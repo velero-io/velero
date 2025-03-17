@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.12.0
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: datadownloads.velero.io
 spec:
   group: velero.io
@@ -52,14 +52,19 @@ spec:
           and data mover controller for the datamover restore operation
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -67,12 +72,14 @@ spec:
             description: DataDownloadSpec is the specification for a DataDownload.
             properties:
               backupStorageLocation:
-                description: BackupStorageLocation is the name of the backup storage
-                  location where the backup repository is stored.
+                description: |-
+                  BackupStorageLocation is the name of the backup storage location
+                  where the backup repository is stored.
                 type: string
               cancel:
-                description: Cancel indicates request to cancel the ongoing DataDownload.
-                  It can be set when the DataDownload is in InProgress phase
+                description: |-
+                  Cancel indicates request to cancel the ongoing DataDownload. It can be set
+                  when the DataDownload is in InProgress phase
                 type: boolean
               dataMoverConfig:
                 additionalProperties:
@@ -81,22 +88,23 @@ spec:
                   fields.
                 type: object
               datamover:
-                description: DataMover specifies the data mover to be used by the
-                  backup. If DataMover is "" or "velero", the built-in data mover
-                  will be used.
+                description: |-
+                  DataMover specifies the data mover to be used by the backup.
+                  If DataMover is "" or "velero", the built-in data mover will be used.
                 type: string
               operationTimeout:
-                description: OperationTimeout specifies the time used to wait internal
-                  operations, before returning error as timeout.
+                description: |-
+                  OperationTimeout specifies the time used to wait internal operations,
+                  before returning error as timeout.
                 type: string
               snapshotID:
                 description: SnapshotID is the ID of the Velero backup snapshot to
                   be restored from.
                 type: string
               sourceNamespace:
-                description: SourceNamespace is the original namespace where the volume
-                  is backed up from. It may be different from SourcePVC's namespace
-                  if namespace is remapped during restore.
+                description: |-
+                  SourceNamespace is the original namespace where the volume is backed up from.
+                  It may be different from SourcePVC's namespace if namespace is remapped during restore.
                 type: string
               targetVolume:
                 description: TargetVolume is the information of the target PVC and
@@ -129,9 +137,10 @@ spec:
             description: DataDownloadStatus is the current status of a DataDownload.
             properties:
               completionTimestamp:
-                description: CompletionTimestamp records the time a restore was completed.
-                  Completion time is recorded even on failed restores. The server's
-                  time is used for CompletionTimestamps
+                description: |-
+                  CompletionTimestamp records the time a restore was completed.
+                  Completion time is recorded even on failed restores.
+                  The server's time is used for CompletionTimestamps
                 format: date-time
                 nullable: true
                 type: string
@@ -154,9 +163,10 @@ spec:
                 - Failed
                 type: string
               progress:
-                description: Progress holds the total number of bytes of the snapshot
-                  and the current number of restored bytes. This can be used to display
-                  progress information about the restore operation.
+                description: |-
+                  Progress holds the total number of bytes of the snapshot and the current
+                  number of restored bytes. This can be used to display progress information
+                  about the restore operation.
                 properties:
                   bytesDone:
                     format: int64
@@ -166,7 +176,8 @@ spec:
                     type: integer
                 type: object
               startTimestamp:
-                description: StartTimestamp records the time a restore was started.
+                description: |-
+                  StartTimestamp records the time a restore was started.
                   The server's time is used for StartTimestamps
                 format: date-time
                 nullable: true

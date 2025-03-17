@@ -1,6 +1,6 @@
 # Warning: Verify this inside a container with the following command:
-# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-godev-v1.20.10 bash -c "make -f Makefile.prow ci"
-# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-godev-v1.20.10 bash -c "make -f Makefile.prow lint"
+# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.23 bash -c "make -f Makefile.prow ci"
+# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.23 bash -c "make -f Makefile.prow lint"
 #
 # Otherwise, unintended system changes may occur, including replacing your
 # currently installed binaries in GOBIN, files in GOPATH/src
@@ -10,7 +10,7 @@
 
 # Configuration Variables
 GOFLAGS := -mod=mod
-CONGEN_VERSION := 0.12.0
+CONGEN_VERSION := 0.14.0
 CODEGEN_VERSION := 0.22.2
 PROWBIN := /tmp/prowbin
 
@@ -32,7 +32,12 @@ verify-modules:
 .PHONY: verify
 verify: setup-env goimports controller-gen
 	@echo "Running verification scripts"
-	PATH=$(PROWBIN):$(PATH) GOFLAGS=$(GOFLAGS) hack/verify-all.sh
+	PATH=$(PROWBIN):$(GOBIN):$(PATH) GOFLAGS=$(GOFLAGS) hack/verify-all.sh
+
+.PHONY: update
+update: setup-env goimports controller-gen protoc
+	@echo "Running update scripts"
+	PATH=$(PROWBIN):$(GOBIN):$(PATH) GOFLAGS=$(GOFLAGS) hack/update-all.sh
 
 # Build targets
 .PHONY: all
@@ -62,13 +67,14 @@ setup-env: setup-envtest
 	$(GOBIN)/setup-envtest use -p path
 
 # Installations of dependencies
-.PHONY: goimports controller-gen golangci-lint kubectl setup-envtest
+.PHONY: goimports controller-gen golangci-lint kubectl setup-envtest protoc
 
 goimports: $(GOBIN)/goimports
 controller-gen: $(GOBIN)/controller-gen
 golangci-lint: $(GOBIN)/golangci-lint
 kubectl: $(PROWBIN)/kubectl
 setup-envtest: $(GOBIN)/setup-envtest
+protoc: $(GOBIN)/protoc
 
 $(GOBIN)/goimports:
 	@echo "Installing goimports"
@@ -87,3 +93,22 @@ $(GOBIN)/golangci-lint:
 $(GOBIN)/setup-envtest:
 	@echo "Installing envtest tools"
 	go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20230216140739-c98506dc3b8e
+
+$(GOBIN)/protoc:
+	@echo "Installing protoc and plugins"
+	ARCH=$$(uname -m); \
+	if [ "$$ARCH" = "x86_64" ]; then \
+		PROTOC_ARCH="x86_64"; \
+	elif [ "$$ARCH" = "aarch64" ]; then \
+		PROTOC_ARCH="aarch_64"; \
+	else \
+		echo "Unsupported architecture: $$ARCH"; \
+		exit 1; \
+	fi && \
+	dnf install -y unzip && \
+	curl -sSL -o protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v3.14.0/protoc-3.14.0-linux-$$PROTOC_ARCH.zip && \
+		unzip protoc.zip && \
+		mv bin/protoc $(GOBIN)/protoc && \
+		rm -rf bin include protoc.zip && \
+		chmod +x $(GOBIN)/protoc
+	go install github.com/golang/protobuf/protoc-gen-go@v1.4.3

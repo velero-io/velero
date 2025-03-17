@@ -33,7 +33,7 @@ if ! command -v goimports > /dev/null; then
   exit 1
 fi
 
-files="$(find . -type f -name '*.go' -not -path './.go/*' -not -path './vendor/*' -not -path './site/*' -not -path '*/generated/*' -not -name 'zz_generated*' -not -path '*/mocks/*')"
+files="$(find . -type f -name '*.go' -not -path './.go/*' -not -path './vendor/*' -not -path './site/*' -not -path './.git/*' -not -path '*/generated/*' -not -name 'zz_generated*' -not -path '*/mocks/*')"
 echo "${ACTION} gofmt"
 output=$(gofmt "${MODE}" -s ${files})
 if [[ -n "${output}" ]]; then
