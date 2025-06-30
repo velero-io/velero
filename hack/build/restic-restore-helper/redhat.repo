@@ -1,0 +1,60 @@
+[rhel-9-for-$basearch-appstream-rpms]
+baseurl = https://cdn.redhat.com/content/dist/rhel9/$releasever/$basearch/appstream/os
+enabled = 1
+enabled_metadata = 1
+gpgcheck = 1
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+metadata_expire = 86400
+name = Red Hat Enterprise Linux 9 for $basearch - AppStream (RPMs)
+sslcacert = /etc/rhsm/ca/redhat-uep.pem
+sslverify = 1
+sslverifystatus = 1
+
+[rhel-9-for-$basearch-baseos-rpms]
+baseurl = https://cdn.redhat.com/content/dist/rhel9/$releasever/$basearch/baseos/os
+enabled = 1
+enabled_metadata = 1
+gpgcheck = 1
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+metadata_expire = 86400
+name = Red Hat Enterprise Linux 9 for $basearch - BaseOS (RPMs)
+sslcacert = /etc/rhsm/ca/redhat-uep.pem
+sslverify = 1
+sslverifystatus = 1
+
+[rhel-9-for-$basearch-baseos-source-rpms]
+baseurl = https://cdn.redhat.com/content/dist/rhel9/$releasever/$basearch/baseos/source/SRPMS
+enabled = 1
+enabled_metadata = 0
+gpgcheck = 1
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+metadata_expire = 86400
+name = Red Hat Enterprise Linux 9 for $basearch - BaseOS (Source RPMs)
+sslcacert = /etc/rhsm/ca/redhat-uep.pem
+sslverify = 1
+sslverifystatus = 1
+
+[rhocp-4.18-for-rhel-9-$basearch-rpms]
+baseurl = https://cdn.redhat.com/content/dist/layered/rhel9/$basearch/rhocp/4.18/os
+enabled = 1
+enabled_metadata = 0
+gpgcheck = 1
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+metadata_expire = 86400
+name = Red Hat OpenShift Container Platform 4.18 for RHEL 9 $basearch (RPMs)
+sslcacert = /etc/rhsm/ca/redhat-uep.pem
+sslverify = 1
+sslverifystatus = 1
+
+[rhocp-4.18-for-rhel-9-$basearch-source-rpms]
+baseurl = https://cdn.redhat.com/content/dist/layered/rhel9/$basearch/rhocp/4.18/source/SRPMS
+enabled = 1
+enabled_metadata = 0
+gpgcheck = 1
+gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+metadata_expire = 86400
+name = Red Hat OpenShift Container Platform 4.18 for RHEL 9 $basearch (Source RPMs)
+sslcacert = /etc/rhsm/ca/redhat-uep.pem
+sslverify = 1
+sslverifystatus = 1
+

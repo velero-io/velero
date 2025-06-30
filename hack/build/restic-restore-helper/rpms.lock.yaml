@@ -1,0 +1,307 @@
+arches:
+- arch: aarch64
+  module_metadata: []
+  packages:
+  - checksum: sha256:bd929a6e3161dfee43b377f888d3712ee70cfb591f50cab845e8551973b010f1
+    evr: 3:7.92-3.el9
+    name: nmap-ncat
+    repoid: rhel-9-for-aarch64-appstream-rpms
+    size: 228860
+    sourcerpm: nmap-7.92-3.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/appstream/os/Packages/n/nmap-ncat-7.92-3.el9.aarch64.rpm
+  - checksum: sha256:e64d3c31cf547cee1ad95c144483f71082716f5ee659cdd7f06d0bcde590c3b2
+    evr: 54.0-1.el9
+    name: libibverbs
+    repoid: rhel-9-for-aarch64-baseos-rpms
+    size: 459278
+    sourcerpm: rdma-core-54.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/os/Packages/l/libibverbs-54.0-1.el9.aarch64.rpm
+  - checksum: sha256:91c7bf60c756cd2a457652b95e96e725068898f4ce580b70784fc60a099621b5
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-aarch64-baseos-rpms
+    size: 363241
+    sourcerpm: libnl3-3.11.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/os/Packages/l/libnl3-3.11.0-1.el9.aarch64.rpm
+  - checksum: sha256:cd6462c66489eed11b8d9f1acf70a38a1a2629a969a31d0f511eca148783dcdd
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-aarch64-baseos-rpms
+    size: 176251
+    sourcerpm: libpcap-1.10.0-4.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/os/Packages/l/libpcap-1.10.0-4.el9.aarch64.rpm
+  - checksum: sha256:f914250a9ef52968e27af0f0e2520745df4443dc354367bec54dd06b4a2da60b
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-aarch64-baseos-rpms
+    size: 1398689
+    sourcerpm: openssl-3.2.2-6.el9_5.1.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/os/Packages/o/openssl-3.2.2-6.el9_5.1.aarch64.rpm
+  - checksum: sha256:0687e5a1115ba679137404c8d37a45141a31968ffd01677455530d24c126a0d2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-aarch64-baseos-rpms
+    size: 862160
+    sourcerpm: tzdata-2025b-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/os/Packages/t/tzdata-2025b-1.el9.noarch.rpm
+  source:
+  - checksum: sha256:13f6ea90f26fbc96e3754584a576c03ca41221fc939164f5a7b6341a6372fd7a
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-aarch64-baseos-source-rpms
+    size: 5068824
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/source/SRPMS/Packages/l/libnl3-3.11.0-1.el9.src.rpm
+  - checksum: sha256:539a59c99ed259ed660253101672d6af134b4de0a0ec64e37f12c4031eb2a2b2
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-aarch64-baseos-source-rpms
+    size: 951935
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/source/SRPMS/Packages/l/libpcap-1.10.0-4.el9.src.rpm
+  - checksum: sha256:56c0b951be3e5ad6a1da594f9d4f09b8b752e2fb3d6827bcc03892f22f622b22
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-aarch64-baseos-source-rpms
+    size: 17985138
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/source/SRPMS/Packages/o/openssl-3.2.2-6.el9_5.1.src.rpm
+  - checksum: sha256:d22ac38cce2d526f51eb3f9e1c647974bc979c014ba909272b7c3bd9eaf30b90
+    evr: 54.0-1.el9
+    name: rdma-core
+    repoid: rhel-9-for-aarch64-baseos-source-rpms
+    size: 2015866
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/source/SRPMS/Packages/r/rdma-core-54.0-1.el9.src.rpm
+  - checksum: sha256:a2668d1f6b053545a5824a428755484895d72475a9d3833cbfbec9e08660aba2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-aarch64-baseos-source-rpms
+    size: 904607
+    url: https://cdn.redhat.com/content/dist/rhel9/9/aarch64/baseos/source/SRPMS/Packages/t/tzdata-2025b-1.el9.src.rpm
+- arch: ppc64le
+  module_metadata: []
+  packages:
+  - checksum: sha256:28c6e68a8955cc673506312af29bc88a4c5eb767d6db64cb4d07fed56e5badaa
+    evr: 3:7.92-3.el9
+    name: nmap-ncat
+    repoid: rhel-9-for-ppc64le-appstream-rpms
+    size: 255275
+    sourcerpm: nmap-7.92-3.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/appstream/os/Packages/n/nmap-ncat-7.92-3.el9.ppc64le.rpm
+  - checksum: sha256:a70d3bde2e94badf86b1be07653658e74366e9a8784587a3768428a3ac195f72
+    evr: 54.0-1.el9
+    name: libibverbs
+    repoid: rhel-9-for-ppc64le-baseos-rpms
+    size: 511485
+    sourcerpm: rdma-core-54.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/os/Packages/l/libibverbs-54.0-1.el9.ppc64le.rpm
+  - checksum: sha256:3f75460b21f4bd370d1bbb39a0cf54b27279f7d45bcf65420bebd350eb9f100e
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-ppc64le-baseos-rpms
+    size: 393979
+    sourcerpm: libnl3-3.11.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/os/Packages/l/libnl3-3.11.0-1.el9.ppc64le.rpm
+  - checksum: sha256:0f664a5a3b8020718905e2b06e27354d07aed325d6f8e2254dedee4a63a729f8
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-ppc64le-baseos-rpms
+    size: 188789
+    sourcerpm: libpcap-1.10.0-4.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/os/Packages/l/libpcap-1.10.0-4.el9.ppc64le.rpm
+  - checksum: sha256:56283cbf84234ec9256fb68e2d2669bc5799862eb2ee40521b8ac59044567835
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-ppc64le-baseos-rpms
+    size: 1422952
+    sourcerpm: openssl-3.2.2-6.el9_5.1.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/os/Packages/o/openssl-3.2.2-6.el9_5.1.ppc64le.rpm
+  - checksum: sha256:0687e5a1115ba679137404c8d37a45141a31968ffd01677455530d24c126a0d2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-ppc64le-baseos-rpms
+    size: 862160
+    sourcerpm: tzdata-2025b-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/os/Packages/t/tzdata-2025b-1.el9.noarch.rpm
+  source:
+  - checksum: sha256:13f6ea90f26fbc96e3754584a576c03ca41221fc939164f5a7b6341a6372fd7a
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-ppc64le-baseos-source-rpms
+    size: 5068824
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/source/SRPMS/Packages/l/libnl3-3.11.0-1.el9.src.rpm
+  - checksum: sha256:539a59c99ed259ed660253101672d6af134b4de0a0ec64e37f12c4031eb2a2b2
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-ppc64le-baseos-source-rpms
+    size: 951935
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/source/SRPMS/Packages/l/libpcap-1.10.0-4.el9.src.rpm
+  - checksum: sha256:56c0b951be3e5ad6a1da594f9d4f09b8b752e2fb3d6827bcc03892f22f622b22
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-ppc64le-baseos-source-rpms
+    size: 17985138
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/source/SRPMS/Packages/o/openssl-3.2.2-6.el9_5.1.src.rpm
+  - checksum: sha256:d22ac38cce2d526f51eb3f9e1c647974bc979c014ba909272b7c3bd9eaf30b90
+    evr: 54.0-1.el9
+    name: rdma-core
+    repoid: rhel-9-for-ppc64le-baseos-source-rpms
+    size: 2015866
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/source/SRPMS/Packages/r/rdma-core-54.0-1.el9.src.rpm
+  - checksum: sha256:a2668d1f6b053545a5824a428755484895d72475a9d3833cbfbec9e08660aba2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-ppc64le-baseos-source-rpms
+    size: 904607
+    url: https://cdn.redhat.com/content/dist/rhel9/9/ppc64le/baseos/source/SRPMS/Packages/t/tzdata-2025b-1.el9.src.rpm
+- arch: s390x
+  module_metadata: []
+  packages:
+  - checksum: sha256:b42a004133dd719cc4b09052e3952b2a4d3877a5d576fc88c58122db2aa2d7fe
+    evr: 3:7.92-3.el9
+    name: nmap-ncat
+    repoid: rhel-9-for-s390x-appstream-rpms
+    size: 228076
+    sourcerpm: nmap-7.92-3.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/appstream/os/Packages/n/nmap-ncat-7.92-3.el9.s390x.rpm
+  - checksum: sha256:1aa6a92010aa46413bda1d47e89de4349c049eca6a472b3c8adc6f6a530b9983
+    evr: 54.0-1.el9
+    name: libibverbs
+    repoid: rhel-9-for-s390x-baseos-rpms
+    size: 446558
+    sourcerpm: rdma-core-54.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/os/Packages/l/libibverbs-54.0-1.el9.s390x.rpm
+  - checksum: sha256:70386e84521e5d56acdbc69f598b42de07b5a2b62756f3be1a7a90e82bf23502
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-s390x-baseos-rpms
+    size: 361754
+    sourcerpm: libnl3-3.11.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/os/Packages/l/libnl3-3.11.0-1.el9.s390x.rpm
+  - checksum: sha256:8eeed3015f2ea273202e6ae622a208a88758ee07dfa9a237fe7e2447646645a8
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-s390x-baseos-rpms
+    size: 172787
+    sourcerpm: libpcap-1.10.0-4.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/os/Packages/l/libpcap-1.10.0-4.el9.s390x.rpm
+  - checksum: sha256:0a24289ee6324c2ecd6edad913f8ecfcfc6db43fbf6fed65458141e3ec0c104f
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-s390x-baseos-rpms
+    size: 1407537
+    sourcerpm: openssl-3.2.2-6.el9_5.1.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/os/Packages/o/openssl-3.2.2-6.el9_5.1.s390x.rpm
+  - checksum: sha256:0687e5a1115ba679137404c8d37a45141a31968ffd01677455530d24c126a0d2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-s390x-baseos-rpms
+    size: 862160
+    sourcerpm: tzdata-2025b-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/os/Packages/t/tzdata-2025b-1.el9.noarch.rpm
+  source:
+  - checksum: sha256:13f6ea90f26fbc96e3754584a576c03ca41221fc939164f5a7b6341a6372fd7a
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-s390x-baseos-source-rpms
+    size: 5068824
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/source/SRPMS/Packages/l/libnl3-3.11.0-1.el9.src.rpm
+  - checksum: sha256:539a59c99ed259ed660253101672d6af134b4de0a0ec64e37f12c4031eb2a2b2
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-s390x-baseos-source-rpms
+    size: 951935
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/source/SRPMS/Packages/l/libpcap-1.10.0-4.el9.src.rpm
+  - checksum: sha256:56c0b951be3e5ad6a1da594f9d4f09b8b752e2fb3d6827bcc03892f22f622b22
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-s390x-baseos-source-rpms
+    size: 17985138
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/source/SRPMS/Packages/o/openssl-3.2.2-6.el9_5.1.src.rpm
+  - checksum: sha256:d22ac38cce2d526f51eb3f9e1c647974bc979c014ba909272b7c3bd9eaf30b90
+    evr: 54.0-1.el9
+    name: rdma-core
+    repoid: rhel-9-for-s390x-baseos-source-rpms
+    size: 2015866
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/source/SRPMS/Packages/r/rdma-core-54.0-1.el9.src.rpm
+  - checksum: sha256:a2668d1f6b053545a5824a428755484895d72475a9d3833cbfbec9e08660aba2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-s390x-baseos-source-rpms
+    size: 904607
+    url: https://cdn.redhat.com/content/dist/rhel9/9/s390x/baseos/source/SRPMS/Packages/t/tzdata-2025b-1.el9.src.rpm
+- arch: x86_64
+  module_metadata: []
+  packages:
+  - checksum: sha256:4107c9b2ac6fe1a6be44088f79fcafd012e22c7867dad98741c88590cadeb5a2
+    evr: 3:7.92-3.el9
+    name: nmap-ncat
+    repoid: rhel-9-for-x86_64-appstream-rpms
+    size: 234565
+    sourcerpm: nmap-7.92-3.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/appstream/os/Packages/n/nmap-ncat-7.92-3.el9.x86_64.rpm
+  - checksum: sha256:fc593dc18f73c296df4fa808341cb2dbee7e5082fb872b79e7984c3b24279d3b
+    evr: 54.0-1.el9
+    name: libibverbs
+    repoid: rhel-9-for-x86_64-baseos-rpms
+    size: 466434
+    sourcerpm: rdma-core-54.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os/Packages/l/libibverbs-54.0-1.el9.x86_64.rpm
+  - checksum: sha256:89728a253a5bf1c8e01c40573f1283d40188e003bdbd4ac565f8b0f05bced55c
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-x86_64-baseos-rpms
+    size: 376137
+    sourcerpm: libnl3-3.11.0-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os/Packages/l/libnl3-3.11.0-1.el9.x86_64.rpm
+  - checksum: sha256:3c0c51cc6b947970812238914713f1f96aa5e9bdaaceb6ee50249540ad89f05b
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-x86_64-baseos-rpms
+    size: 180846
+    sourcerpm: libpcap-1.10.0-4.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os/Packages/l/libpcap-1.10.0-4.el9.x86_64.rpm
+  - checksum: sha256:f379686df99db814e30568a896b417278775fc96864ac6d2660bf48ef94309e3
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-x86_64-baseos-rpms
+    size: 1420999
+    sourcerpm: openssl-3.2.2-6.el9_5.1.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os/Packages/o/openssl-3.2.2-6.el9_5.1.x86_64.rpm
+  - checksum: sha256:0687e5a1115ba679137404c8d37a45141a31968ffd01677455530d24c126a0d2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-x86_64-baseos-rpms
+    size: 862160
+    sourcerpm: tzdata-2025b-1.el9.src.rpm
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os/Packages/t/tzdata-2025b-1.el9.noarch.rpm
+  source:
+  - checksum: sha256:13f6ea90f26fbc96e3754584a576c03ca41221fc939164f5a7b6341a6372fd7a
+    evr: 3.11.0-1.el9
+    name: libnl3
+    repoid: rhel-9-for-x86_64-baseos-source-rpms
+    size: 5068824
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/source/SRPMS/Packages/l/libnl3-3.11.0-1.el9.src.rpm
+  - checksum: sha256:539a59c99ed259ed660253101672d6af134b4de0a0ec64e37f12c4031eb2a2b2
+    evr: 14:1.10.0-4.el9
+    name: libpcap
+    repoid: rhel-9-for-x86_64-baseos-source-rpms
+    size: 951935
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/source/SRPMS/Packages/l/libpcap-1.10.0-4.el9.src.rpm
+  - checksum: sha256:56c0b951be3e5ad6a1da594f9d4f09b8b752e2fb3d6827bcc03892f22f622b22
+    evr: 1:3.2.2-6.el9_5.1
+    name: openssl
+    repoid: rhel-9-for-x86_64-baseos-source-rpms
+    size: 17985138
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/source/SRPMS/Packages/o/openssl-3.2.2-6.el9_5.1.src.rpm
+  - checksum: sha256:d22ac38cce2d526f51eb3f9e1c647974bc979c014ba909272b7c3bd9eaf30b90
+    evr: 54.0-1.el9
+    name: rdma-core
+    repoid: rhel-9-for-x86_64-baseos-source-rpms
+    size: 2015866
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/source/SRPMS/Packages/r/rdma-core-54.0-1.el9.src.rpm
+  - checksum: sha256:a2668d1f6b053545a5824a428755484895d72475a9d3833cbfbec9e08660aba2
+    evr: 2025b-1.el9
+    name: tzdata
+    repoid: rhel-9-for-x86_64-baseos-source-rpms
+    size: 904607
+    url: https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/source/SRPMS/Packages/t/tzdata-2025b-1.el9.src.rpm
+lockfileVendor: redhat
+lockfileVersion: 1

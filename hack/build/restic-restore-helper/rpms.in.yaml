@@ -1,0 +1,13 @@
+packages:
+  - openssl
+  - nmap-ncat
+arches:
+  - aarch64
+  - ppc64le
+  - s390x
+  - x86_64
+reinstallPackages:
+  - tzdata
+contentOrigin:
+  repofiles:
+  - ./redhat.repo
