@@ -1,0 +1,4 @@
+[submodule "restic"]
+	path = restic
+	url = https://github.com/openshift/restic.git
+	branch = oadp-1.3
