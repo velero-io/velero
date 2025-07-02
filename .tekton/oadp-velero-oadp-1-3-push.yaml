@@ -569,6 +569,7 @@ spec:
         - '1.3'
         - '1.3.8'
         - 'latest'
+        - 'velero-v1.12'
       runAfter:
       - build-image-index
       taskRef:
