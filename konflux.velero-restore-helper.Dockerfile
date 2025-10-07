@@ -13,3 +13,8 @@ USER 65534:65534
 
 ENTRYPOINT ["/velero-restore-helper"]
 
+LABEL description="OpenShift API for Data Protection - Velero Restic Restore Helper"
+LABEL io.k8s.description="OpenShift API for Data Protection - Velero Restic Restore Helper"
+LABEL io.k8s.display-name="OADP Velero Restic Restore Helper"
+LABEL io.openshift.tags="migration"
+LABEL summary="OpenShift API for Data Protection - Velero Restic Restore Helper"
