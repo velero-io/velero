@@ -49,3 +49,8 @@ ENV HOME=/home/velero
 
 ENTRYPOINT ["/velero"]
 
+LABEL description="OpenShift API for Data Protection - Velero"
+LABEL io.k8s.description="OpenShift API for Data Protection - Velero"
+LABEL io.k8s.display-name="OADP Velero"
+LABEL io.openshift.tags="migration"
+LABEL summary="OpenShift API for Data Protection - Velero"
