@@ -202,25 +202,31 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 	backupScheduleName := backupRequest.GetLabels()[velerov1api.ScheduleNameLabel]
+
+	// Determine the final phase and completion timestamp, but do NOT set them
+	// on the in-memory backup object yet. We first need to upload metadata and
+	// contents to object storage. If the upload fails, the deferred patch must
+	// NOT write a terminal phase to the API server so the controller can retry.
+	var finalPhase velerov1api.BackupPhase
 	switch backup.Status.Phase {
 	case velerov1api.BackupPhaseFinalizing:
-		backup.Status.Phase = velerov1api.BackupPhaseCompleted
-		r.metrics.RegisterBackupSuccess(backupScheduleName)
-		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusSucc)
+		finalPhase = velerov1api.BackupPhaseCompleted
 	case velerov1api.BackupPhaseFinalizingPartiallyFailed:
-		backup.Status.Phase = velerov1api.BackupPhasePartiallyFailed
-		r.metrics.RegisterBackupPartialFailure(backupScheduleName)
-		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusFailure)
+		finalPhase = velerov1api.BackupPhasePartiallyFailed
 	}
 
-	backup.Status.CompletionTimestamp = &metav1.Time{Time: r.clock.Now()}
-	backup.Status.CSIVolumeSnapshotsCompleted = updateCSIVolumeSnapshotsCompleted(operations)
+	completionTimestamp := &metav1.Time{Time: r.clock.Now()}
+	csiVolumeSnapshotsCompleted := updateCSIVolumeSnapshotsCompleted(operations)
 
-	recordBackupMetrics(log, backup, outBackupFile, r.metrics, true)
+	// Encode backup JSON with the final phase for object storage, so that the
+	// metadata in storage reflects the completed state.
+	backupForUpload := backup.DeepCopy()
+	backupForUpload.Status.Phase = finalPhase
+	backupForUpload.Status.CompletionTimestamp = completionTimestamp
+	backupForUpload.Status.CSIVolumeSnapshotsCompleted = csiVolumeSnapshotsCompleted
 
-	// update backup metadata in object store
 	backupJSON := new(bytes.Buffer)
-	if err := encode.To(backup, "json", backupJSON); err != nil {
+	if err := encode.To(backupForUpload, "json", backupJSON); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error encoding backup json")
 	}
 	err = backupStore.PutBackupMetadata(backup.Name, backupJSON)
@@ -233,6 +239,24 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
 		}
 	}
+
+	// Uploads succeeded — now safe to set the final phase on the in-memory
+	// backup object so the deferred patch writes it to the API server.
+	backup.Status.Phase = finalPhase
+	backup.Status.CompletionTimestamp = completionTimestamp
+	backup.Status.CSIVolumeSnapshotsCompleted = csiVolumeSnapshotsCompleted
+
+	switch finalPhase {
+	case velerov1api.BackupPhaseCompleted:
+		r.metrics.RegisterBackupSuccess(backupScheduleName)
+		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusSucc)
+	case velerov1api.BackupPhasePartiallyFailed:
+		r.metrics.RegisterBackupPartialFailure(backupScheduleName)
+		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusFailure)
+	}
+
+	recordBackupMetrics(log, backup, outBackupFile, r.metrics, true)
+
 	return ctrl.Result{}, nil
 }
 
