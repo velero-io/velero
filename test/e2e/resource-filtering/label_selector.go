@@ -146,7 +146,7 @@ func (l *LabelSelector) Verify() error {
 			if err != nil {
 				return errors.Wrap(err, fmt.Sprintf("failed to list secrets in namespace: %q", namespace))
 			} else if len(secretsList.Items) == 0 {
-				return errors.Errorf(fmt.Sprintf("no secrets found in namespace: %q", namespace))
+				return errors.Errorf("no secrets found in namespace: %q", namespace)
 			}
 		} else { //exclude
 			if err == nil {

@@ -406,10 +406,10 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		}
 		resourceModifiers, err = resourcemodifiers.GetResourceModifiersFromConfig(ResourceModifierConfigMap)
 		if err != nil {
-			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, fmt.Sprintf("Error in parsing resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name)).Error())
+			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, "Error in parsing resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name).Error())
 			return backupInfo{}, nil
 		} else if err = resourceModifiers.Validate(); err != nil {
-			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, fmt.Sprintf("Validation error in resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name)).Error())
+			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, "Validation error in resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name).Error())
 			return backupInfo{}, nil
 		}
 		r.logger.Infof("Retrieved Resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name)

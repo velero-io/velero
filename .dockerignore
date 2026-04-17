@@ -1,3 +1,7 @@
 .go/
 .go.std/
 site/
+.claude/
+.cache/
+.backlog/
+.devcontainer/

@@ -108,7 +108,7 @@ func (i *IncludeResources) Verify() error {
 			}
 			return errors.Wrap(err, fmt.Sprintf("failed to list secrets in namespace: %q", namespace))
 		} else if len(secretsList.Items) != 0 {
-			return errors.Errorf(fmt.Sprintf("Should no secrets found  %s in namespace: %q", secretsList.Items[0].Name, namespace))
+			return errors.Errorf("Should no secrets found  %s in namespace: %q", secretsList.Items[0].Name, namespace)
 		}
 
 		//Check configmap
@@ -116,7 +116,7 @@ func (i *IncludeResources) Verify() error {
 		if err != nil {
 			return errors.Wrap(err, fmt.Sprintf("failed to list configmap in namespace: %q", namespace))
 		} else if len(configmapList.Items) == 0 {
-			return errors.Errorf(fmt.Sprintf("Should have configmap found in namespace: %q", namespace))
+			return errors.Errorf("Should have configmap found in namespace: %q", namespace)
 		}
 	}
 	return nil

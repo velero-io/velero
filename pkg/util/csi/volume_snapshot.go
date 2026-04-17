@@ -19,7 +19,6 @@ package csi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -55,7 +54,7 @@ func WaitVolumeSnapshotReady(ctx context.Context, snapshotClient snapshotter.Sna
 	err := wait.PollImmediate(waitInternal, timeout, func() (bool, error) {
 		tmpVS, err := snapshotClient.VolumeSnapshots(volumeSnapshotNS).Get(ctx, volumeSnapshot, metav1.GetOptions{})
 		if err != nil {
-			return false, errors.Wrapf(err, fmt.Sprintf("error to get volumesnapshot %s/%s", volumeSnapshotNS, volumeSnapshot))
+			return false, errors.Wrapf(err, "error to get volumesnapshot %s/%s", volumeSnapshotNS, volumeSnapshot)
 		}
 
 		if tmpVS.Status == nil {
@@ -139,7 +138,7 @@ func EnsureDeleteVS(ctx context.Context, snapshotClient snapshotter.SnapshotV1In
 				return true, nil
 			}
 
-			return false, errors.Wrapf(err, fmt.Sprintf("error to get VolumeSnapshot %s", vsName))
+			return false, errors.Wrapf(err, "error to get VolumeSnapshot %s", vsName)
 		}
 
 		return false, nil
@@ -191,7 +190,7 @@ func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1I
 				return true, nil
 			}
 
-			return false, errors.Wrapf(err, fmt.Sprintf("error to get VolumeSnapshotContent %s", vscName))
+			return false, errors.Wrapf(err, "error to get VolumeSnapshotContent %s", vscName)
 		}
 
 		return false, nil
