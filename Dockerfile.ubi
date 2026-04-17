@@ -1,11 +1,11 @@
-FROM quay.io/konveyor/builder:ubi9-v1.23 AS builder
+FROM quay.io/konveyor/builder:ubi9-v1.25 AS builder
 ENV GOPATH=$APP_ROOT
 COPY . /go/src/github.com/vmware-tanzu/velero
 WORKDIR /go/src/github.com/vmware-tanzu/velero
 RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=mod -ldflags '-extldflags "-static" -X github.com/vmware-tanzu/velero/pkg/buildinfo.Version=1.12.4' -o /go/src/velero github.com/vmware-tanzu/velero/cmd/velero
 RUN CGO_ENABLED=0 GOOS=linux go build -a -mod=mod -ldflags '-extldflags "-static"' -o /go/src/velero-helper github.com/vmware-tanzu/velero/cmd/velero-helper
 
-FROM quay.io/konveyor/builder:ubi9-v1.23 AS restic-builder
+FROM quay.io/konveyor/builder:ubi9-v1.25 AS restic-builder
 ENV GOPATH=$APP_ROOT
 RUN mkdir -p $APP_ROOT/src/github.com/restic \
 && cd $APP_ROOT/src/github.com/restic \

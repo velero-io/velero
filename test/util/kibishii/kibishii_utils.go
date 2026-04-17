@@ -270,7 +270,7 @@ func generateData(ctx context.Context, namespace string, kibishiiData *KibishiiD
 	})
 
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to wait generate data in namespace %s", namespace))
+		return errors.Wrapf(err, "Failed to wait generate data in namespace %s", namespace)
 	}
 	return nil
 }
@@ -300,7 +300,7 @@ func verifyData(ctx context.Context, namespace string, kibishiiData *KibishiiDat
 	})
 
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to verify kibishii data in namespace %s\n", namespace))
+		return errors.Wrapf(err, "Failed to verify kibishii data in namespace %s", namespace)
 	}
 	fmt.Printf("Success to verify kibishii data in namespace %s\n", namespace)
 	return nil

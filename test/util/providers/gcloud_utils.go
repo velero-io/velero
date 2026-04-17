@@ -95,7 +95,7 @@ func (s GCSStorage) DeleteObjectsInBucket(cloudCredentialsFile, bslBucket, bslPr
 		if strings.Contains(obj.Name, bslPrefix+backupObject+"/") {
 			fmt.Printf("Delete item: %s\n", obj.Name)
 			if err = bucket.Object(obj.Name).Delete(ctx); err != nil {
-				return errors.Wrapf(err, fmt.Sprintf("Fail to delete object %s in bucket %s", obj.Name, bslBucket))
+				return errors.Wrapf(err, "Fail to delete object %s in bucket %s", obj.Name, bslBucket)
 			}
 		}
 	}
@@ -105,12 +105,12 @@ func (s GCSStorage) IsSnapshotExisted(cloudCredentialsFile, bslConfig, backupObj
 	ctx := context.Background()
 	data, err := os.ReadFile(cloudCredentialsFile)
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed reading gcloud credential file %s", cloudCredentialsFile))
+		return errors.Wrapf(err, "Failed reading gcloud credential file %s", cloudCredentialsFile)
 	}
 
 	creds, err := google.CredentialsFromJSON(ctx, data)
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed getting credentials from JSON data %s", string(data)))
+		return errors.Wrapf(err, "Failed getting credentials from JSON data %s", string(data))
 	}
 
 	computeService, err := compute.NewService(context.Background(), option.WithCredentialsFile(cloudCredentialsFile))

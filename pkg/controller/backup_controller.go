@@ -506,9 +506,9 @@ func (b *backupReconciler) prepareBackupRequest(backup *velerov1api.Backup, logg
 		}
 		res, err := resourcepolicies.GetResourcePoliciesFromConfig(policiesConfigmap)
 		if err != nil {
-			request.Status.ValidationErrors = append(request.Status.ValidationErrors, errors.Wrapf(err, fmt.Sprintf("resource policies %s/%s", request.Namespace, request.Spec.ResourcePolicy.Name)).Error())
+			request.Status.ValidationErrors = append(request.Status.ValidationErrors, errors.Wrapf(err, "resource policies %s/%s", request.Namespace, request.Spec.ResourcePolicy.Name).Error())
 		} else if err = res.Validate(); err != nil {
-			request.Status.ValidationErrors = append(request.Status.ValidationErrors, errors.Wrapf(err, fmt.Sprintf("resource policies %s/%s", request.Namespace, request.Spec.ResourcePolicy.Name)).Error())
+			request.Status.ValidationErrors = append(request.Status.ValidationErrors, errors.Wrapf(err, "resource policies %s/%s", request.Namespace, request.Spec.ResourcePolicy.Name).Error())
 		}
 		request.ResPolicies = res
 	}

@@ -77,7 +77,7 @@ func WaitForPods(ctx context.Context, client TestClient, namespace string, pods 
 		return true, nil
 	})
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to wait for pods in namespace %s to start running", namespace))
+		return errors.Wrapf(err, "Failed to wait for pods in namespace %s to start running", namespace)
 	}
 	return nil
 }

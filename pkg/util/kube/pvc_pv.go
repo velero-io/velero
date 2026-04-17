@@ -19,7 +19,6 @@ package kube
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -81,7 +80,7 @@ func WaitPVCBound(ctx context.Context, pvcGetter corev1client.CoreV1Interface,
 	err := wait.PollImmediate(waitInternal, timeout, func() (bool, error) {
 		tmpPVC, err := pvcGetter.PersistentVolumeClaims(namespace).Get(ctx, pvc, metav1.GetOptions{})
 		if err != nil {
-			return false, errors.Wrapf(err, fmt.Sprintf("error to get pvc %s/%s", namespace, pvc))
+			return false, errors.Wrapf(err, "error to get pvc %s/%s", namespace, pvc)
 		}
 
 		if tmpPVC.Spec.VolumeName == "" {
@@ -302,7 +301,7 @@ func WaitPVBound(ctx context.Context, pvGetter corev1client.CoreV1Interface, pvN
 	err := wait.PollImmediate(waitInternal, timeout, func() (bool, error) {
 		tmpPV, err := pvGetter.PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
 		if err != nil {
-			return false, errors.Wrapf(err, fmt.Sprintf("failed to get pv %s", pvName))
+			return false, errors.Wrapf(err, "failed to get pv %s", pvName)
 		}
 
 		if tmpPV.Spec.ClaimRef == nil {

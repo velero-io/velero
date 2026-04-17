@@ -255,7 +255,7 @@ func (s AWSStorage) IsObjectsInBucket(cloudCredentialsFile, bslBucket, bslPrefix
 	}
 
 	if err != nil {
-		return false, errors.Wrapf(err, fmt.Sprintf("Failed to create AWS session of region %s", region))
+		return false, errors.Wrapf(err, "Failed to create AWS session of region %s", region)
 	}
 	svc := s3.New(sess)
 
@@ -312,7 +312,7 @@ func (s AWSStorage) DeleteObjectsInBucket(cloudCredentialsFile, bslBucket, bslPr
 	}
 
 	if err != nil {
-		return errors.Wrapf(err, fmt.Sprintf("Failed to create AWS session of region %s", region))
+		return errors.Wrapf(err, "Failed to create AWS session of region %s", region)
 	}
 
 	svc := s3.New(sess)

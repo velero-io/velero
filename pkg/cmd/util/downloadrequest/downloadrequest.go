@@ -132,7 +132,7 @@ func Stream(ctx context.Context, kbClient kbclient.Client, namespace, name strin
 	if err != nil {
 		if urlErr, ok := err.(*url.Error); ok {
 			if _, ok := urlErr.Err.(x509.UnknownAuthorityError); ok {
-				return fmt.Errorf(err.Error() + "\n\nThe --insecure-skip-tls-verify flag can also be used to accept any TLS certificate for the download, but it is susceptible to man-in-the-middle attacks.")
+				return fmt.Errorf("%s\n\nThe --insecure-skip-tls-verify flag can also be used to accept any TLS certificate for the download, but it is susceptible to man-in-the-middle attacks.", err.Error())
 			}
 		}
 		return err
