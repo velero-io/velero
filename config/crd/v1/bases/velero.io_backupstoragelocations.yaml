@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.17.0
   name: backupstoragelocations.velero.io
 spec:
   group: velero.io
@@ -89,7 +89,6 @@ spec:
                     description: |-
                       Name of the referent.
                       More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                      TODO: Add other useful fields. apiVersion, kind, uid?
                     type: string
                   optional:
                     description: Specify whether the Secret or its key must be defined
@@ -141,7 +140,6 @@ spec:
                 description: |-
                   AccessMode is an unused field.
 
-
                   Deprecated: there is now an AccessMode field on the Spec and this field
                   will be removed entirely as of v2.0.
                 enum:
@@ -152,7 +150,6 @@ spec:
                 description: |-
                   LastSyncedRevision is the value of the `metadata/revision` file in the backup
                   storage location the last time the BSL's contents were synced into the cluster.
-
 
                   Deprecated: this field is no longer updated or used for detecting changes to
                   the location's contents and will be removed entirely in v2.0.
