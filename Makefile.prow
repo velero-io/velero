@@ -10,7 +10,7 @@
 
 # Configuration Variables
 GOFLAGS := -mod=mod
-CONGEN_VERSION := 0.14.0
+CONGEN_VERSION := 0.17.0
 CODEGEN_VERSION := 0.22.2
 PROWBIN := /tmp/prowbin
 

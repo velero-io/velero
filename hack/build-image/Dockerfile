@@ -32,7 +32,7 @@ RUN wget --quiet https://github.com/kubernetes-sigs/kubebuilder/releases/downloa
 
 # get controller-tools
 # Use CGO_ENABLED=0 to avoid potential cross-compilation issues
-RUN CGO_ENABLED=0 go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0
+RUN CGO_ENABLED=0 go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.0
 
 # get goimports (the revision is pinned so we don't indiscriminately update, but the particular commit
 # is not important)
