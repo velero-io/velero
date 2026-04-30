@@ -20,6 +20,12 @@ golangci-lint cache status
 # Enable GL_DEBUG line below for debug messages for golangci-lint
 # export GL_DEBUG=loader,gocritic,env
 CMD="golangci-lint run"
+
+# Add --fix flag if first argument is "fix"
+if [ "$1" = "fix" ]; then
+    CMD="$CMD --fix"
+fi
+
 echo "Running $CMD"
 
 eval $CMD
