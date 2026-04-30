@@ -245,12 +245,12 @@ func DescribeBackupStatusInSF(ctx context.Context, kbClient kbclient.Client, d *
 	if status.StartTimestamp == nil || status.StartTimestamp.Time.IsZero() {
 		backupStatusInfo["started"] = "<n/a>"
 	} else {
-		backupStatusInfo["started"] = status.StartTimestamp.Time.String()
+		backupStatusInfo["started"] = status.StartTimestamp.String()
 	}
 	if status.CompletionTimestamp == nil || status.CompletionTimestamp.Time.IsZero() {
 		backupStatusInfo["completed"] = "<n/a>"
 	} else {
-		backupStatusInfo["completed"] = status.CompletionTimestamp.Time.String()
+		backupStatusInfo["completed"] = status.CompletionTimestamp.String()
 	}
 
 	// Expiration can't be 0, it is always set to a 30-day default. It can be nil

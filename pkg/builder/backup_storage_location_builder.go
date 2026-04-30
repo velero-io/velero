@@ -68,8 +68,8 @@ func (b *BackupStorageLocationBuilder) Provider(name string) *BackupStorageLocat
 
 // Bucket sets the BackupStorageLocation's object storage bucket.
 func (b *BackupStorageLocationBuilder) Bucket(val string) *BackupStorageLocationBuilder {
-	if b.object.Spec.StorageType.ObjectStorage == nil {
-		b.object.Spec.StorageType.ObjectStorage = new(velerov1api.ObjectStorageLocation)
+	if b.object.Spec.ObjectStorage == nil {
+		b.object.Spec.ObjectStorage = new(velerov1api.ObjectStorageLocation)
 	}
 	b.object.Spec.ObjectStorage.Bucket = val
 	return b
@@ -77,8 +77,8 @@ func (b *BackupStorageLocationBuilder) Bucket(val string) *BackupStorageLocation
 
 // Prefix sets the BackupStorageLocation's object storage prefix.
 func (b *BackupStorageLocationBuilder) Prefix(val string) *BackupStorageLocationBuilder {
-	if b.object.Spec.StorageType.ObjectStorage == nil {
-		b.object.Spec.StorageType.ObjectStorage = new(velerov1api.ObjectStorageLocation)
+	if b.object.Spec.ObjectStorage == nil {
+		b.object.Spec.ObjectStorage = new(velerov1api.ObjectStorageLocation)
 	}
 	b.object.Spec.ObjectStorage.Prefix = val
 	return b
@@ -86,8 +86,8 @@ func (b *BackupStorageLocationBuilder) Prefix(val string) *BackupStorageLocation
 
 // CACert sets the BackupStorageLocation's object storage CACert.
 func (b *BackupStorageLocationBuilder) CACert(val []byte) *BackupStorageLocationBuilder {
-	if b.object.Spec.StorageType.ObjectStorage == nil {
-		b.object.Spec.StorageType.ObjectStorage = new(velerov1api.ObjectStorageLocation)
+	if b.object.Spec.ObjectStorage == nil {
+		b.object.Spec.ObjectStorage = new(velerov1api.ObjectStorageLocation)
 	}
 	b.object.Spec.ObjectStorage.CACert = val
 	return b

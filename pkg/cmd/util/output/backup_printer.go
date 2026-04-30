@@ -121,7 +121,7 @@ func humanReadableTimeFromNow(when time.Time) string {
 
 	now := time.Now()
 	switch {
-	case when == now || when.After(now):
+	case when.Equal(now) || when.After(now):
 		return duration.ShortHumanDuration(when.Sub(now))
 	default:
 		return fmt.Sprintf("%s ago", duration.ShortHumanDuration(now.Sub(when)))

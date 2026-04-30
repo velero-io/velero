@@ -200,7 +200,7 @@ func (r *itemCollector) getResourceItems(log logrus.FieldLogger, gv schema.Group
 		gr  = gvr.GroupResource()
 	)
 
-	orders := getOrderedResourcesForType(r.backupRequest.Backup.Spec.OrderedResources, resource.Name)
+	orders := getOrderedResourcesForType(r.backupRequest.Spec.OrderedResources, resource.Name)
 	// Getting the preferred group version of this resource
 	preferredGVR, _, err := r.discoveryHelper.ResourceFor(gr.WithVersion(""))
 	if err != nil {

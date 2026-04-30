@@ -27,7 +27,6 @@ import (
 )
 
 func GenZshCompletion(out io.Writer, velero *cobra.Command) {
-
 	zshHead := "#compdef velero\n"
 
 	out.Write([]byte(zshHead))

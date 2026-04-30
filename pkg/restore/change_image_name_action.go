@@ -201,7 +201,7 @@ func (a *ChangeImageNameAction) isImageReplaceRuleExist(log *logrus.Entry, oldIm
 			log.Infoln("match specific case:", row)
 			oldImagePart := strings.TrimSpace(row[0:strings.Index(row, delimiterValue)])
 			newImagePart := strings.TrimSpace(row[strings.Index(row, delimiterValue)+len(delimiterValue):])
-			newImageName = strings.Replace(oldImageName, oldImagePart, newImagePart, -1)
+			newImageName = strings.ReplaceAll(oldImageName, oldImagePart, newImagePart)
 			return true, newImageName, nil
 		}
 	}

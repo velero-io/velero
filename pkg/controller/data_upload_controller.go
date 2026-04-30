@@ -157,7 +157,8 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	if du.Status.Phase == "" || du.Status.Phase == velerov2alpha1api.DataUploadPhaseNew {
+	switch du.Status.Phase {
+	case "", velerov2alpha1api.DataUploadPhaseNew:
 		log.Info("Data upload starting")
 
 		accepted, err := r.acceptDataUpload(ctx, du)
@@ -220,7 +221,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		return ctrl.Result{}, nil
-	} else if du.Status.Phase == velerov2alpha1api.DataUploadPhaseAccepted {
+	case velerov2alpha1api.DataUploadPhaseAccepted:
 		if du.Spec.Cancel {
 			// we don't want to update CR into cancel status forcely as it may conflict with CR update in Expose action
 			// we could retry when the CR requeue in periodcally
@@ -233,7 +234,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		return ctrl.Result{}, nil
-	} else if du.Status.Phase == velerov2alpha1api.DataUploadPhasePrepared {
+	case velerov2alpha1api.DataUploadPhasePrepared:
 		log.Info("Data upload is prepared")
 
 		if du.Spec.Cancel {
@@ -288,7 +289,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			r.closeDataPath(ctx, du.Name)
 		}
 		return result, err
-	} else if du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
+	case velerov2alpha1api.DataUploadPhaseInProgress:
 		log.Info("Data upload is in progress")
 		if du.Spec.Cancel {
 			log.Info("Data upload is being canceled")
@@ -310,7 +311,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil
-	} else {
+	default:
 		// put the finilizer remove action here for all cr will goes to the final status, we could check finalizer and do remove action in final status
 		// instead of intermediate state.
 		// remove finalizer no matter whether the cr is being deleted or not for it is no longer needed when internal resources are all cleaned up

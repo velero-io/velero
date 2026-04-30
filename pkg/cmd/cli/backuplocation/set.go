@@ -137,7 +137,7 @@ func (o *SetOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 
 	location.Spec.Default = o.DefaultBackupStorageLocation
-	location.Spec.StorageType.ObjectStorage.CACert = caCertData
+	location.Spec.ObjectStorage.CACert = caCertData
 
 	for name, key := range o.Credential.Data() {
 		location.Spec.Credential = builder.ForSecretKeySelector(name, key).Result()

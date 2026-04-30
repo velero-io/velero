@@ -119,7 +119,7 @@ func InvokeDeleteActions(ctx *Context) error {
 					if !action.Selector.Matches(labels.Set(obj.GetLabels())) {
 						continue
 					}
-					err = action.DeleteItemAction.Execute(&velero.DeleteItemActionExecuteInput{
+					err = action.Execute(&velero.DeleteItemActionExecuteInput{
 						Item:   obj,
 						Backup: ctx.Backup,
 					})

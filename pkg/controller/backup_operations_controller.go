@@ -259,7 +259,7 @@ func (c *backupOperationsReconciler) updateBackupAndOperationsJSON(
 			}
 		}
 		// update backup
-		err := c.Client.Patch(ctx, backup, client.MergeFrom(original))
+		err := c.Patch(ctx, backup, client.MergeFrom(original))
 		if err != nil {
 			removeIfComplete = false
 			return errors.Wrapf(err, "error updating Backup %s", backup.Name)
@@ -267,7 +267,7 @@ func (c *backupOperationsReconciler) updateBackupAndOperationsJSON(
 	} else if completionChanges {
 		// If backup is still incomplete and no new errors are found but there are some new operations
 		// completed, patch backup to reflect new completion numbers, but don't upload detailed json file
-		err := c.Client.Patch(ctx, backup, client.MergeFrom(original))
+		err := c.Patch(ctx, backup, client.MergeFrom(original))
 		if err != nil {
 			return errors.Wrapf(err, "error updating Backup %s", backup.Name)
 		}

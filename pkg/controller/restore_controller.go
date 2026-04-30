@@ -162,7 +162,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Developer note: any error returned by this method will
 	// cause the restore to be re-enqueued and re-processed by
 	// the controller.
-	log := r.logger.WithField("Restore", req.NamespacedName.String())
+	log := r.logger.WithField("Restore", req.String())
 
 	restore := &api.Restore{}
 	err := r.kbClient.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, restore)
@@ -172,7 +172,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, nil
 		}
 
-		log.Errorf("Fail to get restore %s: %s", req.NamespacedName.String(), err.Error())
+		log.Errorf("Fail to get restore %s: %s", req.String(), err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -263,7 +263,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// return the error so the restore can be re-processed; it's currently
 		// still in phase = New.
 		log.Errorf("fail to update restore %s status to %s: %s",
-			req.NamespacedName.String(), restore.Status.Phase, err.Error())
+			req.String(), restore.Status.Phase, err.Error())
 		return ctrl.Result{}, errors.Wrapf(err, "error updating Restore phase to %s", restore.Status.Phase)
 	}
 	// store ref to just-updated item for creating patch
