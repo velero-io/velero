@@ -16,40 +16,102 @@ limitations under the License.
 
 package cbt
 
-import "github.com/vmware-tanzu/velero/pkg/cbtservice"
+import (
+	"math/bits"
 
-// Bitmap defines the methods to store and iterate the CBT bitmap
-type Bitmap interface {
-	// Set sets bits within the provided range
-	Set(cbtservice.Range)
+	"github.com/RoaringBitmap/roaring"
 
-	// SetFull sets all bits to the bitmap
-	SetFull()
+	"github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
+)
 
-	// Snapshot returns snapshot of the bitmap
-	SourceID() string
+const (
+	InvalidOffset64 = ^uint64(0)
+)
 
-	// ChangeID returns the changeID of the bitmap
-	ChangeID() string
-
-	// Iterator returns the iterator for the CBT Bitmap
-	Iterator() Iterator
+type bitmapImpl struct {
+	bitmap       *roaring.Bitmap
+	blockSize    uint
+	blockSizeLog int
+	length       uint64
+	snapshot     string
+	changeID     string
+	volumeID     string
 }
 
-// Iterator defines the methods to iterate the CBT bitmap and query the associated information
-type Iterator interface {
-	// ChangeID returns the changeID of the bitmap
-	ChangeID() string
+type bitmapIterator struct {
+	bitmapImpl
+	iterator roaring.IntPeekable
+}
 
-	// Snapshot returns snapshot of the bitmap
-	Snapshot() string
+func NewBitmap(blockSize uint, length uint64, snapshot string, changeID string, volumeID string) types.Bitmap {
+	return &bitmapImpl{
+		bitmap:       roaring.New(),
+		blockSize:    blockSize,
+		blockSizeLog: bits.Len(blockSize) - 1,
+		length:       length,
+		snapshot:     snapshot,
+		changeID:     changeID,
+		volumeID:     volumeID,
+	}
+}
 
-	// BlockSize returns the granularity of the bitmap
-	BlockSize() int
+func (c *bitmapImpl) Set(offset, length uint64) {
+	if offset >= c.length {
+		return
+	}
 
-	// Count returns the toal number of count in the bitmap
-	Count() uint64
+	if offset+length > c.length {
+		length = c.length - offset
+	}
 
-	// Next returns the offset of the next set block and whether it comes to the end of the iteration
-	Next() (int64, bool)
+	start := offset >> c.blockSizeLog
+	end := (offset + length + uint64(c.blockSize) - 1) >> c.blockSizeLog
+
+	c.bitmap.AddRange(start, end)
+}
+
+func (c *bitmapImpl) SetFull() {
+	start := uint64(0)
+	end := (c.length + uint64(c.blockSize) - 1) >> c.blockSizeLog
+
+	c.bitmap.AddRange(start, end)
+}
+
+func (c *bitmapImpl) Snapshot() string {
+	return c.snapshot
+}
+
+func (c *bitmapImpl) ChangeID() string {
+	return c.changeID
+}
+
+func (c *bitmapImpl) VolumeID() string {
+	return c.volumeID
+}
+
+func (c *bitmapImpl) Iterator() types.Iterator {
+	if c.bitmap == nil {
+		return nil
+	}
+
+	return &bitmapIterator{
+		bitmapImpl: *c,
+		iterator:   c.bitmap.Iterator(),
+	}
+}
+
+func (c *bitmapIterator) Next() (uint64, bool) {
+	if !c.iterator.HasNext() {
+		return InvalidOffset64, false
+	}
+
+	return uint64(c.iterator.Next()) << c.blockSizeLog, true
+}
+
+func (c *bitmapIterator) Count() uint64 {
+	return c.bitmap.GetCardinality()
+}
+
+func (c *bitmapIterator) BlockSize() uint {
+	return c.blockSize
 }

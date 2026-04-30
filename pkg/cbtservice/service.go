@@ -20,8 +20,8 @@ import "context"
 
 // Range defines the range of a change
 type Range struct {
-	Offset int64
-	Length int64
+	Offset uint64
+	Length uint64
 }
 
 // SourceInfo is the information provided to the uploader, the uploader calls CBT service with this information
