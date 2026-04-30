@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	storagev1api "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -953,86 +954,144 @@ func TestGetVolumeSnapshotClass(t *testing.T) {
 		Driver: "bar.csi.k8s.io",
 	}
 
-	objs := []runtime.Object{hostpathClass, fooClass, barClass, fooClassWithoutLabel, barClass2}
+	sctestClass := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "sctest",
+		},
+		Driver: "foo.csi.k8s.io",
+	}
+
+	// storageclasses
+	fooStorageClass := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "foo",
+			Labels: map[string]string{},
+		},
+		Provisioner: "foo.csi.k8s.io",
+	}
+
+	fooannotationStorageClass := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "foo",
+			Annotations: map[string]string{
+				"velero.io/csi-volumesnapshot-class": "sctest",
+			},
+		},
+		Provisioner: "foo.csi.k8s.io",
+	}
+
+	barStorageClass := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "bar",
+			Labels: map[string]string{},
+		},
+		Provisioner: "bar.csi.k8s.io",
+	}
+
+	hostpathStorageClass := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "hostpath",
+			Labels: map[string]string{},
+		},
+		Provisioner: "hostpath.csi.k8s.io",
+	}
+
+	blahStorageClass := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "blah",
+			Labels: map[string]string{},
+		},
+		Provisioner: "blah.csi.k8s.io",
+	}
+
+	objs := []runtime.Object{hostpathClass, sctestClass, fooClass, barClass, fooClassWithoutLabel, barClass2}
 	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 
 	testCases := []struct {
-		name        string
-		driverName  string
-		pvc         *corev1api.PersistentVolumeClaim
-		backup      *velerov1api.Backup
-		expectedVSC *snapshotv1api.VolumeSnapshotClass
-		expectError bool
+		name         string
+		storageClass *storagev1api.StorageClass
+		pvc          *corev1api.PersistentVolumeClaim
+		backup       *velerov1api.Backup
+		expectedVSC  *snapshotv1api.VolumeSnapshotClass
+		expectError  bool
 	}{
 		{
-			name:        "no annotations on pvc and backup, should find hostpath volumesnapshotclass using default behavior of labels",
-			driverName:  "hostpath.csi.k8s.io",
-			pvc:         pvcNone,
-			backup:      backupNone,
-			expectedVSC: hostpathClass,
-			expectError: false,
+			name:         "no annotations on pvc and backup, should find hostpath volumesnapshotclass using default behavior of labels",
+			storageClass: hostpathStorageClass,
+			pvc:          pvcNone,
+			backup:       backupNone,
+			expectedVSC:  hostpathClass,
+			expectError:  false,
 		},
 		{
-			name:        "foowithoutlabel VSC annotations on pvc",
-			driverName:  "foo.csi.k8s.io",
-			pvc:         pvcFoo,
-			backup:      backupNone,
-			expectedVSC: fooClassWithoutLabel,
-			expectError: false,
+			name:         "foowithoutlabel VSC annotations on pvc",
+			storageClass: fooStorageClass,
+			pvc:          pvcFoo,
+			backup:       backupNone,
+			expectedVSC:  fooClassWithoutLabel,
+			expectError:  false,
 		},
 		{
-			name:        "foowithoutlabel VSC annotations on pvc, but csi driver does not match, no annotation on backup so fallback to default behavior of labels",
-			driverName:  "bar.csi.k8s.io",
-			pvc:         pvcFoo,
-			backup:      backupNone,
-			expectedVSC: barClass,
-			expectError: false,
+			name:         "sctest VSC annotations on StorageClass",
+			storageClass: fooannotationStorageClass,
+			pvc:          pvcNone,
+			backup:       backupNone,
+			expectedVSC:  sctestClass,
+			expectError:  false,
 		},
 		{
-			name:        "foowithoutlabel VSC annotations on pvc, but csi driver does not match so fallback to fetch from backupAnnotations ",
-			driverName:  "bar.csi.k8s.io",
-			pvc:         pvcFoo,
-			backup:      backupBar2,
-			expectedVSC: barClass2,
-			expectError: false,
+			name:         "foowithoutlabel VSC annotations on pvc, but csi driver does not match, no annotation on backup so fallback to default behavior of labels",
+			storageClass: barStorageClass,
+			pvc:          pvcFoo,
+			backup:       backupNone,
+			expectedVSC:  barClass,
+			expectError:  false,
 		},
 		{
-			name:        "foowithoutlabel VSC annotations on backup for foo.csi.k8s.io",
-			driverName:  "foo.csi.k8s.io",
-			pvc:         pvcNone,
-			backup:      backupFoo,
-			expectedVSC: fooClassWithoutLabel,
-			expectError: false,
+			name:         "foowithoutlabel VSC annotations on pvc, but csi driver does not match so fallback to fetch from backupAnnotations ",
+			storageClass: barStorageClass,
+			pvc:          pvcFoo,
+			backup:       backupBar2,
+			expectedVSC:  barClass2,
+			expectError:  false,
 		},
 		{
-			name:        "foowithoutlabel VSC annotations on backup for bar.csi.k8s.io, no annotation corresponding to foo.csi.k8s.io, so fallback to default behavior of labels",
-			driverName:  "bar.csi.k8s.io",
-			pvc:         pvcNone,
-			backup:      backupFoo,
-			expectedVSC: barClass,
-			expectError: false,
+			name:         "foowithoutlabel VSC annotations on backup for foo.csi.k8s.io",
+			storageClass: fooStorageClass,
+			pvc:          pvcNone,
+			backup:       backupFoo,
+			expectedVSC:  fooClassWithoutLabel,
+			expectError:  false,
 		},
 		{
-			name:        "no snapshotClass for given driver",
-			driverName:  "blah.csi.k8s.io",
-			pvc:         pvcNone,
-			backup:      backupNone,
-			expectedVSC: nil,
-			expectError: true,
+			name:         "foowithoutlabel VSC annotations on backup for bar.csi.k8s.io, no annotation corresponding to foo.csi.k8s.io, so fallback to default behavior of labels",
+			storageClass: barStorageClass,
+			pvc:          pvcNone,
+			backup:       backupFoo,
+			expectedVSC:  barClass,
+			expectError:  false,
 		},
 		{
-			name:        "foo2 VSC annotations on pvc, but doesn't exist in cluster, fallback to default behavior of labels",
-			driverName:  "foo.csi.k8s.io",
-			pvc:         pvcFoo2,
-			backup:      backupFoo2,
-			expectedVSC: fooClass,
-			expectError: false,
+			name:         "no snapshotClass for given driver",
+			storageClass: blahStorageClass,
+			pvc:          pvcNone,
+			backup:       backupNone,
+			expectedVSC:  nil,
+			expectError:  true,
+		},
+		{
+			name:         "foo2 VSC annotations on pvc, but doesn't exist in cluster, fallback to default behavior of labels",
+			storageClass: fooStorageClass,
+			pvc:          pvcFoo2,
+			backup:       backupFoo2,
+			expectedVSC:  fooClass,
+			expectError:  false,
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actualSnapshotClass, actualError := GetVolumeSnapshotClass(
-				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient)
+				tc.storageClass, tc.backup, tc.pvc, logrus.New(), fakeClient)
 			if tc.expectError {
 				require.Error(t, actualError)
 				assert.Nil(t, actualSnapshotClass)

@@ -145,6 +145,7 @@ const (
 	VolumeSnapshotClassSelectorLabel                = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverBackupAnnotationPrefix = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverPVCAnnotation          = "velero.io/csi-volumesnapshot-class"
+	VolumeSnapshotClassDriverStorageClassAnnotation = "velero.io/csi-volumesnapshot-class"
 
 	// https://kubernetes.io/zh-cn/docs/concepts/storage/volume-snapshot-classes/
 	VolumeSnapshotClassKubernetesAnnotation = "snapshot.storage.kubernetes.io/is-default-class"
