@@ -68,8 +68,11 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 	if c.forWindows {
 		dsName = "node-agent-windows"
 	}
-	hostPodsVolumePath := filepath.Join(c.kubeletRootDir, "pods")
-	hostPluginsVolumePath := filepath.Join(c.kubeletRootDir, "plugins")
+	// Use forward slashes for hostPath paths to ensure POSIX-style paths in generated manifests
+	// even when velero CLI runs on Windows. Kubernetes hostPath.path must use '/' separator.
+	kubeletRoot := strings.TrimRight(c.kubeletRootDir, "/\\")
+	hostPodsVolumePath := kubeletRoot + "/pods"
+	hostPluginsVolumePath := kubeletRoot + "/plugins"
 	volumes := []corev1api.Volume{}
 	volumeMounts := []corev1api.VolumeMount{}
 	if !c.nodeAgentDisableHostPath {
