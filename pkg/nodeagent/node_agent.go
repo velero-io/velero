@@ -54,7 +54,6 @@ var (
 	ErrDaemonSetNotFound           = errors.New("daemonset not found")
 	ErrNodeAgentLabelNotFound      = errors.New("node-agent label not found")
 	ErrNodeAgentAnnotationNotFound = errors.New("node-agent annotation not found")
-	ErrNodeAgentTolerationNotFound = errors.New("node-agent toleration not found")
 )
 
 func IsRunningOnLinux(ctx context.Context, kubeClient kubernetes.Interface, namespace string) error {
@@ -210,7 +209,8 @@ func GetAnnotationValue(ctx context.Context, kubeClient kubernetes.Interface, na
 	return val, nil
 }
 
-func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespace string, key string, osType string) (*corev1api.Toleration, error) {
+// GetTolerations returns all tolerations from the node-agent daemonset.
+func GetTolerations(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string) ([]corev1api.Toleration, error) {
 	dsName := daemonSet
 	if osType == kube.NodeOSWindows {
 		dsName = daemonsetWindows
@@ -221,13 +221,7 @@ func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespa
 		return nil, errors.Wrapf(err, "error getting %s daemonset", dsName)
 	}
 
-	for i, t := range ds.Spec.Template.Spec.Tolerations {
-		if t.Key == key {
-			return &ds.Spec.Template.Spec.Tolerations[i], nil
-		}
-	}
-
-	return nil, ErrNodeAgentTolerationNotFound
+	return ds.Spec.Template.Spec.Tolerations, nil
 }
 
 func GetHostPodPath(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string) (string, error) {

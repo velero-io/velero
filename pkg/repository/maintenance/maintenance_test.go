@@ -1678,7 +1678,7 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 			},
 		},
 		{
-			name: "non-allowed toleration should not be inherited",
+			name: "all tolerations should be inherited",
 			deploymentTolerations: []corev1api.Toleration{
 				{
 					Key:      "vng-ondemand",
@@ -1686,88 +1686,36 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 					Effect:   "NoSchedule",
 					Value:    "amd64",
 				},
-			},
-			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
-			},
-		},
-		{
-			name: "allowed toleration should be inherited",
-			deploymentTolerations: []corev1api.Toleration{
 				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
-					Operator: "Equal",
-					Effect:   "NoSchedule",
-					Value:    "spot",
-				},
-			},
-			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
-				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
-					Operator: "Equal",
-					Effect:   "NoSchedule",
-					Value:    "spot",
-				},
-			},
-		},
-		{
-			name: "mixed allowed and non-allowed tolerations should only inherit allowed",
-			deploymentTolerations: []corev1api.Toleration{
-				{
-					Key:      "vng-ondemand", // not in allowlist
-					Operator: "Equal",
-					Effect:   "NoSchedule",
-					Value:    "amd64",
-				},
-				{
-					Key:      "CriticalAddonsOnly", // in allowlist
+					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
 					Effect:   "NoSchedule",
 				},
 				{
-					Key:      "custom-key", // not in allowlist
+					Key:      "custom-key",
 					Operator: "Equal",
-					Effect:   "NoSchedule",
+					Effect:   "NoExecute",
 					Value:    "custom-value",
 				},
 			},
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 				{
-					Key:      "CriticalAddonsOnly",
-					Operator: "Exists",
-					Effect:   "NoSchedule",
-				},
-			},
-		},
-		{
-			name: "multiple allowed tolerations should all be inherited",
-			deploymentTolerations: []corev1api.Toleration{
-				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
+					Key:      "vng-ondemand",
 					Operator: "Equal",
 					Effect:   "NoSchedule",
-					Value:    "spot",
+					Value:    "amd64",
 				},
 				{
 					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
 					Effect:   "NoSchedule",
 				},
-			},
-			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
 				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
+					Key:      "custom-key",
 					Operator: "Equal",
-					Effect:   "NoSchedule",
-					Value:    "spot",
-				},
-				{
-					Key:      "CriticalAddonsOnly",
-					Operator: "Exists",
-					Effect:   "NoSchedule",
+					Effect:   "NoExecute",
+					Value:    "custom-value",
 				},
 			},
 		},
@@ -1793,36 +1741,6 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 }
 
 func TestBuildJobWithTolerationsInheritance(t *testing.T) {
-	// Define allowed tolerations that would be set on Velero deployment
-	allowedTolerations := []corev1api.Toleration{
-		{
-			Key:      "kubernetes.azure.com/scalesetpriority",
-			Operator: "Equal",
-			Effect:   "NoSchedule",
-			Value:    "spot",
-		},
-		{
-			Key:      "CriticalAddonsOnly",
-			Operator: "Exists",
-			Effect:   "NoSchedule",
-		},
-	}
-
-	// Mixed tolerations (allowed and non-allowed)
-	mixedTolerations := []corev1api.Toleration{
-		{
-			Key:      "vng-ondemand", // not in allowlist
-			Operator: "Equal",
-			Effect:   "NoSchedule",
-			Value:    "amd64",
-		},
-		{
-			Key:      "CriticalAddonsOnly", // in allowlist
-			Operator: "Exists",
-			Effect:   "NoSchedule",
-		},
-	}
-
 	// Windows toleration that should always be present
 	windowsToleration := corev1api.Toleration{
 		Key:      "os",
@@ -1844,8 +1762,21 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 			},
 		},
 		{
-			name:                  "allowed tolerations should be inherited along with Windows toleration",
-			deploymentTolerations: allowedTolerations,
+			name: "all tolerations should be inherited along with Windows toleration",
+			deploymentTolerations: []corev1api.Toleration{
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "spot",
+				},
+				{
+					Key:      "custom-taint",
+					Operator: "Equal",
+					Effect:   "NoExecute",
+					Value:    "dedicated",
+				},
+			},
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 				{
@@ -1855,21 +1786,10 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 					Value:    "spot",
 				},
 				{
-					Key:      "CriticalAddonsOnly",
-					Operator: "Exists",
-					Effect:   "NoSchedule",
-				},
-			},
-		},
-		{
-			name:                  "mixed tolerations should only inherit allowed ones",
-			deploymentTolerations: mixedTolerations,
-			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
-				{
-					Key:      "CriticalAddonsOnly",
-					Operator: "Exists",
-					Effect:   "NoSchedule",
+					Key:      "custom-taint",
+					Operator: "Equal",
+					Effect:   "NoExecute",
+					Value:    "dedicated",
 				},
 			},
 		},

@@ -29,6 +29,22 @@ const (
 	ExposeOnGoingLabel     = "velero.io/expose-on-going"
 )
 
+// deduplicateTolerations removes duplicate tolerations from the slice.
+// A toleration is considered a duplicate if another toleration with the same
+// Key, Operator, Value, and Effect already exists in the slice.
+func deduplicateTolerations(tolerations []corev1api.Toleration) []corev1api.Toleration {
+	seen := make(map[string]struct{})
+	result := make([]corev1api.Toleration, 0, len(tolerations))
+	for _, t := range tolerations {
+		key := string(t.Key) + "|" + string(t.Operator) + "|" + string(t.Value) + "|" + string(t.Effect)
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // ExposeResult defines the result of expose.
 // Varying from the type of the expose, the result may be different.
 type ExposeResult struct {

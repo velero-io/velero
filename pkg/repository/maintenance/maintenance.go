@@ -481,9 +481,8 @@ func StartNewJob(
 }
 
 // buildTolerationsForMaintenanceJob builds the tolerations for maintenance jobs.
-// It includes the required Windows toleration for backward compatibility and filters
-// tolerations from the Velero deployment to only include those with keys that are
-// in the ThirdPartyTolerations allowlist, following the same pattern as labels and annotations.
+// It includes the required Windows toleration for backward compatibility and
+// inherits all tolerations from the Velero deployment.
 func buildTolerationsForMaintenanceJob(deployment *appsv1api.Deployment) []corev1api.Toleration {
 	// Start with the Windows toleration for backward compatibility
 	windowsToleration := corev1api.Toleration{
@@ -494,17 +493,9 @@ func buildTolerationsForMaintenanceJob(deployment *appsv1api.Deployment) []corev
 	}
 	result := []corev1api.Toleration{windowsToleration}
 
-	// Filter tolerations from the Velero deployment to only include allowed ones
-	// Only tolerations that exist on the deployment AND have keys in the allowlist are inherited
+	// Inherit all tolerations from the Velero deployment
 	deploymentTolerations := veleroutil.GetTolerationsFromVeleroServer(deployment)
-	for _, k := range util.ThirdPartyTolerations {
-		for _, toleration := range deploymentTolerations {
-			if toleration.Key == k {
-				result = append(result, toleration)
-				break // Only add the first matching toleration for each allowed key
-			}
-		}
-	}
+	result = append(result, deploymentTolerations...)
 
 	return result
 }
