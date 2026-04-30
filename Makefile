@@ -20,6 +20,17 @@ BIN ?= velero
 # This repo's root import path (under GOPATH).
 PKG := github.com/vmware-tanzu/velero
 
+# docker (or podman) command.
+ifneq (, $(shell which docker 2>/dev/null))
+  DOCKER := docker
+else ifneq (, $(shell which podman 2>/dev/null))
+  DOCKER := podman
+  # map host uid to container uid
+  export PODMAN_USERNS=keep-id
+else
+  $(error Neither docker nor podman found)
+endif
+
 # Where to push the docker image.
 REGISTRY ?= velero
 # In order to push images to an insecure registry, follow the two steps:
@@ -63,7 +74,7 @@ else
 endif
 
 BUILDER_IMAGE := $(REGISTRY)/build-image:$(BUILDER_IMAGE_TAG)
-BUILDER_IMAGE_CACHED := $(shell docker images -q ${BUILDER_IMAGE} 2>/dev/null )
+BUILDER_IMAGE_CACHED := $(shell $(DOCKER) images -q ${BUILDER_IMAGE} 2>/dev/null )
 
 HUGO_IMAGE := ghcr.io/gohugoio/hugo
 
@@ -86,14 +97,14 @@ endif
 # check buildx is enabled only if docker is in path
 # macOS/Windows docker cli without Docker Desktop license: https://github.com/abiosoft/colima
 # To add buildx to docker cli: https://github.com/abiosoft/colima/discussions/273#discussioncomment-2684502
-ifeq ($(shell which docker 2>/dev/null 1>&2 && docker buildx inspect 2>/dev/null | awk '/Status/ { print $$2 }'), running)
+ifeq ($(shell which $(DOCKER) 2>/dev/null 1>&2 && $(DOCKER) buildx inspect 2>/dev/null | awk '/Status/ { print $$2 }'), running)
 	BUILDX_ENABLED ?= true
 # if emulated docker cli from podman, assume enabled
 # emulated docker cli from podman: https://podman-desktop.io/docs/migrating-from-docker/emulating-docker-cli-with-podman
 # podman known issues:
 # - on remote podman, such as on macOS,
 #   --output issue: https://github.com/containers/podman/issues/15922
-else ifeq ($(shell which docker 2>/dev/null 1>&2 && cat $(shell which docker) | grep -c "exec podman"), 1)
+else ifeq ($(shell which $(DOCKER) 2>/dev/null 1>&2 && cat $(shell which $(DOCKER)) | grep -c "exec podman"), 1)
 	BUILDX_ENABLED ?= true
 else
 	BUILDX_ENABLED ?= false
@@ -198,7 +209,7 @@ shell: build-dirs build-env
 	@# because the Kubernetes code-generator tools require the project to
 	@# exist in a directory hierarchy ending like this (but *NOT* necessarily
 	@# under $GOPATH).
-	@docker run \
+	@$(DOCKER) run \
 		-e GOFLAGS \
 		-e GOPROXY \
 		-i $(TTY) \
@@ -223,11 +234,11 @@ endif
 
 ifeq ($(BUILDX_INSTANCE),)
 	@echo creating a buildx instance
-	-docker buildx rm velero-builder || true
-	@docker buildx create --use --name=velero-builder
+	-$(DOCKER) buildx rm velero-builder || true
+	@$(DOCKER) buildx create --use --name=velero-builder
 else
 	@echo using a specified buildx instance $(BUILDX_INSTANCE)
-	@docker buildx use $(BUILDX_INSTANCE)
+	@$(DOCKER) buildx use $(BUILDX_INSTANCE)
 endif
 
 	@mkdir -p _output
@@ -248,7 +259,7 @@ container-linux-%:
 container-linux:
 	@echo "building container: $(IMAGE):$(VERSION)-linux-$(BUILDX_ARCH)"
 
-	@docker buildx build --pull \
+	@$(DOCKER) buildx build --pull \
 	--output="type=$(BUILD_OUTPUT_TYPE)$(if $(findstring tar, $(BUILD_OUTPUT_TYPE)),$(comma)dest=_output/$(BIN)-$(VERSION)-linux-$(BUILDX_ARCH).tar,)" \
 	--platform="linux/$(BUILDX_ARCH)" \
 	$(addprefix -t , $(addsuffix "-linux-$(BUILDX_ARCH)",$(ALL_IMAGE_TAGS))) \
@@ -271,7 +282,7 @@ container-windows-%:
 container-windows:
 	@echo "building container: $(IMAGE):$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)"
 
-	@docker buildx build --pull \
+	@$(DOCKER) buildx build --pull \
 	--output="type=$(BUILD_OUTPUT_TYPE)$(if $(findstring tar, $(BUILD_OUTPUT_TYPE)),$(comma)dest=_output/$(BIN)-$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH).tar,)" \
 	--platform="windows/$(BUILDX_ARCH)" \
 	$(addprefix -t , $(addsuffix "-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)",$(ALL_IMAGE_TAGS))) \
@@ -291,22 +302,22 @@ container-windows:
 
 push-manifest:
 	@echo "building manifest: $(IMAGE_TAG) for $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})"
-	@docker manifest create --amend --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
+	@$(DOCKER) manifest create --amend --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
 
 	@set -x; \
 	for arch in $(ALL_ARCH.windows); do \
 		for osversion in $(ALL_OSVERSIONS.windows); do \
 			BASEIMAGE=mcr.microsoft.com/windows/nanoserver:$${osversion}; \
-			full_version=`docker manifest inspect --insecure=$(INSECURE_REGISTRY) $${BASEIMAGE} | jq -r '.manifests[0].platform["os.version"]'`; \
-			docker manifest annotate --os windows --arch $${arch} --os-version $${full_version} $(IMAGE_TAG) $(IMAGE_TAG)-windows-$${osversion}-$${arch}; \
+			full_version=`$(DOCKER) manifest inspect --insecure=$(INSECURE_REGISTRY) $${BASEIMAGE} | jq -r '.manifests[0].platform["os.version"]'`; \
+			$(DOCKER) manifest annotate --os windows --arch $${arch} --os-version $${full_version} $(IMAGE_TAG) $(IMAGE_TAG)-windows-$${osversion}-$${arch}; \
 		done; \
 	done
 
 	@echo "pushing manifest $(IMAGE_TAG)"
-	@docker manifest push --purge --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG)
+	@$(DOCKER) manifest push --purge --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG)
 
 	@echo "pushed manifest $(IMAGE_TAG):"
-	@docker manifest inspect --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG)
+	@$(DOCKER) manifest inspect --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG)
 
 SKIP_TESTS ?=
 test: build-dirs
@@ -363,21 +374,21 @@ else ifneq ($(BUILDER_IMAGE_CACHED),)
 	@echo "Using Cached Image: $(BUILDER_IMAGE)"
 else
 	@echo "Trying to pull build-image: $(BUILDER_IMAGE)"
-	docker pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
+	$(DOCKER) pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
 endif
 
 build-image:
 	@# When we build a new image we just untag the old one.
 	@# This makes sure we don't leave the orphaned image behind.
-	$(eval old_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	$(eval old_id=$(shell $(DOCKER) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 ifeq ($(BUILDX_ENABLED), true)
-	@cd hack/build-image && docker buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(DOCKER) buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 else
-	@cd hack/build-image && docker build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(DOCKER) build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 endif
-	$(eval new_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	$(eval new_id=$(shell $(DOCKER) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 	@if [ "$(old_id)" != "" ] && [ "$(old_id)" != "$(new_id)" ]; then \
-		docker rmi -f $$id || true; \
+		$(DOCKER) rmi -f $$id || true; \
 	fi
 
 push-build-image:
@@ -388,21 +399,21 @@ ifneq "$(origin BUILDER_IMAGE_DOCKERFILE)" "file"
 	@echo "Dockerfile for builder image has been overridden"
 	@echo "Skipping push of custom image"
 else
-	docker push $(BUILDER_IMAGE)
+	$(DOCKER) push $(BUILDER_IMAGE)
 endif
 
 build-image-hugo:
-	cd site && docker build --pull -t $(HUGO_IMAGE) .
+	cd site && $(DOCKER) build --pull -t $(HUGO_IMAGE) .
 
 clean:
 # if we have a cached image then use it to run go clean --modcache
 # this test checks if we there is an image id in the BUILDER_IMAGE_CACHED variable.
 ifneq ($(strip $(BUILDER_IMAGE_CACHED)),)
 	$(MAKE) shell CMD="-c 'go clean --modcache'"
-	docker rmi -f $(BUILDER_IMAGE) || true
+	$(DOCKER) rmi -f $(BUILDER_IMAGE) || true
 endif
 	rm -rf .go _output
-	docker rmi $(HUGO_IMAGE)
+	$(DOCKER) rmi $(HUGO_IMAGE)
 
 
 .PHONY: modules
@@ -447,7 +458,7 @@ release:
 		./hack/release-tools/goreleaser.sh'"
 
 serve-docs: build-image-hugo
-	docker run \
+	$(DOCKER) run \
 	--rm \
 	-v "$$(pwd)/site:/project" \
 	-it -p 1313:1313 \
