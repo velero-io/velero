@@ -301,7 +301,7 @@ func TestBackupFinalizerReconcile_PutBackupMetadataFail(t *testing.T) {
 			localBackupStore.On("PutBackupVolumeInfos", mock.Anything, mock.Anything).Return(nil)
 
 			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
-			assert.Error(t, err, "reconcile should return error when PutBackupMetadata fails")
+			require.Error(t, err, "reconcile should return error when PutBackupMetadata fails")
 
 			backupAfter := velerov1api.Backup{}
 			err = fakeClient.Get(t.Context(), types.NamespacedName{
@@ -380,7 +380,7 @@ func TestBackupFinalizerReconcile_PutBackupContentsFail(t *testing.T) {
 	backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, framework.BackupItemActionResolverV2{}, mock.Anything, mock.Anything).Return(nil)
 
 	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
-	assert.Error(t, err, "reconcile should return error when PutBackupContents fails")
+	require.Error(t, err, "reconcile should return error when PutBackupContents fails")
 
 	backupAfter := velerov1api.Backup{}
 	err = fakeClient.Get(t.Context(), types.NamespacedName{
