@@ -1396,7 +1396,14 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			additionalResourceID := getResourceID(additionalItem.GroupResource, additionalItem.Namespace, additionalItem.Name)
 			additionalObj, err := archive.Unmarshal(ctx.fileSystem, itemPath)
 			if err != nil {
-				errs.Add(namespace, errors.Wrapf(err, "error restoring additional item %s", additionalResourceID))
+				ctx.log.WithError(err).WithFields(logrus.Fields{
+					"additionalResource":          additionalItem.GroupResource.String(),
+					"additionalResourceNamespace": additionalItem.Namespace,
+					"additionalResourceName":      additionalItem.Name,
+				}).Warn("Could not unmarshal additional item")
+				errs.Add(namespace, errors.Wrapf(err, "Could not unmarshal additional item: %s", additionalResourceID))
+
+				continue
 			}
 
 			additionalItemNamespace := additionalItem.Namespace
