@@ -29,6 +29,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/label"
 )
@@ -93,13 +94,21 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 					fmt.Fprintf(os.Stderr, "error getting PodVolumeBackups for backup %s: %v\n", backup.Name, err)
 				}
 
+				// Inherit insecureSkipTLSVerify from BSL config if not set via CLI flag
+				effectiveInsecureSkipTLS := insecureSkipTLSVerify
+				bslInsecure, bslErr := cacert.GetInsecureSkipTLSVerifyFromBackup(context.Background(), kbClient, f.Namespace(), &backups.Items[i])
+				if bslErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: Error getting insecureSkipTLSVerify from BSL for backup %s: %v\n", backup.Name, bslErr)
+				}
+				effectiveInsecureSkipTLS = effectiveInsecureSkipTLS || bslInsecure
+
 				// structured output only applies to a single backup in case of OOM
 				// To describe the list of backups in structured format, users could iterate over the list and describe backup one after another.
 				if len(backups.Items) == 1 && outputFormat != "plaintext" {
-					s := output.DescribeBackupInSF(context.Background(), kbClient, &backups.Items[i], deleteRequestList.Items, podVolumeBackupList.Items, details, insecureSkipTLSVerify, caCertFile, outputFormat)
+					s := output.DescribeBackupInSF(context.Background(), kbClient, &backups.Items[i], deleteRequestList.Items, podVolumeBackupList.Items, details, effectiveInsecureSkipTLS, caCertFile, outputFormat)
 					fmt.Print(s)
 				} else {
-					s := output.DescribeBackup(context.Background(), kbClient, &backups.Items[i], deleteRequestList.Items, podVolumeBackupList.Items, details, insecureSkipTLSVerify, caCertFile)
+					s := output.DescribeBackup(context.Background(), kbClient, &backups.Items[i], deleteRequestList.Items, podVolumeBackupList.Items, details, effectiveInsecureSkipTLS, caCertFile)
 					if first {
 						first = false
 						fmt.Print(s)
