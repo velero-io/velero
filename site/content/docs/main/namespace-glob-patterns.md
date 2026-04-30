@@ -5,6 +5,8 @@ layout: docs
 
 When using `--include-namespaces` and `--exclude-namespaces` flags with backup and restore commands, you can use glob patterns to match multiple namespaces.
 
+Note: If the resolution of namespace patterns results in no namespaces, the backup will succeed with a warning.
+
 ## Supported Patterns
 
 Velero supports the following glob pattern characters:
