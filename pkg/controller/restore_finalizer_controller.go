@@ -559,8 +559,21 @@ func (ctx *finalizerContext) WaitRestoreExecHook() (errs results.Result) {
 	log := ctx.logger.WithField("restore", ctx.restore.Name)
 	log.Info("Waiting for restore exec hooks starts")
 
-	// wait for restore exec hooks to finish
-	err := wait.PollUntilContextCancel(context.Background(), 1*time.Second, true, func(context.Context) (bool, error) {
+	// Bound the wait by resourceTimeout (the same budget Velero already
+	// applies to other finalizer phases). Previously this poll had no
+	// deadline, so a hook that was registered via Add() but never
+	// recorded as executed (pod evicted, container never ready,
+	// goroutine panic, leaked tracker entry) left the restore stuck in
+	// Finalizing forever and — because the finalizer controller is a
+	// single-threaded controller-runtime reconciler — blocked every
+	// other restore on the cluster.
+	timeout := ctx.resourceTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	pollCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := wait.PollUntilContextCancel(pollCtx, 1*time.Second, true, func(context.Context) (bool, error) {
 		log.Debug("Checking the progress of hooks execution")
 		if ctx.multiHookTracker.IsComplete(ctx.restore.Name) {
 			return true, nil

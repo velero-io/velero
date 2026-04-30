@@ -482,6 +482,13 @@ func TestWaitRestoreExecHook(t *testing.T) {
 	hookFailed, hookErr := true, fmt.Errorf("hook failed")
 	hookTracker3.Add(restoreName3, podNs, podName, container, source, hookName, hook.PhasePre, 0)
 
+	// hookTracker4: an entry that is added but never recorded. This
+	// reproduces the hang that motivated the resourceTimeout guard —
+	// without the timeout, WaitRestoreExecHook would block forever.
+	hookTracker4 := hook.NewMultiHookTracker()
+	restoreName4 := "restore4"
+	hookTracker4.Add(restoreName4, "ns", "pod", "con1", "s1", "h1", hook.PhasePre, 0)
+
 	tests := []struct {
 		name                   string
 		hookTracker            *hook.MultiHookTracker
@@ -497,6 +504,8 @@ func TestWaitRestoreExecHook(t *testing.T) {
 		hookName               string
 		hookFailed             bool
 		hookErr                error
+		resourceTimeout        time.Duration
+		expectTimeoutErr       bool
 	}{
 		{
 			name:                   "no restore exec hooks",
@@ -530,6 +539,16 @@ func TestWaitRestoreExecHook(t *testing.T) {
 			hookFailed:             hookFailed,
 			hookErr:                hookErr,
 		},
+		{
+			name:                   "hook never recorded should timeout instead of hanging",
+			hookTracker:            hookTracker4,
+			restore:                builder.ForRestore(velerov1api.DefaultNamespace, restoreName4).Result(),
+			expectedHooksAttempted: 0,
+			expectedHooksFailed:    0,
+			expectedHookErrs:       1,
+			resourceTimeout:        3 * time.Second,
+			expectTimeoutErr:       true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -542,6 +561,7 @@ func TestWaitRestoreExecHook(t *testing.T) {
 			crClient:         fakeClient,
 			restore:          tc.restore,
 			multiHookTracker: tc.hookTracker,
+			resourceTimeout:  tc.resourceTimeout,
 		}
 		require.NoError(t, ctx.crClient.Create(t.Context(), tc.restore))
 
@@ -553,6 +573,12 @@ func TestWaitRestoreExecHook(t *testing.T) {
 		}
 
 		errs := ctx.WaitRestoreExecHook()
+		if tc.expectTimeoutErr {
+			// The poll should be bounded by resourceTimeout and surface
+			// a timeout error rather than hanging the reconciler.
+			assert.NotEmpty(t, errs.Namespaces, "expected timeout error but got none")
+			continue
+		}
 		assert.Len(t, errs.Namespaces, tc.expectedHookErrs)
 
 		updated := &velerov1api.Restore{}
