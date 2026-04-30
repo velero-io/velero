@@ -1223,6 +1223,11 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			case volume.NativeSnapshot:
 				obj, err = ctx.handlePVHasNativeSnapshot(obj, resourceClient)
 				if err != nil {
+					if err == errPVNeedsReprovisioning {
+						restoreLogger.Infof("Dynamically re-provisioning persistent volume because it has Delete reclaim policy and no snapshot data.")
+						ctx.pvsToProvision.Insert(backupResourceName)
+						return warnings, errs, itemExists
+					}
 					errs.Add(namespace, err)
 					return warnings, errs, itemExists
 				}
@@ -1270,6 +1275,11 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			case hasSnapshot(backupResourceName, ctx.volumeSnapshots):
 				obj, err = ctx.handlePVHasNativeSnapshot(obj, resourceClient)
 				if err != nil {
+					if err == errPVNeedsReprovisioning {
+						restoreLogger.Infof("Dynamically re-provisioning persistent volume because it has Delete reclaim policy and no snapshot data.")
+						ctx.pvsToProvision.Insert(backupResourceName)
+						return warnings, errs, itemExists
+					}
 					errs.Add(namespace, err)
 					return warnings, errs, itemExists
 				}
@@ -2557,6 +2567,9 @@ func (ctx *restoreContext) handlePVHasNativeSnapshot(obj *unstructured.Unstructu
 		ctx.log.Infof("Restoring persistent volume from snapshot.")
 		retObj, err = ctx.pvRestorer.executePVAction(retObj)
 		if err != nil {
+			if err == errPVNeedsReprovisioning {
+				return nil, err
+			}
 			return nil, fmt.Errorf("error executing PVAction for %s: %v", getResourceID(kuberesource.PersistentVolumes, "", oldName), err)
 		}
 
@@ -2600,6 +2613,11 @@ func (ctx *restoreContext) handleSkippedPVHasRetainPolicy(
 	logger logrus.FieldLogger,
 ) (*unstructured.Unstructured, error) {
 	logger.Infof("Restoring persistent volume as-is because it doesn't have a snapshot and its reclaim policy is not Delete.")
+	logger.Warnf("Warning: restoring PV %s with its original volume identity (VolumeHandle). "+
+		"If this volume's data was intentionally skipped during backup (e.g. via VolumePolicy action=skip), "+
+		"be aware that in cross-cluster restore scenarios this may cause two clusters to share the same "+
+		"underlying storage. Consider using Delete reclaim policy for volumes that are skipped during backup.",
+		obj.GetName())
 
 	// Check to see if the claimRef.namespace field needs to be remapped, and do so if necessary.
 	if _, err := remapClaimRefNS(ctx, obj); err != nil {

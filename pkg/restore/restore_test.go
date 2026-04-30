@@ -221,6 +221,30 @@ func TestRestorePVWithVolumeInfo(t *testing.T) {
 				test.PVs(): {"/pv-1"},
 			},
 		},
+		{
+			name:    "NativeSnapshot PV with Delete reclaim policy and no snapshot data is dynamically re-provisioned",
+			restore: defaultRestore().Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+				).Done(),
+			apiResources: []*test.APIResource{
+				test.PVs(),
+			},
+			volumeInfoMap: map[string]volume.BackupVolumeInfo{
+				"pv-1": {
+					BackupMethod: volume.NativeSnapshot,
+					PVName:       "pv-1",
+					NativeSnapshotInfo: &volume.NativeSnapshotInfo{
+						SnapshotHandle: "testSnapshotHandle",
+					},
+				},
+			},
+			want: map[*test.APIResource][]string{
+				test.PVs(): {},
+			},
+		},
 	}
 
 	features.Enable("EnableCSI")
@@ -253,6 +277,57 @@ func TestRestorePVWithVolumeInfo(t *testing.T) {
 			assertAPIContents(t, h, tc.want)
 		})
 	}
+}
+
+// mockPVRestorer is a test double for PVRestorer that returns a pre-configured
+// result. It is used to test code paths that depend on pvRestorer behavior
+// without standing up real volume snapshotter plugins.
+type mockPVRestorer struct {
+	result *unstructured.Unstructured
+	err    error
+}
+
+func (m *mockPVRestorer) executePVAction(_ *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	return m.result, m.err
+}
+
+// TestHandlePVHasNativeSnapshot_PropagatesErrPVNeedsReprovisioning verifies that
+// when pvRestorer.executePVAction returns errPVNeedsReprovisioning (e.g. the PV
+// has a Delete reclaim policy but no snapshot exists), handlePVHasNativeSnapshot
+// propagates the error unchanged so the caller can trigger dynamic re-provisioning.
+func TestHandlePVHasNativeSnapshot_PropagatesErrPVNeedsReprovisioning(t *testing.T) {
+	h := newHarness(t)
+	h.DiscoveryClient.WithAPIResource(test.PVs())
+
+	ctx := &restoreContext{
+		log:     h.log,
+		restore: defaultRestore().Result(),
+		pvRestorer: &mockPVRestorer{
+			result: nil,
+			err:    errPVNeedsReprovisioning,
+		},
+		renamedPVs:                    make(map[string]string),
+		dynamicFactory:                client.NewDynamicFactory(h.DynamicClient),
+		resourceTerminatingTimeout:    time.Millisecond,
+		resourceDeletionStatusTracker: kube.NewResourceDeletionStatusTracker(),
+	}
+
+	pvObj := builder.ForPersistentVolume("pv-delete-1").
+		ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).
+		Result()
+	unstructuredPV, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvObj)
+	require.NoError(t, err)
+
+	pvClient, err := ctx.dynamicFactory.ClientForGroupVersionResource(
+		schema.GroupVersion{Group: "", Version: "v1"},
+		metav1.APIResource{Name: "persistentvolumes"},
+		"",
+	)
+	require.NoError(t, err)
+
+	result, err := ctx.handlePVHasNativeSnapshot(&unstructured.Unstructured{Object: unstructuredPV}, pvClient)
+	assert.Nil(t, result)
+	assert.Equal(t, errPVNeedsReprovisioning, err)
 }
 
 // TestRestoreResourceFiltering runs restores with different combinations
