@@ -25,11 +25,9 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -60,8 +58,8 @@ type PodVolumeRestoreAction struct {
 }
 
 func NewPodVolumeRestoreAction(logger logrus.FieldLogger, client corev1client.ConfigMapInterface, crClient ctrlclient.Client, namespace string) (*PodVolumeRestoreAction, error) {
-	deployment := &appsv1api.Deployment{}
-	if err := crClient.Get(context.TODO(), types.NamespacedName{Name: "velero", Namespace: namespace}, deployment); err != nil {
+	deployment, err := veleroutil.GetVeleroServerDeployment(context.TODO(), crClient, namespace)
+	if err != nil {
 		return nil, err
 	}
 	image := veleroutil.GetVeleroServerImage(deployment)
