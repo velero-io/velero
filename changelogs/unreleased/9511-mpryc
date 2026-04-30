@@ -1,0 +1,1 @@
+Fix ListBackups to skip directories without metadata file
