@@ -82,17 +82,38 @@ func (e *DefaultWaitExecHookHandler) HandleHooks(
 		return nil
 	}
 
+	var errors []error
 	// If hooks are defined for a container that does not exist in the pod log a warning and discard
 	// those hooks to avoid waiting for a container that will never become ready. After that if
 	// there are no hooks left to be executed return immediately.
-	for containerName := range byContainer {
+	// Discarded hooks must be recorded as failed in the hook tracker, otherwise the tracker
+	// will never reach completion and the restore finalizer will poll forever waiting on hooks
+	// that can never run.
+	for containerName, hooks := range byContainer {
 		if !podHasContainer(pod, containerName) {
-			log.Warningf("Pod %s does not have container %s: discarding post-restore exec hooks", kube.NamespaceAndName(pod), containerName)
+			discardErr := fmt.Errorf("pod %s does not have container %s: discarding post-restore exec hooks", kube.NamespaceAndName(pod), containerName)
+			log.Warning(discardErr)
+			for i, hook := range hooks {
+				hookLog := log.WithFields(
+					logrus.Fields{
+						"hookSource": hook.HookSource,
+						"hookType":   "exec",
+						"hookPhase":  "post",
+						"hookName":   hook.HookName,
+						"container":  hook.Hook.Container,
+					},
+				)
+				errTracker := multiHookTracker.Record(restoreName, pod.Namespace, pod.Name, hook.Hook.Container, hook.HookSource, hook.HookName, HookPhase(""), i, true, discardErr)
+				if errTracker != nil {
+					hookLog.WithError(errTracker).Warn("Error recording the discarded hook in hook tracker")
+				}
+			}
+			errors = append(errors, discardErr)
 			delete(byContainer, containerName)
 		}
 	}
 	if len(byContainer) == 0 {
-		return nil
+		return errors
 	}
 
 	// Every hook in every container can have its own wait timeout. Rather than setting up separate
@@ -107,8 +128,6 @@ func (e *DefaultWaitExecHookHandler) HandleHooks(
 		ctx, cancel = context.WithTimeout(ctx, maxWait)
 	}
 	waitStart := time.Now()
-
-	var errors []error
 
 	// The first time this handler is called after a container starts running it will execute all
 	// pending hooks for that container. Subsequent invocations of this handler will never execute
