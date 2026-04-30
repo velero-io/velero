@@ -526,6 +526,7 @@ func TestFindPVRForTargetPod(t *testing.T) {
 						velerov1api.PodUIDLabel: string(pod.GetUID()),
 					},
 				},
+				Spec: velerov1api.PodVolumeRestoreSpec{UploaderType: uploader.KopiaType},
 			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -688,6 +689,7 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 		mockClose                bool
 		needExclusiveUpdateError error
 		constrained              bool
+		preserveEmptyUploader    bool
 		expected                 *velerov1api.PodVolumeRestore
 		expectDeleted            bool
 		expectCancelRecord       bool
@@ -939,6 +941,13 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if !test.preserveEmptyUploader && test.pvr != nil && test.pvr.Spec.UploaderType == "" {
+				test.pvr.Spec.UploaderType = uploader.KopiaType
+			}
+			if !test.preserveEmptyUploader && test.expected != nil && test.expected.Spec.UploaderType == "" {
+				test.expected.Spec.UploaderType = uploader.KopiaType
+			}
+
 			objs := []runtime.Object{daemonSet, node}
 
 			ctlObj := []client.Object{}
@@ -1396,7 +1405,7 @@ func TestFindPVBForRestorePod(t *testing.T) {
 	}{
 		{
 			name: "find pvr for pod",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
 			pod:  builder.ForPod(velerov1api.DefaultNamespace, pvrName).Labels(map[string]string{velerov1api.PVRLabel: pvrName}).Status(corev1api.PodStatus{Phase: corev1api.PodRunning}).Result(),
 			checkFunc: func(pvr *velerov1api.PodVolumeRestore, requests []reconcile.Request) {
 				// Assert that the function returns a single request
@@ -1407,7 +1416,7 @@ func TestFindPVBForRestorePod(t *testing.T) {
 			},
 		}, {
 			name: "no selected label found for pod",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
 			pod:  builder.ForPod(velerov1api.DefaultNamespace, pvrName).Result(),
 			checkFunc: func(pvr *velerov1api.PodVolumeRestore, requests []reconcile.Request) {
 				// Assert that the function returns a single request
@@ -1415,7 +1424,7 @@ func TestFindPVBForRestorePod(t *testing.T) {
 			},
 		}, {
 			name: "no matched pod",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
 			pod:  builder.ForPod(velerov1api.DefaultNamespace, pvrName).Labels(map[string]string{velerov1api.PVRLabel: "non-existing-pvr"}).Result(),
 			checkFunc: func(pvr *velerov1api.PodVolumeRestore, requests []reconcile.Request) {
 				assert.Empty(t, requests)
@@ -1423,8 +1432,16 @@ func TestFindPVBForRestorePod(t *testing.T) {
 		},
 		{
 			name: "pvr not accept",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result(),
 			pod:  builder.ForPod(velerov1api.DefaultNamespace, pvrName).Labels(map[string]string{velerov1api.PVRLabel: pvrName}).Result(),
+			checkFunc: func(pvr *velerov1api.PodVolumeRestore, requests []reconcile.Request) {
+				assert.Empty(t, requests)
+			},
+		},
+		{
+			name: "invalid uploader type",
+			pvr:  pvrBuilder().UploaderType("restic").Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
+			pod:  builder.ForPod(velerov1api.DefaultNamespace, pvrName).Labels(map[string]string{velerov1api.PVRLabel: pvrName}).Status(corev1api.PodStatus{Phase: corev1api.PodRunning}).Result(),
 			checkFunc: func(pvr *velerov1api.PodVolumeRestore, requests []reconcile.Request) {
 				assert.Empty(t, requests)
 			},
@@ -1613,32 +1630,32 @@ func TestAttemptPVRResume(t *testing.T) {
 	}{
 		{
 			name: "Other pvr",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhasePrepared).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhasePrepared).Result(),
 		},
 		{
 			name: "Other pvr",
-			pvr:  pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
+			pvr:  pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseAccepted).Result(),
 		},
 		{
 			name:           "InProgress pvr, not the current node",
-			pvr:            pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result(),
+			pvr:            pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result(),
 			inProgressPvrs: []string{pvrName},
 		},
 		{
 			name:           "InProgress pvr, no resume error",
-			pvr:            pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
+			pvr:            pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
 			inProgressPvrs: []string{pvrName},
 		},
 		{
 			name:           "InProgress pvr, resume error, cancel error",
-			pvr:            pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
+			pvr:            pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
 			resumeErr:      errors.New("fake-resume-error"),
 			needErrs:       []bool{false, false, true, false, false, false},
 			inProgressPvrs: []string{pvrName},
 		},
 		{
 			name:           "InProgress pvr, resume error, cancel succeed",
-			pvr:            pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
+			pvr:            pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Node("node-1").Result(),
 			resumeErr:      errors.New("fake-resume-error"),
 			cancelledPvrs:  []string{pvrName},
 			inProgressPvrs: []string{pvrName},
@@ -1646,7 +1663,7 @@ func TestAttemptPVRResume(t *testing.T) {
 		{
 			name:          "Error",
 			needErrs:      []bool{false, false, false, false, false, true},
-			pvr:           pvrBuilder().Phase(velerov1api.PodVolumeRestorePhasePrepared).Result(),
+			pvr:           pvrBuilder().UploaderType(uploader.KopiaType).Phase(velerov1api.PodVolumeRestorePhasePrepared).Result(),
 			expectedError: "error to list PVRs: List error",
 		},
 	}

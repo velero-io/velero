@@ -18,3 +18,4 @@ jobs:
         uses: necojackarc/auto-request-review@v0.13.0
         with:
           config: .github/auto-assignees.yml
+          token: ${{ secrets.GITHUB_TOKEN }}

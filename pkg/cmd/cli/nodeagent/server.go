@@ -37,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	cacheutil "k8s.io/client-go/tools/cache"
@@ -430,10 +429,6 @@ func (s *nodeAgentServer) run() {
 		s.logger.WithError(err).Fatal("Unable to create the pod volume restore controller")
 	}
 
-	if err := controller.InitLegacyPodVolumeRestoreReconciler(s.mgr.GetClient(), s.mgr, s.kubeClient, s.dataPathMgr, s.namespace, s.config.resourceTimeout, s.logger); err != nil {
-		s.logger.WithError(err).Fatal("Unable to create the legacy pod volume restore controller")
-	}
-
 	dataUploadReconciler := controller.NewDataUploadReconciler(
 		s.mgr.GetClient(),
 		s.mgr,
@@ -509,8 +504,6 @@ func (s *nodeAgentServer) run() {
 		if err := pvrReconciler.AttemptPVRResume(s.ctx, s.logger.WithField("node", s.nodeName), s.namespace); err != nil {
 			s.logger.WithError(errors.WithStack(err)).Error("Failed to attempt PVR resume")
 		}
-
-		s.markLegacyPVRsFailed(s.mgr.GetClient())
 	}()
 
 	s.logger.Info("Controllers starting...")
@@ -602,47 +595,6 @@ func (s *nodeAgentServer) validatePodVolumesHostPath(client kubernetes.Interface
 	}
 
 	return nil
-}
-
-func (s *nodeAgentServer) markLegacyPVRsFailed(client ctrlclient.Client) {
-	pvrs := &velerov1api.PodVolumeRestoreList{}
-	if err := client.List(s.ctx, pvrs, &ctrlclient.ListOptions{Namespace: s.namespace}); err != nil {
-		s.logger.WithError(errors.WithStack(err)).Error("failed to list podvolumerestores")
-		return
-	}
-
-	for i, pvr := range pvrs.Items {
-		if !controller.IsLegacyPVR(&pvr) {
-			continue
-		}
-
-		if pvr.Status.Phase != velerov1api.PodVolumeRestorePhaseInProgress {
-			s.logger.Debugf("the status of podvolumerestore %q is %q, skip", pvr.GetName(), pvr.Status.Phase)
-			continue
-		}
-
-		pod := &corev1api.Pod{}
-		if err := client.Get(s.ctx, types.NamespacedName{
-			Namespace: pvr.Spec.Pod.Namespace,
-			Name:      pvr.Spec.Pod.Name,
-		}, pod); err != nil {
-			s.logger.WithError(errors.WithStack(err)).Errorf("failed to get pod \"%s/%s\" of podvolumerestore %q",
-				pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name, pvr.GetName())
-			continue
-		}
-		if pod.Spec.NodeName != s.nodeName {
-			s.logger.Debugf("the node of pod referenced by podvolumerestore %q is %q, not %q, skip", pvr.GetName(), pod.Spec.NodeName, s.nodeName)
-			continue
-		}
-
-		if err := controller.UpdatePVRStatusToFailed(s.ctx, client, &pvrs.Items[i], errors.New("cannot survive from node-agent restart"),
-			fmt.Sprintf("get a legacy podvolumerestore with status %q during the server starting, mark it as %q", velerov1api.PodVolumeRestorePhaseInProgress, velerov1api.PodVolumeRestorePhaseFailed),
-			time.Now(), s.logger); err != nil {
-			s.logger.WithError(errors.WithStack(err)).Errorf("failed to patch podvolumerestore %q", pvr.GetName())
-			continue
-		}
-		s.logger.WithField("podvolumerestore", pvr.GetName()).Warn(pvr.Status.Message)
-	}
 }
 
 var getConfigsFunc = nodeagent.GetConfigs

@@ -38,7 +38,7 @@ const (
 	ConfigmapRefType string = "configmap"
 	// skip action implies the volume would be skipped from the backup operation
 	Skip VolumeActionType = "skip"
-	// fs-backup action implies that the volume would be backed up via file system copy method using the uploader(kopia/restic) configured by the user
+	// fs-backup action implies that the volume would be backed up via file system copy method using the uploader(kopia) configured by the user
 	FSBackup VolumeActionType = "fs-backup"
 	// snapshot action can have 3 different meaning based on velero configuration and backup spec - cloud provider based snapshots, local csi snapshots and datamover snapshots
 	Snapshot VolumeActionType = "snapshot"

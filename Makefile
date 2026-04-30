@@ -211,6 +211,7 @@ shell: build-dirs build-env
 		-v "$$(pwd)/.go/std/$(GOOS)/$(GOARCH):/usr/local/go/pkg/$(GOOS)_$(GOARCH)_static:delegated" \
 		-v "$$(pwd)/.go/go-build:/.cache/go-build:delegated" \
 		-v "$$(pwd)/.go/golangci-lint:/.cache/golangci-lint:delegated" \
+        -v "$$(pwd)/.go/goimports:/.cache/goimports:delegated" \
 		-w /github.com/vmware-tanzu/velero \
 		$(BUILDER_IMAGE) \
 		/bin/sh $(CMD)
@@ -342,7 +343,7 @@ update-crd:
 
 build-dirs:
 	@mkdir -p _output/bin/$(GOOS)/$(GOARCH)
-	@mkdir -p .go/src/$(PKG) .go/pkg .go/bin .go/std/$(GOOS)/$(GOARCH) .go/go-build .go/golangci-lint
+	@mkdir -p .go/src/$(PKG) .go/pkg .go/bin .go/std/$(GOOS)/$(GOARCH) .go/go-build .go/golangci-lint .go/goimports
 
 build-env:
 	@# if we have overridden the value for the build-image Dockerfile,

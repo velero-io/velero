@@ -84,7 +84,7 @@ jobs:
                 else:
                     print(f'  # {original} — cannot auto-suggest rename (non-UTF-8)')
             print()
-            print('See https://github.com/vmware-tanzu/velero/pull/9552 for context.')
+            print('See https://github.com/velero-io/velero/pull/9552 for context.')
             sys.exit(1)
         else:
             print('All file paths are valid for Go module zip.')

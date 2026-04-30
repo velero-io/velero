@@ -35,7 +35,7 @@ func main() {
 	for {
 		<-ticker.C
 		if done() {
-			fmt.Println("All restic restores are done")
+			fmt.Println("All PodVolumeRestores are done")
 			err := removeFolder()
 			if err != nil {
 				fmt.Println(err)

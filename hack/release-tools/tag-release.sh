@@ -24,7 +24,7 @@
 
 # The following variables are needed:
 
-# - $VELERO_VERSION: defines the tag of Velero that any https://github.com/vmware-tanzu/velero/...
+# - $VELERO_VERSION: defines the tag of Velero that any https://github.com/velero-io/velero/...
 #   links in the docs should redirect to.
 # - $REMOTE: defines the remote that should be used when pushing tags and branches. Defaults to "upstream"
 # - $publish: TRUE/FALSE value where FALSE (or not including it) will indicate a dry-run, and TRUE, or simply adding 'publish',

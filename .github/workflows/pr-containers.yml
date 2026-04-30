@@ -32,6 +32,6 @@ jobs:
     # by push, so BRANCH and TAG are empty by default. docker-push.sh will
     # only build Velero image without pushing.
     - name: Make Velero container without pushing to registry.
-      if: github.repository == 'vmware-tanzu/velero'
+      if: github.repository == 'velero-io/velero'
       run: |
         ./hack/docker-push.sh
