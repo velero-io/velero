@@ -74,7 +74,7 @@ These instructions start the Velero server and a Minio instance that is accessib
     ```
     velero install \
         --provider aws \
-        --plugins velero/velero-plugin-for-aws:v1.2.1 \
+        --plugins velero/velero-plugin-for-aws:v1.13.2 \
         --bucket velero \
         --secret-file ./credentials-velero \
         --use-volume-snapshots=false \
