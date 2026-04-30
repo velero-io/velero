@@ -133,3 +133,7 @@ The deprecation window is the period from the release in which the deprecation t
 ## Updating Governance
 
 All substantive changes in Governance require a supermajority agreement by all maintainers.
+
+## AI Policy
+
+Please see the [AI Policy Document](AIPolicy.md)
