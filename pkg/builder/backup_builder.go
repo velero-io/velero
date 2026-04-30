@@ -87,9 +87,9 @@ func (b *BackupBuilder) FromSchedule(schedule *velerov1api.Schedule) *BackupBuil
 
 	// Check if there's explicit Labels defined in the Schedule object template
 	// and if present then copy it to the backup object.
-	if schedule.Spec.Template.Metadata.Labels != nil {
+	if schedule.Spec.Template.Labels != nil {
 		logger := logging.DefaultLogger(logging.LogLevelFlag(logrus.InfoLevel).Parse(), logging.NewFormatFlag().Parse())
-		labels = schedule.Spec.Template.Metadata.Labels
+		labels = schedule.Spec.Template.Labels
 		logger.WithFields(logrus.Fields{
 			"backup": fmt.Sprintf("%s/%s", b.object.GetNamespace(), b.object.GetName()),
 			"labels": schedule.Spec.Template.Metadata.Labels,

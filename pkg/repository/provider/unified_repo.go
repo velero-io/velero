@@ -483,7 +483,8 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 
 	region := config["region"]
 
-	if backendType == repoconfig.AWSBackend {
+	switch backendType {
+	case repoconfig.AWSBackend:
 		s3URL := config["s3Url"]
 		disableTLS := false
 
@@ -519,7 +520,7 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 		if backupLocation.Spec.ObjectStorage != nil && backupLocation.Spec.ObjectStorage.CACert != nil {
 			result[udmrepo.StoreOptionS3CustomCA] = base64.StdEncoding.EncodeToString(backupLocation.Spec.ObjectStorage.CACert)
 		}
-	} else if backendType == repoconfig.AzureBackend {
+	case repoconfig.AzureBackend:
 		domain, err := getAzureStorageDomain(config)
 		if err != nil {
 			return map[string]string{}, errors.Wrapf(err, "error to get azure storage domain")

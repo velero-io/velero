@@ -17,8 +17,9 @@ limitations under the License.
 package framework
 
 import (
+	"context"
+
 	plugin "github.com/hashicorp/go-plugin"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"

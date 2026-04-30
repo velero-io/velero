@@ -42,5 +42,5 @@ fi
 # but the user and group don't exist inside the container, when the code(https://github.com/kubernetes-sigs/controller-runtime/blob/v0.10.2/pkg/internal/testing/addr/manager.go#L44)
 # tries to get the cache directory, it gets the directory "/" and then get the permission error when trying to create directory under "/".
 # Specifying the cache directory by environment variable "XDG_CACHE_HOME" to workaround it
-XDG_CACHE_HOME=/tmp/ go test -installsuffix "static" -short -timeout 1200s -coverprofile=coverage.out "${TARGETS[@]}"
+XDG_CACHE_HOME=/tmp/ go test -installsuffix "static" -short -timeout 1200s "${TARGETS[@]}"
 echo "Success!"

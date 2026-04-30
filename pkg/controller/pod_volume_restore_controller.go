@@ -80,7 +80,7 @@ type PodVolumeRestoreReconciler struct {
 // +kubebuilder:rbac:groups="",resources=persistentvolumerclaims,verbs=get
 
 func (c *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := c.logger.WithField("PodVolumeRestore", req.NamespacedName.String())
+	log := c.logger.WithField("PodVolumeRestore", req.String())
 
 	pvr := &velerov1api.PodVolumeRestore{}
 	if err := c.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: req.Name}, pvr); err != nil {
@@ -266,7 +266,7 @@ func (c *PodVolumeRestoreReconciler) OnDataPathCompleted(ctx context.Context, na
 	log.WithField("PVR", pvrName).Info("Async fs restore data path completed")
 
 	var pvr velerov1api.PodVolumeRestore
-	if err := c.Client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); err != nil {
 		log.WithError(err).Warn("Failed to get PVR on completion")
 		return
 	}
@@ -326,7 +326,7 @@ func (c *PodVolumeRestoreReconciler) OnDataPathFailed(ctx context.Context, names
 	log.WithError(err).Error("Async fs restore data path failed")
 
 	var pvr velerov1api.PodVolumeRestore
-	if getErr := c.Client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); getErr != nil {
+	if getErr := c.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); getErr != nil {
 		log.WithError(getErr).Warn("Failed to get PVR on failure")
 	} else {
 		_, _ = c.errorOut(ctx, &pvr, err, "data path restore failed", log)
@@ -341,7 +341,7 @@ func (c *PodVolumeRestoreReconciler) OnDataPathCancelled(ctx context.Context, na
 	log.Warn("Async fs restore data path canceled")
 
 	var pvr velerov1api.PodVolumeRestore
-	if getErr := c.Client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); getErr != nil {
+	if getErr := c.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); getErr != nil {
 		log.WithError(getErr).Warn("Failed to get PVR on cancel")
 	} else {
 		_, _ = c.errorOut(ctx, &pvr, errors.New("PVR is canceled"), "data path restore canceled", log)
@@ -352,7 +352,7 @@ func (c *PodVolumeRestoreReconciler) OnDataPathProgress(ctx context.Context, nam
 	log := c.logger.WithField("pvr", pvrName)
 
 	var pvr velerov1api.PodVolumeRestore
-	if err := c.Client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, &pvr); err != nil {
 		log.WithError(err).Warn("Failed to get PVB on progress")
 		return
 	}
@@ -360,7 +360,7 @@ func (c *PodVolumeRestoreReconciler) OnDataPathProgress(ctx context.Context, nam
 	original := pvr.DeepCopy()
 	pvr.Status.Progress = veleroapishared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
 
-	if err := c.Client.Patch(ctx, &pvr, client.MergeFrom(original)); err != nil {
+	if err := c.Patch(ctx, &pvr, client.MergeFrom(original)); err != nil {
 		log.WithError(err).Error("Failed to update progress")
 	}
 }

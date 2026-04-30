@@ -19,8 +19,9 @@ package v2
 import (
 	"encoding/json"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 

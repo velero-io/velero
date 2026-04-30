@@ -1,6 +1,6 @@
 # Warning: Verify this inside a container with the following command:
-# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.23 bash -c "make -f Makefile.prow ci"
-# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.23 bash -c "make -f Makefile.prow lint"
+# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.25 bash -c "make -f Makefile.prow ci"
+# podman run -it --rm -v `pwd`:`pwd`:Z -w `pwd` quay.io/konveyor/builder:ubi9-v1.25 bash -c "make -f Makefile.prow lint"
 #
 # Otherwise, unintended system changes may occur, including replacing your
 # currently installed binaries in GOBIN, files in GOPATH/src
@@ -10,7 +10,7 @@
 
 # Configuration Variables
 GOFLAGS := -mod=mod
-CONGEN_VERSION := 0.14.0
+CONGEN_VERSION := 0.17.0
 CODEGEN_VERSION := 0.22.2
 PROWBIN := /tmp/prowbin
 
@@ -92,7 +92,7 @@ $(GOBIN)/golangci-lint:
 
 $(GOBIN)/setup-envtest:
 	@echo "Installing envtest tools"
-	go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20230216140739-c98506dc3b8e
+	go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260405152528-6210f847b2c1
 
 $(GOBIN)/protoc:
 	@echo "Installing protoc and plugins"

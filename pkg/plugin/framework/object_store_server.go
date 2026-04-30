@@ -20,8 +20,9 @@ import (
 	"io"
 	"time"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"

@@ -55,8 +55,8 @@ func (a *JobAction) Execute(input *velero.RestoreItemActionExecuteInput) (*veler
 		delete(job.Spec.Selector.MatchLabels, controllerUIDLabel)
 		delete(job.Spec.Selector.MatchLabels, legacyControllerUIDLabel)
 	}
-	delete(job.Spec.Template.ObjectMeta.Labels, controllerUIDLabel)
-	delete(job.Spec.Template.ObjectMeta.Labels, legacyControllerUIDLabel)
+	delete(job.Spec.Template.Labels, controllerUIDLabel)
+	delete(job.Spec.Template.Labels, legacyControllerUIDLabel)
 
 	res, err := runtime.DefaultUnstructuredConverter.ToUnstructured(job)
 	if err != nil {

@@ -235,7 +235,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 		)
 	}
 
-	log.Infof("Backing up all volumes using pod volume backup: %t", boolptr.IsSetToTrue(backupRequest.Backup.Spec.DefaultVolumesToFsBackup))
+	log.Infof("Backing up all volumes using pod volume backup: %t", boolptr.IsSetToTrue(backupRequest.Spec.DefaultVolumesToFsBackup))
 
 	var err error
 	backupRequest.ResourceHooks, err = getResourceHooks(backupRequest.Spec.Hooks.Resources, kb.discoveryHelper)
@@ -295,7 +295,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 	items := collector.getAllItems()
 	log.WithField("progress", "").Infof("Collected %d items matching the backup spec from the Kubernetes API (actual number of items backed up may be more or less depending on velero.io/exclude-from-backup annotation, plugins returning additional related items to back up, etc.)", len(items))
 
-	updated := backupRequest.Backup.DeepCopy()
+	updated := backupRequest.DeepCopy()
 	if updated.Status.Progress == nil {
 		updated.Status.Progress = &velerov1api.BackupProgress{}
 	}
@@ -353,7 +353,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 				lastUpdate = &val
 			case <-ticker.C:
 				if lastUpdate != nil {
-					updated := backupRequest.Backup.DeepCopy()
+					updated := backupRequest.DeepCopy()
 					if updated.Status.Progress == nil {
 						updated.Status.Progress = &velerov1api.BackupProgress{}
 					}
@@ -436,7 +436,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 
 	// do a final update on progress since we may have just added some CRDs and may not have updated
 	// for the last few processed items.
-	updated = backupRequest.Backup.DeepCopy()
+	updated = backupRequest.DeepCopy()
 	if updated.Status.Progress == nil {
 		updated.Status.Progress = &velerov1api.BackupProgress{}
 	}

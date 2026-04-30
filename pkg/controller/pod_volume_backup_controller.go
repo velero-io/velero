@@ -87,7 +87,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	})
 
 	var pvb velerov1api.PodVolumeBackup
-	if err := r.Client.Get(ctx, req.NamespacedName, &pvb); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, &pvb); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Debug("Unable to find PodVolumeBackup")
 			return ctrl.Result{}, nil
@@ -138,7 +138,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	original := pvb.DeepCopy()
 	pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseInProgress
 	pvb.Status.StartTimestamp = &metav1.Time{Time: r.clock.Now()}
-	if err := r.Client.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
+	if err := r.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
 		return r.errorOut(ctx, &pvb, err, "error updating PodVolumeBackup status", log)
 	}
 
@@ -147,7 +147,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		Namespace: pvb.Spec.Pod.Namespace,
 		Name:      pvb.Spec.Pod.Name,
 	}
-	if err := r.Client.Get(ctx, podNamespacedName, &pod); err != nil {
+	if err := r.Get(ctx, podNamespacedName, &pod); err != nil {
 		return r.errorOut(ctx, &pvb, err, fmt.Sprintf("getting pod %s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name), log)
 	}
 
@@ -195,7 +195,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathCompleted(ctx context.Context, nam
 	log.WithField("PVB", pvbName).Info("Async fs backup data path completed")
 
 	var pvb velerov1api.PodVolumeBackup
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); err != nil {
 		log.WithError(err).Warn("Failed to get PVB on completion")
 		return
 	}
@@ -210,11 +210,11 @@ func (r *PodVolumeBackupReconciler) OnDataPathCompleted(ctx context.Context, nam
 		pvb.Status.Message = "volume was empty so no snapshot was taken"
 	}
 
-	if err := r.Client.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
+	if err := r.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
 		log.WithError(err).Error("error updating PodVolumeBackup status")
 	}
 
-	latencyDuration := pvb.Status.CompletionTimestamp.Time.Sub(pvb.Status.StartTimestamp.Time)
+	latencyDuration := pvb.Status.CompletionTimestamp.Sub(pvb.Status.StartTimestamp.Time)
 	latencySeconds := float64(latencyDuration / time.Second)
 	backupName := fmt.Sprintf("%s/%s", pvb.Namespace, pvb.OwnerReferences[0].Name)
 	generateOpName := fmt.Sprintf("%s-%s-%s-%s-backup", pvb.Name, pvb.Spec.BackupStorageLocation, pvb.Spec.Pod.Namespace, pvb.Spec.UploaderType)
@@ -233,7 +233,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathFailed(ctx context.Context, namesp
 	log.WithError(err).Error("Async fs backup data path failed")
 
 	var pvb velerov1api.PodVolumeBackup
-	if getErr := r.Client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); getErr != nil {
+	if getErr := r.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); getErr != nil {
 		log.WithError(getErr).Warn("Failed to get PVB on failure")
 	} else {
 		_, _ = r.errorOut(ctx, &pvb, err, "data path backup failed", log)
@@ -248,7 +248,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathCancelled(ctx context.Context, nam
 	log.Warn("Async fs backup data path canceled")
 
 	var pvb velerov1api.PodVolumeBackup
-	if getErr := r.Client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); getErr != nil {
+	if getErr := r.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); getErr != nil {
 		log.WithError(getErr).Warn("Failed to get PVB on cancel")
 	} else {
 		_, _ = r.errorOut(ctx, &pvb, errors.New("PVB is canceled"), "data path backup canceled", log)
@@ -259,7 +259,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathProgress(ctx context.Context, name
 	log := r.logger.WithField("pvb", pvbName)
 
 	var pvb velerov1api.PodVolumeBackup
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, &pvb); err != nil {
 		log.WithError(err).Warn("Failed to get PVB on progress")
 		return
 	}
@@ -267,7 +267,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathProgress(ctx context.Context, name
 	original := pvb.DeepCopy()
 	pvb.Status.Progress = veleroapishared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
 
-	if err := r.Client.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
+	if err := r.Patch(ctx, &pvb, client.MergeFrom(original)); err != nil {
 		log.WithError(err).Error("Failed to update progress")
 	}
 }
@@ -293,7 +293,7 @@ func (r *PodVolumeBackupReconciler) getParentSnapshot(ctx context.Context, log l
 	matchingLabels.ApplyToList(listOpts)
 
 	var pvbList velerov1api.PodVolumeBackupList
-	if err := r.Client.List(ctx, &pvbList, listOpts); err != nil {
+	if err := r.List(ctx, &pvbList, listOpts); err != nil {
 		log.WithError(errors.WithStack(err)).Error("getting list of podvolumebackups for this PVC")
 	}
 

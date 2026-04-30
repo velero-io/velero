@@ -137,11 +137,12 @@ func crdsAreReady(kbClient kbclient.Client, crds []*unstructured.Unstructured) (
 	gvk := crds[0].GroupVersionKind()
 
 	var crdReadinessFn func() (bool, error)
-	if gvk.Version == "v1beta1" {
+	switch gvk.Version {
+	case "v1beta1":
 		crdReadinessFn = crdV1Beta1ReadinessFn(kbClient, crds)
-	} else if gvk.Version == "v1" {
+	case "v1":
 		crdReadinessFn = crdV1ReadinessFn(kbClient, crds)
-	} else {
+	default:
 		return false, fmt.Errorf("unsupported CRD version %q", gvk.Version)
 	}
 

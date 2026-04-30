@@ -625,7 +625,7 @@ func (s *server) getCSIVolumeSnapshotListers() (vsLister snapshotv1listers.Volum
 		for informer, synced := range csiCacheSyncResults {
 			if !synced {
 				err = errors.Errorf("cache was not synced for informer %v", informer)
-				return
+				return vsLister, err
 			}
 			s.logger.WithField("informer", informer).Info("Informer cache synced")
 		}

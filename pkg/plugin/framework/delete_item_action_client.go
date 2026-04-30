@@ -19,8 +19,9 @@ package framework
 import (
 	"encoding/json"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"

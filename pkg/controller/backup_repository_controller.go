@@ -113,8 +113,8 @@ func (r *BackupRepoReconciler) needInvalidBackupRepo(oldObj client.Object, newOb
 	oldBSL := oldObj.(*velerov1api.BackupStorageLocation)
 	newBSL := newObj.(*velerov1api.BackupStorageLocation)
 
-	oldStorage := oldBSL.Spec.StorageType.ObjectStorage
-	newStorage := newBSL.Spec.StorageType.ObjectStorage
+	oldStorage := oldBSL.Spec.ObjectStorage
+	newStorage := newBSL.Spec.ObjectStorage
 	oldConfig := oldBSL.Spec.Config
 	newConfig := newBSL.Spec.Config
 
