@@ -1,0 +1,1 @@
+Skip DeleteSnapshot call when ProviderSnapshotID is empty to avoid unnecessary API calls

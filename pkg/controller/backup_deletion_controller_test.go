@@ -811,6 +811,91 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		assert.Len(t, res.Status.Errors, 1)
 		assert.Equal(t, "backup not found", res.Status.Errors[0])
 	})
+
+	t.Run("snapshot with empty ProviderSnapshotID is skipped during deletion", func(t *testing.T) {
+		input := defaultTestDbr()
+		input.Labels = nil
+
+		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").Result()
+		backup.UID = "uid"
+		backup.Spec.StorageLocation = "primary"
+
+		location := &velerov1api.BackupStorageLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      backup.Spec.StorageLocation,
+			},
+			Spec: velerov1api.BackupStorageLocationSpec{
+				Provider: "objStoreProvider",
+				StorageType: velerov1api.StorageType{
+					ObjectStorage: &velerov1api.ObjectStorageLocation{
+						Bucket: "bucket",
+					},
+				},
+			},
+			Status: velerov1api.BackupStorageLocationStatus{
+				Phase: velerov1api.BackupStorageLocationPhaseAvailable,
+			},
+		}
+
+		snapshotLocation := &velerov1api.VolumeSnapshotLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      "vsl-1",
+			},
+			Spec: velerov1api.VolumeSnapshotLocationSpec{
+				Provider: "provider-1",
+			},
+		}
+		td := setupBackupDeletionControllerTest(t, input, backup, location, snapshotLocation)
+
+		// Create snapshots with one having empty ProviderSnapshotID (failed snapshot)
+		// and one with valid ProviderSnapshotID
+		td.volumeSnapshotter.SnapshotsTaken.Insert("snap-1")
+
+		snapshots := []*volume.Snapshot{
+			{
+				Spec: volume.SnapshotSpec{
+					Location: "vsl-1",
+				},
+				Status: volume.SnapshotStatus{
+					ProviderSnapshotID: "", // Empty snapshot ID (failed creation)
+				},
+			},
+			{
+				Spec: volume.SnapshotSpec{
+					Location: "vsl-1",
+				},
+				Status: volume.SnapshotStatus{
+					ProviderSnapshotID: "snap-1", // Valid snapshot ID
+				},
+			},
+		}
+
+		pluginManager := &pluginmocks.Manager{}
+		pluginManager.On("GetVolumeSnapshotter", "provider-1").Return(td.volumeSnapshotter, nil)
+		pluginManager.On("GetDeleteItemActions").Return(nil, nil)
+		pluginManager.On("CleanupClients")
+		td.controller.newPluginManager = func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager }
+
+		td.backupStore.On("GetBackupVolumeSnapshots", input.Spec.BackupName).Return(snapshots, nil)
+		td.backupStore.On("GetBackupContents", input.Spec.BackupName).Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+		td.backupStore.On("DeleteBackup", input.Spec.BackupName).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		// the dbr should be deleted
+		res := &velerov1api.DeleteBackupRequest{}
+		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
+		assert.True(t, apierrors.IsNotFound(err), "Expected not found error, but actual value of error: %v", err)
+
+		td.backupStore.AssertCalled(t, "DeleteBackup", input.Spec.BackupName)
+
+		// Only the valid snapshot should have been deleted (snap-1)
+		// The empty ProviderSnapshotID snapshot should have been skipped
+		assert.Equal(t, 0, td.volumeSnapshotter.SnapshotsTaken.Len())
+	})
 }
 
 func TestGetSnapshotsInBackup(t *testing.T) {
