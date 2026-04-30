@@ -77,7 +77,13 @@ func NewLogsCommand(f client.Factory) *cobra.Command {
 				bslCACert = ""
 			}
 
-			err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), restoreName, velerov1api.DownloadTargetKindRestoreLog, os.Stdout, timeout, insecureSkipTLSVerify, caCertFile, bslCACert)
+			// Inherit insecureSkipTLSVerify from BSL config if not set via CLI flag
+			bslInsecure, err := cacert.GetInsecureSkipTLSVerifyFromRestore(context.Background(), kbClient, f.Namespace(), restore)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: Error getting insecureSkipTLSVerify from BSL: %v\n", err)
+			}
+
+			err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), restoreName, velerov1api.DownloadTargetKindRestoreLog, os.Stdout, timeout, insecureSkipTLSVerify || bslInsecure, caCertFile, bslCACert)
 			cmd.CheckError(err)
 		},
 	}
