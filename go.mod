@@ -19,6 +19,7 @@ require (
 	github.com/bombsimon/logrusr/v3 v3.0.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/fatih/color v1.18.0
+	github.com/gertd/go-pluralize v0.2.1
 	github.com/gobwas/glob v0.2.3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0

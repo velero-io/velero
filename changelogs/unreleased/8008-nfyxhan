@@ -1,0 +1,1 @@
+fix: Resource status restore doesn't work for resources without status subresource (#7993)
