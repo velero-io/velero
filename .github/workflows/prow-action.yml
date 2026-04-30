@@ -9,7 +9,7 @@ jobs:
   execute:
     runs-on: ubuntu-latest
     steps:
-      - uses: jpmcb/prow-github-actions@v1.1.3
+      - uses: jpmcb/prow-github-actions@v2.0.0
         with:
           # TODO: before allowing the /lgtm command, see if we can block merging if changelog labels are missing.
           prow-commands: |
