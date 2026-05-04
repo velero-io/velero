@@ -288,6 +288,12 @@ func (b *BackupBuilder) CSISnapshotTimeout(timeout time.Duration) *BackupBuilder
 	return b
 }
 
+// CSISnapshotErrorTimeout sets the Backup's CSISnapshotErrorTimeout
+func (b *BackupBuilder) CSISnapshotErrorTimeout(timeout time.Duration) *BackupBuilder {
+	b.object.Spec.CSISnapshotErrorTimeout.Duration = timeout
+	return b
+}
+
 // ItemOperationTimeout sets the Backup's ItemOperationTimeout
 func (b *BackupBuilder) ItemOperationTimeout(timeout time.Duration) *BackupBuilder {
 	b.object.Spec.ItemOperationTimeout.Duration = timeout

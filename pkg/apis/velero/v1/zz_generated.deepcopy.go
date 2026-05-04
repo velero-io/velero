@@ -406,6 +406,7 @@ func (in *BackupSpec) DeepCopyInto(out *BackupSpec) {
 		}
 	}
 	out.CSISnapshotTimeout = in.CSISnapshotTimeout
+	out.CSISnapshotErrorTimeout = in.CSISnapshotErrorTimeout
 	out.ItemOperationTimeout = in.ItemOperationTimeout
 	if in.ResourcePolicy != nil {
 		in, out := &in.ResourcePolicy, &out.ResourcePolicy

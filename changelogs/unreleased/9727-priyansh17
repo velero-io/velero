@@ -1,0 +1,2 @@
+Introduce CSISnapshotErrorTimeout to fail backups early when a CSI VolumeSnapshot or VolumeSnapshotContent has a persistent error, instead of waiting for the full ItemOperationTimeout. 
+The new timeout also bounds error tolerance in the data-mover snapshot wait path.

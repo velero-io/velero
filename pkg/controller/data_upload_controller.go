@@ -1004,6 +1004,7 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 			AccessMode:            accessMode,
 			OperationTimeout:      du.Spec.OperationTimeout.Duration,
 			ExposeTimeout:         r.preparingTimeout,
+			SnapshotErrorTimeout:  du.Spec.SnapshotErrorTimeout.Duration,
 			VolumeSize:            pvc.Spec.Resources.Requests[corev1api.ResourceStorage],
 			Affinity:              r.loadAffinity,
 			BackupPVCConfig:       r.backupPVCConfig,

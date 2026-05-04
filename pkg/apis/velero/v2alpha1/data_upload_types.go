@@ -60,6 +60,12 @@ type DataUploadSpec struct {
 	// OperationTimeout specifies the time used to wait internal operations,
 	// before returning error as timeout.
 	OperationTimeout metav1.Duration `json:"operationTimeout"`
+
+	// SnapshotErrorTimeout specifies how long to tolerate persistent errors reported
+	// in the source CSI VolumeSnapshot status before failing the data upload, instead
+	// of waiting the full OperationTimeout. A zero value disables the early failure.
+	// +optional
+	SnapshotErrorTimeout metav1.Duration `json:"snapshotErrorTimeout,omitempty"`
 }
 
 type SnapshotType string
