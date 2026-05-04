@@ -483,6 +483,8 @@ func getStorageType(backupLocation *velerov1api.BackupStorageLocation) string {
 		return udmrepo.StorageTypeGcs
 	case repoconfig.FSBackend:
 		return udmrepo.StorageTypeFs
+	case repoconfig.SFTPBackend:
+		return udmrepo.StorageTypeSftp
 	default:
 		return ""
 	}
@@ -532,6 +534,10 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 		}
 	case repoconfig.GCPBackend:
 		result[udmrepo.StoreOptionCredentialFile] = getGCPCredentials(config)
+	case repoconfig.SFTPBackend:
+		if backupLocation.Spec.Credential != nil {
+			result[repoconfig.CredentialsFileKey] = config[repoconfig.CredentialsFileKey]
+		}
 	}
 
 	return result, nil
@@ -625,6 +631,18 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 	}
 	result[udmrepo.StoreOptionOssRegion] = strings.Trim(region, "/")
 	result[udmrepo.StoreOptionFsPath] = config["fspath"]
+
+	// SFTP backend variables
+	if backendType == repoconfig.SFTPBackend {
+		result[udmrepo.StoreOptionSFTPHost] = config["sftpHost"]
+		result[udmrepo.StoreOptionSFTPPort] = config["sftpPort"]
+		result[udmrepo.StoreOptionSFTPPath] = config["sftpPath"]
+		result[udmrepo.StoreOptionSFTPUsername] = config["sftpUsername"]
+		result[udmrepo.StoreOptionSFTPKeyPath] = config["sftpKeyPath"]
+		result[udmrepo.StoreOptionSFTPKeyData] = config["sftpKeyData"]
+		result[udmrepo.StoreOptionSFTPPassword] = config["sftpPassword"]
+		result[udmrepo.StoreOptionSFTPKnownHostsData] = config["sftpKnownHostsData"]
+	}
 
 	// We remove the unnecessary parameters and keep the modules/logics below safe
 	if backupRepoConfig != nil {

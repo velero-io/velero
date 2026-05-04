@@ -29,6 +29,7 @@ const (
 	StorageTypeAzure = "azure"
 	StorageTypeFs    = "filesystem"
 	StorageTypeGcs   = "gcs"
+	StorageTypeSftp  = "sftp"
 
 	GenOptionMaintainMode  = "mode"
 	GenOptionMaintainFull  = "full"
@@ -46,6 +47,15 @@ const (
 	StoreOptionS3DisableTLSVerify = "skipTLSVerify"
 
 	StoreOptionFsPath = "fspath"
+
+	StoreOptionSFTPHost           = "sftpHost"
+	StoreOptionSFTPPort           = "sftpPort"
+	StoreOptionSFTPPath           = "sftpPath"
+	StoreOptionSFTPUsername       = "sftpUsername"
+	StoreOptionSFTPKeyPath        = "sftpKeyPath"
+	StoreOptionSFTPKeyData        = "sftpKeyData"
+	StoreOptionSFTPPassword       = "sftpPassword"
+	StoreOptionSFTPKnownHostsData = "sftpKnownHostsData"
 
 	StoreOptionGcsReadonly = "readonly"
 

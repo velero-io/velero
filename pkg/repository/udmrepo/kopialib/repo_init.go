@@ -49,6 +49,7 @@ var backendStores = []kopiaBackendStore{
 	{udmrepo.StorageTypeFs, "a filesystem", &backend.FsBackend{}},
 	{udmrepo.StorageTypeGcs, "a Google Cloud Storage bucket", &backend.GCSBackend{}},
 	{udmrepo.StorageTypeS3, "an S3 bucket", &backend.S3Backend{}},
+	{udmrepo.StorageTypeSftp, "an SFTP server", &backend.SFTPBackend{}},
 }
 
 const udmRepoBlobID = "udmrepo.Repository"
