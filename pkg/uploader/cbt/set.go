@@ -19,31 +19,43 @@ package cbt
 import (
 	"context"
 
+	"github.com/pkg/errors"
+
 	"github.com/vmware-tanzu/velero/pkg/cbtservice"
+	"github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
 )
 
 // SetBitmapOrFull translates the allocated/changed blocks from CBT service to the given bitmap or set the bitmap to full when error happens
-func SetBitmapOrFull(ctx context.Context, service cbtservice.Service, bitmap Bitmap) error {
-	var err error
+func SetBitmapOrFull(ctx context.Context, service cbtservice.Service, bitmap types.Bitmap) (err error) {
+	defer func() {
+		if err != nil {
+			bitmap.SetFull()
+		}
+	}()
+
+	if service == nil {
+		return errors.New("CBT service is absent")
+	}
+
+	if bitmap.Snapshot() == "" {
+		return errors.New("invalid snapshot")
+	}
+
 	if bitmap.ChangeID() == "" {
-		err = setFromAllocatedBlocks(ctx, service, bitmap)
-	} else {
-		err = setFromChangedBlocks(ctx, service, bitmap)
+		return errors.Wrapf(service.GetAllocatedBlocks(ctx, bitmap.Snapshot(), func(blocks []cbtservice.Range) error {
+			for _, b := range blocks {
+				bitmap.Set(b.Offset, b.Length)
+			}
+
+			return nil
+		}), "error getting allocated blocks from CBT service")
 	}
 
-	if err != nil {
-		bitmap.SetFull()
-	}
+	return errors.Wrapf(service.GetChangedBlocks(ctx, bitmap.Snapshot(), bitmap.ChangeID(), func(blocks []cbtservice.Range) error {
+		for _, b := range blocks {
+			bitmap.Set(b.Offset, b.Length)
+		}
 
-	return err
-}
-
-// TODO implement in following PRs
-func setFromAllocatedBlocks(_ context.Context, _ cbtservice.Service, _ Bitmap) error {
-	return nil
-}
-
-// TODO implement in following PRs
-func setFromChangedBlocks(_ context.Context, _ cbtservice.Service, _ Bitmap) error {
-	return nil
+		return nil
+	}), "error getting changed blocks from CBT service")
 }
