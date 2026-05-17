@@ -42,7 +42,6 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	pluginmocks "github.com/vmware-tanzu/velero/pkg/plugin/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
@@ -228,7 +227,7 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 			backupStore.On("GetBackupVolumeInfos", mock.Anything).Return(nil, nil)
 			backupStore.On("PutBackupVolumeInfos", mock.Anything, mock.Anything).Return(nil)
 			pluginManager.On("GetBackupItemActionsV2").Return(nil, nil)
-			backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, framework.BackupItemActionResolverV2{}, mock.Anything, mock.Anything).Return(nil)
+			backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}})
 			gotErr := err != nil
 			assert.Equal(t, test.expectError, gotErr)
@@ -295,7 +294,7 @@ func TestBackupFinalizerReconcile_PutBackupMetadataFail(t *testing.T) {
 
 			localPluginManager.On("CleanupClients").Return(nil)
 			localBackupStore.On("GetBackupItemOperations", backup.Name).Return(nil, nil)
-			// PutBackupMetadata fails
+			// PutBackupMetadata fails — retry exhausts after DefaultBackoff (5 retries)
 			localBackupStore.On("PutBackupMetadata", mock.Anything, mock.Anything).Return(fmt.Errorf("object lock prevented upload"))
 			localBackupStore.On("GetBackupVolumeInfos", mock.Anything).Return(nil, nil)
 			localBackupStore.On("PutBackupVolumeInfos", mock.Anything, mock.Anything).Return(nil)
@@ -318,78 +317,96 @@ func TestBackupFinalizerReconcile_PutBackupMetadataFail(t *testing.T) {
 }
 
 func TestBackupFinalizerReconcile_PutBackupContentsFail(t *testing.T) {
-	fakeClock := testclocks.NewFakeClock(time.Now())
-	metav1Now := metav1.NewTime(fakeClock.Now())
-	defaultBackupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Result()
-
-	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-contents-fail").
-		StorageLocation("default").
-		ObjectMeta(builder.WithUID("foo")).
-		StartTimestamp(fakeClock.Now()).
-		Phase(velerov1api.BackupPhaseFinalizing).Result()
-
-	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, backup, defaultBackupLocation)
-	fakeGlobalClient := velerotest.NewFakeControllerRuntimeClient(t, backup, defaultBackupLocation)
-
-	localPluginManager := &pluginmocks.Manager{}
-	localBackupStore := &persistencemocks.BackupStore{}
-
-	backupper := new(fakeBackupper)
-	reconciler := NewBackupFinalizerReconciler(
-		fakeClient,
-		fakeGlobalClient,
-		fakeClock,
-		backupper,
-		func(logrus.FieldLogger) clientmgmt.Manager { return localPluginManager },
-		NewBackupTracker(),
-		NewFakeSingleObjectBackupStoreGetter(localBackupStore),
-		logrus.StandardLogger(),
-		metrics.NewServerMetrics(),
-		10*time.Minute,
-	)
-
-	operations := []*itemoperation.BackupOperation{
+	tests := []struct {
+		name         string
+		initialPhase velerov1api.BackupPhase
+	}{
 		{
-			Spec: itemoperation.BackupOperationSpec{
-				BackupName:       "backup-contents-fail",
-				BackupUID:        "foo",
-				BackupItemAction: "foo",
-				ResourceIdentifier: velero.ResourceIdentifier{
-					GroupResource: kuberesource.Pods,
-					Namespace:     "ns-1",
-					Name:          "pod-1",
-				},
-				OperationID: "operation-1",
-			},
-			Status: itemoperation.OperationStatus{
-				Phase:   itemoperation.OperationPhaseCompleted,
-				Created: &metav1Now,
-			},
+			name:         "Finalizing backup stays Finalizing when PutBackupContents fails",
+			initialPhase: velerov1api.BackupPhaseFinalizing,
+		},
+		{
+			name:         "FinalizingPartiallyFailed backup stays FinalizingPartiallyFailed when PutBackupContents fails",
+			initialPhase: velerov1api.BackupPhaseFinalizingPartiallyFailed,
 		},
 	}
 
-	localPluginManager.On("CleanupClients").Return(nil)
-	localPluginManager.On("GetBackupItemActionsV2").Return(nil, nil)
-	localBackupStore.On("GetBackupItemOperations", backup.Name).Return(operations, nil)
-	localBackupStore.On("GetBackupContents", mock.Anything).Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
-	localBackupStore.On("PutBackupMetadata", mock.Anything, mock.Anything).Return(nil)
-	// PutBackupContents fails
-	localBackupStore.On("PutBackupContents", mock.Anything, mock.Anything).Return(fmt.Errorf("object lock prevented upload"))
-	localBackupStore.On("GetBackupVolumeInfos", mock.Anything).Return(nil, nil)
-	localBackupStore.On("PutBackupVolumeInfos", mock.Anything, mock.Anything).Return(nil)
-	backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, framework.BackupItemActionResolverV2{}, mock.Anything, mock.Anything).Return(nil)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeClock := testclocks.NewFakeClock(time.Now())
+			metav1Now := metav1.NewTime(fakeClock.Now())
+			defaultBackupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Result()
 
-	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
-	require.Error(t, err, "reconcile should return error when PutBackupContents fails")
+			backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-contents-fail").
+				StorageLocation("default").
+				ObjectMeta(builder.WithUID("foo")).
+				StartTimestamp(fakeClock.Now()).
+				Phase(test.initialPhase).Result()
 
-	backupAfter := velerov1api.Backup{}
-	err = fakeClient.Get(t.Context(), types.NamespacedName{
-		Namespace: backup.Namespace,
-		Name:      backup.Name,
-	}, &backupAfter)
-	require.NoError(t, err)
-	assert.Equal(t, velerov1api.BackupPhaseFinalizing, backupAfter.Status.Phase,
-		"backup phase should remain Finalizing when PutBackupContents fails")
-	assert.Nil(t, backupAfter.Status.CompletionTimestamp,
-		"CompletionTimestamp should not be set when PutBackupContents fails")
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, backup, defaultBackupLocation)
+			fakeGlobalClient := velerotest.NewFakeControllerRuntimeClient(t, backup, defaultBackupLocation)
+
+			localPluginManager := &pluginmocks.Manager{}
+			localBackupStore := &persistencemocks.BackupStore{}
+
+			backupper := new(fakeBackupper)
+			reconciler := NewBackupFinalizerReconciler(
+				fakeClient,
+				fakeGlobalClient,
+				fakeClock,
+				backupper,
+				func(logrus.FieldLogger) clientmgmt.Manager { return localPluginManager },
+				NewBackupTracker(),
+				NewFakeSingleObjectBackupStoreGetter(localBackupStore),
+				logrus.StandardLogger(),
+				metrics.NewServerMetrics(),
+				10*time.Minute,
+			)
+
+			operations := []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						BackupName:       "backup-contents-fail",
+						BackupUID:        "foo",
+						BackupItemAction: "foo",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.Pods,
+							Namespace:     "ns-1",
+							Name:          "pod-1",
+						},
+						OperationID: "operation-1",
+					},
+					Status: itemoperation.OperationStatus{
+						Phase:   itemoperation.OperationPhaseCompleted,
+						Created: &metav1Now,
+					},
+				},
+			}
+
+			localPluginManager.On("CleanupClients").Return(nil)
+			localPluginManager.On("GetBackupItemActionsV2").Return(nil, nil)
+			localBackupStore.On("GetBackupItemOperations", backup.Name).Return(operations, nil)
+			localBackupStore.On("GetBackupContents", mock.Anything).Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+			localBackupStore.On("PutBackupMetadata", mock.Anything, mock.Anything).Return(nil)
+			// PutBackupContents fails
+			localBackupStore.On("PutBackupContents", mock.Anything, mock.Anything).Return(fmt.Errorf("object lock prevented upload"))
+			localBackupStore.On("GetBackupVolumeInfos", mock.Anything).Return(nil, nil)
+			localBackupStore.On("PutBackupVolumeInfos", mock.Anything, mock.Anything).Return(nil)
+			backupper.On("FinalizeBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
+			require.Error(t, err, "reconcile should return error when PutBackupContents fails")
+
+			backupAfter := velerov1api.Backup{}
+			err = fakeClient.Get(t.Context(), types.NamespacedName{
+				Namespace: backup.Namespace,
+				Name:      backup.Name,
+			}, &backupAfter)
+			require.NoError(t, err)
+			assert.Equal(t, test.initialPhase, backupAfter.Status.Phase,
+				"backup phase should remain %s when PutBackupContents fails", test.initialPhase)
+			assert.Nil(t, backupAfter.Status.CompletionTimestamp,
+				"CompletionTimestamp should not be set when PutBackupContents fails")
+		})
+	}
 }

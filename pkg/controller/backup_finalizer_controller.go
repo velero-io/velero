@@ -26,6 +26,7 @@ import (
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	clocks "k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -213,6 +214,8 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		finalPhase = velerov1api.BackupPhaseCompleted
 	case velerov1api.BackupPhaseFinalizingPartiallyFailed:
 		finalPhase = velerov1api.BackupPhasePartiallyFailed
+	default:
+		return ctrl.Result{}, nil
 	}
 
 	completionTimestamp := &metav1.Time{Time: r.clock.Now()}
@@ -229,8 +232,9 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := encode.To(backupForUpload, "json", backupJSON); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error encoding backup json")
 	}
-	err = backupStore.PutBackupMetadata(backup.Name, backupJSON)
-	if err != nil {
+	if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return err != nil },
+		func() error { return backupStore.PutBackupMetadata(backup.Name, backupJSON) },
+	); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
 	}
 	if len(operations) > 0 {
