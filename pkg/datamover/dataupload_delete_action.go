@@ -14,6 +14,7 @@ import (
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	repotypes "github.com/vmware-tanzu/velero/pkg/repository/types"
 )
@@ -34,6 +35,26 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 	du := &velerov2alpha1.DataUpload{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), &du); err != nil {
 		return errors.WithStack(errors.Wrapf(err, "failed to convert input.Item from unstructured"))
+	}
+	// Detect DataUploads that do not belong to the backup being deleted.
+	// Velero does not support self-protection: the velero namespace should
+	// never be captured in a backup tarball. When it is (e.g. an operator
+	// schedule covers the velero namespace), the tarball can contain
+	// DataUpload CRs belonging to *other* backups. Creating a snapshot-info
+	// ConfigMap labeled with the executing backup's name in that case
+	// mislabels the snapshot and causes the real owning backup's
+	// deleteMovedSnapshots query to miss it, leaking the Kopia snapshot in
+	// the object store. Log a warning so misconfigured installs are visible,
+	// and skip the snapshot-info ConfigMap creation to avoid mislabeling.
+	if owner := du.Labels[velerov1.BackupNameLabel]; owner != "" && owner != label.GetValidName(input.Backup.Name) {
+		d.logger.Warnf(
+			"DataUpload %q belongs to backup %q but is being deleted under backup %q; "+
+				"this almost always means the velero namespace was included in a backup tarball. "+
+				"Velero does not support self-protection — exclude the velero namespace from your schedules. "+
+				"Skipping snapshot-info ConfigMap creation to avoid mislabeling.",
+			du.Name, owner, input.Backup.Name,
+		)
+		return nil
 	}
 	cm := genConfigmap(input.Backup, *du)
 	if cm == nil {
