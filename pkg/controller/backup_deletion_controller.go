@@ -321,6 +321,10 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 					volumeSnapshotters[snapshot.Spec.Location] = volumeSnapshotter
 				}
 
+				if snapshot.Status.ProviderSnapshotID == "" {
+					log.WithField("volumeSnapshot", snapshot.Spec.PersistentVolumeName).Warn("Skipping snapshot deletion: empty ProviderSnapshotID")
+					continue
+				}
 				if err := volumeSnapshotter.DeleteSnapshot(snapshot.Status.ProviderSnapshotID); err != nil {
 					errs = append(errs, errors.Wrapf(err, "error deleting snapshot %s", snapshot.Status.ProviderSnapshotID).Error())
 				}
