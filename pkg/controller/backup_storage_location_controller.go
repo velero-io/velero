@@ -125,8 +125,8 @@ func sanitizeStorageError(err error) string {
 			cleanMsg = desc
 		} else {
 			// Last resort: return first line
-			if idx := strings.Index(errMsg, "\n"); idx != -1 {
-				cleanMsg = errMsg[:idx]
+			if before, _, ok := strings.Cut(errMsg, "\n"); ok {
+				cleanMsg = before
 			} else {
 				cleanMsg = errMsg
 			}

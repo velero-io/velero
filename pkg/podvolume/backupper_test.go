@@ -281,7 +281,7 @@ func createPodObj(running bool, withVolume bool, withVolumeMounted bool, volumeN
 	}
 
 	if withVolume {
-		for i := 0; i < volumeNum; i++ {
+		for i := range volumeNum {
 			podObj.Spec.Volumes = append(podObj.Spec.Volumes, corev1api.Volume{
 				Name: fmt.Sprintf("fake-volume-%d", i+1),
 				VolumeSource: corev1api.VolumeSource{
@@ -294,7 +294,7 @@ func createPodObj(running bool, withVolume bool, withVolumeMounted bool, volumeN
 
 		if withVolumeMounted {
 			volumeMount := []corev1api.VolumeMount{}
-			for i := 0; i < volumeNum; i++ {
+			for i := range volumeNum {
 				volumeMount = append(volumeMount, corev1api.VolumeMount{
 					Name: fmt.Sprintf("fake-volume-%d", i+1),
 				})
@@ -630,7 +630,7 @@ func TestBackupPodVolumes(t *testing.T) {
 			pvbs, _, errs := bp.BackupPodVolumes(backupObj, test.sourcePod, test.volumes, nil, velerotest.NewLogger())
 
 			if test.errs != nil {
-				for i := 0; i < len(errs); i++ {
+				for i := range errs {
 					require.EqualError(t, errs[i], test.errs[i])
 				}
 			}

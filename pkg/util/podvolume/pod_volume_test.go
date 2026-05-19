@@ -1158,7 +1158,7 @@ func TestBuildCacheForNamespaceIdempotent(t *testing.T) {
 	cache := NewPVCPodCache()
 
 	// Build cache multiple times - should be idempotent
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		err := cache.BuildCacheForNamespace(t.Context(), "ns1", fakeClient)
 		require.NoError(t, err)
 		assert.True(t, cache.IsNamespaceBuilt("ns1"))

@@ -61,13 +61,13 @@ type TestCR struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// +optional
-	Spec TestCRSpec `json:"spec,omitempty"`
+	Spec TestCRSpec `json:"spec,omitzero"`
 
 	// +optional
-	Status TestCRStatus `json:"status,omitempty"`
+	Status TestCRStatus `json:"status,omitzero"`
 }
 
 type TestCRSpec struct {

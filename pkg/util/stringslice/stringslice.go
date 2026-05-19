@@ -16,16 +16,12 @@ limitations under the License.
 
 package stringslice
 
+import "slices"
+
 // Has returns true if the `items` slice contains the
 // value `val`, or false otherwise.
 func Has(items []string, val string) bool {
-	for _, itm := range items {
-		if itm == val {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(items, val)
 }
 
 // Except returns a new string slice that contains all of the entries

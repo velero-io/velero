@@ -18,6 +18,7 @@ package install
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	corev1api "k8s.io/api/core/v1"
@@ -70,9 +71,7 @@ func podLabels(userLabels ...map[string]string) map[string]string {
 
 	// Merge base labels with user labels to enforce CLI precedence
 	for _, labels := range userLabels {
-		for k, v := range labels {
-			base[k] = v
-		}
+		maps.Copy(base, labels)
 	}
 
 	return base
@@ -87,9 +86,7 @@ func podAnnotations(userAnnotations map[string]string) map[string]string {
 	}
 
 	// Merge base annotations with user annotations to enforce CLI precedence
-	for k, v := range userAnnotations {
-		base[k] = v
-	}
+	maps.Copy(base, userAnnotations)
 
 	return base
 }

@@ -389,7 +389,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			if errs == nil {
 				assert.Nil(t, test.errs)
 			} else {
-				for i := 0; i < len(errs); i++ {
+				for i := range errs {
 					if test.errs[i].prefixOnly {
 						errMsg := errs[i].Error()
 						if len(errMsg) >= len(test.errs[i].err) {
@@ -398,7 +398,7 @@ func TestRestorePodVolumes(t *testing.T) {
 
 						assert.Equal(t, test.errs[i].err, errMsg)
 					} else {
-						for i := 0; i < len(errs); i++ {
+						for i := range errs {
 							j := 0
 							for ; j < len(test.errs); j++ {
 								err := errs[i].Error()

@@ -18,6 +18,7 @@ package resourcepolicies
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -127,12 +128,7 @@ func (c *pvcPhaseCondition) match(v *structuredVolume) bool {
 	if v.pvcPhase == "" {
 		return false
 	}
-	for _, phase := range c.phases {
-		if v.pvcPhase == phase {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.phases, v.pvcPhase)
 }
 
 func (c *pvcPhaseCondition) validate() error {
@@ -160,13 +156,7 @@ func (s *storageClassCondition) match(v *structuredVolume) bool {
 		return false
 	}
 
-	for _, sc := range s.storageClass {
-		if v.storageClass == sc {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(s.storageClass, v.storageClass)
 }
 
 type nfsCondition struct {

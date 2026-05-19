@@ -99,5 +99,5 @@ func (p *JSONPatcher) patchArrayToByteArray() []byte {
 		patches = append(patches, patch.ToString())
 	}
 	patchesStr := strings.Join(patches, ",\n\t")
-	return []byte(fmt.Sprintf(`[%s]`, patchesStr))
+	return fmt.Appendf(nil, `[%s]`, patchesStr)
 }

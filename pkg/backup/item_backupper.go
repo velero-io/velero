@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -663,9 +664,7 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 
 	// create tags from the backup's labels
 	tags := map[string]string{}
-	for k, v := range ib.backupRequest.GetLabels() {
-		tags[k] = v
-	}
+	maps.Copy(tags, ib.backupRequest.GetLabels())
 	tags["velero.io/backup"] = ib.backupRequest.Name
 	tags["velero.io/pv"] = pv.Name
 

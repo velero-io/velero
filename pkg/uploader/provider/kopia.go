@@ -47,7 +47,7 @@ type kopiaProvider struct {
 	bkRepo        udmrepo.BackupRepo
 	credGetter    *credentials.CredentialGetter
 	log           logrus.FieldLogger
-	canceling     int32
+	canceling     atomic.Int32
 }
 
 // NewKopiaUploaderProvider initialized with open or create a repository
@@ -91,7 +91,7 @@ func (kp *kopiaProvider) CheckContext(ctx context.Context, finishChan chan struc
 		kp.log.Infof("Action finished")
 		return
 	case <-ctx.Done():
-		atomic.StoreInt32(&kp.canceling, 1)
+		kp.canceling.Store(1)
 
 		if uploader != nil {
 			uploader.Cancel()
@@ -239,7 +239,7 @@ func (kp *kopiaProvider) RunRestore(
 		return 0, errors.Wrapf(err, "Failed to run kopia restore")
 	}
 
-	if atomic.LoadInt32(&kp.canceling) == 1 {
+	if kp.canceling.Load() == 1 {
 		log.Error("Kopia restore is canceled")
 		return 0, ErrorCanceled
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -338,9 +339,7 @@ func AddAnnotations(o *metav1.ObjectMeta, vals map[string]string) {
 	if o.Annotations == nil {
 		o.Annotations = make(map[string]string)
 	}
-	for k, v := range vals {
-		o.Annotations[k] = v
-	}
+	maps.Copy(o.Annotations, vals)
 }
 
 // AddLabels adds the supplied key-values to the labels on the object

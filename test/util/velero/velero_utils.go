@@ -1267,8 +1267,8 @@ func SnapshotCRsCountShouldBe(ctx context.Context, namespace, backupName string,
 	}
 	count := 0
 	stdout = strings.Replace(stdout, "'", "", -1)
-	arr := strings.Split(stdout, "\n")
-	for _, bn := range arr {
+	arr := strings.SplitSeq(stdout, "\n")
+	for bn := range arr {
 		fmt.Println("Snapshot CR:" + bn)
 		if strings.Contains(bn, backupName) {
 			count++

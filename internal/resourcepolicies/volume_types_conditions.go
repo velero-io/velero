@@ -17,6 +17,8 @@ limitations under the License.
 package resourcepolicies
 
 import (
+	"slices"
+
 	corev1api "k8s.io/api/core/v1"
 )
 
@@ -64,12 +66,7 @@ func (v *volumeTypeCondition) match(s *structuredVolume) bool {
 		return true
 	}
 
-	for _, vt := range v.volumeTypes {
-		if vt == s.volumeType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(v.volumeTypes, s.volumeType)
 }
 
 func (v *volumeTypeCondition) validate() error {

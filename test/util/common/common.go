@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -47,10 +48,10 @@ func GetListByCmdPipes(ctx context.Context, cmdLines []*OsCommandLine) ([]string
 		}
 	}
 	cmds[len(cmds)-1].Stdout = &buf
-	for i := len(cmds) - 1; i >= 0; i-- {
-		_ = cmds[i].Start()
+	for i, v := range slices.Backward(cmds) {
+		_ = v.Start()
 		if i == 0 {
-			_ = cmds[i].Run()
+			_ = v.Run()
 		}
 	}
 	for i := 1; i < len(cmds); i++ {

@@ -17,6 +17,8 @@ limitations under the License.
 package flag
 
 import (
+	"slices"
+
 	"github.com/pkg/errors"
 )
 
@@ -48,11 +50,9 @@ func (e *Enum) String() string {
 // receiver. It returns an error if the string
 // is not an allowed value.
 func (e *Enum) Set(s string) error {
-	for _, val := range e.allowedValues {
-		if val == s {
-			e.value = s
-			return nil
-		}
+	if slices.Contains(e.allowedValues, s) {
+		e.value = s
+		return nil
 	}
 
 	return errors.Errorf("invalid value: %q", s)

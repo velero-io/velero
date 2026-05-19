@@ -19,15 +19,11 @@ package util
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 )
 
 func Contains(slice []string, key string) bool {
-	for _, i := range slice {
-		if i == key {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, key)
 }
 
 // GenerateSha256FromRestoreUIDAndVsName Use the restore UID and the VS Name to generate

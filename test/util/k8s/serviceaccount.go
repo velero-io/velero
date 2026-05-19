@@ -66,7 +66,7 @@ func PatchServiceAccountWithImagePullSecret(ctx context.Context, client TestClie
 	}
 
 	if _, err = client.ClientGo.CoreV1().ServiceAccounts(namespace).Patch(ctx, serviceAccount, types.StrategicMergePatchType,
-		[]byte(fmt.Sprintf(`{"imagePullSecrets": [{"name": "%s"}]}`, secretName)), metav1.PatchOptions{}); err != nil {
+		fmt.Appendf(nil, `{"imagePullSecrets": [{"name": "%s"}]}`, secretName), metav1.PatchOptions{}); err != nil {
 		return errors.Wrapf(err, "failed to patch the service account %q under the namespace %q", serviceAccount, namespace)
 	}
 	return nil

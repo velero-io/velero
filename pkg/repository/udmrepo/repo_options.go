@@ -162,9 +162,7 @@ func WithConfigFile(workPath string, repoID string) func(*RepoOptions) error {
 // WithGenOptions sets the GeneralOptions to RepoOptions
 func WithGenOptions(genOptions map[string]string) func(*RepoOptions) error {
 	return func(options *RepoOptions) error {
-		for k, v := range genOptions {
-			options.GeneralOptions[k] = v
-		}
+		maps.Copy(options.GeneralOptions, genOptions)
 
 		return nil
 	}

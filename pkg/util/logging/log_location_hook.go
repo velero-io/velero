@@ -121,9 +121,9 @@ func getLogSourceSetMarker(entry *logrus.Entry) string {
 }
 
 func removeVeleroPackagePrefix(file string) string {
-	if index := strings.Index(file, veleroPackage); index != -1 {
+	if _, after, ok := strings.Cut(file, veleroPackage); ok {
 		// strip off .../github.com/vmware-tanzu/velero/ so we just have pkg/...
-		return file[index+veleroPackageLen:]
+		return after
 	}
 
 	return file

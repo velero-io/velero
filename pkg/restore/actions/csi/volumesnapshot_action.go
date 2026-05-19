@@ -19,6 +19,7 @@ package csi
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -203,11 +204,9 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 ) error {
 	// Check if handle is already in the list
 	if vgsc.Spec.Source.GroupSnapshotHandles != nil {
-		for _, handle := range vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-			if handle == snapshotHandle {
-				p.log.Infof("Snapshot handle %s already present in VGSC %s", snapshotHandle, vgsc.Name)
-				return nil
-			}
+		if slices.Contains(vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles, snapshotHandle) {
+			p.log.Infof("Snapshot handle %s already present in VGSC %s", snapshotHandle, vgsc.Name)
+			return nil
 		}
 	}
 
