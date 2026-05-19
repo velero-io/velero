@@ -561,7 +561,8 @@ func (ctx *finalizerContext) WaitRestoreExecHook() (errs results.Result) {
 
 	// wait for restore exec hooks to finish
 	err := wait.PollUntilContextCancel(context.Background(), 1*time.Second, true, func(context.Context) (bool, error) {
-		log.Debug("Checking the progress of hooks execution")
+		attempted, failed := ctx.multiHookTracker.Stat(ctx.restore.Name)
+		log.Debugf("Checking the progress of hooks execution: attempted=%d, failed=%d", attempted, failed)
 		if ctx.multiHookTracker.IsComplete(ctx.restore.Name) {
 			return true, nil
 		}
