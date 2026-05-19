@@ -1,7 +1,7 @@
 ![100]
 
 [![Build Status][1]][2] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3811/badge)](https://bestpractices.coreinfrastructure.org/projects/3811)
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/vmware-tanzu/velero)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/velero-io/velero)
 
 ## Overview
 
@@ -52,14 +52,29 @@ Velero supports IPv4, IPv6, and dual stack environments. Support for this was te
 
 The Velero maintainers are continuously working to expand testing coverage, but are not able to test every combination of Velero and supported Kubernetes versions for each Velero release. The table above is meant to track the current testing coverage and the expected supported Kubernetes versions for each Velero version.
 
-If you are interested in using a different version of Kubernetes with a given Velero version, we'd recommend that you perform testing before installing or upgrading your environment. For full information around capabilities within a release, also see the Velero [release notes](https://github.com/vmware-tanzu/velero/releases) or Kubernetes [release notes](https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG). See the Velero [support page](https://velero.io/docs/latest/support-process/) for information about supported versions of Velero.
+If you are interested in using a different version of Kubernetes with a given Velero version, we'd recommend that you perform testing before installing or upgrading your environment. For full information around capabilities within a release, also see the Velero [release notes](https://github.com/velero-io/velero/releases) or Kubernetes [release notes](https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG). See the Velero [support page](https://velero.io/docs/latest/support-process/) for information about supported versions of Velero.
 
 For each release, Velero maintainers run the test to ensure the upgrade path from n-2 minor release.  For example, before the release of v1.10.x, the test will verify that the backup created by v1.9.x and v1.8.x can be restored using the build to be tagged as v1.10.x.
 
-[1]: https://github.com/vmware-tanzu/velero/workflows/Main%20CI/badge.svg
-[2]: https://github.com/vmware-tanzu/velero/actions?query=workflow%3A"Main+CI"
-[4]: https://github.com/vmware-tanzu/velero/issues
-[6]: https://github.com/vmware-tanzu/velero/releases
+## Cloud Native Computing Foundation
+
+Velero is a [Cloud Native Computing Foundation](https://www.cncf.io/) sandbox project.
+
+<p align="center">
+  <a href="https://www.cncf.io/">
+    <img src="https://raw.githubusercontent.com/cncf/artwork/main/other/cncf/horizontal/color/cncf-color.svg"
+         alt="Cloud Native Computing Foundation logo" width="300"/>
+  </a>
+</p>
+
+Copyright Contributors to Velero, established as Velero a Series of LF Projects, LLC.
+For website terms of use, trademark policy and other project policies please see
+<https://lfprojects.org/policies/>.
+
+[1]: https://github.com/velero-io/velero/workflows/Main%20CI/badge.svg
+[2]: https://github.com/velero-io/velero/actions?query=workflow%3A"Main+CI"
+[4]: https://github.com/velero-io/velero/issues
+[6]: https://github.com/velero-io/velero/releases
 [9]: https://kubernetes.io/docs/setup/
 [10]: https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-with-homebrew-on-macos
 [11]: https://kubernetes.io/docs/tasks/tools/install-kubectl/#tabset-1
