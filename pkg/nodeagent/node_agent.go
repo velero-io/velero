@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
+	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,6 +79,25 @@ func isRunning(ctx context.Context, kubeClient kubernetes.Interface, namespace s
 // KbClientIsRunningInNode checks if the node agent pod is running properly in a specified node through kube client. If not, return the error found
 func KbClientIsRunningInNode(ctx context.Context, namespace string, nodeName string, kubeClient kubernetes.Interface) error {
 	return isRunningInNode(ctx, namespace, nodeName, nil, kubeClient)
+}
+
+// IsReady checks whether the node-agent daemonset has at least one ready pod by inspecting the DaemonSet status.
+func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) error {
+	ds := new(appsv1api.DaemonSet)
+	windowsDs := new(appsv1api.DaemonSet)
+
+	linuxErr := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonSet}, ds)
+	winErr := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, windowsDs)
+
+	if linuxErr != nil && winErr != nil {
+		return errors.New(fmt.Sprintf("failed to get node-agent daemonsets. linux error: %v, windows error: %v", linuxErr, winErr))
+	}
+
+	if ds.Status.NumberReady == 0 && windowsDs.Status.NumberReady == 0 {
+		return errors.New("node-agent is not ready: no ready pods found in both linux and windows daemonsets")
+	}
+
+	return nil
 }
 
 // IsRunningInNode checks if the node agent pod is running properly in a specified node through controller client. If not, return the error found
