@@ -29,6 +29,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/label"
 )
@@ -80,7 +81,15 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 					fmt.Fprintf(os.Stderr, "error getting PodVolumeRestores for restore %s: %v\n", restore.Name, err)
 				}
 
-				s := output.DescribeRestore(context.Background(), kbClient, &restoreList.Items[i], podVolumeRestoreList.Items, details, insecureSkipTLSVerify, caCertFile)
+				// Inherit insecureSkipTLSVerify from BSL config if not set via CLI flag
+				effectiveInsecureSkipTLS := insecureSkipTLSVerify
+				bslInsecure, bslErr := cacert.GetInsecureSkipTLSVerifyFromRestore(context.Background(), kbClient, f.Namespace(), &restoreList.Items[i])
+				if bslErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: Error getting insecureSkipTLSVerify from BSL for restore %s: %v\n", restore.Name, bslErr)
+				}
+				effectiveInsecureSkipTLS = effectiveInsecureSkipTLS || bslInsecure
+
+				s := output.DescribeRestore(context.Background(), kbClient, &restoreList.Items[i], podVolumeRestoreList.Items, details, effectiveInsecureSkipTLS, caCertFile)
 				if first {
 					first = false
 					fmt.Print(s)

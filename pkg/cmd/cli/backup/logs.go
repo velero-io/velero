@@ -86,7 +86,13 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 		bslCACert = ""
 	}
 
-	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, os.Stdout, l.Timeout, l.InsecureSkipTLSVerify, l.CaCertFile, bslCACert)
+	// Inherit insecureSkipTLSVerify from BSL config if not set via CLI flag
+	bslInsecure, err := cacert.GetInsecureSkipTLSVerifyFromBackup(context.Background(), l.Client, f.Namespace(), backup)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting insecureSkipTLSVerify from BSL: %v\n", err)
+	}
+
+	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, os.Stdout, l.Timeout, l.InsecureSkipTLSVerify || bslInsecure, l.CaCertFile, bslCACert)
 	return err
 }
 
