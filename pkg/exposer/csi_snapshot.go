@@ -76,6 +76,11 @@ type CSISnapshotExposeParam struct {
 	// ExposeTimeout specifies the timeout for the entire expose process
 	ExposeTimeout time.Duration
 
+	// SnapshotErrorTimeout specifies how long to tolerate persistent errors
+	// reported in the source VolumeSnapshot status before failing the expose.
+	// Set to 0 to keep the legacy behavior of only failing on ExposeTimeout.
+	SnapshotErrorTimeout time.Duration
+
 	// VolumeSize specifies the size of the source volume
 	VolumeSize resource.Quantity
 
@@ -135,7 +140,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 
 	curLog.Info("Exposing CSI snapshot")
 
-	volumeSnapshot, err := csi.WaitVolumeSnapshotReady(ctx, e.csiSnapshotClient, csiExposeParam.SnapshotName, csiExposeParam.SourceNamespace, csiExposeParam.ExposeTimeout, curLog)
+	volumeSnapshot, err := csi.WaitVolumeSnapshotReady(ctx, e.csiSnapshotClient, csiExposeParam.SnapshotName, csiExposeParam.SourceNamespace, csiExposeParam.ExposeTimeout, csiExposeParam.SnapshotErrorTimeout, curLog)
 	if err != nil {
 		return errors.Wrapf(err, "error wait volume snapshot ready")
 	}

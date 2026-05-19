@@ -162,6 +162,15 @@ type BackupSpec struct {
 	// +optional
 	CSISnapshotTimeout metav1.Duration `json:"csiSnapshotTimeout,omitempty"`
 
+	// CSISnapshotErrorTimeout specifies how long to tolerate a persistent error
+	// reported in a CSI VolumeSnapshot or VolumeSnapshotContent status before
+	// failing the backup operation. This bounds how long Velero will keep
+	// polling/waiting for a snapshot whose status reports an error, instead of
+	// waiting for the much longer ItemOperationTimeout.
+	// The default value is 10 minutes.
+	// +optional
+	CSISnapshotErrorTimeout metav1.Duration `json:"csiSnapshotErrorTimeout,omitempty"`
+
 	// ItemOperationTimeout specifies the time used to wait for asynchronous BackupItemAction operations
 	// The default value is 4 hour.
 	// +optional
