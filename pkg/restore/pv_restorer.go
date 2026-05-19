@@ -18,6 +18,7 @@ package restore
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -30,6 +31,11 @@ import (
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 )
+
+// errPVNeedsReprovisioning is returned when a PV has no snapshot and a Delete
+// reclaim policy, indicating the underlying storage may no longer exist and the
+// PV should be dynamically re-provisioned instead of restored as-is.
+var errPVNeedsReprovisioning = fmt.Errorf("persistent volume has no snapshot and Delete reclaim policy; it should be dynamically re-provisioned")
 
 type PVRestorer interface {
 	executePVAction(obj *unstructured.Unstructured) (*unstructured.Unstructured, error)
@@ -65,6 +71,10 @@ func (r *pvRestorer) executePVAction(obj *unstructured.Unstructured) (*unstructu
 	}
 	if snapshotInfo == nil {
 		log.Infof("No snapshot found for persistent volume")
+		if hasDeleteReclaimPolicy(obj.Object) {
+			log.Warnf("Persistent volume has Delete reclaim policy but no snapshot; underlying storage may no longer exist, triggering dynamic re-provisioning")
+			return nil, errPVNeedsReprovisioning
+		}
 		return obj, nil
 	}
 
