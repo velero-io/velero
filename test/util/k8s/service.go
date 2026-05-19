@@ -63,7 +63,7 @@ func WaitForServiceDelete(client TestClient, ns, name string, deleteFirst bool) 
 	}
 	return waitutil.PollImmediateInfinite(5*time.Second,
 		func() (bool, error) {
-			if _, err := client.ClientGo.CoreV1().Services(ns).Get(context.TODO(), ns, metav1.GetOptions{}); err != nil {
+			if _, err := client.ClientGo.CoreV1().Services(ns).Get(context.TODO(), name, metav1.GetOptions{}); err != nil {
 				if apierrors.IsNotFound(err) {
 					return true, nil
 				}
