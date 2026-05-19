@@ -582,6 +582,45 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("Invalid included/excluded namespace lists: %v", err))
 	}
 
+	// Auto-exclude the Velero namespace from the backup.
+	// Velero does not support backing up its own namespace.
+	veleroNs := request.Backup.Namespace
+	nsFilter := collections.NewIncludesExcludes().
+		Includes(request.Spec.IncludedNamespaces...).
+		Excludes(request.Spec.ExcludedNamespaces...)
+	if nsFilter.ShouldInclude(veleroNs) {
+		// Remove the Velero namespace from IncludedNamespaces if explicitly listed,
+		// to avoid a contradictory state where it appears in both includes and excludes.
+		filtered := make([]string, 0, len(request.Spec.IncludedNamespaces))
+		for _, ns := range request.Spec.IncludedNamespaces {
+			if ns != veleroNs {
+				filtered = append(filtered, ns)
+			}
+		}
+		hadExplicitIncludes := len(request.Spec.IncludedNamespaces) > 0
+		request.Spec.IncludedNamespaces = filtered
+
+		// If the Velero namespace was the only included namespace, the backup would
+		// be empty. Return a validation error instead of silently proceeding.
+		if hadExplicitIncludes && len(request.Spec.IncludedNamespaces) == 0 {
+			request.Status.ValidationErrors = append(request.Status.ValidationErrors,
+				fmt.Sprintf("Velero namespace %q is the only included namespace, but Velero does not support backing up its own namespace", veleroNs))
+		} else {
+			logger.Warnf("Velero namespace %q is being excluded from this backup because Velero does not support backing up its own namespace.", veleroNs)
+			// Only append if not already present (e.g. from the exclude-from-backup label logic).
+			alreadyExcluded := false
+			for _, ns := range request.Spec.ExcludedNamespaces {
+				if ns == veleroNs {
+					alreadyExcluded = true
+					break
+				}
+			}
+			if !alreadyExcluded {
+				request.Spec.ExcludedNamespaces = append(request.Spec.ExcludedNamespaces, veleroNs)
+			}
+		}
+	}
+
 	// validate that only one exists orLabelSelector or just labelSelector (singular)
 	if request.Spec.OrLabelSelectors != nil && request.Spec.LabelSelector != nil {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "encountered labelSelector as well as orLabelSelectors in backup spec, only one can be specified")
