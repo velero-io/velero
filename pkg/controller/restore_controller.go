@@ -399,6 +399,17 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		return backupInfo{}, nil
 	}
 
+	// reject restores from backups that are not in a usable phase
+	switch info.backup.Status.Phase {
+	case api.BackupPhaseCompleted, api.BackupPhasePartiallyFailed:
+		// ok
+	default:
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
+			fmt.Sprintf("backup %q is in phase %q and cannot be used as a restore source",
+				info.backup.Name, info.backup.Status.Phase))
+		return backupInfo{}, nil
+	}
+
 	// Fill in the ScheduleName so it's easier to consume for metrics.
 	if restore.Spec.ScheduleName == "" {
 		restore.Spec.ScheduleName = info.backup.GetLabels()[api.ScheduleNameLabel]
