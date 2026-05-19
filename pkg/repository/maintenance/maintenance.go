@@ -540,8 +540,7 @@ func buildJob(
 	logger logrus.FieldLogger,
 ) (*batchv1api.Job, error) {
 	// Get the Velero server deployment
-	deployment := &appsv1api.Deployment{}
-	err := cli.Get(ctx, types.NamespacedName{Name: "velero", Namespace: repo.Namespace}, deployment)
+	deployment, err := veleroutil.GetVeleroServerDeployment(ctx, cli, repo.Namespace)
 	if err != nil {
 		return nil, err
 	}

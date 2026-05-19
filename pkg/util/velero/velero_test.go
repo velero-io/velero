@@ -17,6 +17,7 @@ limitations under the License.
 package velero
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -25,6 +26,9 @@ import (
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -923,4 +927,107 @@ func TestBSLIsAvailable(t *testing.T) {
 
 	assert.True(t, BSLIsAvailable(*availableBSL))
 	assert.False(t, BSLIsAvailable(*unavailableBSL))
+}
+
+func TestGetVeleroServerDeployment(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, appsv1api.AddToScheme(scheme))
+
+	veleroLabels := map[string]string{"component": "velero"}
+
+	matchingDeploy := &appsv1api.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "custom-velero-name",
+			Namespace: "velero",
+			Labels:    veleroLabels,
+		},
+		Spec: appsv1api.DeploymentSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{
+					Containers: []corev1api.Container{
+						{Name: "velero", Image: "velero/velero:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	nonVeleroContainerDeploy := &appsv1api.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "other",
+			Namespace: "velero",
+			Labels:    veleroLabels,
+		},
+		Spec: appsv1api.DeploymentSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{
+					Containers: []corev1api.Container{
+						{Name: "other-container"},
+					},
+				},
+			},
+		},
+	}
+
+	unlabeledDeploy := &appsv1api.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "velero",
+			Namespace: "velero",
+		},
+		Spec: appsv1api.DeploymentSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{
+					Containers: []corev1api.Container{
+						{Name: "velero"},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		objects   []ctrlclient.Object
+		namespace string
+		wantName  string
+		wantErr   bool
+	}{
+		{
+			name:      "finds deployment by labels and velero container",
+			objects:   []ctrlclient.Object{matchingDeploy},
+			namespace: "velero",
+			wantName:  "custom-velero-name",
+		},
+		{
+			name:      "skips labeled deployment without velero container",
+			objects:   []ctrlclient.Object{nonVeleroContainerDeploy},
+			namespace: "velero",
+			wantErr:   true,
+		},
+		{
+			name:      "skips deployment without velero labels",
+			objects:   []ctrlclient.Object{unlabeledDeploy},
+			namespace: "velero",
+			wantErr:   true,
+		},
+		{
+			name:      "no deployment in namespace",
+			objects:   nil,
+			namespace: "velero",
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.objects...).Build()
+			got, err := GetVeleroServerDeployment(context.Background(), cli, tc.namespace)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantName, got.Name)
+		})
+	}
 }
