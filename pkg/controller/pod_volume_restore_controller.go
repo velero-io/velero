@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -275,8 +276,8 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if peekErr := r.exposer.PeekExposed(ctx, getPVROwnerObject(pvr)); peekErr != nil {
 			log.Errorf("Cancel PVR %s/%s because of expose error %s", pvr.Namespace, pvr.Name, peekErr)
 
-			diags := strings.Split(r.exposer.DiagnoseExpose(ctx, getPVROwnerObject(pvr)), "\n")
-			for _, diag := range diags {
+			diags := strings.SplitSeq(r.exposer.DiagnoseExpose(ctx, getPVROwnerObject(pvr)), "\n")
+			for diag := range diags {
 				log.Warnf("[Diagnose PVR expose]%s", diag)
 			}
 
@@ -501,8 +502,8 @@ func (r *PodVolumeRestoreReconciler) onPrepareTimeout(ctx context.Context, pvr *
 		return
 	}
 
-	diags := strings.Split(r.exposer.DiagnoseExpose(ctx, getPVROwnerObject(pvr)), "\n")
-	for _, diag := range diags {
+	diags := strings.SplitSeq(r.exposer.DiagnoseExpose(ctx, getPVROwnerObject(pvr)), "\n")
+	for diag := range diags {
 		log.Warnf("[Diagnose PVR expose]%s", diag)
 	}
 
@@ -895,9 +896,7 @@ func (r *PodVolumeRestoreReconciler) setupExposeParam(pvr *velerov1api.PodVolume
 
 	hostingPodLabels := map[string]string{velerov1api.PVRLabel: pvr.Name}
 	if len(r.podLabels) > 0 {
-		for k, v := range r.podLabels {
-			hostingPodLabels[k] = v
-		}
+		maps.Copy(hostingPodLabels, r.podLabels)
 	} else {
 		for _, k := range util.ThirdPartyLabels {
 			if v, err := nodeagent.GetLabelValue(context.Background(), r.kubeClient, pvr.Namespace, k, nodeOS); err != nil {
@@ -912,9 +911,7 @@ func (r *PodVolumeRestoreReconciler) setupExposeParam(pvr *velerov1api.PodVolume
 
 	hostingPodAnnotation := map[string]string{}
 	if len(r.podAnnotations) > 0 {
-		for k, v := range r.podAnnotations {
-			hostingPodAnnotation[k] = v
-		}
+		maps.Copy(hostingPodAnnotation, r.podAnnotations)
 	} else {
 		for _, k := range util.ThirdPartyAnnotations {
 			if v, err := nodeagent.GetAnnotationValue(context.Background(), r.kubeClient, pvr.Namespace, k, nodeOS); err != nil {

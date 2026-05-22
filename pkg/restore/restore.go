@@ -1897,11 +1897,9 @@ func restorePodVolumeBackups(ctx *restoreContext, createdObj *unstructured.Unstr
 	if ctx.podVolumeRestorer == nil {
 		ctx.log.Warn("No pod volume restorer, not restoring pod's volumes")
 	} else {
-		ctx.podVolumeWaitGroup.Add(1)
-		go func() {
+		ctx.podVolumeWaitGroup.Go(func() {
 			// Done() will only be called after all errors have been successfully
 			// sent on the ctx.podVolumeErrs channel
-			defer ctx.podVolumeWaitGroup.Done()
 
 			pod := new(corev1api.Pod)
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(createdObj.UnstructuredContent(), &pod); err != nil {
@@ -1924,7 +1922,7 @@ func restorePodVolumeBackups(ctx *restoreContext, createdObj *unstructured.Unstr
 					ctx.podVolumeErrs <- err
 				}
 			}
-		}()
+		})
 	}
 }
 

@@ -70,7 +70,7 @@ func InstallCR(ctx context.Context, crFile, ns string) error {
 	var stderr string
 	var err error
 
-	for i := 0; i < retries; i++ {
+	for i := range retries {
 		fmt.Printf("Attempt %d: Install custom resource %s\n", i+1, crFile)
 		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-n", ns, "-f", crFile)
 		_, stderr, err = veleroexec.RunCommand(cmd)

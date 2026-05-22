@@ -17,6 +17,8 @@ limitations under the License.
 package actionhelpers
 
 import (
+	"slices"
+
 	"github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,15 +55,12 @@ func RelatedItemsForServiceAccount(objectMeta metav1.Object, clusterRoleBindings
 	)
 
 	for _, crb := range clusterRoleBindings {
-		for _, s := range crb.ServiceAccountSubjects(namespace) {
-			if s == name {
-				log.Infof("Adding clusterrole %s and clusterrolebinding %s to relatedItems since serviceaccount %s/%s is a subject",
-					crb.RoleRefName(), crb.Name(), namespace, name)
+		if slices.Contains(crb.ServiceAccountSubjects(namespace), name) {
+			log.Infof("Adding clusterrole %s and clusterrolebinding %s to relatedItems since serviceaccount %s/%s is a subject",
+				crb.RoleRefName(), crb.Name(), namespace, name)
 
-				bindings.Insert(crb.Name())
-				roles.Insert(crb.RoleRefName())
-				break
-			}
+			bindings.Insert(crb.Name())
+			roles.Insert(crb.RoleRefName())
 		}
 	}
 

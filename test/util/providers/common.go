@@ -55,7 +55,7 @@ func ObjectsShouldNotBeInBucket(objectStoreProvider, cloudCredentialsFile, bslBu
 	if cloudCredentialsFile == "" {
 		return errors.New(fmt.Sprintf("|| ERROR || - Please provide credential file of cloud %s \n", objectStoreProvider))
 	}
-	for i := 0; i < retryTimes; i++ {
+	for range retryTimes {
 		exist, err = IsObjectsInBucket(objectStoreProvider, cloudCredentialsFile, bslBucket, bslPrefix, bslConfig, backupName, subPrefix)
 		if err != nil {
 			return errors.Wrapf(err, "|| UNEXPECTED || - Failed to get backup %s in object store\n", backupName)

@@ -167,6 +167,12 @@ linters:
       ignore-rules:
         - someword
 
+    modernize:
+      # List of analyzers to disable.
+      # By default, all analyzers are enabled.
+      disable:
+        - newexpr
+
     nakedret:
       # make an issue if func has more lines of code than this setting and it has naked returns; default is 30
       max-func-lines: 30
@@ -325,6 +331,7 @@ linters:
     - importas
     - ineffassign
     - misspell
+    - modernize
     - nakedret
     - nilerr
     - noctx

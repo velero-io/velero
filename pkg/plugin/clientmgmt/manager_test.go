@@ -145,7 +145,7 @@ func TestCleanupClients(t *testing.T) {
 
 	m := NewManager(logger, logLevel, registry).(*manager)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rp := &restartabletest.MockRestartableProcess{}
 		defer rp.AssertExpectations(t)
 		rp.On("Stop")

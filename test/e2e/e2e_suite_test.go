@@ -754,8 +754,8 @@ func TestE2e(t *testing.T) {
 
 	// Validate the UpgradeFromVeleroVersion if provided
 	if len(test.VeleroCfg.UpgradeFromVeleroVersion) > 0 {
-		versions := strings.Split(test.VeleroCfg.UpgradeFromVeleroVersion, ",")
-		for _, version := range versions {
+		versions := strings.SplitSeq(test.VeleroCfg.UpgradeFromVeleroVersion, ",")
+		for version := range versions {
 			if err := veleroutil.ValidateVeleroVersion(version); err != nil {
 				fmt.Println("UpgradeFromVeleroVersion is invalid: ", version)
 				t.Error(err)
@@ -765,8 +765,8 @@ func TestE2e(t *testing.T) {
 
 	// Validate the MigrateFromVeleroVersion if provided
 	if len(test.VeleroCfg.MigrateFromVeleroVersion) > 0 {
-		versions := strings.Split(test.VeleroCfg.MigrateFromVeleroVersion, ",")
-		for _, version := range versions {
+		versions := strings.SplitSeq(test.VeleroCfg.MigrateFromVeleroVersion, ",")
+		for version := range versions {
 			if err := veleroutil.ValidateVeleroVersion(version); err != nil {
 				fmt.Println("MigrateFromVeleroVersion is invalid: ", version)
 				t.Error(err)

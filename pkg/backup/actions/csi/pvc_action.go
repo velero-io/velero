@@ -19,6 +19,7 @@ package csi
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -241,9 +242,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 	p.log.Infof("VolumeSnapshotClass=%s", vsClass.Name)
 
 	vsLabels := map[string]string{}
-	for k, v := range pvc.ObjectMeta.Labels {
-		vsLabels[k] = v
-	}
+	maps.Copy(vsLabels, pvc.ObjectMeta.Labels)
 	vsLabels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
 
 	// Craft the vs object to be created

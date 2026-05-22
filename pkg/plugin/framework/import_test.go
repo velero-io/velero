@@ -43,7 +43,7 @@ func TestPkgImportNoCloudProvider(t *testing.T) {
 	cloudProvider, err := regexp.Compile("aws|cloud.google.com|azure")
 	require.NoError(t, err)
 	cloudProviderDeps := []string{}
-	for _, dep := range strings.Split(deps, "\n") {
+	for dep := range strings.SplitSeq(deps, "\n") {
 		if !k8sio.MatchString(dep) {
 			if cloudProvider.MatchString(dep) {
 				cloudProviderDeps = append(cloudProviderDeps, dep)

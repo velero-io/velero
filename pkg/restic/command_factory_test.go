@@ -74,9 +74,9 @@ func TestGetSnapshotCommand(t *testing.T) {
 			actualFlags = append(actualFlags, parts[0])
 
 			// split based on ,
-			tags := strings.Split(parts[1], ",")
+			tags := strings.SplitSeq(parts[1], ",")
 			// loop through each key-value tag pair
-			for _, tag := range tags {
+			for tag := range tags {
 				// split the pair on =
 				kvs := strings.Split(tag, "=")
 				// record actual key & value

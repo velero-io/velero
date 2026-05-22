@@ -17,6 +17,7 @@ limitations under the License.
 package builder
 
 import (
+	"maps"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,9 +61,7 @@ func WithLabelsMap(labels map[string]string) func(obj metav1.Object) {
 		}
 
 		// If the label already exists in the object, it will be overwritten
-		for k, v := range labels {
-			objLabels[k] = v
-		}
+		maps.Copy(objLabels, labels)
 
 		obj.SetLabels(objLabels)
 	}
@@ -86,9 +85,7 @@ func WithAnnotationsMap(annotations map[string]string) func(obj metav1.Object) {
 		}
 
 		// If the label already exists in the object, it will be overwritten
-		for k, v := range annotations {
-			objAnnotations[k] = v
-		}
+		maps.Copy(objAnnotations, annotations)
 
 		obj.SetAnnotations(objAnnotations)
 	}

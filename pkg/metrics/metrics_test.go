@@ -231,7 +231,7 @@ func TestMultipleAdhocBackupsShareMetrics(t *testing.T) {
 	m := NewServerMetrics()
 
 	// Simulate multiple adhoc backup attempts
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		m.RegisterBackupAttempt("")
 	}
 

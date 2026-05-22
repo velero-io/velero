@@ -17,6 +17,7 @@ limitations under the License.
 package actions
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -56,11 +57,10 @@ func (a *ServiceAccountAction) Execute(input *velero.RestoreItemActionExecuteInp
 
 	log.Debug("Checking secrets")
 	check := serviceAccount.Name + "-token-"
-	for i := len(serviceAccount.Secrets) - 1; i >= 0; i-- {
-		secret := &serviceAccount.Secrets[i]
-		log.Debugf("Checking if secret %s matches %s", secret.Name, check)
+	for i, v := range slices.Backward(serviceAccount.Secrets) {
+		log.Debugf("Checking if secret %s matches %s", v.Name, check)
 
-		if strings.HasPrefix(secret.Name, check) {
+		if strings.HasPrefix(v.Name, check) {
 			// Copy all secrets *except* -token-
 			log.Debug("Match found - excluding this secret")
 			serviceAccount.Secrets = append(serviceAccount.Secrets[:i], serviceAccount.Secrets[i+1:]...)

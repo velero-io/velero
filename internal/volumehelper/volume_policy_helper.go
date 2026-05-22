@@ -3,6 +3,7 @@ package volumehelper
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -295,23 +296,11 @@ func (v volumeHelperImpl) shouldPerformFSBackupLegacy(
 	// Check volume in opt-in way
 	if !v.defaultVolumesToFSBackup {
 		optInVolumeNames := podvolumeutil.GetVolumesToBackup(&pod)
-		for _, volumeName := range optInVolumeNames {
-			if volume.Name == volumeName {
-				return true
-			}
-		}
-
-		return false
+		return slices.Contains(optInVolumeNames, volume.Name)
 	} else {
 		// Check volume in opt-out way
 		optOutVolumeNames := podvolumeutil.GetVolumesToExclude(&pod)
-		for _, volumeName := range optOutVolumeNames {
-			if volume.Name == volumeName {
-				return false
-			}
-		}
-
-		return true
+		return !slices.Contains(optOutVolumeNames, volume.Name)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -159,9 +160,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	// the in-cluster BSL with data which doesn't belong in Spec.Config
 	objectStoreConfig := make(map[string]string)
 	if location.Spec.Config != nil {
-		for key, val := range location.Spec.Config {
-			objectStoreConfig[key] = val
-		}
+		maps.Copy(objectStoreConfig, location.Spec.Config)
 	}
 
 	// add the bucket name and prefix to the config map so that object stores

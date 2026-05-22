@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -390,10 +391,7 @@ func WaitAllJobsComplete(ctx context.Context, cli client.Client, repo *velerov1a
 
 	history := []velerov1api.BackupRepositoryMaintenanceStatus{}
 
-	startPos := len(jobList.Items) - limit
-	if startPos < 0 {
-		startPos = 0
-	}
+	startPos := max(len(jobList.Items)-limit, 0)
 
 	for i := startPos; i < len(jobList.Items); i++ {
 		job := &jobList.Items[i]
@@ -609,9 +607,7 @@ func buildJob(
 		RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
 	}
 	if config != nil && len(config.PodLabels) > 0 {
-		for k, v := range config.PodLabels {
-			podLabels[k] = v
-		}
+		maps.Copy(podLabels, config.PodLabels)
 	} else {
 		for _, k := range util.ThirdPartyLabels {
 			if v := veleroutil.GetVeleroServerLabelValue(deployment, k); v != "" {
@@ -622,9 +618,7 @@ func buildJob(
 
 	podAnnotations := map[string]string{}
 	if config != nil && len(config.PodAnnotations) > 0 {
-		for k, v := range config.PodAnnotations {
-			podAnnotations[k] = v
-		}
+		maps.Copy(podAnnotations, config.PodAnnotations)
 	} else {
 		for _, k := range util.ThirdPartyAnnotations {
 			if v := veleroutil.GetVeleroServerAnnotationValue(deployment, k); v != "" {

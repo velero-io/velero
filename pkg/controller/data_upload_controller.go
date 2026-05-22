@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -300,8 +301,8 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if peekErr := ep.PeekExposed(ctx, getOwnerObject(du)); peekErr != nil {
 			log.Errorf("Cancel du %s/%s because of expose error %s", du.Namespace, du.Name, peekErr)
 
-			diags := strings.Split(ep.DiagnoseExpose(ctx, getOwnerObject(du)), "\n")
-			for _, diag := range diags {
+			diags := strings.SplitSeq(ep.DiagnoseExpose(ctx, getOwnerObject(du)), "\n")
+			for diag := range diags {
 				log.Warnf("[Diagnose DU expose]%s", diag)
 			}
 
@@ -874,8 +875,8 @@ func (r *DataUploadReconciler) onPrepareTimeout(ctx context.Context, du *velerov
 			volumeSnapshotName = du.Spec.CSISnapshot.VolumeSnapshot
 		}
 
-		diags := strings.Split(ep.DiagnoseExpose(ctx, getOwnerObject(du)), "\n")
-		for _, diag := range diags {
+		diags := strings.SplitSeq(ep.DiagnoseExpose(ctx, getOwnerObject(du)), "\n")
+		for diag := range diags {
 			log.Warnf("[Diagnose DU expose]%s", diag)
 		}
 
@@ -949,9 +950,7 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 
 		hostingPodLabels := map[string]string{velerov1api.DataUploadLabel: du.Name}
 		if len(r.podLabels) > 0 {
-			for k, v := range r.podLabels {
-				hostingPodLabels[k] = v
-			}
+			maps.Copy(hostingPodLabels, r.podLabels)
 		} else {
 			for _, k := range util.ThirdPartyLabels {
 				if v, err := nodeagent.GetLabelValue(context.Background(), r.kubeClient, du.Namespace, k, nodeOS); err != nil {
@@ -966,9 +965,7 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 
 		hostingPodAnnotation := map[string]string{}
 		if len(r.podAnnotations) > 0 {
-			for k, v := range r.podAnnotations {
-				hostingPodAnnotation[k] = v
-			}
+			maps.Copy(hostingPodAnnotation, r.podAnnotations)
 		} else {
 			for _, k := range util.ThirdPartyAnnotations {
 				if v, err := nodeagent.GetAnnotationValue(context.Background(), r.kubeClient, du.Namespace, k, nodeOS); err != nil {

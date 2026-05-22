@@ -18,6 +18,7 @@ package backup
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 )
@@ -41,9 +42,7 @@ func (m *backedUpItemsMap) CopyItemMap() map[itemKey]struct{} {
 	m.RLock()
 	defer m.RUnlock()
 	returnMap := make(map[itemKey]struct{}, len(m.backedUpItems))
-	for key, val := range m.backedUpItems {
-		returnMap[key] = val
-	}
+	maps.Copy(returnMap, m.backedUpItems)
 	return returnMap
 }
 

@@ -53,7 +53,7 @@ func StartItemBlockWorkerPool(ctx context.Context, workers int, log logrus.Field
 	ctx, cancelFunc := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		logger := log.WithField("worker", i)
 		wg.Add(1)
 		go processItemBlockWorker(ctx, inputChannel, logger, wg)

@@ -110,14 +110,14 @@ func (o *inMemoryObjectStore) ListCommonPrefixes(bucket, prefix, delimiter strin
 		afterPrefix := key[len(prefix):]
 
 		// index of the *start* of 'delimiter' in 'afterPrefix'
-		delimiterStart := strings.Index(afterPrefix, delimiter)
-		if delimiterStart == -1 {
+		before, _, ok := strings.Cut(afterPrefix, delimiter)
+		if !ok {
 			continue
 		}
 
 		// return the prefix, plus everything after the prefix and before
 		// the delimiter, plus the delimiter
-		fullPrefix := prefix + afterPrefix[0:delimiterStart] + delimiter
+		fullPrefix := prefix + before + delimiter
 
 		prefixes = append(prefixes, fullPrefix)
 	}

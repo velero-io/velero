@@ -66,7 +66,7 @@ var KibishiiStorageClassName = "kibishii-storage-class"
 
 func GetKibishiiPVCNameList(workerCount int) []string {
 	var kibishiiPVCNameList []string
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		kibishiiPVCNameList = append(kibishiiPVCNameList, fmt.Sprintf("kibishii-data-kibishii-deployment-%d", i))
 	}
 	return kibishiiPVCNameList
@@ -466,9 +466,9 @@ func readBaseEtcdImage(etcdFilePath string) string {
 	}
 
 	// Split on document marker
-	docs := strings.Split(string(bytes), "---")
+	docs := strings.SplitSeq(string(bytes), "---")
 
-	for _, doc := range docs {
+	for doc := range docs {
 		doc = strings.TrimSpace(doc)
 		if doc == "" {
 			continue

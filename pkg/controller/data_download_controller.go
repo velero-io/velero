@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -294,8 +295,8 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if peekErr := r.restoreExposer.PeekExposed(ctx, getDataDownloadOwnerObject(dd)); peekErr != nil {
 			log.Errorf("Cancel dd %s/%s because of expose error %s", dd.Namespace, dd.Name, peekErr)
 
-			diags := strings.Split(r.restoreExposer.DiagnoseExpose(ctx, getDataDownloadOwnerObject(dd)), "\n")
-			for _, diag := range diags {
+			diags := strings.SplitSeq(r.restoreExposer.DiagnoseExpose(ctx, getDataDownloadOwnerObject(dd)), "\n")
+			for diag := range diags {
 				log.Warnf("[Diagnose DD expose]%s", diag)
 			}
 
@@ -814,8 +815,8 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 		return
 	}
 
-	diags := strings.Split(r.restoreExposer.DiagnoseExpose(ctx, getDataDownloadOwnerObject(dd)), "\n")
-	for _, diag := range diags {
+	diags := strings.SplitSeq(r.restoreExposer.DiagnoseExpose(ctx, getDataDownloadOwnerObject(dd)), "\n")
+	for diag := range diags {
 		log.Warnf("[Diagnose DD expose]%s", diag)
 	}
 
@@ -873,9 +874,7 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 
 	hostingPodLabels := map[string]string{velerov1api.DataDownloadLabel: dd.Name}
 	if len(r.podLabels) > 0 {
-		for k, v := range r.podLabels {
-			hostingPodLabels[k] = v
-		}
+		maps.Copy(hostingPodLabels, r.podLabels)
 	} else {
 		for _, k := range util.ThirdPartyLabels {
 			if v, err := nodeagent.GetLabelValue(context.Background(), r.kubeClient, dd.Namespace, k, nodeOS); err != nil {
@@ -890,9 +889,7 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 
 	hostingPodAnnotation := map[string]string{}
 	if len(r.podAnnotations) > 0 {
-		for k, v := range r.podAnnotations {
-			hostingPodAnnotation[k] = v
-		}
+		maps.Copy(hostingPodAnnotation, r.podAnnotations)
 	} else {
 		for _, k := range util.ThirdPartyAnnotations {
 			if v, err := nodeagent.GetAnnotationValue(context.Background(), r.kubeClient, dd.Namespace, k, nodeOS); err != nil {
