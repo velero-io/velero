@@ -562,6 +562,74 @@ func (_c *BackupRepo_GetSnapshot_Call) RunAndReturn(run func(ctx context.Context
 	return _c
 }
 
+// ListSnapshot provides a mock function for the type BackupRepo
+func (_mock *BackupRepo) ListSnapshot(ctx context.Context, source string) ([]udmrepo.Snapshot, error) {
+	ret := _mock.Called(ctx, source)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshot")
+	}
+
+	var r0 []udmrepo.Snapshot
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]udmrepo.Snapshot, error)); ok {
+		return returnFunc(ctx, source)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []udmrepo.Snapshot); ok {
+		r0 = returnFunc(ctx, source)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]udmrepo.Snapshot)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, source)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// BackupRepo_ListSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshot'
+type BackupRepo_ListSnapshot_Call struct {
+	*mock.Call
+}
+
+// ListSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - source string
+func (_e *BackupRepo_Expecter) ListSnapshot(ctx interface{}, source interface{}) *BackupRepo_ListSnapshot_Call {
+	return &BackupRepo_ListSnapshot_Call{Call: _e.mock.On("ListSnapshot", ctx, source)}
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) Run(run func(ctx context.Context, source string)) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) Return(snapshots []udmrepo.Snapshot, err error) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Return(snapshots, err)
+	return _c
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) RunAndReturn(run func(ctx context.Context, source string) ([]udmrepo.Snapshot, error)) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewObjectWriter provides a mock function for the type BackupRepo
 func (_mock *BackupRepo) NewObjectWriter(ctx context.Context, opt udmrepo.ObjectWriteOptions) (udmrepo.ObjectWriter, error) {
 	ret := _mock.Called(ctx, opt)

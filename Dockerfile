@@ -49,9 +49,9 @@ RUN mkdir -p /output/usr/bin && \
     go clean -modcache -cache
 
 # Velero image packing section
-FROM paketobuildpacks/run-jammy-tiny:latest
+FROM paketobuildpacks/ubuntu-noble-run-tiny:latest
 
-LABEL maintainer="Xun Jiang <jxun@vmware.com>"
+LABEL maintainer="Xun Jiang <xun.jiang@broadcom.com>"
 
 COPY --from=velero-builder /output /
 

@@ -54,6 +54,31 @@ type Action struct {
 	Parameters map[string]any `yaml:"parameters,omitempty"`
 }
 
+// ResourceFilter defines a filter for specific resource kinds.
+type ResourceFilter struct {
+	Kinds            []string            `yaml:"kinds"`
+	LabelSelector    map[string]string   `yaml:"labelSelector,omitempty"`
+	OrLabelSelectors []map[string]string `yaml:"orLabelSelectors,omitempty"`
+	Names            []string            `yaml:"names,omitempty"`
+	ExcludedNames    []string            `yaml:"excludedNames,omitempty"`
+}
+
+// IsCatchAll returns true if the filter is a catch-all entry (empty kinds or ["*"])
+func (rf *ResourceFilter) IsCatchAll() bool {
+	return len(rf.Kinds) == 0 || (len(rf.Kinds) == 1 && rf.Kinds[0] == "*")
+}
+
+// ClusterScopedFilterPolicy defines backup filters scoped globally to cluster-scoped resources.
+type ClusterScopedFilterPolicy struct {
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
+}
+
+// NamespacedFilterPolicy defines backup filters scoped to specific namespaces.
+type NamespacedFilterPolicy struct {
+	Namespaces      []string         `yaml:"namespaces"`
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
+}
+
 // IncludeExcludePolicy defined policy to include or exclude resources based on the names
 type IncludeExcludePolicy struct {
 	// The following fields have the same semantics as those from the spec of backup.
@@ -95,17 +120,21 @@ type VolumePolicy struct {
 
 // ResourcePolicies currently defined slice of volume policies to handle backup
 type ResourcePolicies struct {
-	Version              string                `yaml:"version"`
-	VolumePolicies       []VolumePolicy        `yaml:"volumePolicies"`
-	IncludeExcludePolicy *IncludeExcludePolicy `yaml:"includeExcludePolicy"`
+	Version                   string                     `yaml:"version"`
+	VolumePolicies            []VolumePolicy             `yaml:"volumePolicies"`
+	IncludeExcludePolicy      *IncludeExcludePolicy      `yaml:"includeExcludePolicy"`
+	ClusterScopedFilterPolicy *ClusterScopedFilterPolicy `yaml:"clusterScopedFilterPolicy,omitempty"`
+	NamespacedFilterPolicies  []NamespacedFilterPolicy   `yaml:"namespacedFilterPolicies,omitempty"`
 	// we may support other resource policies in the future, and they could be added separately
 	// OtherResourcePolicies []OtherResourcePolicy
 }
 
 type Policies struct {
-	version              string
-	volumePolicies       []volPolicy
-	includeExcludePolicy *IncludeExcludePolicy
+	version                   string
+	volumePolicies            []volPolicy
+	includeExcludePolicy      *IncludeExcludePolicy
+	clusterScopedFilterPolicy *ClusterScopedFilterPolicy
+	namespacedFilterPolicies  []NamespacedFilterPolicy
 	// OtherPolicies
 }
 
@@ -158,6 +187,8 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 
 	p.version = resPolicies.Version
 	p.includeExcludePolicy = resPolicies.IncludeExcludePolicy
+	p.clusterScopedFilterPolicy = resPolicies.ClusterScopedFilterPolicy
+	p.namespacedFilterPolicies = resPolicies.NamespacedFilterPolicies
 	return nil
 }
 
@@ -233,6 +264,14 @@ func (p *Policies) Validate() error {
 
 func (p *Policies) GetIncludeExcludePolicy() *IncludeExcludePolicy {
 	return p.includeExcludePolicy
+}
+
+func (p *Policies) GetClusterScopedFilterPolicy() *ClusterScopedFilterPolicy {
+	return p.clusterScopedFilterPolicy
+}
+
+func (p *Policies) GetNamespacedFilterPolicies() []NamespacedFilterPolicy {
+	return p.namespacedFilterPolicies
 }
 
 func GetResourcePoliciesFromBackup(

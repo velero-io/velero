@@ -159,14 +159,14 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		OnProgress:  r.OnDataDownloadProgress,
 	}
 
-	fsRestore, err := r.dataPathMgr.CreateFileSystemBR(dd.Name, dataUploadDownloadRequestor, ctx, r.client, dd.Namespace, callbacks, log)
+	dp, err := r.dataPathMgr.CreateGenericDataPath(dd.Name, dataUploadDownloadRequestor, ctx, r.client, dd.Namespace, callbacks, log)
 	if err != nil {
 		return "", errors.Wrap(err, "error to create data path")
 	}
 
 	log.Debug("Found volume path")
-	if err := fsRestore.Init(ctx,
-		&datapath.FSBRInitParam{
+	if err := dp.Init(ctx,
+		&datapath.InitParam{
 			BSLName:           dd.Spec.BackupStorageLocation,
 			SourceNamespace:   dd.Spec.SourceNamespace,
 			UploaderType:      GetUploaderType(dd.Spec.DataMover),
@@ -180,7 +180,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	}
 	log.Info("fs init")
 
-	if err := fsRestore.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig); err != nil {
+	if err := dp.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 
