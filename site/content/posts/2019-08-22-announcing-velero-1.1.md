@@ -60,11 +60,11 @@ Finally, thanks to testing by [Dylan Murray](https://github.com/dymurray) and [S
 
 ## Help Us Build the Future
 
-For Velero 1.2, the current plan is to begin implementing CSI snapshot support at a beta level. If accepted, this approach would align Velero with the larger community, and in the future, it would allow Velero to snapshot far more volume providers. We have posted a [design document](https://github.com/vmware-tanzu/velero/pull/1661) for community review, so please be sure to take a look if this interests you.
+For Velero 1.2, the current plan is to begin implementing CSI snapshot support at a beta level. If accepted, this approach would align Velero with the larger community, and in the future, it would allow Velero to snapshot far more volume providers. We have posted a [design document](https://github.com/velero-io/velero/pull/1661) for community review, so please be sure to take a look if this interests you.
 
 We are also working on volume cloning, so that a persistent volume could be snapshotted and then duplicated for use within another namespace in the cluster.
 
-The team has also been discussing different approaches to concurrent backup jobs. This is a longer term goal, that will not be included in 1.2. Comments on the [design document](https://github.com/vmware-tanzu/velero/pull/1653) would be really helpful.
+The team has also been discussing different approaches to concurrent backup jobs. This is a longer term goal, that will not be included in 1.2. Comments on the [design document](https://github.com/velero-io/velero/pull/1653) would be really helpful.
 
 ## Take the Survey
 
@@ -72,8 +72,8 @@ Finally, we’re running [a survey](https://velero.io/survey) for our users. Let
 
 ## Join the Movement – Contribute!
 
-Velero is better because of our contributors and maintainers. It is because of them that we can bring great software to the community. Please join us during our [online community meetings every first Tuesday](https://github.com/vmware-tanzu/velero-community) and catch up with past meetings on YouTube on the [Velero Community Meetings playlist](https://www.youtube.com/watch?v=nc48ocI-6go&list=PL7bmigfV0EqQRysvqvqOtRNk4L5S7uqwM).
+Velero is better because of our contributors and maintainers. It is because of them that we can bring great software to the community. Please join us during our [online community meetings every first Tuesday](https://github.com/velero-io/velero-community) and catch up with past meetings on YouTube on the [Velero Community Meetings playlist](https://www.youtube.com/watch?v=nc48ocI-6go&list=PL7bmigfV0EqQRysvqvqOtRNk4L5S7uqwM).
 
-You can always find the latest project information at [velero.io](https://velero.io). Look for issues on GitHub marked [“Good first issue”](https://github.com/vmware-tanzu/velero/issues?q=is:open+is:issue+label:%22Good+first+issue%22) or [“Help wanted”](https://github.com/vmware-tanzu/velero/issues?utf8=✓&q=is:open+is:issue+label:%22Help+wanted%22+) if you want to roll up your sleeves and write some code with us.
+You can always find the latest project information at [velero.io](https://velero.io). Look for issues on GitHub marked [“Good first issue”](https://github.com/velero-io/velero/issues?q=is:open+is:issue+label:%22Good+first+issue%22) or [“Help wanted”](https://github.com/velero-io/velero/issues?utf8=✓&q=is:open+is:issue+label:%22Help+wanted%22+) if you want to roll up your sleeves and write some code with us.
 
 You can find us on [Kubernetes Slack in the #velero channel](https://kubernetes.slack.com/messages/C6VCGP4MT), and follow us on Twitter at [@projectvelero](https://twitter.com/projectvelero).

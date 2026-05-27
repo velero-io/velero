@@ -14,7 +14,7 @@ If you're not yet running at least Velero v1.4, see the following:
 - [Upgrading to v1.3][3]
 - [Upgrading to v1.4][4]
 
-Before upgrading, check the [Velero compatibility matrix](https://github.com/vmware-tanzu/velero#velero-compatabilty-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
+Before upgrading, check the [Velero compatibility matrix](https://github.com/velero-io/velero#velero-compatabilty-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
 ## Instructions
 
@@ -77,8 +77,8 @@ Before upgrading, check the [Velero compatibility matrix](https://github.com/vmw
 [2]: https://velero.io/docs/v1.2.0/upgrade-to-1.2/
 [3]: https://velero.io/docs/v1.3.2/upgrade-to-1.3/
 [4]: https://velero.io/docs/v1.4/upgrade-to-1.4/
-[5]: https://github.com/vmware-tanzu/velero/releases/tag/v1.4.2
-[6]: https://github.com/vmware-tanzu/velero/issues/2077
-[7]: https://github.com/vmware-tanzu/velero/issues/2311
-[8]: https://github.com/vmware-tanzu/velero/releases/tag/v1.5.1
-[9]: https://github.com/vmware-tanzu/velero/releases/tag/v1.5.2
+[5]: https://github.com/velero-io/velero/releases/tag/v1.4.2
+[6]: https://github.com/velero-io/velero/issues/2077
+[7]: https://github.com/velero-io/velero/issues/2311
+[8]: https://github.com/velero-io/velero/releases/tag/v1.5.1
+[9]: https://github.com/velero-io/velero/releases/tag/v1.5.2

@@ -62,7 +62,7 @@ On source cluster, Velero needs to manipulate CSI snapshots through the CSI volu
 
 To integrate Velero with the CSI volume snapshot APIs, you must enable the `EnableCSI` feature flag.
 
-From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/vmware-tanzu/velero` repository.
+From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/velero-io/velero` repository.
 The reasons to merge the CSI plugin are:
 * The VolumeSnapshot data mover depends on the CSI plugin, it's reasonabe to integrate them.
 * This change reduces the Velero deploying complexity.
@@ -382,7 +382,7 @@ The `BackupPVC` serves as an intermediate Persistent Volume Claim (PVC) utilized
 In complex storage environments, optimizing `BackupPVC` configurations can significantly enhance the performance of backup operations. [This document][16] outlines
 advanced configuration options for `BackupPVC`, allowing users to fine-tune access modes and storage class settings based on their storage provider's capabilities.
 
-[1]: https://github.com/vmware-tanzu/velero/pull/5968
+[1]: https://github.com/velero-io/velero/pull/5968
 [2]: csi.md
 [3]: file-system-backup.md
 [4]: https://kubernetes.io/blog/2020/12/10/kubernetes-1.20-volume-snapshot-moves-to-ga/
@@ -398,5 +398,5 @@ advanced configuration options for `BackupPVC`, allowing users to fine-tune acce
 [15]: data-movement-backup-node-selection.md
 [16]: data-movement-backup-pvc-configuration.md
 [17]: backup-repository-configuration.md
-[18]: https://github.com/vmware-tanzu/velero/pull/7576
+[18]: https://github.com/velero-io/velero/pull/7576
 

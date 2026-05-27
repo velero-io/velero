@@ -5,7 +5,7 @@ layout: docs
 
 After you set up the Velero server, you can clone the examples used in the following sections by running the following:
 ```
-git clone https://github.com/vmware-tanzu/velero.git
+git clone https://github.com/velero-io/velero.git
 cd velero
 ```
 

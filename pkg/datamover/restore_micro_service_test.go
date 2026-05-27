@@ -347,7 +347,7 @@ func TestRunCancelableRestore(t *testing.T) {
 				rs.dataPathMgr = test.dataPathMgr
 			}
 
-			datapath.FSBRCreator = func(string, string, kbclient.Client, string, datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
+			datapath.VGDPCreator = func(string, string, kbclient.Client, string, datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
 				fsBR := datapathmockes.NewAsyncBR(t)
 				if test.initErr != nil {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(test.initErr)

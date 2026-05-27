@@ -199,7 +199,7 @@ The other VGDP instances will run on nodes, which instance type is `Standard_B4m
 }
 ```
 
-Velero data mover supports to use different StorageClass to create backupPVC by [design](https://github.com/vmware-tanzu/velero/pull/7982).
+Velero data mover supports to use different StorageClass to create backupPVC by [design](https://github.com/velero-io/velero/pull/7982).
 
 In this example, if the backup target PVC's StorageClass is `kibishii-storage-class`, its backupPVC should use StorageClass `worker-storagepolicy`. Because the final StorageClass is `worker-storagepolicy`, the backupPod uses the loadAffinity specified by `loadAffinity`'s elements with `StorageClass` field set to `worker-storagepolicy`. backupPod will be assigned to nodes, which instance type is `Standard_B2ms`.
 

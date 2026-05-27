@@ -22,13 +22,32 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	ctlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
+	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	cacheMock "github.com/vmware-tanzu/velero/pkg/cmd/cli/datamover/mocks"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 )
+
+func TestNewBackupCommandCBTSANameFlag(t *testing.T) {
+	f := factorymocks.NewFactory(t)
+	cmd := NewBackupCommand(f)
+
+	cbtSAFlag := cmd.Flags().Lookup("cbt-sa-name")
+	require.NotNil(t, cbtSAFlag)
+	assert.Empty(t, cbtSAFlag.DefValue)
+
+	err := cmd.Flags().Parse([]string{"--cbt-sa-name", "velero-cbt-sa"})
+	require.NoError(t, err)
+
+	flagValue, err := cmd.Flags().GetString("cbt-sa-name")
+	require.NoError(t, err)
+	assert.Equal(t, "velero-cbt-sa", flagValue)
+}
 
 func fakeCreateDataPathServiceWithErr(_ *dataMoverBackup) (dataPathService, error) {
 	return nil, errors.New("fake-create-data-path-error")
@@ -129,6 +148,7 @@ func TestRunDataPath(t *testing.T) {
 				config: dataMoverBackupConfig{
 					duName: test.duName,
 				},
+				cbtService: cbtservice.Service(nil),
 			}
 
 			s.runDataPath()

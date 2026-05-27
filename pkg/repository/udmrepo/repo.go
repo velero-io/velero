@@ -77,15 +77,19 @@ type AdvancedFeatureInfo struct {
 }
 
 type ObjectMetadata struct {
-	ID   ID
-	Type int // OBJECT_DATA_TYPE_*
-	Size int64
+	ID          ID
+	Name        string
+	Type        int // OBJECT_DATA_TYPE_*
+	Size        int64
+	ModTime     time.Time
+	Permissions int
+	UserID      uint32
+	GroupID     uint32
 }
 
 type Metadata struct {
-	SubObjects   []ObjectMetadata // For dir metadata only, the sub objects in this dir.
-	ExtraDataLen int              // Extra data associated to this metadata.
-	ExtraData    []byte
+	SubObjects []ObjectMetadata
+	Summary    string
 }
 
 type Snapshot struct {
@@ -94,7 +98,7 @@ type Snapshot struct {
 	StartTime   time.Time
 	EndTime     time.Time
 	Tags        map[string]string
-	RootObject  ID
+	RootObject  ObjectMetadata
 }
 
 // BackupRepoService is used to initialize, open or maintain a backup repository
@@ -176,6 +180,9 @@ type BackupRepo interface {
 
 	// DeleteSnapshot deletes a repo snapshot
 	DeleteSnapshot(ctx context.Context, id ID) error
+
+	// ListSnapshot lists all snapshots in repo for the given source
+	ListSnapshot(ctx context.Context, source string) ([]Snapshot, error)
 
 	// Close closes the backup repository
 	Close(ctx context.Context) error

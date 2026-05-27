@@ -25,7 +25,7 @@ When naming your plugin, keep in mind that the name needs to conform to these ru
 - example-with-dash.io/azure
 ```
 
-You will need to give your plugin(s) a name when registering them by calling the appropriate `RegisterX` function: <https://github.com/vmware-tanzu/velero/blob/0e0f357cef7cf15d4c1d291d3caafff2eeb69c1e/pkg/plugin/framework/server.go#L42-L60>
+You will need to give your plugin(s) a name when registering them by calling the appropriate `RegisterX` function: <https://github.com/velero-io/velero/blob/0e0f357cef7cf15d4c1d291d3caafff2eeb69c1e/pkg/plugin/framework/server.go#L42-L60>
 
 ## Plugin Kinds
 
@@ -89,6 +89,6 @@ Once parsed into a `[]string`, the features can then be registered using the `Ne
 
 Velero adds the `LD_LIBRARY_PATH` into the list of environment variables to provide the convenience for plugins that requires C libraries/extensions in the runtime.
 
-[1]: https://github.com/vmware-tanzu/velero-plugin-example
-[2]: https://github.com/vmware-tanzu/velero/blob/v1.2.0/pkg/plugin/logger.go
-[3]: https://github.com/vmware-tanzu/velero/blob/v1.2.0/pkg/restore/restic_restore_action.go
+[1]: https://github.com/velero-io/velero-plugin-example
+[2]: https://github.com/velero-io/velero/blob/v1.2.0/pkg/plugin/logger.go
+[3]: https://github.com/velero-io/velero/blob/v1.2.0/pkg/restore/restic_restore_action.go

@@ -14,7 +14,7 @@ If you are running a build on Ubuntu you will need the following packages:
 
 
 # Local Development
-1. Clone down your own fork, or clone the main repo `git clone https://github.com/vmware-tanzu/velero` and add your own remote.
+1. Clone down your own fork, or clone the main repo `git clone https://github.com/velero-io/velero` and add your own remote.
 1. `cd velero/site`
 1. Serve the site and watch for markup/sass changes `hugo serve`.
 1. View your website at http://127.0.0.1:1313/

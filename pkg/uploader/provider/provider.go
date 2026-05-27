@@ -29,6 +29,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
 )
 
@@ -36,6 +37,11 @@ const restoreProgressCheckInterval = 10 * time.Second
 const backupProgressCheckInterval = 10 * time.Second
 
 var ErrorCanceled error = errors.New("uploader is canceled")
+
+type CBTParam struct {
+	Source  cbtservice.SourceInfo
+	Service cbtservice.Service
+}
 
 // Provider which is designed for one pod volume to do the backup or restore
 type Provider interface {
@@ -48,6 +54,7 @@ type Provider interface {
 		tags map[string]string,
 		forceFull bool,
 		parentSnapshot string,
+		cbtParam CBTParam,
 		volMode uploader.PersistentVolumeMode,
 		uploaderCfg map[string]string,
 		updater uploader.ProgressUpdater) (string, bool, int64, int64, error)
@@ -84,9 +91,13 @@ func NewUploaderProvider(
 	if credGetter.FromFile == nil {
 		return nil, errors.New("uninitialized FileStore credential is not supported")
 	}
-	if uploaderType == uploader.KopiaType {
+
+	switch uploaderType {
+	case uploader.KopiaType:
 		return NewKopiaUploaderProvider(requesterType, ctx, credGetter, backupRepo, log)
-	} else {
+	case uploader.BlockType:
+		return NewBlockUploaderProvider(requesterType, ctx, credGetter, backupRepo, log)
+	default:
 		return nil, errors.Errorf("unsupported uploader type %v", uploaderType)
 	}
 }

@@ -82,15 +82,15 @@ Example:
     	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
     	corev1listers "k8s.io/client-go/listers/core/v1"
 
-        velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-        velerov1client "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/typed/velero/v1"
+        velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+        velerov1client "github.com/velero-io/velero/pkg/generated/clientset/versioned/typed/velero/v1"
     )
 
 ## Mocks
 
 We use a package to generate mocks for our interfaces.
 
-Example: if you want to change this mock: https://github.com/vmware-tanzu/velero/blob/v1.16.0/pkg/podvolume/mocks/restorer.go
+Example: if you want to change this mock: https://github.com/velero-io/velero/blob/v1.16.0/pkg/podvolume/mocks/restorer.go
 
 Run:
 

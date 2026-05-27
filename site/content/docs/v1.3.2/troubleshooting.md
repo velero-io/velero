@@ -117,7 +117,7 @@ Now, visiting http://localhost:8085/metrics on a browser should show the metrics
 
 [1]: debugging-restores.md
 [2]: debugging-install.md
-[4]: https://github.com/vmware-tanzu/velero/issues
+[4]: https://github.com/velero-io/velero/issues
 [5]: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 [6]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero
 [7]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero/values.yaml#L44

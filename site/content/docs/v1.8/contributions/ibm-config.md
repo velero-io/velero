@@ -14,9 +14,9 @@ To set up IBM Cloud Object Storage (COS) as Velero's destination, you:
 
 ## Download Velero
 
-1. Download the [latest official release's](https://github.com/vmware-tanzu/velero/releases) tarball for your client platform.
+1. Download the [latest official release's](https://github.com/velero-io/velero/releases) tarball for your client platform.
 
-    _We strongly recommend that you use an [official release](https://github.com/vmware-tanzu/velero/releases) of
+    _We strongly recommend that you use an [official release](https://github.com/velero-io/velero/releases) of
 Velero. The tarballs for each release contain the `velero` command-line client. The code in the main branch
 of the Velero repository is under active development and is not guaranteed to be stable!_
 

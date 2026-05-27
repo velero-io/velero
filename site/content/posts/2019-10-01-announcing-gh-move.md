@@ -16,7 +16,7 @@ We are now part of a brand new GitHub organization: [VMware Tanzu][1]. VMware Ta
 
 ## The new Velero
 
-The new Velero repository can now be found at [github.com/vmware-tanzu/velero](https://github.com/vmware-tanzu/velero). Past issues, pull requests, commits, contributors, etc., have all been moved to this repo.
+The new Velero repository can now be found at [github.com/velero-io/velero](https://github.com/velero-io/velero). Past issues, pull requests, commits, contributors, etc., have all been moved to this repo.
 
 The next Velero release, version 1.2, will be built out of this new repository and is slated to come out at the end of October. The main [set of changes][5] for version 1.2 is the restructuring around how we will be handling all Object Store and Volume Snapshotter plugins. Previously, Velero included both types of plugins for AWS, Microsoft Azure, and Google Cloud Platform (GCP) in-tree. Beginning with Velero 1.2, these plugins will be moved out of tree and installed like any other plugin.
 
@@ -43,4 +43,4 @@ As always, we welcome feedback and participation in the development of Velero. A
 [2]: https://blogs.vmware.com/cloudnative/2019/10/01/open-source-in-vmware-tanzu/
 [3]: ../docs/main/supported-providers
 [4]: https://velero.io/docs/main/
-[5]: https://github.com/vmware-tanzu/velero/issues#workspaces/velero-5c59c15e39d47b774b5864e3/board?milestones=v1.2%232019-10-31&filterLogic=any&repos=99143276&showPipelineDescriptions=false
+[5]: https://github.com/velero-io/velero/issues#workspaces/velero-5c59c15e39d47b774b5864e3/board?milestones=v1.2%232019-10-31&filterLogic=any&repos=99143276&showPipelineDescriptions=false

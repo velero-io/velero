@@ -7,7 +7,7 @@ image: /img/posts/csi-announce-blog.jpg
 tags: ['Velero Team', 'Ashish Amarnath']
 ---
 
-In the recent [1.4 release of Velero](https://github.com/vmware-tanzu/velero/releases), we announced a new feature of supporting CSI snapshotting using the [Kubernetes CSI Snapshot Beta APIs](https://kubernetes.io/docs/concepts/storage/volume-snapshots/).
+In the recent [1.4 release of Velero](https://github.com/velero-io/velero/releases), we announced a new feature of supporting CSI snapshotting using the [Kubernetes CSI Snapshot Beta APIs](https://kubernetes.io/docs/concepts/storage/volume-snapshots/).
 With this capability of CSI volume snapshotting, Velero can now support any volume provider that has a CSI driver with snapshotting capability, without requiring a Velero-specific volume snapshotter plugin to be available.
 
 This post has the necessary instructions for you to start using this feature.
@@ -43,7 +43,7 @@ This script will deploy the following CSI components, CRDs, and necessary RBAC:
 
 The CSI volume snapshot capability is currently, as of Velero 1.4, a beta feature behind the `EnableCSI` feature flag and is not enabled by default.
 
-Following instructions from our [docs website](https://velero.io/docs/csi/), install Velero with the [velero-plugin-for-csi](https://github.com/vmware-tanzu/velero-plugin-for-csi) and using the Azure Blob Store as our BackupStorageLocation. Please refer to our [velero-plugin-for-microsoft-azure documentation](https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure) for instructions on setting up the BackupStorageLocation. Please note that the BackupStorageLocation should be set up before installing Velero.
+Following instructions from our [docs website](https://velero.io/docs/csi/), install Velero with the [velero-plugin-for-csi](https://github.com/vmware-tanzu/velero-plugin-for-csi) and using the Azure Blob Store as our BackupStorageLocation. Please refer to our [velero-plugin-for-microsoft-azure documentation](https://github.com/velero-io/velero-plugin-for-microsoft-azure) for instructions on setting up the BackupStorageLocation. Please note that the BackupStorageLocation should be set up before installing Velero.
 
 Install Velero by running the below command
 

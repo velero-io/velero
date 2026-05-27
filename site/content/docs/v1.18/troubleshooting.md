@@ -235,12 +235,12 @@ If the ownership conflict error(`maintenance must be run by designated user`) al
 Velero doesn't handle the conflict by design.
 To resolve it, please use Kopia maintenance CLI to set the ownership correctly, e.g. `kopia maintenance set --owner=default@default`.
 
-Please refer to [Issue 9007](https://github.com/vmware-tanzu/velero/issues/9007) for more information.
+Please refer to [Issue 9007](https://github.com/velero-io/velero/issues/9007) for more information.
 
 [1]: debugging-restores.md
 [2]: debugging-install.md
 [3]: file-system-backup.md
-[4]: https://github.com/vmware-tanzu/velero/issues
+[4]: https://github.com/velero-io/velero/issues
 [5]: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 [6]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero
 [7]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero/values.yaml#L44

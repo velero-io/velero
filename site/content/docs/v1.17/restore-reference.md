@@ -217,10 +217,10 @@ data:
 
 Velero by default removes PVC's `volume.kubernetes.io/selected-node` annotation during restore, so that the restored PVC could be provisioned appropriately according to ```WaitForFirstConsumer``` rules, storage topologies and the restored pod's schedule result, etc.  
 
-For more information of how this selected-node annotation matters to PVC restore, see issue https://github.com/vmware-tanzu/velero/issues/9053.
+For more information of how this selected-node annotation matters to PVC restore, see issue https://github.com/velero-io/velero/issues/9053.
 
 As an expectation, when you provide the selected-node configuration, Velero sets the annotation to the node in the configuration, if the node doesn't exist in the cluster then the annotation will also be removed.  
-Note: This feature is under deprecation as of Velero 1.15, following Velero deprecation policy. This feature is primarily used to remedy some problems in old Kubernetes versions as described [here](https://github.com/vmware-tanzu/velero/pull/2377). It may not work with the new features of Kubernetes and Velero. For more information, see issue https://github.com/vmware-tanzu/velero/issues/9053 for more information.  
+Note: This feature is under deprecation as of Velero 1.15, following Velero deprecation policy. This feature is primarily used to remedy some problems in old Kubernetes versions as described [here](https://github.com/velero-io/velero/pull/2377). It may not work with the new features of Kubernetes and Velero. For more information, see issue https://github.com/velero-io/velero/issues/9053 for more information.  
 To configure a selected-node, create a config map in the Velero namespace like the following:
 
 ```yaml

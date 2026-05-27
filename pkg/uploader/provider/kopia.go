@@ -36,9 +36,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/service"
 )
 
-// BackupFunc mainly used to make testing more convenient
-var BackupFunc = kopia.Backup
-var RestoreFunc = kopia.Restore
+var kopiaBackupFunc = kopia.Backup
+var kopiaRestoreFunc = kopia.Restore
 var BackupRepoServiceCreateFunc = service.Create
 
 // kopiaProvider recorded info related with kopiaProvider
@@ -118,6 +117,7 @@ func (kp *kopiaProvider) RunBackup(
 	tags map[string]string,
 	forceFull bool,
 	parentSnapshot string,
+	_ CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (string, bool, int64, int64, error) {
@@ -165,7 +165,7 @@ func (kp *kopiaProvider) RunBackup(
 		uploaderCfg[kopia.UploaderConfigMultipartKey] = "true"
 	}
 
-	snapshotInfo, _, err := BackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, uploaderCfg, tags, log)
+	snapshotInfo, _, err := kopiaBackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, uploaderCfg, tags, log)
 	if err != nil {
 		snapshotID := ""
 		if snapshotInfo != nil {
@@ -233,7 +233,7 @@ func (kp *kopiaProvider) RunRestore(
 	// We use the cancel channel to control the restore cancel, so don't pass a context with cancel to Kopia restore.
 	// Otherwise, Kopia restore will not response to the cancel control but return an arbitrary error.
 	// Kopia restore cancel is not designed as well as Kopia backup which uses the context to control backup cancel all the way.
-	size, fileCount, err := RestoreFunc(context.Background(), repoWriter, progress, snapshotID, volumePath, volMode, uploaderCfg, log, restoreCancel)
+	size, fileCount, err := kopiaRestoreFunc(context.Background(), repoWriter, progress, snapshotID, volumePath, volMode, uploaderCfg, log, restoreCancel)
 
 	if err != nil {
 		return 0, errors.Wrapf(err, "Failed to run kopia restore")

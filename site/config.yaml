@@ -7,8 +7,8 @@ frontmatter:
   date: [":filename", ":default"]
 params:
   author: Velero Authors
-  vm_logo: vm-logo.png
   logo: Velero.svg
+  cncf_logo: cncf-white.svg
   hero:
     backgroundColor: med-blue
   versioning: true
@@ -47,14 +47,18 @@ params:
     - v0.5.0
     - v0.4.0
     - v0.3.0
-  gh_repo: https://github.com/vmware-tanzu/velero
+  gh_repo: https://github.com/velero-io/velero
   footer:
     title: Getting Started
     content: To help you get started, see the documentation.
     cta_title: ''
     cta_url: /docs
     cta_text: Documentation
-    vm_link: http://vmware.github.io/
+    cncf_link: https://www.cncf.io/
+    # Set to "" once Velero is promoted to incubating or graduated.
+    cncf_status: sandbox
+    lf_policies_link: https://lfprojects.org/policies/
+    copyright_holder: Velero a Series of LF Projects, LLC
   footer_social_links:
     - title: Twitter
       fa_icon: fab fa-twitter
@@ -70,7 +74,7 @@ params:
       url: /blog/index.xml
     - title: GitHub
       fa_icon: fab fa-github
-      url: https://github.com/vmware-tanzu/velero
+      url: https://github.com/velero-io/velero
 minify:
   disableCSS: false
   disableHTML: false

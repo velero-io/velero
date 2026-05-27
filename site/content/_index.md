@@ -13,7 +13,7 @@ hero:
     url: /blog/Velero-1.11/
   cta_link2:
     text:  Download Velero
-    url: https://github.com/vmware-tanzu/velero/releases/latest
+    url: https://github.com/velero-io/velero/releases/latest
   promo1:
     icon: /img/disaster-recover-icon.svg
     title: Disaster Recovery
@@ -33,6 +33,6 @@ secondary_ctas:
     content: Learn about Velero and how to protect your Kubernetes resources and volumes.
   cta2:
     title: How Do You Use Velero?
-    url: https://github.com/vmware-tanzu/velero/issues/1327
+    url: https://github.com/velero-io/velero/issues/1327
     content: See how Velero is helping others and tell the world how you use Velero.
 ---

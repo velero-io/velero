@@ -17,15 +17,19 @@ limitations under the License.
 package kopialib
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
+	"github.com/kopia/kopia/snapshot"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -1279,6 +1283,552 @@ func TestIsReady(t *testing.T) {
 			}
 
 			require.Equal(t, tc.expected, ready)
+		})
+	}
+}
+
+type fakeObjectReader struct {
+	*bytes.Reader
+}
+
+func (f *fakeObjectReader) Close() error {
+	return nil
+}
+
+func (f *fakeObjectReader) Length() int64 {
+	return int64(f.Reader.Len())
+}
+
+func TestWriteMetadata(t *testing.T) {
+	testCases := []struct {
+		name            string
+		rawWriter       *repomocks.MockRepositoryWriter
+		rawObjWriter    *repomocks.Writer
+		meta            *udmrepo.Metadata
+		rawWriterRetErr error
+		expectedErr     string
+	}{
+		{
+			name:        "raw writer is nil",
+			expectedErr: "repo writer is closed or not open",
+		},
+		{
+			name:      "invalid object id",
+			rawWriter: repomocks.NewMockRepositoryWriter(t),
+			meta: &udmrepo.Metadata{
+				SubObjects: []udmrepo.ObjectMetadata{
+					{
+						ID: "fake-id",
+					},
+				},
+			},
+			expectedErr: "error parsing object ID from {fake-id  0 0 0001-01-01 00:00:00 +0000 UTC 0 0 0}: malformed content ID: \"fake-id\": invalid content prefix",
+		},
+		{
+			name:         "write dir manifest fail",
+			rawWriter:    repomocks.NewMockRepositoryWriter(t),
+			rawObjWriter: repomocks.NewWriter(t),
+			meta: &udmrepo.Metadata{
+				SubObjects: []udmrepo.ObjectMetadata{
+					{
+						ID: "I123456",
+					},
+				},
+			},
+			rawWriterRetErr: errors.New("fake-write-error"),
+			expectedErr:     "error writing dir manifest: : unable to encode directory JSON: fake-write-error",
+		},
+		{
+			name:         "succeed",
+			rawWriter:    repomocks.NewMockRepositoryWriter(t),
+			rawObjWriter: repomocks.NewWriter(t),
+			meta: &udmrepo.Metadata{
+				SubObjects: []udmrepo.ObjectMetadata{
+					{
+						ID: "I123456",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawWriter != nil {
+				if tc.rawObjWriter != nil {
+					tc.rawWriter.On("NewObjectWriter", mock.Anything, mock.Anything).Return(tc.rawObjWriter)
+					if tc.rawWriterRetErr != nil {
+						tc.rawObjWriter.On("Write", mock.Anything).Return(0, tc.rawWriterRetErr)
+						tc.rawObjWriter.On("Close").Return(nil)
+					} else {
+						tc.rawObjWriter.On("Write", mock.Anything).Return(10, nil)
+						tc.rawObjWriter.On("Result").Return(object.ID{}, nil)
+						tc.rawObjWriter.On("Close").Return(nil)
+					}
+				}
+				kr.rawWriter = tc.rawWriter
+			}
+
+			_, err := kr.WriteMetadata(t.Context(), tc.meta, udmrepo.ObjectWriteOptions{})
+
+			if tc.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
+		})
+	}
+}
+
+func TestReadMetadata(t *testing.T) {
+	testCases := []struct {
+		name        string
+		rawRepo     *repomocks.MockRepository
+		objectID    udmrepo.ID
+		openErr     error
+		readData    []byte
+		expectedErr string
+		expected    *udmrepo.Metadata
+	}{
+		{
+			name:        "open object fail",
+			rawRepo:     repomocks.NewMockRepository(t),
+			objectID:    "I123456",
+			openErr:     errors.New("fake-open-error"),
+			expectedErr: "error to open metadata object I123456: error to open object: fake-open-error",
+		},
+		{
+			name:        "invalid json",
+			rawRepo:     repomocks.NewMockRepository(t),
+			objectID:    "I123456",
+			readData:    []byte("invalid json"),
+			expectedErr: "unable to parse directory object: invalid character 'i' looking for beginning of value",
+		},
+		{
+			name:     "succeed",
+			rawRepo:  repomocks.NewMockRepository(t),
+			objectID: "I123456",
+			readData: []byte(`{"stream":"kopia:directory","entries":[{"name":"file1","type":"f","mode":"0644","size":100,"uid":1000,"gid":1000,"mtime":"2023-01-01T00:00:00Z","obj":"I123456"}]}`),
+			expected: &udmrepo.Metadata{
+				SubObjects: []udmrepo.ObjectMetadata{
+					{
+						ID:          "I123456",
+						Name:        "file1",
+						Type:        udmrepo.ObjectDataTypeData,
+						Size:        100,
+						ModTime:     time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC).Local(),
+						Permissions: 420,
+						UserID:      1000,
+						GroupID:     1000,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawRepo != nil {
+				if tc.openErr != nil {
+					tc.rawRepo.On("OpenObject", mock.Anything, mock.Anything).Return(nil, tc.openErr)
+				} else {
+					reader := &fakeObjectReader{Reader: bytes.NewReader(tc.readData)}
+					tc.rawRepo.On("OpenObject", mock.Anything, mock.Anything).Return(reader, nil)
+				}
+				kr.rawRepo = tc.rawRepo
+			}
+
+			meta, err := kr.ReadMetadata(t.Context(), tc.objectID)
+
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expected, meta)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
+		})
+	}
+}
+
+func TestSaveSnapshot(t *testing.T) {
+	testCases := []struct {
+		name            string
+		rawWriter       *repomocks.MockRepositoryWriter
+		snap            udmrepo.Snapshot
+		rawWriterRetErr error
+		rawWriterRetID  manifest.ID
+		setWriterMock   bool
+		expectedErr     string
+		expectedID      udmrepo.ID
+	}{
+		{
+			name:        "raw writer is nil",
+			expectedErr: "repo writer is closed or not open",
+		},
+		{
+			name:      "invalid snapshot source",
+			rawWriter: repomocks.NewMockRepositoryWriter(t),
+			snap: udmrepo.Snapshot{
+				Source: "",
+			},
+			expectedErr: "invalid snapshot source",
+		},
+		{
+			name:      "invalid root object id",
+			rawWriter: repomocks.NewMockRepositoryWriter(t),
+			snap: udmrepo.Snapshot{
+				Source:     "fake-source",
+				RootObject: udmrepo.ObjectMetadata{ID: "fake-id"},
+			},
+			expectedErr: "error parsing root object ID fake-id: malformed content ID: \"fake-id\": invalid content prefix",
+		},
+		{
+			name:      "save snapshot fail",
+			rawWriter: repomocks.NewMockRepositoryWriter(t),
+			snap: udmrepo.Snapshot{
+				Source:     "fake-source",
+				RootObject: udmrepo.ObjectMetadata{ID: "I123456"},
+			},
+			rawWriterRetErr: errors.New("fake-save-error"),
+			setWriterMock:   true,
+			expectedErr:     "error saving snapshot: error putting manifest: fake-save-error",
+		},
+		{
+			name:      "succeed",
+			rawWriter: repomocks.NewMockRepositoryWriter(t),
+			snap: udmrepo.Snapshot{
+				Source:     "fake-source",
+				RootObject: udmrepo.ObjectMetadata{ID: "I123456"},
+			},
+			rawWriterRetID: manifest.ID("fake-manifest-id"),
+			setWriterMock:  true,
+			expectedID:     udmrepo.ID("fake-manifest-id"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawWriter != nil {
+				if tc.setWriterMock {
+					tc.rawWriter.On("PutManifest", mock.Anything, mock.Anything, mock.Anything).Return(tc.rawWriterRetID, tc.rawWriterRetErr)
+				}
+				kr.rawWriter = tc.rawWriter
+			}
+
+			id, err := kr.SaveSnapshot(t.Context(), tc.snap)
+
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedID, id)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
+		})
+	}
+}
+
+func TestGetSnapshot(t *testing.T) {
+	expectedTime := time.Now()
+	rawObjID, _ := object.ParseID("I123456")
+
+	mockMani := &snapshot.Manifest{
+		Source:      snapshot.SourceInfo{Path: "fake-source"},
+		Description: "fake-desc",
+		StartTime:   fs.UTCTimestampFromTime(expectedTime),
+		EndTime:     fs.UTCTimestampFromTime(expectedTime.Add(time.Minute)),
+		RootEntry: &snapshot.DirEntry{
+			ObjectID: rawObjID,
+		},
+		Tags: map[string]string{"tag1": "val1"},
+	}
+
+	testCases := []struct {
+		name          string
+		rawRepo       *repomocks.MockRepository
+		snapshotID    udmrepo.ID
+		rawRepoRetErr error
+		setRepoMock   bool
+		expectedErr   string
+		expectedSnap  udmrepo.Snapshot
+	}{
+		{
+			name:          "get snapshot fail",
+			rawRepo:       repomocks.NewMockRepository(t),
+			snapshotID:    udmrepo.ID("fake-id"),
+			rawRepoRetErr: errors.New("fake-get-error"),
+			setRepoMock:   true,
+			expectedErr:   "error getting snapshot manifest: unable to find manifest entries: fake-get-error",
+		},
+		{
+			name:        "succeed",
+			rawRepo:     repomocks.NewMockRepository(t),
+			snapshotID:  udmrepo.ID("fake-id"),
+			setRepoMock: true,
+			expectedSnap: udmrepo.Snapshot{
+				Source:      "fake-source",
+				Description: "fake-desc",
+				StartTime:   mockMani.StartTime.ToTime(),
+				EndTime:     mockMani.EndTime.ToTime(),
+				RootObject: udmrepo.ObjectMetadata{
+					ID:          udmrepo.ID("I123456"),
+					Type:        udmrepo.ObjectDataTypeMetadata,
+					Size:        mockMani.RootEntry.FileSize,
+					ModTime:     mockMani.RootEntry.ModTime.ToTime(),
+					Permissions: int(mockMani.RootEntry.Permissions),
+					UserID:      mockMani.RootEntry.UserID,
+					GroupID:     mockMani.RootEntry.GroupID,
+				},
+				Tags: map[string]string{"tag1": "val1"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawRepo != nil {
+				if tc.setRepoMock {
+					tc.rawRepo.On("GetManifest", mock.Anything, mock.Anything, mock.Anything).Return(&manifest.EntryMetadata{
+						Labels: map[string]string{
+							manifest.TypeLabelKey: snapshot.ManifestType,
+						},
+					}, tc.rawRepoRetErr).Run(func(args mock.Arguments) {
+						if tc.rawRepoRetErr == nil {
+							payload := args.Get(2)
+							if ptr, ok := payload.(*snapshot.Manifest); ok {
+								*ptr = *mockMani
+							} else {
+								b, _ := json.Marshal(mockMani)
+								json.Unmarshal(b, payload)
+							}
+						}
+					})
+				}
+				kr.rawRepo = tc.rawRepo
+			}
+
+			snap, err := kr.GetSnapshot(t.Context(), tc.snapshotID)
+
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedSnap, snap)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
+		})
+	}
+}
+
+func TestDeleteSnapshot(t *testing.T) {
+	expectedTime := time.Now()
+	rawObjID, _ := object.ParseID("I123456")
+
+	mockMani := &snapshot.Manifest{
+		Source:      snapshot.SourceInfo{Path: "fake-source"},
+		Description: "fake-desc",
+		StartTime:   fs.UTCTimestampFromTime(expectedTime),
+		EndTime:     fs.UTCTimestampFromTime(expectedTime.Add(time.Minute)),
+		RootEntry: &snapshot.DirEntry{
+			ObjectID: rawObjID,
+		},
+		Tags: map[string]string{"tag1": "val1"},
+	}
+
+	testCases := []struct {
+		name            string
+		rawRepo         *repomocks.MockRepository
+		rawWriter       *repomocks.MockRepositoryWriter
+		snapshotID      udmrepo.ID
+		rawRepoRetErr   error
+		rawWriterRetErr error
+		setRepoMock     bool
+		setWriterMock   bool
+		expectedErr     string
+	}{
+		{
+			name:          "get snapshot fail",
+			rawRepo:       repomocks.NewMockRepository(t),
+			snapshotID:    udmrepo.ID("fake-id"),
+			rawRepoRetErr: errors.New("fake-get-error"),
+			setRepoMock:   true,
+			expectedErr:   "error getting snapshot: error getting snapshot manifest: unable to find manifest entries: fake-get-error",
+		},
+		{
+			name:            "delete manifest fail",
+			rawRepo:         repomocks.NewMockRepository(t),
+			rawWriter:       repomocks.NewMockRepositoryWriter(t),
+			snapshotID:      udmrepo.ID("fake-id"),
+			rawWriterRetErr: errors.New("fake-delete-error"),
+			setRepoMock:     true,
+			setWriterMock:   true,
+			expectedErr:     "error to delete manifest: fake-delete-error",
+		},
+		{
+			name:          "succeed",
+			rawRepo:       repomocks.NewMockRepository(t),
+			rawWriter:     repomocks.NewMockRepositoryWriter(t),
+			snapshotID:    udmrepo.ID("fake-id"),
+			setRepoMock:   true,
+			setWriterMock: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawRepo != nil {
+				if tc.setRepoMock {
+					tc.rawRepo.On("GetManifest", mock.Anything, mock.Anything, mock.Anything).Return(&manifest.EntryMetadata{
+						Labels: map[string]string{
+							manifest.TypeLabelKey: snapshot.ManifestType,
+						},
+					}, tc.rawRepoRetErr).Run(func(args mock.Arguments) {
+						if tc.rawRepoRetErr == nil {
+							payload := args.Get(2)
+							if ptr, ok := payload.(*snapshot.Manifest); ok {
+								*ptr = *mockMani
+							} else {
+								b, _ := json.Marshal(mockMani)
+								json.Unmarshal(b, payload)
+							}
+						}
+					})
+				}
+				kr.rawRepo = tc.rawRepo
+			}
+
+			if tc.rawWriter != nil {
+				if tc.setWriterMock {
+					tc.rawWriter.On("DeleteManifest", mock.Anything, mock.Anything).Return(tc.rawWriterRetErr)
+				}
+				kr.rawWriter = tc.rawWriter
+			}
+
+			err := kr.DeleteSnapshot(t.Context(), tc.snapshotID)
+
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
+		})
+	}
+}
+
+func TestListSnapshot(t *testing.T) {
+	expectedTime := time.Now()
+	rawObjID, _ := object.ParseID("I123456")
+
+	mockMani := &snapshot.Manifest{
+		Source:      snapshot.SourceInfo{Path: "fake-source"},
+		Description: "fake-desc",
+		StartTime:   fs.UTCTimestampFromTime(expectedTime),
+		EndTime:     fs.UTCTimestampFromTime(expectedTime.Add(time.Minute)),
+		RootEntry: &snapshot.DirEntry{
+			ObjectID:    rawObjID,
+			FileSize:    100,
+			ModTime:     fs.UTCTimestampFromTime(expectedTime),
+			Permissions: 0o644,
+			UserID:      1000,
+			GroupID:     1000,
+		},
+		Tags: map[string]string{"tag1": "val1"},
+	}
+
+	testCases := []struct {
+		name          string
+		rawRepo       *repomocks.MockRepository
+		source        string
+		findRetErr    error
+		setRepoMock   bool
+		expectedErr   string
+		expectedSnaps []udmrepo.Snapshot
+	}{
+		{
+			name:        "find manifest fail",
+			rawRepo:     repomocks.NewMockRepository(t),
+			source:      "fake-source",
+			findRetErr:  errors.New("fake-find-error"),
+			setRepoMock: true,
+			expectedErr: "error listing snapshot manifest for source fake-source: unable to find manifest entries: fake-find-error",
+		},
+		{
+			name:        "succeed",
+			rawRepo:     repomocks.NewMockRepository(t),
+			source:      "fake-source",
+			setRepoMock: true,
+			expectedSnaps: []udmrepo.Snapshot{
+				{
+					Source:      "fake-source",
+					Description: "fake-desc",
+					StartTime:   mockMani.StartTime.ToTime(),
+					EndTime:     mockMani.EndTime.ToTime(),
+					RootObject: udmrepo.ObjectMetadata{
+						ID:          udmrepo.ID("I123456"),
+						Type:        udmrepo.ObjectDataTypeMetadata,
+						Size:        mockMani.RootEntry.FileSize,
+						ModTime:     mockMani.RootEntry.ModTime.ToTime(),
+						Permissions: int(mockMani.RootEntry.Permissions),
+						UserID:      mockMani.RootEntry.UserID,
+						GroupID:     mockMani.RootEntry.GroupID,
+					},
+					Tags: map[string]string{"tag1": "val1"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kr := &kopiaRepository{}
+
+			if tc.rawRepo != nil {
+				if tc.setRepoMock {
+					tc.rawRepo.On("FindManifests", mock.Anything, mock.Anything).Return([]*manifest.EntryMetadata{
+						{
+							ID: "fake-id",
+							Labels: map[string]string{
+								manifest.TypeLabelKey: snapshot.ManifestType,
+								"hostname":            udmrepo.GetRepoDomain(),
+								"username":            udmrepo.GetRepoUser(),
+								"path":                tc.source,
+							},
+						},
+					}, tc.findRetErr)
+
+					tc.rawRepo.On("GetManifest", mock.Anything, mock.Anything, mock.Anything).Return(&manifest.EntryMetadata{
+						Labels: map[string]string{
+							manifest.TypeLabelKey: snapshot.ManifestType,
+						},
+					}, nil).Run(func(args mock.Arguments) {
+						payload := args.Get(2)
+						if ptr, ok := payload.(*snapshot.Manifest); ok {
+							*ptr = *mockMani
+						} else {
+							b, _ := json.Marshal(mockMani)
+							json.Unmarshal(b, payload)
+						}
+					}).Maybe()
+				}
+				kr.rawRepo = tc.rawRepo
+			}
+
+			snaps, err := kr.ListSnapshot(t.Context(), tc.source)
+
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedSnaps, snaps)
+			} else {
+				assert.EqualError(t, err, tc.expectedErr)
+			}
 		})
 	}
 }

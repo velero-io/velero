@@ -24,7 +24,7 @@ layout: docs
 ```bash
 mkdir $HOME/go
 export GOPATH=$HOME/go
-go get github.com/vmware-tanzu/velero
+go get github.com/velero-io/velero
 ```
 
 Where `go` is your [import path][4] for Go.
@@ -32,7 +32,7 @@ Where `go` is your [import path][4] for Go.
 For Go development, it is recommended to add the Go import path (`$HOME/go` in this example) to your path.
 
 ### Option 2) Release archive
-Download the archive named `Source code` from the [release page][22] and extract it in your Go import path as `src/github.com/vmware-tanzu/velero`.
+Download the archive named `Source code` from the [release page][22] and extract it in your Go import path as `src/github.com/velero-io/velero`.
 
 Note that the Makefile targets assume building from a git repository. When building from an archive, you will be limited to the `go build` commands described below.
 
@@ -235,13 +235,13 @@ If you need to add or update the vendored dependencies, see [Vendoring dependenc
 [3]: #build
 [4]: https://blog.golang.org/organizing-go-code
 [5]: https://golang.org/doc/install
-[6]: https://github.com/vmware-tanzu/velero/tree/main/examples
+[6]: https://github.com/velero-io/velero/tree/main/examples
 [7]: #run
 [8]: config-definition.md
 [10]: #vendoring-dependencies
 [11]: vendoring-dependencies.md
 [12]: #test
-[13]: https://github.com/vmware-tanzu/velero/blob/main/hack/generate-proto.sh
+[13]: https://github.com/velero-io/velero/blob/main/hack/generate-proto.sh
 [14]: https://grpc.io/docs/quickstart/go.html#install-protocol-buffers-v3
 [15]: https://docs.aws.amazon.com/cli/latest/topic/config-vars.html#the-shared-credentials-file
 [16]: https://cloud.google.com/docs/authentication/getting-started#setting_the_environment_variable
@@ -250,4 +250,4 @@ If you need to add or update the vendored dependencies, see [Vendoring dependenc
 [19]: ../examples/README.md
 [20]: api-types/backupstoragelocation.md
 [21]: api-types/volumesnapshotlocation.md
-[22]: https://github.com/vmware-tanzu/velero/releases
+[22]: https://github.com/velero-io/velero/releases
