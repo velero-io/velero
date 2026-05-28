@@ -354,11 +354,11 @@ If you get an error like `complete:13: command not found: compdef`, then add the
   compinit
   ```
 
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: namespace.md
 [3]: restic.md
 [4]: on-premises.md
 [6]: velero-install.md#usage
 [9]: self-signed-certificates.md
 [10]: csi.md
-[11]: https://github.com/vmware-tanzu/velero/blob/v1.8.0/pkg/apis/velero/v1/constants.go
+[11]: https://github.com/velero-io/velero/blob/v1.8.0/pkg/apis/velero/v1/constants.go

@@ -241,7 +241,7 @@ data:
   <old-node-name>: <new-node-name>
 ```
 
-Note: This feature is deprecated as of Velero 1.15, following Velero deprecation policy. This feature is primarily used to remedy some problems in old Kubernetes versions as described [here](https://github.com/vmware-tanzu/velero/pull/2377). It may not work with the new features of Kubernetes and Velero. E.g., it doesn't work for PVCs with ```WaitForFirstConsumer``` as the ```volumeBindingMode```. These kind of PVCs won't be bound until the pod is scheduled and the scheduler will overwrite the selected-node annotation to the node where the pod is scheduled to.  
+Note: This feature is deprecated as of Velero 1.15, following Velero deprecation policy. This feature is primarily used to remedy some problems in old Kubernetes versions as described [here](https://github.com/velero-io/velero/pull/2377). It may not work with the new features of Kubernetes and Velero. E.g., it doesn't work for PVCs with ```WaitForFirstConsumer``` as the ```volumeBindingMode```. These kind of PVCs won't be bound until the pod is scheduled and the scheduler will overwrite the selected-node annotation to the node where the pod is scheduled to.  
 
 ## Restoring into a different namespace
 

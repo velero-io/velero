@@ -306,8 +306,8 @@ velero snapshot-location set <vsl-name> \
 
 [1]: api-types/backupstoragelocation.md
 [2]: api-types/volumesnapshotlocation.md
-[3]: https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure/blob/main/volumesnapshotlocation.md
-[4]: https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure/blob/main/backupstoragelocation.md
+[3]: https://github.com/velero-io/velero-plugin-for-microsoft-azure/blob/main/volumesnapshotlocation.md
+[4]: https://github.com/velero-io/velero-plugin-for-microsoft-azure/blob/main/backupstoragelocation.md
 [5]: /plugins
 [6]: overview-plugins.md
 [7]: https://kubernetes.io/docs/concepts/configuration/secret/

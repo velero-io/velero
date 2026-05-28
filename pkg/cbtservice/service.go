@@ -16,7 +16,9 @@ limitations under the License.
 
 package cbtservice
 
-import "context"
+import (
+	"context"
+)
 
 // Range defines the range of a change
 type Range struct {

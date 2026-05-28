@@ -176,5 +176,5 @@ Maintenance jobs will not run for backup repositories whose backup storage locat
 [1]: velero-install.md#usage
 [2]: node-agent-concurrency.md
 [3]: backup-repository-configuration.md#full-maintenance-interval-customization
-[4]: https://github.com/vmware-tanzu/velero/blob/d5a2e7e6b9512e8ba52ec269ed5ce9a0fa23548c/pkg/util/third_party.go#L19-L21
-[5]: https://github.com/vmware-tanzu/velero/blob/d5a2e7e6b9512e8ba52ec269ed5ce9a0fa23548c/pkg/util/third_party.go#L23-L25
+[4]: https://github.com/velero-io/velero/blob/d5a2e7e6b9512e8ba52ec269ed5ce9a0fa23548c/pkg/util/third_party.go#L19-L21
+[5]: https://github.com/velero-io/velero/blob/d5a2e7e6b9512e8ba52ec269ed5ce9a0fa23548c/pkg/util/third_party.go#L23-L25

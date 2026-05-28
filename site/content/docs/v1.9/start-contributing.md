@@ -16,7 +16,7 @@ To make a design pull request, you can copy the template found in the `design/_t
 
 ## Finding your way around
 
-You may join the Velero community and contribute in many different ways, including helping us design or test new features. For any significant feature we consider adding, we start with a design document. You may find a list of in progress new designs here: https://github.com/vmware-tanzu/velero/pulls?q=is%3Aopen+is%3Apr+label%3ADesign. Feel free to review and help us with your input.
+You may join the Velero community and contribute in many different ways, including helping us design or test new features. For any significant feature we consider adding, we start with a design document. You may find a list of in progress new designs here: https://github.com/velero-io/velero/pulls?q=is%3Aopen+is%3Apr+label%3ADesign. Feel free to review and help us with your input.
 
 You can also vote on issues using :+1: and :-1:, as explained in our [Feature enhancement request][3] and [Bug issue][4] templates. This will help us quantify importance and prioritize issues.
 
@@ -28,7 +28,7 @@ Please browse our list of resources, including a playlist of past online communi
 
 If you are ready to jump in and test, add code, or help with documentation, please use the navigation on the left under `Contribute`.
 
-[1]: https://github.com/vmware-tanzu/velero/blob/v1.9.0/CODE_OF_CONDUCT.md
-[2]: https://github.com/vmware-tanzu/velero/blob/v1.9.0/CONTRIBUTING.md
-[3]: https://github.com/vmware-tanzu/velero/blob/v1.9.0/.github/ISSUE_TEMPLATE/feature-enhancement-request.md
-[4]: https://github.com/vmware-tanzu/velero/blob/v1.9.0/.github/ISSUE_TEMPLATE/bug_report.md
+[1]: https://github.com/velero-io/velero/blob/v1.9.0/CODE_OF_CONDUCT.md
+[2]: https://github.com/velero-io/velero/blob/v1.9.0/CONTRIBUTING.md
+[3]: https://github.com/velero-io/velero/blob/v1.9.0/.github/ISSUE_TEMPLATE/feature-enhancement-request.md
+[4]: https://github.com/velero-io/velero/blob/v1.9.0/.github/ISSUE_TEMPLATE/bug_report.md

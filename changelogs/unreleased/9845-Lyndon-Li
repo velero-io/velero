@@ -1,0 +1,1 @@
+Fix issue #9823, add incremental aware object writer for block data mover

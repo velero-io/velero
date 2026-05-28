@@ -217,7 +217,7 @@ data:
 
 Velero removes PVC's `volume.kubernetes.io/selected-node` annotation during restore, so that the restored PVC could be provisioned appropriately according to ```WaitForFirstConsumer``` rules, storage topologies and the restored pod's schedule result, etc.  
 
-For more information of how this selected-node annotation matters to PVC restore, see issue https://github.com/vmware-tanzu/velero/issues/9053.  
+For more information of how this selected-node annotation matters to PVC restore, see issue https://github.com/velero-io/velero/issues/9053.  
 
 ## Restoring into a different namespace
 

@@ -121,7 +121,7 @@ kubectl create cm node-agent-config -n velero --from-file=node-agent-config.json
 ### Pod Labels
 Add customized labels for data mover pods to support third-party integrations and environment-specific requirements.
 
-If `podLabels` is configured, it supersedes Velero's [in-tree third-party labels](https://github.com/vmware-tanzu/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L19-L21).
+If `podLabels` is configured, it supersedes Velero's [in-tree third-party labels](https://github.com/velero-io/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L19-L21).
 If `podLabels` is not configured, Velero uses the in-tree third-party labels for compatibility with common cloud providers and networking solutions.
 
 The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods.
@@ -142,7 +142,7 @@ The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVo
 ### Pod Annotations
 Add customized annotations for data mover pods to support third-party integrations and pod-level configuration.
 
-If `podAnnotations` is configured, it supersedes Velero's [in-tree third-party annotations](https://github.com/vmware-tanzu/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L23-L25).
+If `podAnnotations` is configured, it supersedes Velero's [in-tree third-party annotations](https://github.com/velero-io/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L23-L25).
 If `podAnnotations` is not configured, Velero uses the in-tree third-party annotations for compatibility with common cloud providers and networking solutions.
 
 The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods.

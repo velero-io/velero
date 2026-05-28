@@ -11,4 +11,4 @@ Read more about how to use and create plugins [in our docs][1], a detailed list 
 
 [1]: https://velero.io/docs
 [2]: https://velero.io/docs/supported-providers/
-[3]: https://github.com/vmware-tanzu/velero-plugin-example
+[3]: https://github.com/velero-io/velero-plugin-example

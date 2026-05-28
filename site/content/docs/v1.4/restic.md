@@ -431,7 +431,7 @@ The [velero-volume-controller][10] written by duyanghao helps to solve this prob
 
 [1]: https://github.com/restic/restic
 [2]: customize-installation.md#enable-restic-integration
-[3]: https://github.com/vmware-tanzu/velero/releases/
+[3]: https://github.com/velero-io/velero/releases/
 [4]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [5]: http://restic.readthedocs.io/en/latest/100_references.html#terminology
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation

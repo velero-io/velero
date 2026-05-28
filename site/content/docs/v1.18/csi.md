@@ -8,7 +8,7 @@ Integrating Container Storage Interface (CSI) snapshot support into Velero enabl
 By supporting CSI snapshot APIs, Velero can support any volume provider that has a CSI driver, without requiring a Velero-specific plugin to be available. This page gives an overview of how to add support for CSI snapshots to Velero.
 
 ## Notice
-From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/vmware-tanzu/velero` repository.
+From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/velero-io/velero` repository.
 The reasons to merge the CSI plugin are:
 * The VolumeSnapshot data mover depends on the CSI plugin, it's reasonabe to integrate them.
 * This change reduces the Velero deploying complexity.
@@ -130,7 +130,7 @@ The `DeletionPolicy` on the VolumeSnapshotContent will be the same as the `Delet
 
 When the Velero backup expires, the VolumeSnapshot objects will be deleted and the VolumeSnapshotContent objects will be updated to have a `DeletionPolicy` of `Delete`, to free space on the storage system.
 
-**Note:** The AWS, Microsoft Azure, and Google Cloud Platform (GCP) Velero plugins version 1.4 and later are able to snapshot and restore persistent volumes provisioned by a CSI driver via the APIs of the cloud provider, without having to install Velero CSI plugins. See the [AWS](https://github.com/vmware-tanzu/velero-plugin-for-aws), [Microsoft Azure](https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure), and [Google Cloud Platform (GCP)](https://github.com/vmware-tanzu/velero-plugin-for-gcp) Velero plugin repo for more information on supported CSI drivers.
+**Note:** The AWS, Microsoft Azure, and Google Cloud Platform (GCP) Velero plugins version 1.4 and later are able to snapshot and restore persistent volumes provisioned by a CSI driver via the APIs of the cloud provider, without having to install Velero CSI plugins. See the [AWS](https://github.com/velero-io/velero-plugin-for-aws), [Microsoft Azure](https://github.com/velero-io/velero-plugin-for-microsoft-azure), and [Google Cloud Platform (GCP)](https://github.com/velero-io/velero-plugin-for-gcp) Velero plugin repo for more information on supported CSI drivers.
 From v1.14, no need to install the CSI plugin, because it is integrated into the Velero code base.
 
 [1]: customize-installation.md#enable-server-side-features

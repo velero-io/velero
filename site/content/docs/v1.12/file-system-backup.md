@@ -506,7 +506,7 @@ which is used to backup pod volume data
 the backup storage  
 
 For more details, refer to [kopia architecture](https://kopia.io/docs/advanced/architecture/) and 
-Velero's [Unified Repository design](https://github.com/vmware-tanzu/velero/pull/4926)
+Velero's [Unified Repository design](https://github.com/velero-io/velero/pull/4926)
 
 ### Custom resource and controllers
 Velero has three custom resource definitions and associated controllers:
@@ -602,7 +602,7 @@ To solve this, a controller was written by Thomann Bits&Beats: [velero-pvc-watch
 [1]: https://github.com/restic/restic
 [2]: https://github.com/kopia/kopia
 [3]: customize-installation.md#enable-restic-integration
-[4]: https://github.com/vmware-tanzu/velero/releases/
+[4]: https://github.com/velero-io/velero/releases/
 [5]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation
 [7]: https://github.com/bitsbeats/velero-pvc-watcher
