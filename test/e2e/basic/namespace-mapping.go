@@ -21,8 +21,8 @@ type NamespaceMapping struct {
 
 const NamespaceBaseName string = "ns-mp-"
 
-var OneNamespaceMappingResticTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 1, UseVolumeSnapshots: false}})
-var MultiNamespacesMappingResticTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 2, UseVolumeSnapshots: false}})
+var OneNamespaceMappingFSBackupTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 1, UseVolumeSnapshots: false}})
+var MultiNamespacesMappingFSBackupTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 2, UseVolumeSnapshots: false}})
 var OneNamespaceMappingSnapshotTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 1, UseVolumeSnapshots: true}})
 var MultiNamespacesMappingSnapshotTest func() = TestFunc(&NamespaceMapping{TestCase: TestCase{NamespacesTotal: 2, UseVolumeSnapshots: true}})
 
@@ -37,7 +37,7 @@ func (n *NamespaceMapping) Init() error {
 	if n.VeleroCfg.CloudProvider == "kind" {
 		n.kibishiiData = &KibishiiData{Levels: 0, DirsPerLevel: 0, FilesPerLevel: 0, FileLength: 0, BlockSize: 0, PassNum: 0, ExpectedNodes: 2}
 	}
-	backupType := "restic"
+	backupType := "fs-backup"
 	if n.UseVolumeSnapshots {
 		backupType = "snapshot"
 	}

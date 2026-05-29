@@ -20,4 +20,4 @@ jobs:
           days-before-pr-close: -1
           # Only issues made after Feb 09 2021.
           start-date: "2021-09-02T00:00:00"
-          exempt-issue-labels: "Epic,Area/CLI,Area/Cloud/AWS,Area/Cloud/Azure,Area/Cloud/GCP,Area/Cloud/vSphere,Area/CSI,Area/Design,Area/Documentation,Area/Plugins,Bug,Enhancement/User,kind/requirement,kind/refactor,kind/tech-debt,limitation,Needs investigation,Needs triage,Needs Product,P0 - Hair on fire,P1 - Important,P2 - Long-term important,P3 - Wouldn't it be nice if...,Product Requirements,Restic - GA,Restic,release-blocker,Security,backlog"
+          exempt-issue-labels: "Epic,Area/CLI,Area/Cloud/AWS,Area/Cloud/Azure,Area/Cloud/GCP,Area/Cloud/vSphere,Area/CSI,Area/Design,Area/Documentation,Area/Plugins,Bug,Enhancement/User,kind/requirement,kind/refactor,kind/tech-debt,limitation,Needs investigation,Needs triage,Needs Product,P0 - Hair on fire,P1 - Important,P2 - Long-term important,P3 - Wouldn't it be nice if...,Product Requirements,release-blocker,Security,backlog"

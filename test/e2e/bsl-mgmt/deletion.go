@@ -41,13 +41,11 @@ const (
 	bslDeletionTestNs = "bsl-deletion"
 )
 
-// Test backup and restore of Kibishii using restic
-
 func BslDeletionWithSnapshots() {
 	BslDeletionTest(true)
 }
 
-func BslDeletionWithRestic() {
+func BslDeletionWithFSBackup() {
 	BslDeletionTest(false)
 }
 func BslDeletionTest(useVolumeSnapshots bool) {
@@ -89,7 +87,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 	})
 
 	When("kibishii is the sample workload", func() {
-		It("Local backups and restic repos (if Velero was installed with Restic) will be deleted once the corresponding backup storage location is deleted", func() {
+		It("Local backups and backup repos will be deleted once the corresponding backup storage location is deleted", func() {
 			oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 			defer ctxCancel()
 			if veleroCfg.AdditionalBSLProvider == "" {
@@ -165,7 +163,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 				)).To(Succeed())
 			})
 
-			// Restic can not backup PV only, so pod need to be labeled also
+			// FS backup can not backup PV only, so pod need to be labeled also
 			By("Label all 2 worker-pods of Kibishii", func() {
 				Expect(AddLabelToPod(context.Background(), podName1, bslDeletionTestNs, label1)).To(Succeed())
 				Expect(AddLabelToPod(context.Background(), "kibishii-deployment-1", bslDeletionTestNs, label2)).To(Succeed())

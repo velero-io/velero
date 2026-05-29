@@ -293,18 +293,18 @@ E2E tests can be run with specific cases to be included and/or excluded using th
 
 1. Run Velero tests with specific cases to be included:
 ```bash
-GINKGO_LABELS="Basic && Restic" \
+GINKGO_LABELS="Basic && FSBackup" \
 CLOUD_PROVIDER=aws \
 BSL_BUCKET=example-bucket \
 CREDS_FILE=/path/to/aws-creds \
 make test-e2e \
 ```
 
-In this example, only case have both `Basic` and `Restic` labels are included.
+In this example, only case have both `Basic` and `FSBackup` labels are included.
 
 1. Run Velero tests with specific cases to be excluded:
 ```bash
-GINKGO_LABELS="!(Scale || Schedule || TTL || (Upgrade && Restic) || (Migration && Restic))" \
+GINKGO_LABELS="!(Scale || Schedule || TTL || (Upgrade && FSBackup) || (Migration && FSBackup))" \
 CLOUD_PROVIDER=aws \
 BSL_BUCKET=example-bucket \
 CREDS_FILE=/path/to/aws-creds \
@@ -315,8 +315,8 @@ In this example, cases are labelled as
 * `Scale`
 * `Schedule`
 * `TTL`
-* `Upgrade` and `Restic`
-* `Migration` and `Restic` 
+* `Upgrade` and `FSBackup`
+* `Migration` and `FSBackup` 
 will be skipped.
 
 #### VKS environment test
@@ -370,9 +370,7 @@ Following pipelines should cover all E2E tests along with proper filters:
 
 1. **CSI pipeline:** As we can see lots of labels in E2E test code, there're many snapshot-labeled test scripts. To cover CSI scenario, a pipeline with CSI enabled should be a good choice, otherwise, we will double all the snapshot cases for CSI scenario, it's very time-wasting. By providing `FEATURES=EnableCSI` and  `PLUGINS=<provider-plugin-images>`, a CSI pipeline is ready for testing.
 1. **Data mover pipeline:** Data mover scenario is the same scenario with migaration test except the restriction of migaration between different providers, so it better to separated it out from other pipelines. Please refer the example in previous.
-1. **Restic/Kopia backup path pipelines:**
-    1. **Restic pipeline:** For the same reason of saving time, set `UPLOADER_TYPE` to `restic` for all file system backup test cases;
-    1. **Kopia pipeline:** Set `UPLOADER_TYPE` to `kopia` for all file system backup test cases;
+1. **File system backup pipeline:** Set `UPLOADER_TYPE` to `kopia` for all file system backup test cases;
 1. **Long time pipeline:** Long time cases should be group into one pipeline, currently these test cases with labels `Scale`, `Schedule` or `TTL` can be group into a pipeline, and make sure to skip them off in any other pipelines.
     
 **Note:** please organize filters among proper pipelines for other test cases.
