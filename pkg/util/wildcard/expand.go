@@ -26,6 +26,11 @@ func ShouldExpandWildcards(includes []string, excludes []string, fromBackup bool
 
 	wildcardFound := false
 	for _, include := range includes {
+		// Special case: "*" alone means "match all" - don't expand
+		if include == "*" {
+			return false
+		}
+
 		if containsWildcardPattern(include) {
 			wildcardFound = true
 		}

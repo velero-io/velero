@@ -23,11 +23,11 @@ func TestShouldExpandWildcards(t *testing.T) {
 			expected:   false,
 		},
 		{
-			name:       "includes has star - should expand",
+			name:       "includes has star - should not expand",
 			includes:   []string{"*"},
 			excludes:   []string{"ns1"},
 			fromBackup: true,
-			expected:   true,
+			expected:   false,
 		},
 		{
 			excludes:   []string{"ns3", "ns4"},
@@ -35,18 +35,18 @@ func TestShouldExpandWildcards(t *testing.T) {
 			expected:   false,
 		},
 		{
-			name:       "includes has star - should expand",
+			name:       "includes has star - should not expand",
 			includes:   []string{"*"},
 			excludes:   []string{"ns1"},
 			fromBackup: true,
-			expected:   true,
+			expected:   false,
 		},
 		{
-			name:       "includes has star after a wildcard pattern - should expand",
+			name:       "includes has star after a wildcard pattern - should not expand",
 			includes:   []string{"ns*", "*"},
 			excludes:   []string{"ns1"},
 			fromBackup: true,
-			expected:   true,
+			expected:   false,
 		},
 		{
 			name:       "includes has wildcard pattern",
@@ -70,11 +70,11 @@ func TestShouldExpandWildcards(t *testing.T) {
 			expected:   true,
 		},
 		{
-			name:       "includes has star and wildcard - should expand",
+			name:       "includes has star and wildcard - should not expand",
 			includes:   []string{"*", "ns*"},
 			excludes:   []string{},
 			fromBackup: true,
-			expected:   true,
+			expected:   false,
 		},
 		{
 			name:       "double asterisk should be detected as wildcard",

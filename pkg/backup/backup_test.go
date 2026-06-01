@@ -5407,6 +5407,8 @@ func TestBackupNamespaces(t *testing.T) {
 			want: []string{
 				"resources/namespaces/cluster/ns-1.json",
 				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/namespaces/cluster/ns-3.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
 			},
 		},
 		{
@@ -5440,6 +5442,10 @@ func TestBackupNamespaces(t *testing.T) {
 			want: []string{
 				"resources/namespaces/cluster/ns-1.json",
 				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/namespaces/cluster/ns-2.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-2.json",
+				"resources/namespaces/cluster/ns-3.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
 				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
 				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
 			},
