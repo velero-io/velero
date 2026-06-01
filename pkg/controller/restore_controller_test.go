@@ -360,6 +360,15 @@ func TestRestoreReconcile(t *testing.T) {
 			expectedRestorerCall:  NewRestore("foo", "bar", "backup-1", "ns-1", "", velerov1api.RestorePhaseInProgress).Result(),
 		},
 		{
+			name:                     "restore from a backup that is being deleted fails validation",
+			location:                 defaultStorageLocation,
+			restore:                  NewRestore("foo", "bar", "backup-1", "ns-1", "", velerov1api.RestorePhaseNew).Result(),
+			backup:                   defaultBackup().StorageLocation("default").Phase(velerov1api.BackupPhaseDeleting).Result(),
+			expectedErr:              false,
+			expectedPhase:            string(velerov1api.RestorePhaseFailedValidation),
+			expectedValidationErrors: []string{"backup backup-1 is being deleted and cannot be used as a restore source"},
+		},
+		{
 			name:     "valid restore gets executed and only includes pod volume backups from restore namespace",
 			location: defaultStorageLocation,
 			restore:  NewRestore("foo", "bar2", "backup-1", "ns-1", "", velerov1api.RestorePhaseNew).Result(),

@@ -394,6 +394,14 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		return backupInfo{}, nil
 	}
 
+	// Reject restores from a backup that is being deleted: its underlying data may be
+	// concurrently removed by the backup deletion controller, producing a corrupt restore.
+	// See https://github.com/vmware-tanzu/velero/issues/9790.
+	if info.backup.Status.Phase == api.BackupPhaseDeleting {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("backup %s is being deleted and cannot be used as a restore source", info.backup.Name))
+		return backupInfo{}, nil
+	}
+
 	if !veleroutil.BSLIsAvailable(*info.location) {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("The BSL %s is unavailable, cannot retrieve the backup", info.location.Name))
 		return backupInfo{}, nil
