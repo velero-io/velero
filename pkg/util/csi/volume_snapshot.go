@@ -47,17 +47,24 @@ const (
 	volumeSnapshotContentProtectFinalizer = "velero.io/volume-snapshot-content-protect-finalizer"
 )
 
-// WaitVolumeSnapshotReady waits a VS to become ready to use until the timeout reaches
+// WaitVolumeSnapshotReady waits a VS to become ready to use until the timeout reaches.
+// If errorTimeout is greater than 0 and the VolumeSnapshot's status reports an error
+// continuously for at least errorTimeout, the wait fails early instead of waiting the
+// full timeout. Set errorTimeout to 0 to keep the legacy behavior of only failing on
+// the overall timeout.
 func WaitVolumeSnapshotReady(
 	ctx context.Context,
 	snapshotClient snapshotter.SnapshotV1Interface,
 	volumeSnapshot string,
 	volumeSnapshotNS string,
 	timeout time.Duration,
+	errorTimeout time.Duration,
 	log logrus.FieldLogger,
 ) (*snapshotv1api.VolumeSnapshot, error) {
 	var updated *snapshotv1api.VolumeSnapshot
 	errMessage := sets.NewString()
+	var firstErrorTime time.Time
+	var persistentErr error
 
 	err := wait.PollUntilContextTimeout(
 		ctx,
@@ -81,6 +88,21 @@ func WaitVolumeSnapshotReady(
 
 			if tmpVS.Status.Error != nil {
 				errMessage.Insert(stringptr.GetString(tmpVS.Status.Error.Message))
+				if errorTimeout > 0 {
+					if firstErrorTime.IsZero() {
+						firstErrorTime = time.Now()
+					} else if time.Since(firstErrorTime) >= errorTimeout {
+						persistentErr = errors.Errorf(
+							"VolumeSnapshot %s/%s has a persistent error beyond CSISnapshotErrorTimeout (%s): %s",
+							volumeSnapshotNS, volumeSnapshot, errorTimeout,
+							stringptr.GetString(tmpVS.Status.Error.Message),
+						)
+						return false, persistentErr
+					}
+				}
+			} else {
+				// Reset the error window once the controller stops reporting an error.
+				firstErrorTime = time.Time{}
 			}
 
 			if !boolptr.IsSetToTrue(tmpVS.Status.ReadyToUse) {
@@ -92,7 +114,9 @@ func WaitVolumeSnapshotReady(
 		},
 	)
 
-	if wait.Interrupted(err) {
+	if persistentErr != nil {
+		err = persistentErr
+	} else if wait.Interrupted(err) {
 		err = errors.Errorf(
 			"volume snapshot is not ready until timeout, errors: %v",
 			errMessage.List(),

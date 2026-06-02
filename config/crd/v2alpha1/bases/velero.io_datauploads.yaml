@@ -129,6 +129,12 @@ spec:
                   OperationTimeout specifies the time used to wait internal operations,
                   before returning error as timeout.
                 type: string
+              snapshotErrorTimeout:
+                description: |-
+                  SnapshotErrorTimeout specifies how long to tolerate persistent errors reported
+                  in the source CSI VolumeSnapshot status before failing the data upload, instead
+                  of waiting the full OperationTimeout. A zero value disables the early failure.
+                type: string
               snapshotType:
                 description: SnapshotType is the type of the snapshot to be backed
                   up.

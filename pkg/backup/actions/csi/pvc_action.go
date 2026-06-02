@@ -567,6 +567,7 @@ func newDataUpload(
 			BackupStorageLocation: backup.Spec.StorageLocation,
 			SourceNamespace:       pvc.Namespace,
 			OperationTimeout:      backup.Spec.CSISnapshotTimeout,
+			SnapshotErrorTimeout:  backup.Spec.CSISnapshotErrorTimeout,
 		},
 	}
 
