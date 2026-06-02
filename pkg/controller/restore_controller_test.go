@@ -444,7 +444,7 @@ func TestRestoreReconcile(t *testing.T) {
 			expectedStartTime:               &timestamp,
 			expectedCompletedTime:           &timestamp,
 			backupStoreGetBackupContentsErr: errors.New("Couldn't download backup"),
-			backup:                          defaultBackup().StorageLocation("default").Result(),
+			backup:                          defaultBackup().StorageLocation("default").Phase(velerov1api.BackupPhaseCompleted).Result(),
 		},
 		{
 			name:              "restore attached with an expected finalizer gets cleaned up successfully",
