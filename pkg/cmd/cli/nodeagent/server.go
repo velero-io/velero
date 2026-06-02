@@ -385,6 +385,12 @@ func (s *nodeAgentServer) run() {
 		s.logger.Info("Backup repo config is not provided, using default values for cache volume configs")
 	}
 
+	var csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+	if s.dataPathConfigs != nil && s.dataPathConfigs.CSISnapshotMetadataServiceConfigs != nil {
+		csiSnapshotMetadataServiceConfigs = s.dataPathConfigs.CSISnapshotMetadataServiceConfigs
+		s.logger.Infof("Using CSI snapshot metadata service config %v", s.dataPathConfigs.CSISnapshotMetadataServiceConfigs)
+	}
+
 	pvbReconciler := controller.NewPodVolumeBackupReconciler(
 		s.mgr.GetClient(),
 		s.mgr,
@@ -447,6 +453,7 @@ func (s *nodeAgentServer) run() {
 		dataMovePriorityClass,
 		podLabels,
 		podAnnotations,
+		csiSnapshotMetadataServiceConfigs,
 	)
 	if err := dataUploadReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.WithError(err).Fatal("Unable to create the data upload controller")

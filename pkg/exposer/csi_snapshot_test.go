@@ -18,6 +18,7 @@ package exposer
 
 import (
 	"fmt"
+	"maps"
 	"testing"
 	"time"
 
@@ -1056,21 +1057,25 @@ func TestExpose(t *testing.T) {
 				backupPVC, err := exposer.kubeClient.CoreV1().PersistentVolumeClaims(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
 				require.NoError(t, err)
 
-				expectedVS, err := exposer.csiSnapshotClient.VolumeSnapshots(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+				backupVS, err := exposer.csiSnapshotClient.VolumeSnapshots(ownerObject.Namespace).Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
 				require.NoError(t, err)
 
-				expectedVSC, err := exposer.csiSnapshotClient.VolumeSnapshotContents().Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+				backupVSC, err := exposer.csiSnapshotClient.VolumeSnapshotContents().Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
 				require.NoError(t, err)
 
-				assert.Equal(t, expectedVS.Annotations, vsObject.Annotations)
-				assert.Equal(t, *expectedVS.Spec.VolumeSnapshotClassName, *vsObject.Spec.VolumeSnapshotClassName)
-				assert.Equal(t, expectedVSC.Name, *expectedVS.Spec.Source.VolumeSnapshotContentName)
+				assert.Equal(t, vsObject.Annotations, backupVS.Annotations)
+				assert.Equal(t, *vsObject.Spec.VolumeSnapshotClassName, *backupVS.Spec.VolumeSnapshotClassName)
+				assert.Equal(t, *backupVS.Spec.Source.VolumeSnapshotContentName, backupVSC.Name)
 
-				assert.Equal(t, expectedVSC.Annotations, vscObj.Annotations)
-				assert.Equal(t, expectedVSC.Labels, vscObj.Labels)
-				assert.Equal(t, expectedVSC.Spec.DeletionPolicy, vscObj.Spec.DeletionPolicy)
-				assert.Equal(t, expectedVSC.Spec.Driver, vscObj.Spec.Driver)
-				assert.Equal(t, *expectedVSC.Spec.VolumeSnapshotClassName, *vscObj.Spec.VolumeSnapshotClassName)
+				anno := make(map[string]string)
+				maps.Copy(anno, vscObj.Annotations)
+				anno[kube.KubeAnnAllowVolumeModeChange] = "true"
+
+				assert.Equal(t, anno, backupVSC.Annotations)
+				assert.Equal(t, vscObj.Labels, backupVSC.Labels)
+				assert.Equal(t, vscObj.Spec.DeletionPolicy, backupVSC.Spec.DeletionPolicy)
+				assert.Equal(t, vscObj.Spec.Driver, backupVSC.Spec.Driver)
+				assert.Equal(t, *vscObj.Spec.VolumeSnapshotClassName, *backupVSC.Spec.VolumeSnapshotClassName)
 
 				if test.expectedVolumeSize != nil {
 					assert.Equal(t, *test.expectedVolumeSize, backupPVC.Spec.Resources.Requests[corev1api.ResourceStorage])
@@ -1514,7 +1519,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					APIVersion: tt.ownerBackup.APIVersion,
 				}
 			}
-			got, err := e.createBackupPVC(t.Context(), ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly, map[string]string{})
+			got, err := e.createBackupPVC(t.Context(), ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly, map[string]string{}, "")
 			if !tt.wantErr(t, err, fmt.Sprintf("createBackupPVC(%v, %v, %v, %v, %v, %v)", ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly)) {
 				return
 			}

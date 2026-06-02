@@ -53,6 +53,7 @@ const (
 	KubeAnnDynamicallyProvisioned = "pv.kubernetes.io/provisioned-by"
 	KubeAnnMigratedTo             = "pv.kubernetes.io/migrated-to"
 	KubeAnnSelectedNode           = "volume.kubernetes.io/selected-node"
+	KubeAnnAllowVolumeModeChange  = "snapshot.storage.kubernetes.io/allow-volume-mode-change"
 )
 
 // VolumeSnapshotContentManagedByLabel is applied by the snapshot controller

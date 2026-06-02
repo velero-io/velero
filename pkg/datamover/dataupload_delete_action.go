@@ -88,7 +88,7 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 
 // generate the configmap which is to be created and used as a way to communicate the snapshot info to the backup deletion controller
 func genConfigmap(bak *velerov1.Backup, du velerov2alpha1.DataUpload) *corev1api.ConfigMap {
-	if !IsBuiltInUploader(du.Spec.DataMover) || du.Status.SnapshotID == "" {
+	if !IsBuiltInDataMover(du.Spec.DataMover) || du.Status.SnapshotID == "" {
 		return nil
 	}
 	snapshot := repotypes.SnapshotIdentifier{

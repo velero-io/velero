@@ -18,6 +18,11 @@ package datamover
 
 import "fmt"
 
+const (
+	DataMoverTypeVeleroFs    string = "velero-fs"
+	DataMoverTypeVeleroBlock string = "velero-block"
+)
+
 func GetUploaderType(dataMover string) string {
 	if dataMover == "" || dataMover == "velero" {
 		return "kopia"
@@ -26,7 +31,7 @@ func GetUploaderType(dataMover string) string {
 	}
 }
 
-func IsBuiltInUploader(dataMover string) bool {
+func IsBuiltInDataMover(dataMover string) bool {
 	return dataMover == "" || dataMover == "velero"
 }
 

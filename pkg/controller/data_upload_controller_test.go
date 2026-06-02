@@ -251,6 +251,7 @@ func initDataUploaderReconcilerWithError(needError ...error) (*DataUploadReconci
 		"",  // dataMovePriorityClass
 		nil, // podLabels
 		nil, // podAnnotations
+		nil,
 	), nil
 }
 
@@ -1513,6 +1514,7 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 				"upload-priority",
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
