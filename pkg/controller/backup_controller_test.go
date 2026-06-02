@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -34,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -2016,6 +2018,240 @@ func TestPatchResourceWorksWithStatus(t *testing.T) {
 			// check fromCluster is equal to updated
 			if !reflect.DeepEqual(fromCluster, tt.args.updated) {
 				t.Error(cmp.Diff(fromCluster, tt.args.updated))
+			}
+		})
+	}
+}
+
+// TestPrepareBackupRequest_NamespacedFilterPoliciesIncompatibleWithOldFilters verifies
+// that a backup referencing a ResourcePolicy ConfigMap with namespacedFilterPolicies
+// produces a validation error when old-style resource filters are also set on the spec.
+func TestPrepareBackupRequest_NamespacedFilterPoliciesIncompatibleWithOldFilters(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["production"]
+  resourceFilters:
+  - kinds: ["Deployment"]
+    names: ["api-server"]
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-filter-policy",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+		Data: map[string]string{"policy": policyYAML},
+	}
+
+	backup := defaultBackup().IncludedResources("deployments").Result()
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{
+		Kind: "configmap",
+		Name: "my-filter-policy",
+	}
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		logger:          logger,
+		discoveryHelper: discoveryHelper,
+		kbClient:        fakeClient,
+		clock:           &clock.RealClock{},
+		formatFlag:      formatFlag,
+	}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+
+	require.NotEmpty(t, res.Status.ValidationErrors)
+
+	hasTargetError := slices.ContainsFunc(res.Status.ValidationErrors, func(e string) bool {
+		return strings.Contains(e, "namespace-scoped or fine-grained global filter policies")
+	})
+
+	assert.True(t, hasTargetError, "expected validation error about namespacedFilterPolicies incompatibility with old-style filters, got: %v", res.Status.ValidationErrors)
+}
+
+// TestPrepareBackupRequest_ClusterScopedFilterPolicyIncompatibleWithOldFilters verifies
+// that a backup referencing a ResourcePolicy ConfigMap with clusterScopedFilterPolicy
+// produces a validation error when old-style resource filters are also set on the spec.
+func TestPrepareBackupRequest_ClusterScopedFilterPolicyIncompatibleWithOldFilters(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-cluster-filter-policy",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+		Data: map[string]string{"policy": policyYAML},
+	}
+
+	backup := defaultBackup().IncludedResources("clusterroles").Result()
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{
+		Kind: "configmap",
+		Name: "my-cluster-filter-policy",
+	}
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		logger:          logger,
+		discoveryHelper: discoveryHelper,
+		kbClient:        fakeClient,
+		clock:           &clock.RealClock{},
+		formatFlag:      formatFlag,
+	}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+
+	require.NotEmpty(t, res.Status.ValidationErrors)
+
+	hasClusterError := slices.ContainsFunc(res.Status.ValidationErrors, func(e string) bool {
+		return strings.Contains(e, "namespace-scoped or fine-grained global filter policies")
+	})
+
+	assert.True(t, hasClusterError, "expected validation error about clusterScopedFilterPolicy incompatibility with old-style filters, got: %v", res.Status.ValidationErrors)
+}
+
+const (
+	namespacedFilterPolicyYAML = `version: v1
+namespacedFilterPolicies:
+- namespaces: ["production"]
+  resourceFilters:
+  - kinds: ["Deployment"]
+    names: ["api-server"]
+`
+	clusterScopedFilterPolicyYAML = `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]
+`
+	bothFilterPoliciesYAML = `version: v1
+namespacedFilterPolicies:
+- namespaces: ["production"]
+  resourceFilters:
+  - kinds: ["Deployment"]
+    names: ["api-server"]
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]
+`
+)
+
+// TestPrepareBackupRequest_FilterPoliciesWithNewFilters verifies that backups referencing
+// a ResourcePolicy ConfigMap with namespacedFilterPolicies and/or clusterScopedFilterPolicy
+// succeed when old-style resource filters are not set on the spec.
+func TestPrepareBackupRequest_FilterPoliciesWithNewFilters(t *testing.T) {
+	tests := []struct {
+		name                      string
+		policyYAML                string
+		policyConfigMapName       string
+		backup                    *velerov1api.Backup
+		expectNamespacedPolicies  int
+		expectClusterScopedPolicy bool
+	}{
+		{
+			name:                     "namespacedFilterPolicies only",
+			policyYAML:               namespacedFilterPolicyYAML,
+			policyConfigMapName:      "my-filter-policy",
+			backup:                   defaultBackup().StorageLocation("loc-1").Result(),
+			expectNamespacedPolicies: 1,
+		},
+		{
+			name:                      "clusterScopedFilterPolicy only",
+			policyYAML:                clusterScopedFilterPolicyYAML,
+			policyConfigMapName:       "my-cluster-filter-policy",
+			backup:                    defaultBackup().StorageLocation("loc-1").Result(),
+			expectClusterScopedPolicy: true,
+		},
+		{
+			name:                      "both filter policies",
+			policyYAML:                bothFilterPoliciesYAML,
+			policyConfigMapName:       "my-combined-filter-policy",
+			backup:                    defaultBackup().StorageLocation("loc-1").Result(),
+			expectNamespacedPolicies:  1,
+			expectClusterScopedPolicy: true,
+		},
+		{
+			name:                "with new-style spec filters",
+			policyYAML:          bothFilterPoliciesYAML,
+			policyConfigMapName: "my-combined-filter-policy",
+			backup: defaultBackup().
+				StorageLocation("loc-1").
+				IncludedNamespaceScopedResources("deployments").
+				IncludedClusterScopedResources("clusterroles").
+				Result(),
+			expectNamespacedPolicies:  1,
+			expectClusterScopedPolicy: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			formatFlag := logging.FormatText
+			logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+			policyConfigMap := &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      test.policyConfigMapName,
+					Namespace: velerov1api.DefaultNamespace,
+				},
+				Data: map[string]string{"policy": test.policyYAML},
+			}
+
+			test.backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{
+				Kind: "configmap",
+				Name: test.policyConfigMapName,
+			}
+
+			backupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "loc-1").
+				Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, backupLocation, policyConfigMap)
+
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+
+			c := &backupReconciler{
+				logger:          logger,
+				discoveryHelper: discoveryHelper,
+				kbClient:        fakeClient,
+				clock:           &clock.RealClock{},
+				formatFlag:      formatFlag,
+			}
+
+			res := c.prepareBackupRequest(ctx, test.backup, logger)
+			defer res.WorkerPool.Stop()
+
+			assert.Empty(t, res.Status.ValidationErrors)
+			hasIncompatibilityError := slices.ContainsFunc(res.Status.ValidationErrors, func(e string) bool {
+				return strings.Contains(e, "namespace-scoped or fine-grained global filter policies")
+			})
+			assert.False(t, hasIncompatibilityError)
+
+			require.NotNil(t, res.ResPolicies)
+			assert.Len(t, res.ResPolicies.GetNamespacedFilterPolicies(), test.expectNamespacedPolicies)
+			if test.expectClusterScopedPolicy {
+				assert.NotNil(t, res.ResPolicies.GetClusterScopedFilterPolicy())
+			} else {
+				assert.Nil(t, res.ResPolicies.GetClusterScopedFilterPolicy())
 			}
 		})
 	}
