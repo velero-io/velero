@@ -287,6 +287,9 @@ The policies YAML config file would look like this:
         # pvc matches specific phase(s)
         pvcPhase:
           - Pending
+        # pvc matches specific volume mode(s)
+        pvcVolumeMode:
+          - Block
       action:
         type: skip
     - conditions:
@@ -380,6 +383,7 @@ Currently, Velero supports the volume attributes listed below:
 - storageClass: matching volumes those with specified `storageClass`, such as `gp2`, `ebs-sc` in eks
 - volume sources: matching volumes that used specified volume sources. Currently we support nfs or csi backend volume source
 - pvcPhase: matching volumes based on the phase of their associated PVCs (Pending, Bound, Lost)
+- pvcVolumeMode: matching volumes based on the volume mode of their associated PVCs (Filesystem, Block)
 
 Velero supported conditions and format listed below:
 - capacity
@@ -519,6 +523,46 @@ Velero supported conditions and format listed below:
             - gp2
         action:
           type: skip
+      ```
+
+- pvc VolumeMode
+
+  This condition filters volumes based on the volume mode of their associated PVCs. The condition is specified as a list of volume modes to match. The volume matches this condition if the PVC's volume mode matches any of the volume modes in the list. Supported volume modes are: `Filesystem` and `Block`. PVCs without an explicit volume mode are treated as `Filesystem`, matching the Kubernetes default.
+    ```yaml
+    pvcVolumeMode:
+      - Block
+    ```
+
+    Some examples:
+  - Skip Block PVCs: Skip backup of volumes whose associated PVC uses `Block` volume mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode:
+            - Block
+        action:
+          type: skip
+      ```
+  - Match multiple volume modes: Apply an action to volumes whose associated PVC uses either `Filesystem` or `Block` volume mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode:
+            - Filesystem
+            - Block
+        action:
+          type: snapshot
+      ```
+  - Combine with other conditions: You can combine PVC volume mode conditions with other conditions like PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode:
+            - Block
+          pvcPhase:
+            - Bound
+        action:
+          type: snapshot
       ```
 
 

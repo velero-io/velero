@@ -155,6 +155,19 @@ func unmarshalResourcePolicies(yamlData *string) (*ResourcePolicies, error) {
 				return nil, fmt.Errorf("pvcLabels must be a map of string to string, got %T", raw)
 			}
 		}
+		if raw, ok := vp.Conditions["pvcVolumeMode"]; ok {
+			switch values := raw.(type) {
+			case []any:
+				for _, value := range values {
+					if _, ok := value.(string); !ok {
+						return nil, fmt.Errorf("pvcVolumeMode must be a list of strings, got element %T", value)
+					}
+				}
+			case []string:
+			default:
+				return nil, fmt.Errorf("pvcVolumeMode must be a list of strings, got %T", raw)
+			}
+		}
 	}
 	return resPolicies, nil
 }
@@ -181,6 +194,9 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 		}
 		if len(con.PVCPhase) > 0 {
 			volP.conditions = append(volP.conditions, &pvcPhaseCondition{phases: con.PVCPhase})
+		}
+		if len(con.PVCVolumeMode) > 0 {
+			volP.conditions = append(volP.conditions, &pvcVolumeModeCondition{volumeModes: con.PVCVolumeMode})
 		}
 		p.volumePolicies = append(p.volumePolicies, volP)
 	}

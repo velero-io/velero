@@ -25,6 +25,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func pvcVolumeMode(mode corev1api.PersistentVolumeMode) *corev1api.PersistentVolumeMode {
+	return &mode
+}
+
 func TestLoadResourcePolicies(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -157,6 +161,29 @@ volumePolicies:
       type: skip
 `,
 			wantErr: false,
+		},
+		{
+			name: "supported format pvcVolumeMode",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcVolumeMode:
+        - Block
+    action:
+      type: skip
+`,
+			wantErr: false,
+		},
+		{
+			name: "error format of pvcVolumeMode (not a list)",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcVolumeMode: Block
+    action:
+      type: skip
+`,
+			wantErr: true,
 		},
 	}
 	for _, tc := range testCases {
@@ -1046,6 +1073,87 @@ volumePolicies:
 			},
 			skip: true,
 		},
+		{
+			name: "PVC volume mode matching - Block volume mode should skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: ["Block"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-block",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeBlock),
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC volume mode matching - Filesystem volume mode should not skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: ["Block"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-filesystem",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeFilesystem),
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC volume mode matching - nil volume mode defaults to Filesystem",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: ["Filesystem"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-default-filesystem",
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC volume mode matching - Multiple volume modes",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: ["Filesystem", "Block"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-block",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeBlock),
+				},
+			},
+			skip: true,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1119,28 +1227,33 @@ func TestGetMatchAction_Errors(t *testing.T) {
 
 func TestParsePVC(t *testing.T) {
 	tests := []struct {
-		name           string
-		pvc            *corev1api.PersistentVolumeClaim
-		expectedLabels map[string]string
-		expectedPhase  string
-		expectErr      bool
+		name               string
+		pvc                *corev1api.PersistentVolumeClaim
+		expectedLabels     map[string]string
+		expectedPhase      string
+		expectedVolumeMode string
+		expectErr          bool
 	}{
 		{
-			name: "valid PVC with labels and Pending phase",
+			name: "valid PVC with labels, Pending phase, and Block volume mode",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"env": "prod"},
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeBlock),
 				},
 				Status: corev1api.PersistentVolumeClaimStatus{
 					Phase: corev1api.ClaimPending,
 				},
 			},
-			expectedLabels: map[string]string{"env": "prod"},
-			expectedPhase:  "Pending",
-			expectErr:      false,
+			expectedLabels:     map[string]string{"env": "prod"},
+			expectedPhase:      "Pending",
+			expectedVolumeMode: "Block",
+			expectErr:          false,
 		},
 		{
-			name: "valid PVC with Bound phase",
+			name: "valid PVC with Bound phase and nil volume mode",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{},
@@ -1149,27 +1262,33 @@ func TestParsePVC(t *testing.T) {
 					Phase: corev1api.ClaimBound,
 				},
 			},
-			expectedLabels: nil,
-			expectedPhase:  "Bound",
-			expectErr:      false,
+			expectedLabels:     nil,
+			expectedPhase:      "Bound",
+			expectedVolumeMode: "Filesystem",
+			expectErr:          false,
 		},
 		{
-			name: "valid PVC with Lost phase",
+			name: "valid PVC with Lost phase and Filesystem volume mode",
 			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeFilesystem),
+				},
 				Status: corev1api.PersistentVolumeClaimStatus{
 					Phase: corev1api.ClaimLost,
 				},
 			},
-			expectedLabels: nil,
-			expectedPhase:  "Lost",
-			expectErr:      false,
+			expectedLabels:     nil,
+			expectedPhase:      "Lost",
+			expectedVolumeMode: "Filesystem",
+			expectErr:          false,
 		},
 		{
-			name:           "nil PVC pointer",
-			pvc:            (*corev1api.PersistentVolumeClaim)(nil),
-			expectedLabels: nil,
-			expectedPhase:  "",
-			expectErr:      false,
+			name:               "nil PVC pointer",
+			pvc:                (*corev1api.PersistentVolumeClaim)(nil),
+			expectedLabels:     nil,
+			expectedPhase:      "",
+			expectedVolumeMode: "",
+			expectErr:          false,
 		},
 	}
 
@@ -1180,6 +1299,7 @@ func TestParsePVC(t *testing.T) {
 
 			assert.Equal(t, tc.expectedLabels, s.pvcLabels)
 			assert.Equal(t, tc.expectedPhase, s.pvcPhase)
+			assert.Equal(t, tc.expectedVolumeMode, s.pvcVolumeMode)
 		})
 	}
 }
@@ -1509,7 +1629,7 @@ namespacedFilterPolicies:
 - namespaces: ["team-frontend-*", "specific-ns"]
   resourceFilters:
   - kinds: ["Pod", "ConfigMap", "Secret"]
-- namespaces: ["team-*", "another-pattern"] 
+- namespaces: ["team-*", "another-pattern"]
   resourceFilters:
   - kinds: ["Deployment", "Service"]`
 
@@ -1535,4 +1655,63 @@ namespacedFilterPolicies:
 	policy2 := nfPolicies[1]
 	assert.Equal(t, []string{"team-*", "another-pattern"}, policy2.Namespaces)
 	assert.Equal(t, []string{"Deployment", "Service"}, policy2.ResourceFilters[0].Kinds)
+}
+
+func TestPVCVolumeModeMatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		condition     *pvcVolumeModeCondition
+		volume        *structuredVolume
+		expectedMatch bool
+	}{
+		{
+			name:          "match Block volume mode",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{"Block"}},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match multiple volume modes - Filesystem matches",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{"Filesystem", "Block"}},
+			volume:        &structuredVolume{pvcVolumeMode: "Filesystem"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match multiple volume modes - Block matches",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{"Filesystem", "Block"}},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+		{
+			name:          "no match for different volume mode",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{"Block"}},
+			volume:        &structuredVolume{pvcVolumeMode: "Filesystem"},
+			expectedMatch: false,
+		},
+		{
+			name:          "no match for empty volume mode",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{"Block"}},
+			volume:        &structuredVolume{pvcVolumeMode: ""},
+			expectedMatch: false,
+		},
+		{
+			name:          "match with empty volume modes list (always match)",
+			condition:     &pvcVolumeModeCondition{volumeModes: []string{}},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match with nil volume modes list (always match)",
+			condition:     &pvcVolumeModeCondition{volumeModes: nil},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.condition.match(tc.volume)
+			assert.Equal(t, tc.expectedMatch, result)
+		})
+	}
 }

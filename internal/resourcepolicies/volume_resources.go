@@ -18,6 +18,7 @@ package resourcepolicies
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -45,13 +46,14 @@ type capacity struct {
 }
 
 type structuredVolume struct {
-	capacity     resource.Quantity
-	storageClass string
-	nfs          *nFSVolumeSource
-	csi          *csiVolumeSource
-	volumeType   SupportedVolume
-	pvcLabels    map[string]string
-	pvcPhase     string
+	capacity      resource.Quantity
+	storageClass  string
+	nfs           *nFSVolumeSource
+	csi           *csiVolumeSource
+	volumeType    SupportedVolume
+	pvcLabels     map[string]string
+	pvcPhase      string
+	pvcVolumeMode string
 }
 
 func (s *structuredVolume) parsePV(pv *corev1api.PersistentVolume) {
@@ -76,6 +78,11 @@ func (s *structuredVolume) parsePVC(pvc *corev1api.PersistentVolumeClaim) {
 			s.pvcLabels = pvc.Labels
 		}
 		s.pvcPhase = string(pvc.Status.Phase)
+		if pvc.Spec.VolumeMode != nil {
+			s.pvcVolumeMode = string(*pvc.Spec.VolumeMode)
+		} else {
+			s.pvcVolumeMode = string(corev1api.PersistentVolumeFilesystem)
+		}
 	}
 }
 
@@ -127,15 +134,30 @@ func (c *pvcPhaseCondition) match(v *structuredVolume) bool {
 	if v.pvcPhase == "" {
 		return false
 	}
-	for _, phase := range c.phases {
-		if v.pvcPhase == phase {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.phases, v.pvcPhase)
 }
 
 func (c *pvcPhaseCondition) validate() error {
+	return nil
+}
+
+// pvcVolumeModeCondition defines a condition that matches if the PVC's volume mode matches any of the provided volume modes.
+type pvcVolumeModeCondition struct {
+	volumeModes []string
+}
+
+func (c *pvcVolumeModeCondition) match(v *structuredVolume) bool {
+	// No volume modes specified: always match.
+	if len(c.volumeModes) == 0 {
+		return true
+	}
+	if v.pvcVolumeMode == "" {
+		return false
+	}
+	return slices.Contains(c.volumeModes, v.pvcVolumeMode)
+}
+
+func (c *pvcVolumeModeCondition) validate() error {
 	return nil
 }
 

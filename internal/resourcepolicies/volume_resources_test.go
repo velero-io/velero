@@ -430,6 +430,22 @@ func TestUnmarshalVolumeConditions(t *testing.T) {
 			},
 			expectedError: "!!str `production` into map[string]string",
 		},
+		{
+			name: "Valid pvcVolumeMode input",
+			input: map[string]any{
+				"capacity":      "1Gi,10Gi",
+				"pvcVolumeMode": []string{"Filesystem", "Block"},
+			},
+			expectedError: "",
+		},
+		{
+			name: "Invalid pvcVolumeMode input: not a list",
+			input: map[string]any{
+				"capacity":      "1Gi,10Gi",
+				"pvcVolumeMode": "Block",
+			},
+			expectedError: "str `Block` into []string",
+		},
 	}
 
 	for _, tc := range testCases {
