@@ -83,7 +83,7 @@ Below we've done 6 groups of tests. For each single group of test, we used limit
 
 Recorded the metrics of time consumption, maximum CPU usage, maximum memory usage, and minio storage usage for node-agent daemonset. The metrics of Velero deployment are not included.
 
-Compression is either disabled or not unavailable for both uploader.
+Compression is disabled for testing purposes.
 
 ### Case 1: 4194304(4M) files, 2396745(2M) directories, 0B per file total 0B content
 #### result:
@@ -144,5 +144,5 @@ Compression is either disabled or not unavailable for both uploader.
 
 ## Summary
 - With the same specification resources, Kopia uploader is less time-consuming when backup.
-- Performance would be better if choosing Kopia uploader for the scenario in backup large mounts of data or massive small files.
+- Kopia uploader performs well when backing up large amounts of data or massive small files.
 - It's better to set one reasonable resource configuration instead of the default depending on your scenario. With default configuration, it's easy to hit timeout or OOM in large-scale backups.

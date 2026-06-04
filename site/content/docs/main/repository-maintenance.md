@@ -23,7 +23,7 @@ If there is a key value as `global` in the map, the key's value is applied to al
 The other keys in the map is the combination of three elements of a BackupRepository, because those three keys can identify a unique BackupRepository:
 * The namespace in which BackupRepository backs up volume data.
 * The BackupRepository referenced BackupStorageLocation's name.
-* The BackupRepository's type. Current value is `kopia`.
+* The BackupRepository's type. Possible value is `kopia`.
 
 If there is a key match with BackupRepository, the key's value is applied to the BackupRepository's maintenance jobs.
 By this way, it's possible to let user configure before the BackupRepository is created.
