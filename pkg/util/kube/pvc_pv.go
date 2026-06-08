@@ -464,17 +464,18 @@ func GetPVCForPodVolume(vol *corev1api.Volume, pod *corev1api.Pod, crClient crcl
 }
 
 func DiagnosePVC(pvc *corev1api.PersistentVolumeClaim, events *corev1api.EventList) string {
-	diag := fmt.Sprintf("PVC %s/%s, phase %s, binding to %s\n", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName)
+	var diag strings.Builder
+	_, _ = fmt.Fprintf(&diag, "PVC %s/%s, phase %s, binding to %s\n", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName)
 
 	if events != nil {
 		for _, e := range events.Items {
 			if e.InvolvedObject.UID == pvc.UID && e.Type == corev1api.EventTypeWarning {
-				diag += fmt.Sprintf("PVC event reason %s, message %s\n", e.Reason, e.Message)
+				_, _ = fmt.Fprintf(&diag, "PVC event reason %s, message %s\n", e.Reason, e.Message)
 			}
 		}
 	}
 
-	return diag
+	return diag.String()
 }
 
 func DiagnosePV(pv *corev1api.PersistentVolume) string {

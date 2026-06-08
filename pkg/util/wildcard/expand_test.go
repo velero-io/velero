@@ -69,6 +69,12 @@ func TestShouldExpandWildcards(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "empty includes with wildcard excludes - should not expand",
+			includes: []string{},
+			excludes: []string{"ns*"},
+			expected: false,
+		},
+		{
 			name:     "complex wildcard patterns",
 			includes: []string{"*-prod"},
 			excludes: []string{"test-*-staging"},

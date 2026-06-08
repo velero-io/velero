@@ -15,7 +15,7 @@ If you're not yet running at least Velero v1.5, see the following:
 - [Upgrading to v1.4][4]
 - [Upgrading to v1.5][5]
 
-Before upgrading, check the [Velero compatibility matrix](https://github.com/vmware-tanzu/velero#velero-compatabilty-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
+Before upgrading, check the [Velero compatibility matrix](https://github.com/velero-io/velero#velero-compatabilty-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
 ## Instructions
 
@@ -85,7 +85,7 @@ After upgrading, if there is a previously created backup storage location with t
 [3]: https://velero.io/docs/v1.3.2/upgrade-to-1.3/
 [4]: https://velero.io/docs/v1.4/upgrade-to-1.4/
 [5]: https://velero.io/docs/v1.5/upgrade-to-1.5
-[6]: https://github.com/vmware-tanzu/velero/releases/tag/v1.4.2
-[7]: https://github.com/vmware-tanzu/velero/issues/2077
-[8]: https://github.com/vmware-tanzu/velero/issues/2311
+[6]: https://github.com/velero-io/velero/releases/tag/v1.4.2
+[7]: https://github.com/velero-io/velero/issues/2077
+[8]: https://github.com/velero-io/velero/issues/2311
 [9]: https://velero.io/docs/v1.6/locations

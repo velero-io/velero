@@ -23,16 +23,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateFileSystemBR(t *testing.T) {
+func TestCreateGenericDataPath(t *testing.T) {
 	m := NewManager(2)
 
-	async_job_1, err := m.CreateFileSystemBR("job-1", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	async_job_1, err := m.CreateGenericDataPath("job-1", "test", t.Context(), nil, "velero", Callbacks{}, nil)
 	require.NoError(t, err)
 
-	_, err = m.CreateFileSystemBR("job-2", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	_, err = m.CreateGenericDataPath("job-2", "test", t.Context(), nil, "velero", Callbacks{}, nil)
 	require.NoError(t, err)
 
-	_, err = m.CreateFileSystemBR("job-3", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	_, err = m.CreateGenericDataPath("job-3", "test", t.Context(), nil, "velero", Callbacks{}, nil)
 	assert.Equal(t, ConcurrentLimitExceed, err)
 
 	ret := m.GetAsyncBR("job-0")

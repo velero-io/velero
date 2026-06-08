@@ -43,7 +43,7 @@ func BackupRestoreWithSnapshots() {
 	BackupRestoreTest(config)
 }
 
-func BackupRestoreWithRestic() {
+func BackupRestoreWithFSBackup() {
 	config := BackupRestoreTestConfig{false, "", false}
 	BackupRestoreTest(config)
 }
@@ -53,7 +53,7 @@ func BackupRestoreRetainedPVWithSnapshots() {
 	BackupRestoreTest(config)
 }
 
-func BackupRestoreRetainedPVWithRestic() {
+func BackupRestoreRetainedPVWithFSBackup() {
 	config := BackupRestoreTestConfig{false, "overlays/sc-reclaim-policy/", true}
 	BackupRestoreTest(config)
 }

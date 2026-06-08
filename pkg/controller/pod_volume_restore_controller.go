@@ -603,7 +603,7 @@ func (r *PodVolumeRestoreReconciler) closeDataPath(ctx context.Context, pvrName 
 func (r *PodVolumeRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	gp := kube.NewGenericEventPredicate(func(object client.Object) bool {
 		pvr := object.(*velerov1api.PodVolumeRestore)
-		if IsLegacyPVR(pvr) {
+		if _, err := uploader.ValidateUploaderType(pvr.Spec.UploaderType); err != nil {
 			return false
 		}
 
@@ -628,7 +628,8 @@ func (r *PodVolumeRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	pred := kube.NewAllEventPredicate(func(obj client.Object) bool {
 		pvr := obj.(*velerov1api.PodVolumeRestore)
-		return !IsLegacyPVR(pvr)
+		_, err := uploader.ValidateUploaderType(pvr.Spec.UploaderType)
+		return err == nil
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -678,7 +679,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForTargetPod(ctx context.Context, po
 
 	requests := []reconcile.Request{}
 	for _, item := range list.Items {
-		if IsLegacyPVR(&item) {
+		if _, err := uploader.ValidateUploaderType(item.Spec.UploaderType); err != nil {
 			continue
 		}
 
@@ -707,6 +708,11 @@ func (r *PodVolumeRestoreReconciler) findPVRForRestorePod(ctx context.Context, p
 	log = log.WithFields(logrus.Fields{
 		"PVR": pvr.Name,
 	})
+
+	if _, err := uploader.ValidateUploaderType(pvr.Spec.UploaderType); err != nil {
+		log.WithField("uploaderType", pvr.Spec.UploaderType).Debug("skip PVR with invalid uploader type")
+		return []reconcile.Request{}
+	}
 
 	if pvr.Status.Phase != velerov1api.PodVolumeRestorePhaseAccepted {
 		return []reconcile.Request{}
@@ -1029,7 +1035,7 @@ func (r *PodVolumeRestoreReconciler) AttemptPVRResume(ctx context.Context, logge
 
 	for i := range pvrs.Items {
 		pvr := &pvrs.Items[i]
-		if IsLegacyPVR(pvr) {
+		if _, err := uploader.ValidateUploaderType(pvr.Spec.UploaderType); err != nil {
 			continue
 		}
 

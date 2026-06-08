@@ -7,6 +7,10 @@ on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   # Automatically assigns reviewers and owner
   add-reviews:
@@ -16,4 +20,3 @@ jobs:
         uses: kentaro-m/auto-assign-action@v2.0.0
         with:
           configuration-path: ".github/auto-assignees.yml"
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"

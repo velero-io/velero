@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	volumegroupsnapshotv1beta1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -103,7 +103,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
 	// Check if VGSC already exists
-	existingVGSC := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{}
+	existingVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	err := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, existingVGSC)
 	if err == nil {
 		// VGSC already exists, add this snapshot handle if not already present
@@ -119,7 +119,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 
 	// Look up VolumeGroupSnapshotClass to get secret annotations
 	vgscAnnotations := map[string]string{}
-	vgscList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotClassList{}
+	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList{}
 	if err := p.crClient.List(ctx, vgscList); err == nil {
 		for _, vgsClass := range vgscList.Items {
 			if vgsClass.Driver == driver {
@@ -135,7 +135,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		}
 	}
 
-	vgsc := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{
+	vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vgscName,
 			Labels: map[string]string{
@@ -143,11 +143,11 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			},
 			Annotations: vgscAnnotations,
 		},
-		Spec: volumegroupsnapshotv1beta1.VolumeGroupSnapshotContentSpec{
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
 			DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 			Driver:         driver,
-			Source: volumegroupsnapshotv1beta1.VolumeGroupSnapshotContentSource{
-				GroupSnapshotHandles: &volumegroupsnapshotv1beta1.GroupSnapshotHandles{
+			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
+				GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
 					VolumeGroupSnapshotHandle: vgsh,
 					VolumeSnapshotHandles:     []string{snapshotHandle},
 				},
@@ -164,7 +164,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			// Another VS restore created the VGSC between our Get and Create.
 			// Re-fetch and add our snapshot handle.
 			p.log.Infof("Stub VGSC %s was created by another VS restore, adding our handle", vgscName)
-			raceVGSC := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{}
+			raceVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 			if getErr := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, raceVGSC); getErr != nil {
 				return errors.Wrapf(getErr, "failed to get VGSC %s after race", vgscName)
 			}
@@ -174,7 +174,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	}
 
 	// Re-fetch to get server-assigned metadata (resourceVersion) needed for patching
-	createdVGSC := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{}
+	createdVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 	if err := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, createdVGSC); err != nil {
 		p.log.Warnf("Failed to fetch stub VGSC %s for status patch: %v", vgscName, err)
 		return nil
@@ -183,7 +183,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	// Set volumeGroupSnapshotHandle in status using Patch to avoid conflicts with the CSI controller.
 	patchBase := createdVGSC.DeepCopy()
 	if createdVGSC.Status == nil {
-		createdVGSC.Status = &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContentStatus{}
+		createdVGSC.Status = &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentStatus{}
 	}
 	createdVGSC.Status.VolumeGroupSnapshotHandle = &vgsh
 	if err := p.crClient.Status().Patch(ctx, createdVGSC, crclient.MergeFrom(patchBase)); err != nil {
@@ -198,7 +198,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 // This is needed when multiple VolumeSnapshots from the same VolumeGroupSnapshot are restored.
 func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 	ctx context.Context,
-	vgsc *volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent,
+	vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent,
 	snapshotHandle string,
 ) error {
 	// Check if handle is already in the list
@@ -214,7 +214,7 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 	// Add the snapshot handle to the list
 	patchBase := vgsc.DeepCopy()
 	if vgsc.Spec.Source.GroupSnapshotHandles == nil {
-		vgsc.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1beta1.GroupSnapshotHandles{}
+		vgsc.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1beta2.GroupSnapshotHandles{}
 	}
 	vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(
 		vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles,

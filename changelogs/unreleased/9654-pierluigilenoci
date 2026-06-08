@@ -1,0 +1,1 @@
+Fix issue #9658, Honor --stderrthreshold when --logtostderr is enabled

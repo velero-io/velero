@@ -55,7 +55,7 @@ checksum:
   name_template: 'CHECKSUM'
 release:
   github:
-    owner: vmware-tanzu
+    owner: velero-io
     name: velero
   draft: true
   prerelease: auto

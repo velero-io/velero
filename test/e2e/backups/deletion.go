@@ -34,13 +34,11 @@ import (
 	. "github.com/vmware-tanzu/velero/test/util/velero"
 )
 
-// Test backup and restore of Kibishii using restic
-
 func BackupDeletionWithSnapshots() {
 	backup_deletion_test(true)
 }
 
-func BackupDeletionWithRestic() {
+func BackupDeletionWithFSBackup() {
 	backup_deletion_test(false)
 }
 func backup_deletion_test(useVolumeSnapshots bool) {

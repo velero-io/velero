@@ -25,7 +25,7 @@ jobs:
               version=$(grep '^go ' go.mod | awk '{print $2}' | cut -d. -f1-2)
             else
               goDirectiveVersion=$(grep '^go ' go.mod | awk '{print $2}')
-              toolChainVersion=$(grep '^toolchain ' go.mod | awk '{print $2}')
+              toolChainVersion=$(grep '^toolchain ' go.mod | awk '{print $2}' | sed 's/^go//')
               version=$(printf "%s\n%s\n" "$goDirectiveVersion" "$toolChainVersion" | sort -V | tail -n1)
             fi
 

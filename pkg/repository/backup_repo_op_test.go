@@ -19,6 +19,9 @@ package repository
 import (
 	"fmt"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/stretchr/testify/assert"
 
 	"testing"
@@ -153,7 +156,7 @@ func TestGetBackupRepository(t *testing.T) {
 
 			if backupRepo != nil && tc.expected != nil {
 				backupRepo.ResourceVersion = tc.expected.ResourceVersion
-				require.Equal(t, *tc.expected, *backupRepo)
+				require.Empty(t, cmp.Diff(*tc.expected, *backupRepo, cmpopts.IgnoreFields(velerov1api.BackupRepository{}, "TypeMeta")))
 			} else {
 				require.Equal(t, tc.expected, backupRepo)
 			}

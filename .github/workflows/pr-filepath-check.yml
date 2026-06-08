@@ -1,0 +1,93 @@
+name: Pull Request File Path Check
+on: [pull_request]
+jobs:
+
+  filepath-check:
+    name: Check for invalid characters in file paths
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Check out the code
+      uses: actions/checkout@v6
+
+    - name: Validate file paths for Go module compatibility
+      run: |
+        # Go's module zip rejects filenames containing certain characters.
+        # See golang.org/x/mod/module fileNameOK() for the full specification.
+        #
+        # Allowed ASCII: letters, digits, and: !#$%&()+,-.=@[]^_{}~ and space
+        # Allowed non-ASCII: unicode letters only
+        # Rejected: " ' * < > ? ` | / \ : and any non-letter unicode (control
+        #           chars, format chars like U+200E LEFT-TO-RIGHT MARK, etc.)
+        #
+        # This check catches issues like the U+200E incident in PR #9552.
+
+        EXIT_STATUS=0
+
+        git ls-files -z | python3 -c "
+        import sys, unicodedata
+
+        data = sys.stdin.buffer.read()
+        files = data.split(b'\x00')
+
+        # Characters explicitly rejected by Go's fileNameOK
+        # (path separators / and \ are inherent to paths so we check per-element)
+        bad_ascii = set('\"' + \"'\" + '*<>?\`|:')
+
+        allowed_ascii = set('!#$%&()+,-.=@[]^_{}~ ')
+
+        def is_ok(ch):
+            if ch.isascii():
+                return ch.isalnum() or ch in allowed_ascii
+            return ch.isalpha()
+
+        bad_files = []  # list of (original_path, clean_path, char_desc)
+        for f in files:
+            if not f:
+                continue
+            try:
+                name = f.decode('utf-8')
+            except UnicodeDecodeError:
+                print(f'::error::Non-UTF-8 bytes in filename: {f!r}')
+                bad_files.append((repr(f), None, 'non-UTF-8 bytes'))
+                continue
+
+            # Check each path element (split on /)
+            for element in name.split('/'):
+                for ch in element:
+                    if not is_ok(ch):
+                        cp = ord(ch)
+                        char_name = unicodedata.name(ch, f'U+{cp:04X}')
+                        char_desc = f'U+{cp:04X} ({char_name})'
+                        # Build cleaned path by stripping invalid chars
+                        clean = '/'.join(
+                            ''.join(c for c in elem if is_ok(c))
+                            for elem in name.split('/')
+                        )
+                        print(f'::error file={name}::File \"{name}\" contains invalid char {char_desc}')
+                        bad_files.append((name, clean, char_desc))
+                        break
+
+        if bad_files:
+            print()
+            print('The following files have characters that are invalid in Go module zip archives:')
+            print()
+            for original, clean, desc in bad_files:
+                print(f'  {original}  — {desc}')
+            print()
+            print('To fix, rename the files to remove the problematic characters:')
+            print()
+            for original, clean, desc in bad_files:
+                if clean:
+                    print(f'  mv \"{original}\" \"{clean}\" && git add \"{clean}\"')
+                    print(f'  # or: git mv \"{original}\" \"{clean}\"')
+                else:
+                    print(f'  # {original} — cannot auto-suggest rename (non-UTF-8)')
+            print()
+            print('See https://github.com/velero-io/velero/pull/9552 for context.')
+            sys.exit(1)
+        else:
+            print('All file paths are valid for Go module zip.')
+        " || EXIT_STATUS=1
+
+        exit $EXIT_STATUS

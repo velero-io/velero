@@ -8,7 +8,7 @@ Refer [this document](customize-installation.md) to customize your installation.
 
 ## Prerequisites
 
-- Access to a Kubernetes cluster, v1.12 or later, with DNS and container networking enabled. Note that Velero versions 1.6.0-1.6.2, only support Kubernetes versions v1.12-1.21. If you are installing on a newer version of Kubernetes, its recommended that you install a newer version of Velero. For more information on supported Kubernetes versions, see the Velero [compatibility matrix](https://github.com/vmware-tanzu/velero#velero-compatabilty-matrix).
+- Access to a Kubernetes cluster, v1.12 or later, with DNS and container networking enabled. Note that Velero versions 1.6.0-1.6.2, only support Kubernetes versions v1.12-1.21. If you are installing on a newer version of Kubernetes, its recommended that you install a newer version of Velero. For more information on supported Kubernetes versions, see the Velero [compatibility matrix](https://github.com/velero-io/velero#velero-compatabilty-matrix).
 - `kubectl` installed locally
 
 Velero uses object storage to store backups and associated artifacts. It also optionally integrates with supported block storage systems to snapshot your persistent volumes. Before beginning the installation process, you should identify the object storage provider and optional block storage provider(s) you'll be using from the list of [compatible providers][0].
@@ -66,7 +66,7 @@ _Note: if your object storage provider is different than your volume snapshot pr
 Please refer to [this part of the documentation][5].
 
 [0]: supported-providers.md
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: on-premises.md
 [3]: overview-plugins.md
 [4]: customize-installation.md#install-an-additional-volume-snapshot-provider

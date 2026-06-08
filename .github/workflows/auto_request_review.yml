@@ -5,6 +5,10 @@ on:
   pull_request_target:
     types: [opened, ready_for_review, reopened]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   auto-request-review:
     name: Auto Request Review
@@ -13,5 +17,5 @@ jobs:
       - name: Request a PR review based on files types/paths, and/or groups the author belongs to
         uses: necojackarc/auto-request-review@v0.13.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           config: .github/auto-assignees.yml
+          token: ${{ secrets.GITHUB_TOKEN }}

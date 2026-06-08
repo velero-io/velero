@@ -9,6 +9,11 @@ import (
 )
 
 func ShouldExpandWildcards(includes []string, excludes []string) bool {
+	// Empty includes is equivalent to * (match all) - don't expand
+	if len(includes) == 0 {
+		return false
+	}
+
 	wildcardFound := false
 	for _, include := range includes {
 		// Special case: "*" alone means "match all" - don't expand

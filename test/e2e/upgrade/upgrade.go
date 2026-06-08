@@ -43,7 +43,7 @@ func BackupUpgradeRestoreWithSnapshots() {
 	}
 }
 
-func BackupUpgradeRestoreWithRestic() {
+func BackupUpgradeRestoreWithFSBackup() {
 	veleroCfg = VeleroCfg
 	for _, upgradeFromVelero := range GetVersionList(veleroCfg.UpgradeFromVeleroCLI, veleroCfg.UpgradeFromVeleroVersion) {
 		BackupUpgradeRestoreTest(false, upgradeFromVelero)
@@ -108,8 +108,6 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 			Expect(err).To(Succeed())
 			oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 			defer ctxCancel()
-			supportUploaderType, err := IsSupportUploaderType(veleroCLI2Version.VeleroVersion)
-			Expect(err).To(Succeed())
 			if veleroCLI2Version.VeleroCLI == "" {
 				//Assume tag of velero server image is identical to velero CLI version
 				//Download velero CLI if it's empty according to velero CLI version
@@ -182,8 +180,6 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 				BackupCfg.UseVolumeSnapshots = useVolumeSnapshots
 				BackupCfg.DefaultVolumesToFsBackup = !useVolumeSnapshots
 				BackupCfg.Selector = ""
-				//TODO: pay attention to this param, remove it when restic is not the default backup tool any more.
-				BackupCfg.UseResticIfFSBackup = !supportUploaderType
 				Expect(VeleroBackupNamespace(oneHourTimeout, tmpCfg.UpgradeFromVeleroCLI,
 					tmpCfg.VeleroNamespace, BackupCfg)).To(Succeed(), func() string {
 					RunDebug(context.Background(), tmpCfg.UpgradeFromVeleroCLI, tmpCfg.VeleroNamespace,
@@ -247,17 +243,9 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 				tmpCfg.GCFrequency = ""
 				tmpCfg.UseNodeAgent = !useVolumeSnapshots
 				Expect(err).To(Succeed())
-				if supportUploaderType {
-					Expect(VeleroInstall(context.Background(), &tmpCfg, false)).To(Succeed())
-					Expect(CheckVeleroVersion(context.Background(), tmpCfg.VeleroCLI,
-						tmpCfg.VeleroVersion)).To(Succeed())
-				} else {
-					// For upgrade from v1.9 or other version below v1.9
-					tmpCfg.UploaderType = "restic"
-					Expect(VeleroUpgrade(context.Background(), tmpCfg)).To(Succeed())
-					Expect(CheckVeleroVersion(context.Background(), tmpCfg.VeleroCLI,
-						tmpCfg.VeleroVersion)).To(Succeed())
-				}
+				Expect(VeleroInstall(context.Background(), &tmpCfg, false)).To(Succeed())
+				Expect(CheckVeleroVersion(context.Background(), tmpCfg.VeleroCLI,
+					tmpCfg.VeleroVersion)).To(Succeed())
 			})
 
 			// Wait for 70s to make sure the backups are synced after Velero reinstall

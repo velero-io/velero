@@ -22,9 +22,9 @@ If you encounter issues with installing or configuring, see [Debugging Installat
 
 ### Download Velero
 
-1. Download the [latest official release's](https://github.com/vmware-tanzu/velero/releases) tarball for your client platform.
+1. Download the [latest official release's](https://github.com/velero-io/velero/releases) tarball for your client platform.
 
-    _We strongly recommend that you use an [official release](https://github.com/vmware-tanzu/velero/releases) of
+    _We strongly recommend that you use an [official release](https://github.com/velero-io/velero/releases) of
 Velero. The tarballs for each release contain the `velero` command-line client. The code in the main branch
 of the Velero repository is under active development and is not guaranteed to be stable!_
 
@@ -268,6 +268,6 @@ In this case:
 [3]: install-overview.md
 [17]: restic.md
 [18]: debugging-restores.md
-[26]: https://github.com/vmware-tanzu/velero/releases
+[26]: https://github.com/velero-io/velero/releases
 [30]: https://godoc.org/github.com/robfig/cron
 [31]: #expose-minio-outside-your-cluster

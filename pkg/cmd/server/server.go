@@ -27,7 +27,7 @@ import (
 	"time"
 
 	logrusr "github.com/bombsimon/logrusr/v3"
-	volumegroupsnapshotv1beta1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -247,7 +247,7 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		cancelFunc()
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta1.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
@@ -1164,8 +1164,8 @@ func markPodVolumeRestoresCancel(ctx context.Context, client ctrlclient.Client, 
 
 	for i := range pvrs.Items {
 		pvr := pvrs.Items[i]
-		if controller.IsLegacyPVR(&pvr) {
-			log.WithField("PVR", pvr.GetName()).Warn("Found a legacy PVR during velero server restart, cannot stop it")
+		if _, err := uploader.ValidateUploaderType(pvr.Spec.UploaderType); err != nil {
+			log.WithField("PVR", pvr.Name).Warnf("invalid uploader type %s, skip marking cancel for this PVR", pvr.Spec.UploaderType)
 			continue
 		}
 

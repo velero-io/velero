@@ -397,11 +397,10 @@ var _ = Describe(
 	APIExtensionsVersionsTest,
 )
 
-// Test backup and restore of Kibishii using restic
 var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and Restic for volume backups",
-	Label("Basic", "Restic", "AdditionalBSL"),
-	BackupRestoreWithRestic,
+	"Velero tests on cluster using the plugin provider for object storage and file system backup for volumes",
+	Label("Basic", "FSBackup", "AdditionalBSL"),
+	BackupRestoreWithFSBackup,
 )
 
 var _ = Describe(
@@ -417,9 +416,9 @@ var _ = Describe(
 )
 
 var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups",
-	Label("Basic", "Restic", "RetainPV", "AdditionalBSL"),
-	BackupRestoreRetainedPVWithRestic,
+	"Velero tests on cluster using the plugin provider for object storage and file system backup for volumes",
+	Label("Basic", "FSBackup", "RetainPV", "AdditionalBSL"),
+	BackupRestoreRetainedPVWithFSBackup,
 )
 
 var _ = Describe(
@@ -452,11 +451,10 @@ var _ = Describe(
 	MultiNSBackupRestore,
 )
 
-// Upgrade test by Kibishii using Restic
 var _ = Describe(
-	"Velero upgrade tests on cluster using the plugin provider for object storage and Restic for volume backups",
-	Label("Upgrade", "Restic"),
-	BackupUpgradeRestoreWithRestic,
+	"Velero upgrade tests on cluster using the plugin provider for object storage and file system backup for volumes",
+	Label("Upgrade", "FSBackup"),
+	BackupUpgradeRestoreWithFSBackup,
 )
 var _ = Describe(
 	"Velero upgrade tests on cluster using the plugin provider for object storage and snapshots for volume backups",
@@ -522,7 +520,7 @@ var _ = Describe(
 )
 var _ = Describe(
 	"Velero test on skip backup of volume by resource policies",
-	Label("ResourceFiltering", "ResourcePolicies", "Restic"),
+	Label("ResourceFiltering", "ResourcePolicies", "FSBackup"),
 	ResourcePoliciesTest,
 )
 
@@ -560,9 +558,9 @@ var _ = Describe(
 )
 
 var _ = Describe(
-	"Velero tests of Restic backup deletion",
-	Label("Backups", "Deletion", "Restic"),
-	BackupDeletionWithRestic,
+	"Velero tests of file system backup deletion",
+	Label("Backups", "Deletion", "FSBackup"),
+	BackupDeletionWithFSBackup,
 )
 var _ = Describe(
 	"Velero tests of snapshot backup deletion",
@@ -570,7 +568,7 @@ var _ = Describe(
 	BackupDeletionWithSnapshots,
 )
 var _ = Describe(
-	"Local backups and Restic repos will be deleted once the corresponding backup storage location is deleted",
+	"Local backups and backup repos will be deleted once the corresponding backup storage location is deleted",
 	Label("Backups", "TTL", "LongTime", "Snapshot", "SkipVanillaZfs"),
 	TTLTest,
 )
@@ -608,9 +606,9 @@ var _ = Describe(
 	BslDeletionWithSnapshots,
 )
 var _ = Describe(
-	"Local backups and Restic repos will be deleted once the corresponding backup storage location is deleted",
-	Label("BSL", "Deletion", "Restic", "AdditionalBSL"),
-	BslDeletionWithRestic,
+	"Local backups and backup repos will be deleted once the corresponding backup storage location is deleted",
+	Label("BSL", "Deletion", "FSBackup", "AdditionalBSL"),
+	BslDeletionWithFSBackup,
 )
 
 var _ = Describe(
@@ -626,13 +624,13 @@ var _ = Describe(
 
 var _ = Describe(
 	"Backup resources should follow the specific order in schedule",
-	Label("NamespaceMapping", "Single", "Restic"),
-	OneNamespaceMappingResticTest,
+	Label("NamespaceMapping", "Single", "FSBackup"),
+	OneNamespaceMappingFSBackupTest,
 )
 var _ = Describe(
 	"Backup resources should follow the specific order in schedule",
-	Label("NamespaceMapping", "Multiple", "Restic"),
-	MultiNamespacesMappingResticTest,
+	Label("NamespaceMapping", "Multiple", "FSBackup"),
+	MultiNamespacesMappingFSBackupTest,
 )
 var _ = Describe(
 	"Backup resources should follow the specific order in schedule",
@@ -683,6 +681,12 @@ var _ = Describe(
 	"Test node agent config's LoadAffinity part",
 	Label("NodeAgentConfig", "LoadAffinity"),
 	LoadAffinities,
+)
+
+var _ = Describe(
+	"Test data mover dynamic Cache PVC injection",
+	Label("NodeAgentConfig", "CachePVC"),
+	CachePVCTest,
 )
 
 func GetKubeConfigContext() error {

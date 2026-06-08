@@ -30,7 +30,7 @@ func TestIsBuiltInUploader(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(tt *testing.T) {
-			assert.Equal(tt, tc.want, IsBuiltInUploader(tc.dataMover))
+			assert.Equal(tt, tc.want, IsBuiltInDataMover(tc.dataMover))
 		})
 	}
 }

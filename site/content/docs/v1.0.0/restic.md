@@ -330,7 +330,7 @@ on to running other init containers/the main containers.
 
 [1]: https://github.com/restic/restic
 [2]: install-overview.md
-[3]: https://github.com/vmware-tanzu/velero/releases/
+[3]: https://github.com/velero-io/velero/releases/
 [4]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [5]: http://restic.readthedocs.io/en/latest/100_references.html#terminology
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation

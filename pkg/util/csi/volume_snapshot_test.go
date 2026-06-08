@@ -2004,7 +2004,7 @@ func TestGetVSCForVS(t *testing.T) {
 			}
 
 			if tc.expectedVSC != nil {
-				require.True(t, cmp.Equal(tc.expectedVSC, vsc, cmpopts.IgnoreFields(snapshotv1api.VolumeSnapshotContent{}, "ResourceVersion")))
+				require.Empty(t, cmp.Diff(tc.expectedVSC, vsc, cmpopts.IgnoreFields(snapshotv1api.VolumeSnapshotContent{}, "TypeMeta", "ResourceVersion")))
 			}
 		})
 	}

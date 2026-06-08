@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
@@ -44,6 +45,21 @@ type fakeClientWithErrors struct {
 	getError    error
 	patchError  error
 	deleteError error
+}
+
+type fakeClientWithCallTracking struct {
+	crclient.Client
+	events *[]string
+}
+
+func (c *fakeClientWithCallTracking) Create(ctx context.Context, obj crclient.Object, opts ...crclient.CreateOption) error {
+	*c.events = append(*c.events, "create")
+	return c.Client.Create(ctx, obj, opts...)
+}
+
+func (c *fakeClientWithCallTracking) Delete(ctx context.Context, obj crclient.Object, opts ...crclient.DeleteOption) error {
+	*c.events = append(*c.events, "delete")
+	return c.Client.Delete(ctx, obj, opts...)
 }
 
 func (c *fakeClientWithErrors) Get(ctx context.Context, key crclient.ObjectKey, obj crclient.Object, opts ...crclient.GetOption) error {
@@ -323,6 +339,39 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 		}
 		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "delete-fail-vsc"))
 	})
+}
+
+func TestVSCExecute_CreateSleepDeleteOrder(t *testing.T) {
+	snapshotHandleStr := "test"
+	vsc := builder.ForVolumeSnapshotContent("bar").
+		ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.BackupNameLabel: "backup"})).
+		Status(&snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &snapshotHandleStr}).
+		Result()
+
+	vscMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vsc)
+	require.NoError(t, err)
+
+	events := make([]string, 0, 3)
+	realClient := velerotest.NewFakeControllerRuntimeClient(t)
+	trackingClient := &fakeClientWithCallTracking{Client: realClient, events: &events}
+
+	originalSleep := sleepBetweenTempVSCCreateAndDelete
+	t.Cleanup(func() {
+		sleepBetweenTempVSCCreateAndDelete = originalSleep
+	})
+
+	sleepBetweenTempVSCCreateAndDelete = func(d time.Duration) {
+		require.Equal(t, tempVSCCreateDeleteGap, d)
+		events = append(events, "sleep")
+	}
+
+	p := volumeSnapshotContentDeleteItemAction{log: logrus.StandardLogger(), crClient: trackingClient}
+	err = p.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   &unstructured.Unstructured{Object: vscMap},
+		Backup: builder.ForBackup("velero", "backup").Result(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"create", "sleep", "delete"}, events)
 }
 
 func boolPtr(b bool) *bool {

@@ -105,8 +105,6 @@ see: https://velero.io/docs/main/build-from-source/#making-images-and-updating-v
 endef
 # comma cannot be escaped and can only be used in Make function arguments by putting into variable
 comma=,
-# The version of restic binary to be downloaded
-RESTIC_VERSION ?= 0.15.0
 
 CLI_PLATFORMS ?= linux-amd64 linux-arm linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 linux-ppc64le linux-s390x
 BUILD_OUTPUT_TYPE ?= docker
@@ -213,6 +211,7 @@ shell: build-dirs build-env
 		-v "$$(pwd)/.go/std/$(GOOS)/$(GOARCH):/usr/local/go/pkg/$(GOOS)_$(GOARCH)_static:delegated" \
 		-v "$$(pwd)/.go/go-build:/.cache/go-build:delegated" \
 		-v "$$(pwd)/.go/golangci-lint:/.cache/golangci-lint:delegated" \
+        -v "$$(pwd)/.go/goimports:/.cache/goimports:delegated" \
 		-w /github.com/vmware-tanzu/velero \
 		$(BUILDER_IMAGE) \
 		/bin/sh $(CMD)
@@ -260,7 +259,6 @@ container-linux:
 	--build-arg=GIT_SHA=$(GIT_SHA) \
 	--build-arg=GIT_TREE_STATE=$(GIT_TREE_STATE) \
 	--build-arg=REGISTRY=$(REGISTRY) \
-	--build-arg=RESTIC_VERSION=$(RESTIC_VERSION) \
 	--provenance=false \
 	--sbom=false \
 	-f $(VELERO_DOCKERFILE) .
@@ -345,7 +343,7 @@ update-crd:
 
 build-dirs:
 	@mkdir -p _output/bin/$(GOOS)/$(GOARCH)
-	@mkdir -p .go/src/$(PKG) .go/pkg .go/bin .go/std/$(GOOS)/$(GOARCH) .go/go-build .go/golangci-lint
+	@mkdir -p .go/src/$(PKG) .go/pkg .go/bin .go/std/$(GOOS)/$(GOARCH) .go/go-build .go/golangci-lint .go/goimports
 
 build-env:
 	@# if we have overridden the value for the build-image Dockerfile,

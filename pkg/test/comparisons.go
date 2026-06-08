@@ -107,7 +107,7 @@ func AssertDeepEqual(t *testing.T, expected, actual any) bool {
 	}
 
 	if !equality.Semantic.DeepEqual(expected, actual) {
-		s := diff.ObjectDiff(expected, actual)
+		s := diff.Diff(expected, actual)
 		return assert.Fail(t, fmt.Sprintf("Objects not equal:\n\n%s", s))
 	}
 

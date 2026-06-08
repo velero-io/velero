@@ -34,11 +34,20 @@
     height: auto;
     margin-left: 30px;
   }
-  .vm-logo {
-    font-size: .75rem;
-    img {
-      max-width: 75px;
-      margin-left: 30px;
+  .cncf-affiliation {
+    color: $footer-foreground;
+    a {
+      color: $footer-link-color;
+      border-bottom: 0;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+    .cncf-logo {
+      display: inline-block;
+      margin-top: 0.25rem;
+      max-width: 300px;
+      height: auto;
     }
   }
 }

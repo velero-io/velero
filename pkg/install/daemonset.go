@@ -198,7 +198,8 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 					Secret: &corev1api.SecretVolumeSource{
 						// read-only for Owner, Group, Public
 						DefaultMode: ptr.To(int32(0444)),
-						SecretName:  "cloud-credentials",
+						// #nosec G101 -- This is a reference to a Secret resource name, not a credential
+						SecretName: "cloud-credentials",
 					},
 				},
 			},

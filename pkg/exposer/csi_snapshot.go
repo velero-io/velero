@@ -19,6 +19,7 @@ package exposer
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -33,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/vmware-tanzu/velero/pkg/datamover"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
@@ -93,6 +95,12 @@ type CSISnapshotExposeParam struct {
 
 	// PriorityClassName is the priority class name for the data mover pod
 	PriorityClassName string
+
+	// DataMover is the data mover type, e.g., velero-fs, velero-block
+	DataMover string
+
+	// SnapshotMetadataServiceConfigs is the config for CSI snapshot metadata service
+	SnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
 }
 
 // CSISnapshotExposeWaitParam define the input param for WaitExposed of CSI snapshots
@@ -234,7 +242,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		}
 	}
 
-	backupPVC, err := e.createBackupPVC(ctx, ownerObject, backupVS.Name, backupPVCStorageClass, csiExposeParam.AccessMode, volumeSize, backupPVCReadOnly, backupPVCAnnotations)
+	backupPVC, err := e.createBackupPVC(ctx, ownerObject, backupVS.Name, backupPVCStorageClass, csiExposeParam.AccessMode, volumeSize, backupPVCReadOnly, backupPVCAnnotations, csiExposeParam.DataMover)
 	if err != nil {
 		return errors.Wrap(err, "error to create backup pvc")
 	}
@@ -264,6 +272,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		csiExposeParam.PriorityClassName,
 		intoleratableNodes,
 		volumeTopology,
+		csiExposeParam.SnapshotMetadataServiceConfigs,
 	)
 	if err != nil {
 		return errors.Wrap(err, "error to create backup pod")
@@ -450,7 +459,11 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
 }
 
-func getVolumeModeByAccessMode(accessMode string) (corev1api.PersistentVolumeMode, error) {
+func getVolumeModeByAccessMode(accessMode string, dataMover string) (corev1api.PersistentVolumeMode, error) {
+	if dataMover == datamover.DataMoverTypeVeleroBlock {
+		return corev1api.PersistentVolumeBlock, nil
+	}
+
 	switch accessMode {
 	case AccessModeFileSystem:
 		return corev1api.PersistentVolumeFilesystem, nil
@@ -488,10 +501,14 @@ func (e *csiSnapshotExposer) createBackupVS(ctx context.Context, ownerObject cor
 func (e *csiSnapshotExposer) createBackupVSC(ctx context.Context, ownerObject corev1api.ObjectReference, snapshotVSC *snapshotv1api.VolumeSnapshotContent, vs *snapshotv1api.VolumeSnapshot) (*snapshotv1api.VolumeSnapshotContent, error) {
 	backupVSCName := ownerObject.Name
 
+	anno := make(map[string]string)
+	maps.Copy(anno, snapshotVSC.Annotations)
+	anno[kube.KubeAnnAllowVolumeModeChange] = "true"
+
 	vsc := &snapshotv1api.VolumeSnapshotContent{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        backupVSCName,
-			Annotations: snapshotVSC.Annotations,
+			Annotations: anno,
 			Labels:      map[string]string{},
 		},
 		Spec: snapshotv1api.VolumeSnapshotContentSpec{
@@ -524,10 +541,10 @@ func (e *csiSnapshotExposer) createBackupVSC(ctx context.Context, ownerObject co
 	return e.csiSnapshotClient.VolumeSnapshotContents().Create(ctx, vsc, metav1.CreateOptions{})
 }
 
-func (e *csiSnapshotExposer) createBackupPVC(ctx context.Context, ownerObject corev1api.ObjectReference, backupVS, storageClass, accessMode string, resource resource.Quantity, readOnly bool, annotations map[string]string) (*corev1api.PersistentVolumeClaim, error) {
+func (e *csiSnapshotExposer) createBackupPVC(ctx context.Context, ownerObject corev1api.ObjectReference, backupVS, storageClass, accessMode string, resource resource.Quantity, readOnly bool, annotations map[string]string, dataMover string) (*corev1api.PersistentVolumeClaim, error) {
 	backupPVCName := ownerObject.Name
 
-	volumeMode, err := getVolumeModeByAccessMode(accessMode)
+	volumeMode, err := getVolumeModeByAccessMode(accessMode, dataMover)
 	if err != nil {
 		return nil, err
 	}
@@ -600,6 +617,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 	priorityClassName string,
 	intoleratableNodes []string,
 	volumeTopology *corev1api.NodeSelector,
+	csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
 ) (*corev1api.Pod, error) {
 	podName := ownerObject.Name
 
@@ -654,6 +672,12 @@ func (e *csiSnapshotExposer) createBackupPod(
 
 	args = append(args, podInfo.logFormatArgs...)
 	args = append(args, podInfo.logLevelArgs...)
+
+	if csiSnapshotMetadataServiceConfigs != nil {
+		if csiSnapshotMetadataServiceConfigs.SAName != "" {
+			args = append(args, fmt.Sprintf("--csi-snapshot-metadata-service-sa=%s", csiSnapshotMetadataServiceConfigs.SAName))
+		}
+	}
 
 	if affinity == nil {
 		affinity = &kube.LoadAffinity{}

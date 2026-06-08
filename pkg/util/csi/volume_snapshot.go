@@ -708,17 +708,18 @@ func DiagnoseVS(vs *snapshotv1api.VolumeSnapshot, events *corev1api.EventList) s
 		}
 	}
 
-	diag := fmt.Sprintf("VS %s/%s, bind to %s, readyToUse %v, errMessage %s\n", vs.Namespace, vs.Name, vscName, readyToUse, errMessage)
+	var diag strings.Builder
+	_, _ = fmt.Fprintf(&diag, "VS %s/%s, bind to %s, readyToUse %v, errMessage %s\n", vs.Namespace, vs.Name, vscName, readyToUse, errMessage)
 
 	if events != nil {
 		for _, e := range events.Items {
 			if e.InvolvedObject.UID == vs.UID && e.Type == corev1api.EventTypeWarning {
-				diag += fmt.Sprintf("VS event reason %s, message %s\n", e.Reason, e.Message)
+				_, _ = fmt.Fprintf(&diag, "VS event reason %s, message %s\n", e.Reason, e.Message)
 			}
 		}
 	}
 
-	return diag
+	return diag.String()
 }
 
 func DiagnoseVSC(vsc *snapshotv1api.VolumeSnapshotContent) string {

@@ -173,7 +173,6 @@ func (nie *NamespaceIncludesExcludes) ExpandIncludesExcludes() error {
 }
 
 // ResolveNamespaceList returns a list of all namespaces which will be backed up.
-// The second return value indicates whether wildcard expansion was performed.
 func (nie *NamespaceIncludesExcludes) ResolveNamespaceList() ([]string, error) {
 	// Check if this is being called by non-backup processing e.g. backup queue controller
 	if !nie.wildcardExpanded {

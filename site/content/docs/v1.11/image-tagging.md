@@ -9,7 +9,7 @@ This document describes Velero's image tagging policy.
 
 `velero/velero:<SemVer>`
 
-Velero follows the [Semantic Versioning](http://semver.org/) standard for releases. Each tag in the `github.com/vmware-tanzu/velero` repository has a matching image, `velero/velero:v1.0.0`.
+Velero follows the [Semantic Versioning](http://semver.org/) standard for releases. Each tag in the `github.com/velero-io/velero` repository has a matching image, `velero/velero:v1.0.0`.
 
 ### Latest
 

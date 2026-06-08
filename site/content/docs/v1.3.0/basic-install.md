@@ -60,7 +60,7 @@ _Note: if your object storage provider is different than your volume snapshot pr
 Please refer to [this part of the documentation][5].
 
 [0]: supported-providers.md
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: on-premises.md
 [3]: overview-plugins.md
 [4]: customize-installation.md#install-an-additional-volume-snapshot-provider

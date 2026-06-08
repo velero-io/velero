@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Velero binary build section
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS velero-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-trixie AS velero-builder
 
 ARG GOPROXY
 ARG BIN
@@ -48,38 +48,11 @@ RUN mkdir -p /output/usr/bin && \
     -ldflags "${LDFLAGS}" ${PKG}/cmd/velero-helper && \
     go clean -modcache -cache
 
-# Restic binary build section
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS restic-builder
-
-ARG GOPROXY
-ARG BIN
-ARG TARGETOS
-ARG TARGETARCH
-ARG TARGETVARIANT
-ARG RESTIC_VERSION
-
-ENV CGO_ENABLED=0 \
-    GO111MODULE=on \
-    GOPROXY=${GOPROXY} \
-    GOOS=${TARGETOS} \
-    GOARCH=${TARGETARCH} \
-    GOARM=${TARGETVARIANT}
-
-COPY . /go/src/github.com/vmware-tanzu/velero
-
-RUN mkdir -p /output/usr/bin && \
-    export GOARM=$(echo "${GOARM}" | cut -c2-) && \
-    /go/src/github.com/vmware-tanzu/velero/hack/build-restic.sh && \
-    go clean -modcache -cache
-
 # Velero image packing section
-FROM paketobuildpacks/run-jammy-tiny:latest
+FROM paketobuildpacks/ubuntu-noble-run-tiny:latest
 
-LABEL maintainer="Xun Jiang <jxun@vmware.com>"
+LABEL maintainer="Xun Jiang <xun.jiang@broadcom.com>"
 
 COPY --from=velero-builder /output /
 
-COPY --from=restic-builder /output /
-
 USER cnb:cnb
-

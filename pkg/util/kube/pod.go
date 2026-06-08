@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -183,16 +184,16 @@ func GetPodContainerTerminateMessage(pod *corev1api.Pod, container string) strin
 
 // GetPodTerminateMessage returns the terminate message for all containers of a pod
 func GetPodTerminateMessage(pod *corev1api.Pod) string {
-	message := ""
+	var message strings.Builder
 	for _, containerStatus := range pod.Status.ContainerStatuses {
 		if containerStatus.State.Terminated != nil {
 			if containerStatus.State.Terminated.Message != "" {
-				message += containerStatus.State.Terminated.Message + "/"
+				message.WriteString(containerStatus.State.Terminated.Message + "/")
 			}
 		}
 	}
 
-	return message
+	return message.String()
 }
 
 func getPodLogReader(ctx context.Context, podGetter corev1client.CoreV1Interface, pod string, namespace string, logOptions *corev1api.PodLogOptions) (io.ReadCloser, error) {
@@ -272,21 +273,22 @@ func ToSystemAffinity(loadAffinity *LoadAffinity, volumeTopology *corev1api.Node
 }
 
 func DiagnosePod(pod *corev1api.Pod, events *corev1api.EventList) string {
-	diag := fmt.Sprintf("Pod %s/%s, phase %s, node name %s, message %s\n", pod.Namespace, pod.Name, pod.Status.Phase, pod.Spec.NodeName, pod.Status.Message)
+	var diag strings.Builder
+	_, _ = fmt.Fprintf(&diag, "Pod %s/%s, phase %s, node name %s, message %s\n", pod.Namespace, pod.Name, pod.Status.Phase, pod.Spec.NodeName, pod.Status.Message)
 
 	for _, condition := range pod.Status.Conditions {
-		diag += fmt.Sprintf("Pod condition %s, status %s, reason %s, message %s\n", condition.Type, condition.Status, condition.Reason, condition.Message)
+		_, _ = fmt.Fprintf(&diag, "Pod condition %s, status %s, reason %s, message %s\n", condition.Type, condition.Status, condition.Reason, condition.Message)
 	}
 
 	if events != nil {
 		for _, e := range events.Items {
 			if e.InvolvedObject.UID == pod.UID && e.Type == corev1api.EventTypeWarning {
-				diag += fmt.Sprintf("Pod event reason %s, message %s\n", e.Reason, e.Message)
+				_, _ = fmt.Fprintf(&diag, "Pod event reason %s, message %s\n", e.Reason, e.Message)
 			}
 		}
 	}
 
-	return diag
+	return diag.String()
 }
 
 var funcExit = os.Exit

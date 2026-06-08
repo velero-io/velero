@@ -570,6 +570,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		}
 	}
 
+	// Empty IncludedNamespaces means "include all namespaces". Normalize
+	// to ["*"] so that downstream wildcard expansion does not collapse
+	// an empty-includes + wildcard-excludes combination into "back up nothing".
+	if len(request.Spec.IncludedNamespaces) == 0 {
+		request.Spec.IncludedNamespaces = []string{"*"}
+	}
+
 	// validate the included/excluded namespaces
 	for _, err := range collections.ValidateNamespaceIncludesExcludes(request.Spec.IncludedNamespaces, request.Spec.ExcludedNamespaces) {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("Invalid included/excluded namespace lists: %v", err))
@@ -587,6 +594,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	if resourcePolicies != nil && resourcePolicies.GetIncludeExcludePolicy() != nil && collections.UseOldResourceFilters(request.Spec) {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "include-resources, exclude-resources and include-cluster-resources are old filter parameters.\n"+
 			"They cannot be used with include-exclude policies.")
+	}
+	// namespacedFilterPolicies and clusterScopedFilterPolicy incompatible with old-style filters
+	if resourcePolicies != nil &&
+		(len(resourcePolicies.GetNamespacedFilterPolicies()) > 0 || resourcePolicies.GetClusterScopedFilterPolicy() != nil) &&
+		collections.UseOldResourceFilters(request.Spec) {
+		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "include-resources, exclude-resources and include-cluster-resources are old filter parameters.\n"+
+			"They cannot be used with namespace-scoped or fine-grained global filter policies.")
 	}
 	request.ResPolicies = resourcePolicies
 	return request

@@ -616,10 +616,8 @@ func createVeleroResources(ctx context.Context, cli, namespace string, args []st
 		return errors.Wrapf(err, "failed to run velero install dry run command, stdout=%s, stderr=%s", stdout, stderr)
 	}
 
-	// From v1.15, the Restic uploader is deprecated,
-	// and a warning message is printed for the install CLI.
-	// Need to skip the deprecation of Restic message before the generated JSON.
-	// Redirect to the stdout to the first curly bracket to skip the warning.
+	// The install CLI may print warning messages before the generated JSON.
+	// Skip any text before the first curly bracket.
 	if stdout[0] != '{' {
 		newIndex := strings.Index(stdout, "{")
 		stdout = stdout[newIndex:]
@@ -730,7 +728,7 @@ func patchResources(resources *unstructured.UnstructuredList, namespace string, 
 		}
 	}
 
-	// customize the restic restore helper image
+	// customize the restore helper image
 	if len(options.RestoreHelperImage) > 0 {
 		restoreActionConfig := corev1api.ConfigMap{
 			TypeMeta: metav1.TypeMeta{
@@ -755,7 +753,7 @@ func patchResources(resources *unstructured.UnstructuredList, namespace string, 
 			return errors.Wrapf(err, "failed to convert restore action config to unstructure")
 		}
 		resources.Items = append(resources.Items, un)
-		fmt.Printf("the restic restore helper image is set by the configmap %q \n", "fs-restore-action-config")
+		fmt.Printf("the restore helper image is set by the configmap %q \n", "fs-restore-action-config")
 	}
 
 	return nil

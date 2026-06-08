@@ -122,7 +122,7 @@ func RunRestartableDelegateTests(
 					// If Function returns nil as struct return type, we cannot just
 					// compare the interface to nil as its type will not be nil,
 					// only the value will be
-					if expected[i] == nil && reflect.ValueOf(a).Kind() == reflect.Ptr {
+					if expected[i] == nil && reflect.ValueOf(a).Kind() == reflect.Pointer {
 						assert.True(t, reflect.ValueOf(a).IsNil())
 						continue
 					}

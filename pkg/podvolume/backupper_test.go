@@ -29,6 +29,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -40,8 +41,60 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
+
+type fakeInformerRegistration struct{}
+
+func (fakeInformerRegistration) HasSynced() bool { return true }
+
+func (fakeInformerRegistration) HasSyncedChecker() cache.DoneChecker {
+	return fakeDoneChecker{name: "fakeInformerRegistration"}
+}
+
+type fakeDoneChecker struct {
+	name string
+}
+
+func (f fakeDoneChecker) Name() string { return f.name }
+
+func (f fakeDoneChecker) Done() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+type fakeInformer struct {
+	handler cache.ResourceEventHandler
+}
+
+func (f *fakeInformer) AddEventHandler(handler cache.ResourceEventHandler) (cache.ResourceEventHandlerRegistration, error) {
+	f.handler = handler
+	return fakeInformerRegistration{}, nil
+}
+
+func (f *fakeInformer) AddEventHandlerWithResyncPeriod(handler cache.ResourceEventHandler, _ time.Duration) (cache.ResourceEventHandlerRegistration, error) {
+	return f.AddEventHandler(handler)
+}
+
+func (f *fakeInformer) AddEventHandlerWithOptions(handler cache.ResourceEventHandler, _ cache.HandlerOptions) (cache.ResourceEventHandlerRegistration, error) {
+	return f.AddEventHandler(handler)
+}
+
+func (f *fakeInformer) RemoveEventHandler(_ cache.ResourceEventHandlerRegistration) error {
+	return nil
+}
+
+func (f *fakeInformer) AddIndexers(_ cache.Indexers) error { return nil }
+
+func (f *fakeInformer) HasSynced() bool { return true }
+
+func (f *fakeInformer) HasSyncedChecker() cache.DoneChecker {
+	return fakeDoneChecker{name: "fakeInformer"}
+}
+
+func (f *fakeInformer) IsStopped() bool { return false }
+
+var _ ctrlcache.Informer = (*fakeInformer)(nil)
 
 func TestIsHostPathVolume(t *testing.T) {
 	// hostPath pod volume
@@ -343,7 +396,7 @@ func TestBackupPodVolumes(t *testing.T) {
 			},
 			uploaderType: "fake-uploader-type",
 			errs: []string{
-				"invalid uploader type 'fake-uploader-type', valid type: 'kopia'",
+				"invalid uploader type 'fake-uploader-type', valid types: 'kopia', 'velero-block'",
 			},
 		},
 		{
@@ -557,27 +610,16 @@ func TestBackupPodVolumes(t *testing.T) {
 			objList = append(objList, test.kubeClientObj...)
 			fakeCtrlClient := fakeClientBuilder.WithRuntimeObjects(objList...).Build()
 
-			fakeCRWatchClient := velerotest.NewFakeControllerRuntimeWatchClient(t, test.kubeClientObj...)
-			lw := kube.InternalLW{
-				Client:     fakeCRWatchClient,
-				Namespace:  velerov1api.DefaultNamespace,
-				ObjectList: new(velerov1api.PodVolumeBackupList),
-			}
-
-			pvbInformer := cache.NewSharedIndexInformer(&lw, &velerov1api.PodVolumeBackup{}, 0, cache.Indexers{})
-
-			go pvbInformer.Run(ctx.Done())
-			require.True(t, cache.WaitForCacheSync(ctx.Done(), pvbInformer.HasSynced))
+			// This test validates creation-time behavior only, so we don't need
+			// informer sync/watch to be running.
+			pvbInformer := cache.NewSharedIndexInformer(&cache.ListWatch{}, &velerov1api.PodVolumeBackup{}, 0, cache.Indexers{})
 
 			ensurer := repository.NewEnsurer(fakeCtrlClient, velerotest.NewLogger(), time.Millisecond)
 
 			backupObj := builder.ForBackup(velerov1api.DefaultNamespace, "fake-backup").Result()
 			backupObj.Spec.StorageLocation = test.bsl
 
-			factory := NewBackupperFactory(repository.NewRepoLocker(), ensurer, fakeCtrlClient, pvbInformer, velerotest.NewLogger())
-			bp, err := factory.NewBackupper(ctx, log, backupObj, test.uploaderType)
-
-			require.NoError(t, err)
+			bp := newBackupper(ctx, log, repository.NewRepoLocker(), ensurer, pvbInformer, fakeCtrlClient, test.uploaderType, backupObj)
 
 			if test.mockGetRepositoryType {
 				funcGetRepositoryType = func() string { return "" }
@@ -587,9 +629,7 @@ func TestBackupPodVolumes(t *testing.T) {
 
 			pvbs, _, errs := bp.BackupPodVolumes(backupObj, test.sourcePod, test.volumes, nil, velerotest.NewLogger())
 
-			if test.errs == nil {
-				require.NoError(t, err)
-			} else {
+			if test.errs != nil {
 				for i := 0; i < len(errs); i++ {
 					require.EqualError(t, errs[i], test.errs[i])
 				}
@@ -760,17 +800,7 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 		velerov1api.AddToScheme(scheme)
 		client := ctrlfake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
-		lw := kube.InternalLW{
-			Client:     client,
-			Namespace:  velerov1api.DefaultNamespace,
-			ObjectList: new(velerov1api.PodVolumeBackupList),
-		}
-
-		informer := cache.NewSharedIndexInformer(&lw, &velerov1api.PodVolumeBackup{}, 0, cache.Indexers{})
-
-		ctx := t.Context()
-		go informer.Run(ctx.Done())
-		require.True(t, cache.WaitForCacheSync(ctx.Done(), informer.HasSynced))
+		informer := &fakeInformer{}
 
 		logger := logrus.New()
 		logHook := &logHook{}
@@ -787,9 +817,13 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 			err := client.Get(t.Context(), ctrlclient.ObjectKey{Namespace: c.pvb.Namespace, Name: c.pvb.Name}, pvb)
 			require.NoError(t, err)
 
+			oldPVB := pvb.DeepCopy()
 			pvb.Status = *c.statusToBeUpdated
 			err = client.Update(t.Context(), pvb)
 			require.NoError(t, err)
+
+			require.NotNil(t, informer.handler)
+			informer.handler.OnUpdate(oldPVB, pvb)
 		}
 
 		pvbs := backuper.WaitAllPodVolumesProcessed(logger)

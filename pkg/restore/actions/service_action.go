@@ -117,7 +117,7 @@ func deleteHealthCheckNodePort(service *corev1api.Service) error {
 			continue
 		}
 		fields := new(map[string]any)
-		if err := json.Unmarshal(entry.FieldsV1.Raw, fields); err != nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), fields); err != nil {
 			return errors.WithStack(err)
 		}
 
@@ -222,7 +222,7 @@ func deleteNodePorts(service *corev1api.Service) error {
 			continue
 		}
 		fields := new(map[string]any)
-		if err := json.Unmarshal(entry.FieldsV1.Raw, fields); err != nil {
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), fields); err != nil {
 			return errors.WithStack(err)
 		}
 

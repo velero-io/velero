@@ -23,7 +23,7 @@ func TestValidateUploaderType(t *testing.T) {
 		{
 			"'anything_else' is invalid",
 			"anything_else",
-			"invalid uploader type 'anything_else', valid type: 'kopia'",
+			"invalid uploader type 'anything_else', valid types: 'kopia', 'velero-block'",
 			"",
 		},
 	}

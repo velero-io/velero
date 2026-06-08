@@ -196,3 +196,21 @@ func (l *logrusAdapter) Name() string {
 func (l *logrusAdapter) StandardWriter(opts *hclog.StandardLoggerOptions) io.Writer {
 	panic("not implemented")
 }
+
+// GetLevel returns the current level
+func (l *logrusAdapter) GetLevel() hclog.Level {
+	switch l.level {
+	case logrus.TraceLevel:
+		return hclog.Trace
+	case logrus.DebugLevel:
+		return hclog.Debug
+	case logrus.InfoLevel:
+		return hclog.Info
+	case logrus.WarnLevel:
+		return hclog.Warn
+	case logrus.ErrorLevel:
+		return hclog.Error
+	default:
+		return hclog.NoLevel
+	}
+}

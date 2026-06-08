@@ -23,12 +23,14 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/gobwas/glob"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
 )
 
 type VolumeActionType string
@@ -38,7 +40,7 @@ const (
 	ConfigmapRefType string = "configmap"
 	// skip action implies the volume would be skipped from the backup operation
 	Skip VolumeActionType = "skip"
-	// fs-backup action implies that the volume would be backed up via file system copy method using the uploader(kopia/restic) configured by the user
+	// fs-backup action implies that the volume would be backed up via file system copy method using the uploader(kopia) configured by the user
 	FSBackup VolumeActionType = "fs-backup"
 	// snapshot action can have 3 different meaning based on velero configuration and backup spec - cloud provider based snapshots, local csi snapshots and datamover snapshots
 	Snapshot VolumeActionType = "snapshot"
@@ -52,6 +54,31 @@ type Action struct {
 	Type VolumeActionType `yaml:"type"`
 	// Parameters defined map of parameters when executing a specific action
 	Parameters map[string]any `yaml:"parameters,omitempty"`
+}
+
+// ResourceFilter defines a filter for specific resource kinds.
+type ResourceFilter struct {
+	Kinds            []string            `yaml:"kinds"`
+	LabelSelector    map[string]string   `yaml:"labelSelector,omitempty"`
+	OrLabelSelectors []map[string]string `yaml:"orLabelSelectors,omitempty"`
+	Names            []string            `yaml:"names,omitempty"`
+	ExcludedNames    []string            `yaml:"excludedNames,omitempty"`
+}
+
+// IsCatchAll returns true if the filter is a catch-all entry (empty kinds or ["*"])
+func (rf *ResourceFilter) IsCatchAll() bool {
+	return len(rf.Kinds) == 0 || (len(rf.Kinds) == 1 && rf.Kinds[0] == "*")
+}
+
+// ClusterScopedFilterPolicy defines backup filters scoped globally to cluster-scoped resources.
+type ClusterScopedFilterPolicy struct {
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
+}
+
+// NamespacedFilterPolicy defines backup filters scoped to specific namespaces.
+type NamespacedFilterPolicy struct {
+	Namespaces      []string         `yaml:"namespaces"`
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
 }
 
 // IncludeExcludePolicy defined policy to include or exclude resources based on the names
@@ -95,17 +122,21 @@ type VolumePolicy struct {
 
 // ResourcePolicies currently defined slice of volume policies to handle backup
 type ResourcePolicies struct {
-	Version              string                `yaml:"version"`
-	VolumePolicies       []VolumePolicy        `yaml:"volumePolicies"`
-	IncludeExcludePolicy *IncludeExcludePolicy `yaml:"includeExcludePolicy"`
+	Version                   string                     `yaml:"version"`
+	VolumePolicies            []VolumePolicy             `yaml:"volumePolicies"`
+	IncludeExcludePolicy      *IncludeExcludePolicy      `yaml:"includeExcludePolicy"`
+	ClusterScopedFilterPolicy *ClusterScopedFilterPolicy `yaml:"clusterScopedFilterPolicy,omitempty"`
+	NamespacedFilterPolicies  []NamespacedFilterPolicy   `yaml:"namespacedFilterPolicies,omitempty"`
 	// we may support other resource policies in the future, and they could be added separately
 	// OtherResourcePolicies []OtherResourcePolicy
 }
 
 type Policies struct {
-	version              string
-	volumePolicies       []volPolicy
-	includeExcludePolicy *IncludeExcludePolicy
+	version                   string
+	volumePolicies            []volPolicy
+	includeExcludePolicy      *IncludeExcludePolicy
+	clusterScopedFilterPolicy *ClusterScopedFilterPolicy
+	namespacedFilterPolicies  []NamespacedFilterPolicy
 	// OtherPolicies
 }
 
@@ -158,6 +189,8 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 
 	p.version = resPolicies.Version
 	p.includeExcludePolicy = resPolicies.IncludeExcludePolicy
+	p.clusterScopedFilterPolicy = resPolicies.ClusterScopedFilterPolicy
+	p.namespacedFilterPolicies = resPolicies.NamespacedFilterPolicies
 	return nil
 }
 
@@ -228,11 +261,27 @@ func (p *Policies) Validate() error {
 		}
 	}
 
+	if err := p.validateClusterScopedFilterPolicy(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if err := p.validateNamespacedFilterPolicies(); err != nil {
+		return errors.WithStack(err)
+	}
+
 	return nil
 }
 
 func (p *Policies) GetIncludeExcludePolicy() *IncludeExcludePolicy {
 	return p.includeExcludePolicy
+}
+
+func (p *Policies) GetClusterScopedFilterPolicy() *ClusterScopedFilterPolicy {
+	return p.clusterScopedFilterPolicy
+}
+
+func (p *Policies) GetNamespacedFilterPolicies() []NamespacedFilterPolicy {
+	return p.namespacedFilterPolicies
 }
 
 func GetResourcePoliciesFromBackup(
@@ -295,4 +344,118 @@ func getResourcePoliciesFromConfig(cm *corev1api.ConfigMap) (*Policies, error) {
 	}
 
 	return policies, nil
+}
+
+func (p *Policies) validateNamespacedFilterPolicies() error {
+	seenPatterns := make(map[string][]int) // pattern -> list of policy indices
+
+	// Rule 1-7: Basic validation rules
+	for i, nfp := range p.namespacedFilterPolicies {
+		if len(nfp.Namespaces) == 0 {
+			return fmt.Errorf("namespacedFilterPolicies[%d]: at least one namespace must be specified", i)
+		}
+		if len(nfp.ResourceFilters) == 0 {
+			return fmt.Errorf("namespacedFilterPolicies[%d]: at least one resourceFilter must be specified", i)
+		}
+
+		// Rule 8 & 9: Validate glob patterns and collect namespace patterns for duplicate check
+		for j, pattern := range nfp.Namespaces {
+			if err := wildcard.ValidateNamespaceName(pattern); err != nil {
+				return fmt.Errorf("namespacedFilterPolicies[%d].namespaces[%d]: %w", i, j, err)
+			}
+			seenPatterns[pattern] = append(seenPatterns[pattern], i)
+		}
+
+		seenKinds := make(map[string]int)
+		hasCatchAll := false
+		for j, rf := range nfp.ResourceFilters {
+			if rf.IsCatchAll() {
+				if hasCatchAll {
+					return fmt.Errorf("namespacedFilterPolicies[%d]: only one catch-all resource filter is allowed", i)
+				}
+				hasCatchAll = true
+				if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d]: names or excludedNames cannot be specified for catch-all filters", i, j)
+				}
+			}
+
+			for _, kind := range rf.Kinds {
+				if kind == "*" {
+					continue // "*" is handled by IsCatchAll, no need to check duplicates against other kinds
+				}
+				if prevJ, ok := seenKinds[kind]; ok {
+					return fmt.Errorf("namespacedFilterPolicies[%d]: kind %q appears in both resourceFilters[%d] and resourceFilters[%d]", i, kind, prevJ, j)
+				}
+				seenKinds[kind] = j
+			}
+
+			if len(rf.LabelSelector) > 0 && len(rf.OrLabelSelectors) > 0 {
+				return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d]: labelSelector and orLabelSelectors cannot co-exist", i, j)
+			}
+
+			// Validate glob patterns for names and excludedNames using gobwas/glob
+			for k, pattern := range rf.Names {
+				if _, err := glob.Compile(pattern); err != nil {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d].names[%d]: invalid glob pattern %q: %v", i, j, k, pattern, err)
+				}
+			}
+			for k, pattern := range rf.ExcludedNames {
+				if _, err := glob.Compile(pattern); err != nil {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d].excludedNames[%d]: invalid glob pattern %q: %v", i, j, k, pattern, err)
+				}
+			}
+		}
+	}
+
+	// Rule 8: Report exact duplicates only
+	for pattern, policyIndices := range seenPatterns {
+		if len(policyIndices) > 1 {
+			return fmt.Errorf(
+				"namespacedFilterPolicies: duplicate namespace pattern '%s' found in policies %v",
+				pattern, policyIndices)
+		}
+	}
+
+	return nil
+}
+
+func (p *Policies) validateClusterScopedFilterPolicy() error {
+	if p.clusterScopedFilterPolicy == nil {
+		return nil
+	}
+
+	if len(p.clusterScopedFilterPolicy.ResourceFilters) == 0 {
+		return fmt.Errorf("clusterScopedFilterPolicy: resourceFilters cannot be empty; remove the policy block entirely if it is not needed")
+	}
+
+	seenKinds := make(map[string]int)
+	for j, rf := range p.clusterScopedFilterPolicy.ResourceFilters {
+		if rf.IsCatchAll() {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: kinds must be specified (catch-all is not supported)", j)
+		}
+
+		for _, kind := range rf.Kinds {
+			if prevJ, ok := seenKinds[kind]; ok {
+				return fmt.Errorf("clusterScopedFilterPolicy: kind %q appears in both resourceFilters[%d] and resourceFilters[%d]", kind, prevJ, j)
+			}
+			seenKinds[kind] = j
+		}
+
+		if len(rf.LabelSelector) > 0 && len(rf.OrLabelSelectors) > 0 {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: labelSelector and orLabelSelectors cannot co-exist", j)
+		}
+
+		for k, pattern := range rf.Names {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].names[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
+		}
+		for k, pattern := range rf.ExcludedNames {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].excludedNames[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
+		}
+	}
+
+	return nil
 }

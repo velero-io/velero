@@ -342,6 +342,12 @@ If you are installing Velero in Kubernetes 1.14.x or earlier, you need to use `k
 If you intend to use Velero with a storage provider that is secured by a self-signed certificate,
 you may need to instruct Velero to trust that certificate. See [use Velero with a storage provider secured by a self-signed certificate][9] for details.
 
+## Enabling parallel/concurrent backup processing
+
+By default, only one backup is processed in the `InProgress` phase at a time. The install flag `concurrent-backups`, which takes an integer argument, configures Velero to process multiple backups at the same time, up to a max of `concurrent-backups`. The other restriction on parallel backup processing is that two backups which have any included namespaces in common may not run at the same time. For example, if `concurrent-backups` is set to 2 and two backups for "namespace1" are submitted at the same time, only one of those will be processed at the same time. On the other hand, if a backup for "namespace1" and another for "namespace2" are submitted, then both can be processed in parallel. Note that a whole-cluster backup (one which does not restrict to a set list of namespaces) includes all namespaces, and therefore it will not run in parallel with any other backup.
+
+Enabling parallel backups can provide a significant performance benefit for backups which contain a large number of Kubernetes resources or ones which contain a large number of smaller volumes. Backups dominated by large volumes will not see as much benefit, since the majority of time for those backups is spent waiting for the async phase to complete. A larger `concurrent-backups` configuration may require additional memory and CPU resources for the velero container.
+
 ## Additional options
 
 Run `velero install --help` or see the [Helm chart documentation](https://vmware-tanzu.github.io/helm-charts/) for the full set of installation options.
@@ -517,16 +523,16 @@ The new workflow is:
   ```
 
 
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: namespace.md
 [3]: file-system-backup.md
 [4]: on-premises.md
 [6]: velero-install.md#usage
-[7]: https://github.com/vmware-tanzu/velero/issues/2077
-[8]: https://github.com/vmware-tanzu/velero/issues/2311
+[7]: https://github.com/velero-io/velero/issues/2077
+[8]: https://github.com/velero-io/velero/issues/2311
 [9]: self-signed-certificates.md
 [10]: csi.md
-[11]: https://github.com/vmware-tanzu/velero/blob/main/pkg/apis/velero/v1/constants.go
+[11]: https://github.com/velero-io/velero/blob/main/pkg/apis/velero/v1/constants.go
 [12]: csi-snapshot-data-movement.md
 [13]: performance-guidance.md
 [14]: repository-maintenance.md

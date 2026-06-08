@@ -44,10 +44,7 @@ const CSI = "csi"
 const Velero = "velero"
 const VeleroRestoreHelper = "velero-restore-helper"
 
-const (
-	UploaderTypeRestic = "restic"
-	UploaderTypeKopia  = "kopia"
-)
+const UploaderTypeKopia = "kopia"
 
 const (
 	KubeSystemNamespace           = "kube-system"
@@ -168,7 +165,6 @@ type BackupConfig struct {
 	ExcludeResources            string
 	IncludeClusterResources     bool
 	OrderedResources            string
-	UseResticIfFSBackup         bool
 	DefaultVolumesToFsBackup    bool
 	SnapshotMoveData            bool
 }

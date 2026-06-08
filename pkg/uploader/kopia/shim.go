@@ -183,8 +183,8 @@ func (sr *shimRepository) NewObjectWriter(ctx context.Context, option object.Wri
 		opt.DataType = udmrepo.ObjectDataTypeData
 	}
 
-	writer := sr.udmRepo.NewObjectWriter(ctx, opt)
-	if writer == nil {
+	writer, err := sr.udmRepo.NewObjectWriter(ctx, opt)
+	if err != nil || writer == nil {
 		return nil
 	}
 

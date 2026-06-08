@@ -17,10 +17,10 @@ layout: docs
 
 ## Download Velero
 
-1. Download the [latest release](https://github.com/vmware-tanzu/velero/releases/) of Velero to your development environment. This includes the `velero` CLI utility and example Kubernetes manifest files. For example: 
+1. Download the [latest release](https://github.com/velero-io/velero/releases/) of Velero to your development environment. This includes the `velero` CLI utility and example Kubernetes manifest files. For example: 
 
     ```
-    wget https://github.com/vmware-tanzu/velero/releases/download/v1.0.0/velero-v1.0.0-linux-amd64.tar.gz
+    wget https://github.com/velero-io/velero/releases/download/v1.0.0/velero-v1.0.0-linux-amd64.tar.gz
     ```
 
     *We strongly recommend that you use an official release of Velero. The tarballs for each release contain the velero command-line client. The code in the main branch of the Velero repository is under active development and is not guaranteed to be stable!*

@@ -6,7 +6,7 @@ layout: docs
 
 Velero provides best effort support through the process on this page for the current version of Velero and n-1 Velero version, including all patch releases in the supported minor releases. For example, if the current version is 1.9, the Velero maintainers would offer best effort support for v1.9 and v1.8. If you have a question about a previous Velero version (for example, 1.7), please note that maintainers may ask you to upgrade to a supported version before doing any investigation into your issue.
 
-For more information about Velero testing and supported Kubernetes versions, see Velero's [compatibility matrix](https://github.com/vmware-tanzu/velero/blob/v1.12.0/README.md#velero-compatibility-matrix).
+For more information about Velero testing and supported Kubernetes versions, see Velero's [compatibility matrix](https://github.com/velero-io/velero/blob/v1.12.0/README.md#velero-compatibility-matrix).
 
 
 ## Weekly Rotation

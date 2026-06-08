@@ -32,6 +32,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
 	"github.com/vmware-tanzu/velero/pkg/datamover"
@@ -56,6 +57,7 @@ type dataMoverBackupConfig struct {
 	volumeMode      string
 	duName          string
 	resourceTimeout time.Duration
+	cbtSAName       string
 }
 
 func NewBackupCommand(f client.Factory) *cobra.Command {
@@ -92,6 +94,7 @@ func NewBackupCommand(f client.Factory) *cobra.Command {
 	command.Flags().StringVar(&config.volumeMode, "volume-mode", config.volumeMode, "The mode of the volume to be backed up")
 	command.Flags().StringVar(&config.duName, "data-upload", config.duName, "The data upload name")
 	command.Flags().DurationVar(&config.resourceTimeout, "resource-timeout", config.resourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters.")
+	command.Flags().StringVar(&config.cbtSAName, "cbt-sa-name", config.cbtSAName, "The name of the service account used by CSI's CBT service")
 
 	_ = command.MarkFlagRequired("volume-path")
 	_ = command.MarkFlagRequired("volume-mode")
@@ -112,6 +115,7 @@ type dataMoverBackup struct {
 	config      dataMoverBackupConfig
 	kubeClient  kubernetes.Interface
 	dataPathMgr *datapath.Manager
+	cbtService  cbtservice.Service
 }
 
 func newdataMoverBackup(logger logrus.FieldLogger, factory client.Factory, config dataMoverBackupConfig) (*dataMoverBackup, error) {
@@ -197,6 +201,12 @@ func newdataMoverBackup(logger logrus.FieldLogger, factory client.Factory, confi
 		config:     config,
 		namespace:  factory.Namespace(),
 		nodeName:   nodeName,
+		cbtService: cbtservice.NewService(
+			logger,
+			factory.Namespace(),
+			config.cbtSAName,
+			clientConfig,
+		),
 	}
 
 	s.kubeClient, err = factory.KubeClient()

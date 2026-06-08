@@ -490,7 +490,7 @@ which is used to backup pod volume data
 the backup storage  
 
 For more details, refer to [kopia architecture](https://kopia.io/docs/advanced/architecture/) and 
-Velero's [Unified Repository & Kopia Integration Design](https://github.com/vmware-tanzu/velero/blob/v1.14.0/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
+Velero's [Unified Repository & Kopia Integration Design](https://github.com/velero-io/velero/blob/v1.14.0/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
 
 ### Custom resource and controllers
 Velero has three custom resource definitions and associated controllers:
@@ -647,7 +647,7 @@ For Kopia repository, the cache is stored in the node-agent pod's root file syst
 [1]: https://github.com/restic/restic
 [2]: https://github.com/kopia/kopia
 [3]: customize-installation.md#enable-restic-integration
-[4]: https://github.com/vmware-tanzu/velero/releases/
+[4]: https://github.com/velero-io/velero/releases/
 [5]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation
 [7]: https://github.com/bitsbeats/velero-pvc-watcher

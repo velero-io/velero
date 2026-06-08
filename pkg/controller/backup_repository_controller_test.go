@@ -929,6 +929,8 @@ func TestUpdateRepoMaintenanceHistory(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			maintenanceStatusQueueLength = 3
+
 			updateRepoMaintenanceHistory(test.backupRepo, test.result, &metav1.Time{Time: standardTime}, &metav1.Time{Time: standardTime.Add(time.Hour)}, "fake-message-0")
 
 			for at := range test.backupRepo.Status.RecentMaintenance {

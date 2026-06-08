@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "Building MinIO image from Bitnami Dockerfile..."
           git clone --depth 1 https://github.com/bitnami/containers.git /tmp/bitnami-containers
-          cd /tmp/bitnami-containers/bitnami/minio/2025/debian-12
+          cd /tmp/bitnami-containers/bitnami/minio/2026/debian-12
           docker build -t bitnami/minio:local .
           docker save bitnami/minio:local > ${{ github.workspace }}/minio-image.tar
   # Create json of k8s versions to test
@@ -95,9 +95,9 @@ jobs:
             \"k8s\":$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -v -E "alpha|beta" | grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]'),\
             \"labels\":[\
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
-              \"ResourceFiltering && !Restic\", \
+              \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
-              \"(NamespaceMapping && Single && Restic) || (NamespaceMapping && Multiple && Restic)\"\
+              \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
@@ -136,7 +136,7 @@ jobs:
       - uses: engineerd/setup-kind@v0.6.2
         with:
           skipClusterLogsExport: true
-          version: "v0.27.0"
+          version: "v0.32.0"
           image: "kindest/node:v${{ matrix.k8s }}"
       - name: Fetch built CLI
         id: cli-cache

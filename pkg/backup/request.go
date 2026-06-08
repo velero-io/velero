@@ -19,6 +19,9 @@ package backup
 import (
 	"sync"
 
+	"github.com/gobwas/glob"
+	"k8s.io/apimachinery/pkg/labels"
+
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -32,6 +35,21 @@ type itemKey struct {
 	resource  string
 	namespace string
 	name      string
+}
+
+// ResolvedResourceFilter holds the materialized filter state for one kind-group
+// within a namespace.
+type ResolvedResourceFilter struct {
+	LabelSelector    labels.Selector
+	OrLabelSelectors []labels.Selector
+	NameIE           *collections.IncludesExcludes
+}
+
+// ResolvedNamespaceFilter holds the materialized filter state for a namespace.
+// ResourceFilterMap is keyed by the resolved group-resource string.
+type ResolvedNamespaceFilter struct {
+	ResourceFilterMap map[string]*ResolvedResourceFilter
+	CatchAllFilter    *ResolvedResourceFilter
 }
 
 type SynchronizedVSList struct {
@@ -70,6 +88,27 @@ type Request struct {
 	SkippedPVTracker          *skipPVTracker
 	VolumesInformation        volume.BackupVolumesInformation
 	WorkerPool                *ItemBlockWorkerPool
+
+	// ClusterScopedFilterMap holds resolved global filters for cluster-scoped resources.
+	// Key is the resolved group-resource string.
+	ClusterScopedFilterMap map[string]*ResolvedResourceFilter
+
+	// NamespacedFilterMap holds resolved per-namespace filters.
+	// Key is either an exact namespace name or a glob pattern.
+	NamespacedFilterMap map[string]*ResolvedNamespaceFilter
+
+	// NamespacedFilterPatterns preserves the order of patterns for first-match semantics
+	// and caches pre-compiled globs to avoid repeated compilation in the hot path.
+	NamespacedFilterPatterns []NamespacedFilterPattern
+}
+
+// NamespacedFilterPattern pairs a namespace pattern string with its pre-compiled
+// glob so that GetNamespaceFilter does not recompile on every call.
+// Compiled is nil for exact-match (non-glob) patterns, which are looked up
+// directly in NamespacedFilterMap.
+type NamespacedFilterPattern struct {
+	Pattern  string
+	Compiled glob.Glob
 }
 
 // BackupVolumesInformation contains the information needs by generating
@@ -106,4 +145,26 @@ func (r *Request) FillVolumesInformation() {
 
 func (r *Request) StopWorkerPool() {
 	r.WorkerPool.Stop()
+}
+
+// GetNamespaceFilter returns the resolved filter for a namespace, or nil
+// if the namespace should use global filters. Uses first-match semantics
+// when multiple patterns could match the same namespace.
+func (r *Request) GetNamespaceFilter(namespace string) *ResolvedNamespaceFilter {
+	if r.NamespacedFilterMap == nil {
+		return nil
+	}
+
+	// First check for exact match
+	if f, ok := r.NamespacedFilterMap[namespace]; ok {
+		return f
+	}
+
+	// Walk patterns in definition order using pre-compiled globs (no allocation per call)
+	for _, p := range r.NamespacedFilterPatterns {
+		if p.Compiled != nil && p.Compiled.Match(namespace) {
+			return r.NamespacedFilterMap[p.Pattern]
+		}
+	}
+	return nil
 }

@@ -29,6 +29,7 @@ import (
 
 func main() {
 	outTemplateFilename := os.Args[1]
+	// #nosec G304,G703 -- outTemplateFilename is generated from internal logic and not user-controllable
 	outFile, err := os.OpenFile(outTemplateFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)

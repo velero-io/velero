@@ -359,7 +359,7 @@ func TestCancel(t *testing.T) {
 			err = pvcRIA.crClient.Get(t.Context(), crclient.ObjectKey{Namespace: tc.dataDownload.Namespace, Name: tc.dataDownload.Name}, resultDataDownload)
 			require.NoError(t, err)
 
-			require.True(t, cmp.Equal(tc.expectedDataDownload, *resultDataDownload, cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "ResourceVersion", "Name")))
+			require.Empty(t, cmp.Diff(tc.expectedDataDownload, *resultDataDownload, cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "TypeMeta", "ResourceVersion", "Name")))
 		})
 	}
 }
@@ -523,7 +523,7 @@ func TestExecute(t *testing.T) {
 					LabelSelector: labels.SelectorFromSet(tc.expectedDataDownload.Labels),
 				})
 				require.NoError(t, err)
-				require.True(t, cmp.Equal(tc.expectedDataDownload, &dataDownloadList.Items[0], cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "ResourceVersion", "Name")))
+				require.Empty(t, cmp.Diff(tc.expectedDataDownload, &dataDownloadList.Items[0], cmpopts.IgnoreFields(velerov2alpha1.DataDownload{}, "TypeMeta", "ResourceVersion", "Name")))
 			}
 		})
 	}

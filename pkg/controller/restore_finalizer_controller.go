@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	volumegroupsnapshotv1beta1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -457,7 +457,7 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContentList{}
+	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
 	err := ctx.crClient.List(
 		context.Background(),
 		vgscList,

@@ -24,7 +24,7 @@ import (
 
 	"k8s.io/client-go/util/retry"
 
-	volumegroupsnapshotv1beta1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -480,7 +480,7 @@ func (p *pvcBackupItemAction) Progress(
 		return progress, biav2.InvalidOperationIDError(operationID)
 	}
 
-	dataUpload, err := getDataUpload(context.Background(), p.crClient, operationID)
+	dataUpload, err := getDataUpload(context.Background(), p.crClient, backup.Namespace, operationID)
 	if err != nil {
 		p.log.Errorf(
 			"fail to get DataUpload for backup %s/%s by operation ID %s: %s",
@@ -525,7 +525,7 @@ func (p *pvcBackupItemAction) Cancel(operationID string, backup *velerov1api.Bac
 		return biav2.InvalidOperationIDError(operationID)
 	}
 
-	dataUpload, err := getDataUpload(context.Background(), p.crClient, operationID)
+	dataUpload, err := getDataUpload(context.Background(), p.crClient, backup.Namespace, operationID)
 	if err != nil {
 		p.log.Errorf(
 			"fail to get DataUpload for backup %s/%s: %s",
@@ -618,10 +618,12 @@ func createDataUpload(
 func getDataUpload(
 	ctx context.Context,
 	crClient crclient.Client,
+	namespace string,
 	operationID string,
 ) (*velerov2alpha1.DataUpload, error) {
 	dataUploadList := new(velerov2alpha1.DataUploadList)
 	err := crClient.List(ctx, dataUploadList, &crclient.ListOptions{
+		Namespace: namespace,
 		LabelSelector: labels.SelectorFromSet(
 			map[string]string{velerov1api.AsyncOperationIDLabel: operationID},
 		),
@@ -778,7 +780,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 		}
 
 		// Re-fetch latest VGS to ensure status is populated after VGSC binding
-		latestVGS := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{}
+		latestVGS := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKeyFromObject(newVGS), latestVGS); err != nil {
 			return nil, errors.Wrapf(err, "failed to re-fetch VolumeGroupSnapshot %s after VGSC binding wait", newVGS.Name)
 		}
@@ -926,7 +928,7 @@ func (p *pvcBackupItemAction) determineVGSClass(
 	}
 
 	// 3. Fallback to label-based default
-	vgsClassList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotClassList{}
+	vgsClassList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList{}
 	if err := p.crClient.List(ctx, vgsClassList); err != nil {
 		return "", errors.Wrap(err, "failed to list VolumeGroupSnapshotClasses")
 	}
@@ -955,22 +957,22 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 	backup *velerov1api.Backup,
 	pvc corev1api.PersistentVolumeClaim,
 	vgsLabelKey, vgsLabelValue, vgsClassName string,
-) (*volumegroupsnapshotv1beta1.VolumeGroupSnapshot, error) {
+) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	vgsLabels := map[string]string{
 		velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
 		velerov1api.BackupUIDLabel:  string(backup.UID),
 		vgsLabelKey:                 vgsLabelValue,
 	}
 
-	vgs := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("velero-%s-", vgsLabelValue),
 			Namespace:    pvc.Namespace,
 			Labels:       vgsLabels,
 		},
-		Spec: volumegroupsnapshotv1beta1.VolumeGroupSnapshotSpec{
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSpec{
 			VolumeGroupSnapshotClassName: &vgsClassName,
-			Source: volumegroupsnapshotv1beta1.VolumeGroupSnapshotSource{
+			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSource{
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						vgsLabelKey: vgsLabelValue,
@@ -998,7 +1000,7 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 	ctx context.Context,
 	groupedPVCs []corev1api.PersistentVolumeClaim,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) (map[string]*snapshotv1api.VolumeSnapshot, error) {
 	expected := len(groupedPVCs)
@@ -1041,10 +1043,10 @@ func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 	return vsMap, nil
 }
 
-func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) bool {
+func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) bool {
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Kind == kuberesource.VGSKind &&
-			ref.APIVersion == volumegroupsnapshotv1beta1.GroupName+"/"+volumegroupsnapshotv1beta1.SchemeGroupVersion.Version &&
+			ref.APIVersion == volumegroupsnapshotv1beta2.GroupName+"/"+volumegroupsnapshotv1beta2.SchemeGroupVersion.Version &&
 			ref.UID == vgs.UID {
 			return true
 		}
@@ -1055,7 +1057,7 @@ func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta1.Volume
 func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	ctx context.Context,
 	vsMap map[string]*snapshotv1api.VolumeSnapshot,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	backup *velerov1api.Backup,
 ) error {
 	for pvcName, vs := range vsMap {
@@ -1098,7 +1100,7 @@ func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	return nil
 }
 
-func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs == nil || vgs.Status == nil || vgs.Status.BoundVolumeGroupSnapshotContentName == nil {
 		return errors.New("VolumeGroupSnapshotContent name not found in VGS status")
 	}
@@ -1106,7 +1108,7 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	vgscName := vgs.Status.BoundVolumeGroupSnapshotContentName
 
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		vgsc := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{}
+		vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKey{Name: *vgscName}, vgsc); err != nil {
 			return errors.Wrapf(err, "failed to get VolumeGroupSnapshotContent %s for VolumeGroupSnapshot %s/%s", *vgscName, vgs.Namespace, vgs.Name)
 		}
@@ -1125,9 +1127,9 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	})
 }
 
-func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs.Status != nil && vgs.Status.BoundVolumeGroupSnapshotContentName != nil {
-		vgsc := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{
+		vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: *vgs.Status.BoundVolumeGroupSnapshotContentName,
 			},
@@ -1152,11 +1154,11 @@ func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumeg
 
 func (p *pvcBackupItemAction) waitForVGSCBinding(
 	ctx context.Context,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) error {
 	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		vgsRef := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{}
+		vgsRef := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKeyFromObject(vgs), vgsRef); err != nil {
 			return false, err
 		}
@@ -1169,8 +1171,8 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 	})
 }
 
-func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1beta1.VolumeGroupSnapshot, error) {
-	vgsList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotList{}
+func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
+	vgsList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotList{}
 	if err := p.crClient.List(ctx, vgsList,
 		crclient.InNamespace(namespace),
 		crclient.MatchingLabels(labels),

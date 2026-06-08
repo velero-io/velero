@@ -140,7 +140,7 @@ func NewServer() Server {
 func (s *server) BindFlags(flags *pflag.FlagSet) Server {
 	s.flagSet = flags
 	s.config.BindFlags(flags)
-	s.flagSet.ParseErrorsWhitelist.UnknownFlags = true // Velero.io word list : ignore
+	s.flagSet.ParseErrorsAllowlist.UnknownFlags = true // Velero.io word list : ignore
 	return s
 }
 

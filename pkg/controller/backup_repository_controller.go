@@ -52,8 +52,10 @@ import (
 const (
 	repoSyncPeriod                      = 5 * time.Minute
 	defaultMaintainFrequency            = 7 * 24 * time.Hour
-	defaultMaintenanceStatusQueueLength = 3
+	defaultMaintenanceStatusQueueLength = 25
 )
+
+var maintenanceStatusQueueLength = defaultMaintenanceStatusQueueLength
 
 type BackupRepoReconciler struct {
 	client.Client
@@ -369,7 +371,7 @@ func ensureRepo(repo *velerov1api.BackupRepository, repoManager repomanager.Mana
 }
 
 func (r *BackupRepoReconciler) recallMaintenance(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) error {
-	history, err := maintenance.WaitAllJobsComplete(ctx, r.Client, req, defaultMaintenanceStatusQueueLength, log)
+	history, err := maintenance.WaitAllJobsComplete(ctx, r.Client, req, maintenanceStatusQueueLength, log)
 	if err != nil {
 		return errors.Wrapf(err, "error waiting incomplete repo maintenance job for repo %s", req.Name)
 	}
@@ -427,7 +429,7 @@ func consolidateHistory(coming, cur []velerov1api.BackupRepositoryMaintenanceSta
 
 	truncated := []velerov1api.BackupRepositoryMaintenanceStatus{}
 	for consolidator.Len() > 0 {
-		if len(truncated) == defaultMaintenanceStatusQueueLength {
+		if len(truncated) == maintenanceStatusQueueLength {
 			break
 		}
 
@@ -537,8 +539,8 @@ func updateRepoMaintenanceHistory(repo *velerov1api.BackupRepository, result vel
 	}
 
 	startingPos := 0
-	if len(repo.Status.RecentMaintenance) >= defaultMaintenanceStatusQueueLength {
-		startingPos = len(repo.Status.RecentMaintenance) - defaultMaintenanceStatusQueueLength + 1
+	if len(repo.Status.RecentMaintenance) >= maintenanceStatusQueueLength {
+		startingPos = len(repo.Status.RecentMaintenance) - maintenanceStatusQueueLength + 1
 	}
 
 	repo.Status.RecentMaintenance = append(repo.Status.RecentMaintenance[startingPos:], latest)

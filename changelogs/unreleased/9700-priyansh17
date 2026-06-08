@@ -1,0 +1,1 @@
+Fix issue #9699, add a 2-second gap between temporary CSI VolumeSnapshotContent create and delete operations

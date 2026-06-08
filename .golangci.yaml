@@ -317,7 +317,7 @@ linters:
     - errchkjson
     - exptostd
     - ginkgolinter
-    - goconst
+    #- goconst # Disable goconst for now, as it reports a lot of false positives. We can enable it later after refactoring the codebase to reduce the number of string literals.
     - goheader
     - goprintffuncname
     - gosec
@@ -383,6 +383,9 @@ linters:
         linters:
           - dupword
         text: "bucket"
+      - text: "non-constant format string"
+        linters:
+          - govet
 
     generated: lax
     presets:

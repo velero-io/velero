@@ -52,7 +52,7 @@ You will need to change this setting on the server to make it work.
 
 **Note:** The `--insecure-skip-tls-verify` flag is insecure and susceptible to man-in-the-middle attacks and meant to help your testing and developing scenarios in an on-premises environment. Using this flag in production is not recommended.
 
-Velero provides a way for you to skip TLS verification on the object store when using the [AWS provider plugin](https://github.com/vmware-tanzu/velero-plugin-for-aws) or [File System Backup](file-system-backup.md) by passing the `--insecure-skip-tls-verify` flag with the following Velero commands,
+Velero provides a way for you to skip TLS verification on the object store when using the [AWS provider plugin](https://github.com/velero-io/velero-plugin-for-aws) or [File System Backup](file-system-backup.md) by passing the `--insecure-skip-tls-verify` flag with the following Velero commands,
 
 * velero backup describe
 * velero backup download

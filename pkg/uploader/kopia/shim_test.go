@@ -66,7 +66,7 @@ func TestShimRepo(t *testing.T) {
 	backupRepo.On("Flush", mock.Anything).Return(nil)
 	NewShimRepo(backupRepo).Flush(ctx)
 
-	backupRepo.On("NewObjectWriter", mock.Anything, mock.Anything).Return(nil)
+	backupRepo.On("NewObjectWriter", mock.Anything, mock.Anything).Return(nil, nil)
 	NewShimRepo(backupRepo).NewObjectWriter(ctx, object.WriterOptions{})
 }
 

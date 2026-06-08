@@ -420,7 +420,7 @@ However, Velero cancels the `DataUpload`/`DataDownload` in below scenarios autom
 Customized data movers that support cancellation could cancel their ongoing tasks and clean up any intermediate resources. If you are using Velero built-in data mover, the cancellation is supported.  
 
 
-[1]: https://github.com/vmware-tanzu/velero/pull/5968
+[1]: https://github.com/velero-io/velero/pull/5968
 [2]: csi.md
 [3]: file-system-backup.md
 [4]: https://kubernetes.io/blog/2020/12/10/kubernetes-1.20-volume-snapshot-moves-to-ga/

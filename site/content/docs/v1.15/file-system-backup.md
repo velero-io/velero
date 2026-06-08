@@ -491,7 +491,7 @@ which is used to backup pod volume data
 the backup storage  
 
 For more details, refer to [kopia architecture](https://kopia.io/docs/advanced/architecture/) and 
-Velero's [Unified Repository & Kopia Integration Design](https://github.com/vmware-tanzu/velero/blob/v1.15.0/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
+Velero's [Unified Repository & Kopia Integration Design](https://github.com/velero-io/velero/blob/v1.15.0/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
 
 ### Custom resource and controllers
 Velero has three custom resource definitions and associated controllers:
@@ -691,7 +691,7 @@ In the output of `velero backup describe` command for a backup with fs-backup:
 [1]: https://github.com/restic/restic
 [2]: https://github.com/kopia/kopia
 [3]: customize-installation.md#enable-restic-integration
-[4]: https://github.com/vmware-tanzu/velero/releases/
+[4]: https://github.com/velero-io/velero/releases/
 [5]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation
 [7]: https://github.com/bitsbeats/velero-pvc-watcher
@@ -704,5 +704,5 @@ In the output of `velero backup describe` command for a backup with fs-backup:
 [14]: https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/
 [15]: customize-installation.md#customize-resource-requests-and-limits
 [16]: performance-guidance.md
-[17]: https://github.com/vmware-tanzu/velero/blob/v1.15.0/GOVERNANCE.md#deprecation-policy
+[17]: https://github.com/velero-io/velero/blob/v1.15.0/GOVERNANCE.md#deprecation-policy
 [18]: backup-repository-configuration.md

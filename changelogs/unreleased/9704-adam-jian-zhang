@@ -1,0 +1,1 @@
+Fix issue #9703, fix CSI PVC Backup Plugin list options to only list in installed namespace

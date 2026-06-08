@@ -17,6 +17,7 @@ limitations under the License.
 package kube
 
 import (
+	"sort"
 	"testing"
 	"time"
 
@@ -24,9 +25,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/util/workqueue"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -91,8 +90,6 @@ func TestPredicate(t *testing.T) {
 		},
 	)
 
-	require.NoError(t, source.Start(ctx, queue))
-
 	// Should not patch a backup storage location object status phase
 	// if the location's validation frequency is specifically set to zero
 	require.NoError(t, client.Create(ctx, &velerov1.BackupStorageLocation{
@@ -107,6 +104,8 @@ func TestPredicate(t *testing.T) {
 			LastValidationTime: &metav1.Time{Time: time.Now()},
 		},
 	}))
+
+	require.NoError(t, source.Start(ctx, queue))
 	time.Sleep(2 * time.Second)
 
 	require.Equal(t, 0, queue.Len())
@@ -127,23 +126,19 @@ func TestOrder(t *testing.T) {
 		1*time.Second,
 		PeriodicalEnqueueSourceOption{
 			OrderFunc: func(objList crclient.ObjectList) crclient.ObjectList {
-				locationList := &velerov1.BackupStorageLocationList{}
-				objArray := make([]runtime.Object, 0)
+				locationList, ok := objList.(*velerov1.BackupStorageLocationList)
+				if !ok {
+					return objList
+				}
 
-				// Generate BSL array.
-				locations, _ := meta.ExtractList(objList)
-				// Move default BSL to tail of array.
-				objArray = append(objArray, locations[1])
-				objArray = append(objArray, locations[0])
-
-				meta.SetList(locationList, objArray)
+				sort.SliceStable(locationList.Items, func(i, j int) bool {
+					return locationList.Items[i].Spec.Default && !locationList.Items[j].Spec.Default
+				})
 
 				return locationList
 			},
 		},
 	)
-
-	require.NoError(t, source.Start(ctx, queue))
 
 	// Should not patch a backup storage location object status phase
 	// if the location's validation frequency is specifically set to zero
@@ -172,6 +167,8 @@ func TestOrder(t *testing.T) {
 			LastValidationTime: &metav1.Time{Time: time.Now()},
 		},
 	}))
+
+	require.NoError(t, source.Start(ctx, queue))
 	time.Sleep(2 * time.Second)
 
 	first, _ := queue.Get()

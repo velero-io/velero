@@ -1,0 +1,1 @@
+Fix issue #9659, in the case that PVB/PVR/DU/DD is cancelled before the data path is really started, call EndEvent to prevent data mover pod from crashing because of delay event distribution

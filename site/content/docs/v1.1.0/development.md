@@ -34,5 +34,5 @@ To run unit tests, use `make test`.
 If you need to add or update the vendored dependencies, see [Vendoring dependencies][11].
 
 [11]: vendoring-dependencies.md
-[13]: https://github.com/vmware-tanzu/velero/blob/main/hack/generate-proto.sh
+[13]: https://github.com/velero-io/velero/blob/main/hack/generate-proto.sh
 [14]: https://grpc.io/docs/quickstart/go.html#install-protocol-buffers-v3

@@ -18,6 +18,7 @@ package csi
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -39,6 +40,10 @@ type volumeSnapshotContentDeleteItemAction struct {
 	log      logrus.FieldLogger
 	crClient crclient.Client
 }
+
+const tempVSCCreateDeleteGap = 2 * time.Second
+
+var sleepBetweenTempVSCCreateAndDelete = time.Sleep
 
 // AppliesTo returns information indicating
 // VolumeSnapshotContentRestoreItemAction action should be invoked
@@ -122,6 +127,9 @@ func (p *volumeSnapshotContentDeleteItemAction) Execute(
 		return errors.Wrapf(err, "fail to create VolumeSnapshotContent %s", snapCont.Name)
 	}
 	p.log.Infof("Created temp VolumeSnapshotContent %s with DeletionPolicy=Delete to trigger cloud snapshot cleanup", snapCont.Name)
+
+	// Add a small delay before delete to avoid create/delete race conditions in CSI controllers.
+	sleepBetweenTempVSCCreateAndDelete(tempVSCCreateDeleteGap)
 
 	// Delete the temp VSC immediately to trigger cloud snapshot removal.
 	// The CSI driver will handle the actual cloud snapshot deletion.

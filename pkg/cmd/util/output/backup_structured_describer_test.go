@@ -17,6 +17,7 @@ limitations under the License.
 package output
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -706,4 +709,97 @@ func TestDescribeDeleteBackupRequestsInSF(t *testing.T) {
 			assert.True(tt, reflect.DeepEqual(sd.output, tc.expect))
 		})
 	}
+}
+
+func TestDescribeFineGrainedFilterPoliciesInSF(t *testing.T) {
+	yamlData := `
+version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["StorageClass"]
+    labelSelector: {"app": "velero"}
+  - kinds: ["ClusterRole"]
+    orLabelSelectors:
+    - {"app": "velero"}
+    - {"app": "test"}
+    names: ["role1"]
+    excludedNames: ["role2"]
+namespacedFilterPolicies:
+- namespaces: ["ns1", "ns2"]
+  resourceFilters:
+  - kinds: ["Pod", "ConfigMap"]
+    labelSelector: {"app": "velero"}
+  - kinds: ["*"]
+`
+	cm := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-policy",
+			Namespace: "velero",
+		},
+		Data: map[string]string{
+			"policy.yaml": yamlData,
+		},
+	}
+
+	client := fake.NewClientBuilder().WithRuntimeObjects(cm).Build()
+
+	backup := builder.ForBackup("velero", "test-backup").
+		ResourcePolicies("test-policy").Result()
+
+	sd := &StructuredDescriber{
+		output: make(map[string]any),
+		format: "",
+	}
+
+	DescribeFineGrainedFilterPoliciesInSF(context.Background(), client, sd, backup)
+
+	expect := map[string]any{
+		"clusterScopedFilterPolicy": map[string]any{
+			"resourceFilters": []map[string]any{
+				{
+					"kinds":         []string{"StorageClass"},
+					"labelSelector": map[string]string{"app": "velero"},
+				},
+				{
+					"kinds": []string{"ClusterRole"},
+					"orLabelSelectors": []map[string]string{
+						{"app": "velero"},
+						{"app": "test"},
+					},
+					"names":         []string{"role1"},
+					"excludedNames": []string{"role2"},
+				},
+			},
+		},
+		"namespacedFilterPolicies": []map[string]any{
+			{
+				"namespace": "ns1",
+				"resourceFilters": []map[string]any{
+					{
+						"kinds":         []string{"Pod", "ConfigMap"},
+						"labelSelector": map[string]string{"app": "velero"},
+					},
+					{
+						"kinds":      []string{},
+						"isCatchAll": true,
+					},
+				},
+			},
+			{
+				"namespace": "ns2",
+				"resourceFilters": []map[string]any{
+					{
+						"kinds":         []string{"Pod", "ConfigMap"},
+						"labelSelector": map[string]string{"app": "velero"},
+					},
+					{
+						"kinds":      []string{},
+						"isCatchAll": true,
+					},
+				},
+			},
+		},
+	}
+
+	assert.True(t, reflect.DeepEqual(sd.output, expect))
 }

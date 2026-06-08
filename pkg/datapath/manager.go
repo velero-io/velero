@@ -28,7 +28,7 @@ import (
 )
 
 var ConcurrentLimitExceed error = errors.New("Concurrent number exceeds")
-var FSBRCreator = newFileSystemBR
+var VGDPCreator = newGeneralDataPath
 var MicroServiceBRWatcherCreator = newMicroServiceBRWatcher
 
 type Manager struct {
@@ -45,8 +45,8 @@ func NewManager(cocurrentNum int) *Manager {
 	}
 }
 
-// CreateFileSystemBR creates a new file system backup/restore data path instance
-func (m *Manager) CreateFileSystemBR(jobName string, requestorType string, ctx context.Context, client client.Client, namespace string, callbacks Callbacks, log logrus.FieldLogger) (AsyncBR, error) {
+// CreateGenericDataPath creates a new generic data path instance
+func (m *Manager) CreateGenericDataPath(jobName string, requestorType string, ctx context.Context, client client.Client, namespace string, callbacks Callbacks, log logrus.FieldLogger) (AsyncBR, error) {
 	m.trackerLock.Lock()
 	defer m.trackerLock.Unlock()
 
@@ -54,7 +54,7 @@ func (m *Manager) CreateFileSystemBR(jobName string, requestorType string, ctx c
 		return nil, ConcurrentLimitExceed
 	}
 
-	m.tracker[jobName] = FSBRCreator(jobName, requestorType, client, namespace, callbacks, log)
+	m.tracker[jobName] = VGDPCreator(jobName, requestorType, client, namespace, callbacks, log)
 
 	return m.tracker[jobName], nil
 }

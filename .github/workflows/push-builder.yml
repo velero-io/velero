@@ -28,7 +28,7 @@ jobs:
 
     # Only try to publish the container image from the root repo; forks don't have permission to do so and will always get failures.
     - name: Publish container image
-      if: github.repository == 'vmware-tanzu/velero'
+      if: github.repository == 'velero-io/velero'
       run: |
         docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_PASSWORD }}
        
