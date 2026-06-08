@@ -64,7 +64,7 @@ $ velero completion fish > ~/.config/fish/completions/velero.fish
 			shell := args[0]
 			switch shell {
 			case "bash":
-				if err := cmd.Root().GenBashCompletion(os.Stdout); err != nil {
+				if err := cmd.Root().GenBashCompletionV2(os.Stdout, true); err != nil {
 					fmt.Println("fail to generate bash completion script", err)
 					os.Exit(1)
 				}

@@ -62,6 +62,7 @@ func NewDeleteCommand(f client.Factory, use string) *cobra.Command {
 		},
 	}
 
+	c.ValidArgsFunction = cli.CompleteScheduleNames(f)
 	o.BindFlags(c.Flags())
 	return c
 }

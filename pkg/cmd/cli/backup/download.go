@@ -31,6 +31,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/downloadrequest"
 )
@@ -55,6 +56,7 @@ func NewDownloadCommand(f client.Factory) *cobra.Command {
 		},
 	}
 
+	c.ValidArgsFunction = cli.CompleteBackupNames(f)
 	o.BindFlags(c.Flags())
 
 	return c

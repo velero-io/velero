@@ -61,6 +61,7 @@ func NewDeleteCommand(f client.Factory, use string) *cobra.Command {
 			cmd.CheckError(Run(o))
 		},
 	}
+	c.ValidArgsFunction = cli.CompleteRestoreNames(f)
 	o.BindFlags(c.Flags())
 	return c
 }
