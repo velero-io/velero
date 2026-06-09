@@ -1,1 +1,0 @@
-Fix BackupRepositories becoming stale when BSL config changes while Velero is not running
