@@ -63,19 +63,21 @@ func BackupRepoStartupValidationTest() {
 				_ = DeleteNamespace(context.Background(), *veleroCfg.ClientToInstallVelero, ns, true)
 			}()
 
-			pvcName := "startup-val-pvc"
-			By("Create a PVC and pod so FSBackup creates a BackupRepository", func() {
-				_, err := CreatePVC(*veleroCfg.ClientToInstallVelero, ns, pvcName, "", nil)
-				Expect(err).To(Succeed())
-				_, err = CreatePod(
+			podName := "startup-val-pod"
+			By("Create a pod with PVC so FSBackup creates a BackupRepository", func() {
+				_, err := CreatePod(
 					*veleroCfg.ClientToInstallVelero,
-					ns, "startup-val-pod", "", pvcName,
+					ns, podName, "", "",
 					[]string{"startup-val-vol"},
 					nil, nil,
 					veleroCfg.ImageRegistryProxy,
 					"",
 				)
 				Expect(err).To(Succeed())
+			})
+
+			By("Wait for pod to be running", func() {
+				Expect(WaitForPods(ctx, *veleroCfg.ClientToInstallVelero, ns, []string{podName})).To(Succeed())
 			})
 
 			backupCfg := BackupConfig{
