@@ -1327,7 +1327,7 @@ func TestBoostRepoConnect(t *testing.T) {
 			expectedErr: "error to get repo options: error to get repo password: invalid credentials interface",
 		},
 		{
-			name:            "repo not opened and connect fail",
+			name:            "repo not opened and prepare fail",
 			getter:          new(credmock.SecretStore),
 			credStoreReturn: "fake-password",
 			funcTable: localFuncTable{
@@ -1348,13 +1348,13 @@ func TestBoostRepoConnect(t *testing.T) {
 					return errors.New("fake-error-1")
 				},
 			},
-			retFuncInit: func(context.Context, udmrepo.RepoOptions) error {
-				return errors.New("fake-error-2")
+			retFuncInit: func(ctx context.Context, opts udmrepo.RepoOptions, readOnly bool) (bool, error) {
+				return false, errors.New("fake-error-2")
 			},
-			expectedErr: "error to connect backup repo: fake-error-2",
+			expectedErr: "error to check backup repo: fake-error-2",
 		},
 		{
-			name:            "repo not opened and connect succeed",
+			name:            "repo not opened and prepare succeed via already ready",
 			getter:          new(credmock.SecretStore),
 			credStoreReturn: "fake-password",
 			funcTable: localFuncTable{
@@ -1375,8 +1375,8 @@ func TestBoostRepoConnect(t *testing.T) {
 					return errors.New("fake-error-1")
 				},
 			},
-			retFuncInit: func(context.Context, udmrepo.RepoOptions) error {
-				return nil
+			retFuncInit: func(ctx context.Context, opts udmrepo.RepoOptions, readOnly bool) (bool, error) {
+				return true, nil
 			},
 		},
 		{
@@ -1430,7 +1430,11 @@ func TestBoostRepoConnect(t *testing.T) {
 
 			if tc.repoService != nil {
 				tc.repoService.On("Open", mock.Anything, mock.Anything).Return(tc.retFuncOpen[0], tc.retFuncOpen[1])
-				tc.repoService.On("Connect", mock.Anything, mock.Anything).Return(tc.retFuncInit)
+				if tc.retFuncInit != nil {
+					// BoostRepoConnect fallback calls PrepareRepo which uses IsReady/Create
+					tc.repoService.On("IsReady", mock.Anything, mock.Anything, mock.Anything).Return(tc.retFuncInit).Maybe()
+					tc.repoService.On("Create", mock.Anything, mock.Anything).Return(nil).Maybe()
+				}
 			}
 
 			if tc.backupRepo != nil {
