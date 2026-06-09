@@ -166,53 +166,31 @@ func BackupRepoStartupValidationTest() {
 				}, 3*time.Minute, 5*time.Second).Should(BeTrue(), "Velero deployment should have 1 ready replica")
 			})
 
-			By("Verify BackupRepository was invalidated on startup (NotReady with startup message)", func() {
-				Eventually(func() bool {
+			// Startup validation invalidates the repo, then checkNotReadyRepo re-establishes it
+			// with the new BSL config. The repo may go NotReady -> Ready very quickly, so instead
+			// of trying to catch the transient NotReady state, verify the end result: repo is Ready
+			// and its BSL prefix annotation matches the NEW prefix (proving invalidation + re-establishment).
+			By("Verify BackupRepository was invalidated and re-established with new BSL prefix", func() {
+				Eventually(func() string {
 					cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
 						"-n", veleroCfg.VeleroNamespace,
-						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.phase}", velerov1api.BackupRepositoryTypeKopia))
+						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].metadata.annotations.velero\\.io/bsl-prefix}", velerov1api.BackupRepositoryTypeKopia))
 					output, err := cmd.Output()
 					if err != nil {
-						return false
+						return ""
 					}
-					return strings.Contains(string(output), string(velerov1api.BackupRepositoryPhaseNotReady))
-				}, 2*time.Minute, 5*time.Second).Should(BeTrue(), "BackupRepository should be NotReady after BSL prefix change")
+					return strings.TrimSpace(string(output))
+				}, 5*time.Minute, 10*time.Second).Should(Equal(newPrefix),
+					fmt.Sprintf("BackupRepository BSL prefix annotation should be updated to %q", newPrefix))
 			})
 
-			By("Restore original BSL prefix so repo can recover", func() {
-				patchJSON := fmt.Sprintf(`{"spec":{"objectStorage":{"prefix":"%s"}}}`, originalPrefix)
-				cmd := exec.CommandContext(ctx, "kubectl", "patch",
-					"backupstoragelocation/default",
-					"-n", veleroCfg.VeleroNamespace,
-					"--type=merge",
-					"-p", patchJSON)
-				output, err := cmd.CombinedOutput()
-				if err != nil {
-					fmt.Printf("restore BSL output: %s\n", string(output))
-				}
-				Expect(err).To(Succeed())
-			})
-
-			By("Verify BackupRepository recovers to Ready", func() {
-				Eventually(func() bool {
-					cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
-						"-n", veleroCfg.VeleroNamespace,
-						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.phase}", velerov1api.BackupRepositoryTypeKopia))
-					output, err := cmd.Output()
-					if err != nil {
-						return false
-					}
-					return strings.Contains(string(output), string(velerov1api.BackupRepositoryPhaseReady))
-				}, 5*time.Minute, 10*time.Second).Should(BeTrue(), "BackupRepository should recover to Ready")
-			})
-
-			By("Verify BSL annotations are stored on recovered repo", func() {
+			By("Verify BackupRepository is Ready with new config", func() {
 				cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
 					"-n", veleroCfg.VeleroNamespace,
-					"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].metadata.annotations}", velerov1api.BackupRepositoryTypeKopia))
+					"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.phase}", velerov1api.BackupRepositoryTypeKopia))
 				output, err := cmd.Output()
 				Expect(err).To(Succeed())
-				Expect(string(output)).To(ContainSubstring("velero.io/bsl-bucket"))
+				Expect(string(output)).To(ContainSubstring(string(velerov1api.BackupRepositoryPhaseReady)))
 			})
 		})
 	})
