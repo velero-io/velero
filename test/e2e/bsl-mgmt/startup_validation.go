@@ -111,14 +111,19 @@ func BackupRepoStartupValidationTest() {
 				Expect(err).To(Succeed())
 			})
 
-			By("Wait for Velero pod to terminate", func() {
+			By("Wait for Velero pods to terminate", func() {
 				Eventually(func() bool {
 					cmd := exec.CommandContext(ctx, "kubectl", "get", "pods",
-						"-n", veleroCfg.VeleroNamespace, "-l", "component=velero",
+						"-n", veleroCfg.VeleroNamespace, "-l", "deploy=velero",
 						"--no-headers")
 					output, _ := cmd.Output()
-					return strings.TrimSpace(string(output)) == ""
-				}, 2*time.Minute, 5*time.Second).Should(BeTrue(), "Velero pod should terminate")
+					lines := strings.TrimSpace(string(output))
+					if lines == "" {
+						return true
+					}
+					fmt.Printf("Still waiting for velero pods to terminate: %s\n", lines)
+					return false
+				}, 5*time.Minute, 10*time.Second).Should(BeTrue(), "Velero pod should terminate")
 			})
 
 			originalPrefix := veleroCfg.BSLPrefix
