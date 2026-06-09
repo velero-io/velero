@@ -27,7 +27,7 @@ The following is an overview of Velero's restore process that starts after you r
 
 1. The Velero client makes a call to the Kubernetes API server to create a [`Restore`](api-types/restore.md) object.
 
-1. The `RestoreController` notices the new Restore object and performs validation.
+1. The `RestoreController` notices the new Restore object and performs validation. This includes verifying that the referenced backup is in a usable phase. Only backups in `Completed` or `PartiallyFailed` phase are accepted as restore sources.
 
 1. The `RestoreController` fetches basic information about the backup being restored, like the [BackupStorageLocation](locations.md) (BSL). It also fetches a tarball of the cluster resources in the backup, any volumes that will be restored using File System Backup, and any volume snapshots to be restored.
 
