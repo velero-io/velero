@@ -1,0 +1,1 @@
+Make ToSystemAffinity deterministic by sorting MatchLabels keys to avoid spurious affinity spec diffs and restarts

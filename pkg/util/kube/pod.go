@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -236,7 +237,20 @@ func CollectPodLogs(ctx context.Context, podGetter corev1client.CoreV1Interface,
 func ToSystemAffinity(loadAffinity *LoadAffinity, volumeTopology *corev1api.NodeSelector) *corev1api.Affinity {
 	requirements := []corev1api.NodeSelectorRequirement{}
 	if loadAffinity != nil {
-		for k, v := range loadAffinity.NodeSelector.MatchLabels {
+		// MatchLabels is a map, so its iteration order is not deterministic.
+		// Sort the keys so the generated requirements (and therefore the
+		// resulting affinity) have a stable order. This output may be embedded
+		// into objects that are reconciled continuously (e.g. DaemonSet pod
+		// templates), where an order-only difference would be treated as a spec
+		// change and trigger unnecessary rollouts/restarts.
+		keys := make([]string, 0, len(loadAffinity.NodeSelector.MatchLabels))
+		for k := range loadAffinity.NodeSelector.MatchLabels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			v := loadAffinity.NodeSelector.MatchLabels[k]
 			requirements = append(requirements, corev1api.NodeSelectorRequirement{
 				Key:      k,
 				Values:   []string{v},

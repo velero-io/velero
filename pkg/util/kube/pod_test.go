@@ -835,6 +835,45 @@ func TestToSystemAffinity(t *testing.T) {
 			},
 		},
 		{
+			name: "with multiple match labels are sorted by key",
+			loadAffinity: &LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"key-c": "value-c",
+						"key-a": "value-a",
+						"key-b": "value-b",
+					},
+				},
+			},
+			expected: &corev1api.Affinity{
+				NodeAffinity: &corev1api.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+						NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-a",
+										Values:   []string{"value-a"},
+										Operator: corev1api.NodeSelectorOpIn,
+									},
+									{
+										Key:      "key-b",
+										Values:   []string{"value-b"},
+										Operator: corev1api.NodeSelectorOpIn,
+									},
+									{
+										Key:      "key-c",
+										Values:   []string{"value-c"},
+										Operator: corev1api.NodeSelectorOpIn,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "with olume topology",
 			volumeTopology: &corev1api.NodeSelector{
 				NodeSelectorTerms: []corev1api.NodeSelectorTerm{
