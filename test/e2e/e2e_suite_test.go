@@ -610,6 +610,11 @@ var _ = Describe(
 	Label("BSL", "Deletion", "FSBackup", "AdditionalBSL"),
 	BslDeletionWithFSBackup,
 )
+var _ = Describe(
+	"BackupRepositories are invalidated when BSL config changes while Velero is not running",
+	Label("BSL", "BackupRepository", "StartupValidation"),
+	BackupRepoStartupValidationTest,
+)
 
 var _ = Describe(
 	"Migrate resources between clusters by FileSystem backup",
