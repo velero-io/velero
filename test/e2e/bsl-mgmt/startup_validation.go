@@ -129,6 +129,19 @@ func BackupRepoStartupValidationTest() {
 			originalPrefix := veleroCfg.BSLPrefix
 			newPrefix := originalPrefix + "-changed"
 
+			// Restore BSL prefix on exit so other tests aren't affected
+			defer func() {
+				patchJSON := fmt.Sprintf(`{"spec":{"objectStorage":{"prefix":"%s"}}}`, originalPrefix)
+				cmd := exec.CommandContext(context.Background(), "kubectl", "patch",
+					"backupstoragelocation/default",
+					"-n", veleroCfg.VeleroNamespace,
+					"--type=merge",
+					"-p", patchJSON)
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("warning: failed to restore BSL prefix: %s\n", string(output))
+				}
+			}()
+
 			By(fmt.Sprintf("Patch BSL prefix from %q to %q while Velero is down", originalPrefix, newPrefix), func() {
 				patchJSON := fmt.Sprintf(`{"spec":{"objectStorage":{"prefix":"%s"}}}`, newPrefix)
 				cmd := exec.CommandContext(ctx, "kubectl", "patch",
