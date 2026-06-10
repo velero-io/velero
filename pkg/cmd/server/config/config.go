@@ -181,6 +181,7 @@ type Config struct {
 	RepoMaintenanceJobConfig       string
 	ItemBlockWorkerCount           int
 	ConcurrentBackups              int
+	CRDSchemaCheck                 string
 }
 
 func GetDefaultConfig() *Config {
@@ -214,6 +215,7 @@ func GetDefaultConfig() *Config {
 		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
 		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
 		ConcurrentBackups:              DefaultConcurrentBackups,
+		CRDSchemaCheck:                 "warn",
 	}
 
 	return config
@@ -274,5 +276,11 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"concurrent-backups",
 		c.ConcurrentBackups,
 		"Number of backups to process concurrently. Default is one. Optional.",
+	)
+	flags.StringVar(
+		&c.CRDSchemaCheck,
+		"crd-schema-check",
+		c.CRDSchemaCheck,
+		"CRD schema validation mode during server startup. Valid values: warn (default, log error but start), strict (fail to start), skip (no check).",
 	)
 }
