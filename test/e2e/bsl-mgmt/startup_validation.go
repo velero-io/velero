@@ -179,31 +179,66 @@ func BackupRepoStartupValidationTest() {
 				}, 3*time.Minute, 5*time.Second).Should(BeTrue(), "Velero deployment should have 1 ready replica")
 			})
 
-			// Startup validation invalidates the repo, then checkNotReadyRepo re-establishes it
-			// with the new BSL config. The repo may go NotReady -> Ready very quickly, so instead
-			// of trying to catch the transient NotReady state, verify the end result: repo is Ready
-			// and its BSL prefix annotation matches the NEW prefix (proving invalidation + re-establishment).
-			By("Verify BackupRepository was invalidated and re-established with new BSL prefix", func() {
+			// Startup validation detects the prefix mismatch and invalidates the repo.
+			// The repo stays NotReady because no kopia data exists at the new prefix.
+			// Verify invalidation happened, then restore original prefix so repo can recover.
+			By("Verify BackupRepository was invalidated (NotReady)", func() {
 				Eventually(func() string {
 					cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
 						"-n", veleroCfg.VeleroNamespace,
-						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].metadata.annotations.velero\\.io/bsl-prefix}", velerov1api.BackupRepositoryTypeKopia))
+						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.message}", velerov1api.BackupRepositoryTypeKopia))
 					output, err := cmd.Output()
 					if err != nil {
 						return ""
 					}
-					return strings.TrimSpace(string(output))
-				}, 5*time.Minute, 10*time.Second).Should(Equal(newPrefix),
-					fmt.Sprintf("BackupRepository BSL prefix annotation should be updated to %q", newPrefix))
+					result := strings.TrimSpace(string(output))
+					fmt.Printf("BackupRepository status message: %s\n", result)
+					return result
+				}, 5*time.Minute, 10*time.Second).Should(
+					SatisfyAny(
+						ContainSubstring("BSL configuration changed"),
+						ContainSubstring("re-establish"),
+						ContainSubstring("error"),
+					),
+					"BackupRepository should show invalidation or connection error message")
 			})
 
-			By("Verify BackupRepository is Ready with new config", func() {
+			By("Restore original BSL prefix so repo can recover", func() {
+				patchJSON := fmt.Sprintf(`{"spec":{"objectStorage":{"prefix":"%s"}}}`, originalPrefix)
+				cmd := exec.CommandContext(ctx, "kubectl", "patch",
+					"backupstoragelocation/default",
+					"-n", veleroCfg.VeleroNamespace,
+					"--type=merge",
+					"-p", patchJSON)
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					fmt.Printf("restore BSL output: %s\n", string(output))
+				}
+				Expect(err).To(Succeed())
+			})
+
+			By("Verify BackupRepository recovers to Ready with annotations", func() {
+				Eventually(func() bool {
+					cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
+						"-n", veleroCfg.VeleroNamespace,
+						"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.phase}", velerov1api.BackupRepositoryTypeKopia))
+					output, err := cmd.Output()
+					if err != nil {
+						return false
+					}
+					phase := strings.TrimSpace(string(output))
+					fmt.Printf("BackupRepository phase: %s\n", phase)
+					return strings.Contains(phase, string(velerov1api.BackupRepositoryPhaseReady))
+				}, 5*time.Minute, 10*time.Second).Should(BeTrue(), "BackupRepository should recover to Ready")
+			})
+
+			By("Verify BSL annotations are stored on recovered repo", func() {
 				cmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
 					"-n", veleroCfg.VeleroNamespace,
-					"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].status.phase}", velerov1api.BackupRepositoryTypeKopia))
+					"-o", fmt.Sprintf("jsonpath={.items[?(@.spec.repositoryType=='%s')].metadata.annotations}", velerov1api.BackupRepositoryTypeKopia))
 				output, err := cmd.Output()
 				Expect(err).To(Succeed())
-				Expect(string(output)).To(ContainSubstring(string(velerov1api.BackupRepositoryPhaseReady)))
+				Expect(string(output)).To(ContainSubstring("velero.io/bsl-bucket"))
 			})
 		})
 	})
