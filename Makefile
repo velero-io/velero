@@ -20,6 +20,10 @@ BIN ?= velero
 # This repo's root import path (under GOPATH).
 PKG := github.com/vmware-tanzu/velero
 
+# Container tool for local development targets (shell, lint, build-image, etc.)
+# Override with CONTAINER_TOOL=podman to use podman instead of docker.
+CONTAINER_TOOL ?= docker
+
 # Where to push the docker image.
 REGISTRY ?= velero
 # In order to push images to an insecure registry, follow the two steps:
@@ -63,7 +67,7 @@ else
 endif
 
 BUILDER_IMAGE := $(REGISTRY)/build-image:$(BUILDER_IMAGE_TAG)
-BUILDER_IMAGE_CACHED := $(shell docker images -q ${BUILDER_IMAGE} 2>/dev/null )
+BUILDER_IMAGE_CACHED := $(shell $(CONTAINER_TOOL) images -q ${BUILDER_IMAGE} 2>/dev/null )
 
 HUGO_IMAGE := ghcr.io/gohugoio/hugo
 
@@ -198,7 +202,7 @@ shell: build-dirs build-env
 	@# because the Kubernetes code-generator tools require the project to
 	@# exist in a directory hierarchy ending like this (but *NOT* necessarily
 	@# under $GOPATH).
-	@docker run \
+	@$(CONTAINER_TOOL) run \
 		-e GOFLAGS \
 		-e GOPROXY \
 		-i $(TTY) \
@@ -363,21 +367,21 @@ else ifneq ($(BUILDER_IMAGE_CACHED),)
 	@echo "Using Cached Image: $(BUILDER_IMAGE)"
 else
 	@echo "Trying to pull build-image: $(BUILDER_IMAGE)"
-	docker pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
+	$(CONTAINER_TOOL) pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
 endif
 
 build-image:
 	@# When we build a new image we just untag the old one.
 	@# This makes sure we don't leave the orphaned image behind.
-	$(eval old_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	$(eval old_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 ifeq ($(BUILDX_ENABLED), true)
-	@cd hack/build-image && docker buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(CONTAINER_TOOL) buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 else
-	@cd hack/build-image && docker build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(CONTAINER_TOOL) build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 endif
-	$(eval new_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	$(eval new_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 	@if [ "$(old_id)" != "" ] && [ "$(old_id)" != "$(new_id)" ]; then \
-		docker rmi -f $$id || true; \
+		$(CONTAINER_TOOL) rmi -f $$id || true; \
 	fi
 
 push-build-image:
@@ -392,17 +396,17 @@ else
 endif
 
 build-image-hugo:
-	cd site && docker build --pull -t $(HUGO_IMAGE) .
+	cd site && $(CONTAINER_TOOL) build --pull -t $(HUGO_IMAGE) .
 
 clean:
 # if we have a cached image then use it to run go clean --modcache
 # this test checks if we there is an image id in the BUILDER_IMAGE_CACHED variable.
 ifneq ($(strip $(BUILDER_IMAGE_CACHED)),)
 	$(MAKE) shell CMD="-c 'go clean --modcache'"
-	docker rmi -f $(BUILDER_IMAGE) || true
+	$(CONTAINER_TOOL) rmi -f $(BUILDER_IMAGE) || true
 endif
 	rm -rf .go _output
-	docker rmi $(HUGO_IMAGE)
+	$(CONTAINER_TOOL) rmi $(HUGO_IMAGE)
 
 
 .PHONY: modules
@@ -447,7 +451,7 @@ release:
 		./hack/release-tools/goreleaser.sh'"
 
 serve-docs: build-image-hugo
-	docker run \
+	$(CONTAINER_TOOL) run \
 	--rm \
 	-v "$$(pwd)/site:/project" \
 	-it -p 1313:1313 \
