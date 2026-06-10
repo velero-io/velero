@@ -514,6 +514,89 @@ func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 			}},
 			expectedErrNum: 0,
 		},
+		{
+			name: "resource modifier error falls through to unmodified patch",
+			volumeInfo: []*volume.BackupVolumeInfo{{
+				BackupMethod: "PodVolumeBackup",
+				PVCName:      "pvc1",
+				PVName:       "pv1",
+				PVCNamespace: "ns1",
+				PVInfo: &volume.PVInfo{
+					ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+					Labels:        map[string]string{"label1": "label1-val"},
+				},
+			}},
+			restore:          builder.ForRestore(velerov1api.DefaultNamespace, "restore").Result(),
+			restoredPVCNames: map[string]struct{}{"ns1/pvc1": {}},
+			restoredPV: []*corev1api.PersistentVolume{
+				builder.ForPersistentVolume("new-pv1").ClaimRef("ns1", "pvc1").Phase(corev1api.VolumeBound).ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result()},
+			restoredPVC: []*corev1api.PersistentVolumeClaim{
+				builder.ForPersistentVolumeClaim("ns1", "pvc1").VolumeName("new-pv1").Phase(corev1api.ClaimBound).Result(),
+			},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{
+							GroupResource:     "persistentvolumes",
+							ResourceNameRegex: "[invalid",
+						},
+						Patches: []resourcemodifiers.JSONPatch{
+							{
+								Operation: "remove",
+								Path:      "/metadata/labels/label1",
+							},
+						},
+					},
+				},
+			},
+			expectedPatch: map[string]volume.PVInfo{"new-pv1": {
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"label1": "label1-val"},
+			}},
+			expectedErrNum: 0,
+		},
+		{
+			name: "resource modifier with non-matching group resource does not modify PV",
+			volumeInfo: []*volume.BackupVolumeInfo{{
+				BackupMethod: "PodVolumeBackup",
+				PVCName:      "pvc1",
+				PVName:       "pv1",
+				PVCNamespace: "ns1",
+				PVInfo: &volume.PVInfo{
+					ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+					Labels:        map[string]string{"label1": "label1-val"},
+				},
+			}},
+			restore:          builder.ForRestore(velerov1api.DefaultNamespace, "restore").Result(),
+			restoredPVCNames: map[string]struct{}{"ns1/pvc1": {}},
+			restoredPV: []*corev1api.PersistentVolume{
+				builder.ForPersistentVolume("new-pv1").ClaimRef("ns1", "pvc1").Phase(corev1api.VolumeBound).ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result()},
+			restoredPVC: []*corev1api.PersistentVolumeClaim{
+				builder.ForPersistentVolumeClaim("ns1", "pvc1").VolumeName("new-pv1").Phase(corev1api.ClaimBound).Result(),
+			},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{
+							GroupResource: "persistentvolumeclaims",
+						},
+						Patches: []resourcemodifiers.JSONPatch{
+							{
+								Operation: "remove",
+								Path:      "/metadata/labels/label1",
+							},
+						},
+					},
+				},
+			},
+			expectedPatch: map[string]volume.PVInfo{"new-pv1": {
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"label1": "label1-val"},
+			}},
+			expectedErrNum: 0,
+		},
 	}
 
 	for _, tc := range tests {
@@ -550,6 +633,156 @@ func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 			assert.Equal(t, expectedPVInfo.ReclaimPolicy, string(pv.Spec.PersistentVolumeReclaimPolicy))
 			assert.Equal(t, expectedPVInfo.Labels, pv.Labels)
 		}
+	}
+}
+
+func TestApplyResourceModifiersToPV(t *testing.T) {
+	tests := []struct {
+		name              string
+		pvLabels          map[string]string
+		resourceModifiers *resourcemodifiers.ResourceModifiers
+		expectErr         bool
+		expectedLabels    map[string]string
+	}{
+		{
+			name:     "successful label removal",
+			pvLabels: map[string]string{"keep": "val", "remove": "val"},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{GroupResource: "persistentvolumes"},
+						Patches: []resourcemodifiers.JSONPatch{
+							{Operation: "remove", Path: "/metadata/labels/remove"},
+						},
+					},
+				},
+			},
+			expectErr:      false,
+			expectedLabels: map[string]string{"keep": "val"},
+		},
+		{
+			name:     "rule error returns error",
+			pvLabels: map[string]string{"label": "val"},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{
+							GroupResource:     "persistentvolumes",
+							ResourceNameRegex: "[invalid",
+						},
+						Patches: []resourcemodifiers.JSONPatch{
+							{Operation: "remove", Path: "/metadata/labels/label"},
+						},
+					},
+				},
+			},
+			expectErr:      true,
+			expectedLabels: map[string]string{"label": "val"},
+		},
+		{
+			name:     "non-matching rule leaves PV unchanged",
+			pvLabels: map[string]string{"label": "val"},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{GroupResource: "configmaps"},
+						Patches: []resourcemodifiers.JSONPatch{
+							{Operation: "remove", Path: "/metadata/labels/label"},
+						},
+					},
+				},
+			},
+			expectErr:      false,
+			expectedLabels: map[string]string{"label": "val"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).Build()
+			logger := velerotest.NewLogger()
+
+			pv := &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test-pv",
+					Labels: tc.pvLabels,
+				},
+			}
+
+			ctx := &finalizerContext{
+				crClient:          fakeClient,
+				resourceModifiers: tc.resourceModifiers,
+			}
+
+			err := ctx.applyResourceModifiersToPV(pv, logger)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tc.expectedLabels, pv.Labels)
+		})
+	}
+}
+
+func TestNeedPatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		pvLabels map[string]string
+		pvPolicy corev1api.PersistentVolumeReclaimPolicy
+		pvInfo   *volume.PVInfo
+		expected bool
+	}{
+		{
+			name:     "no patch needed when labels and policy match",
+			pvLabels: map[string]string{"a": "1"},
+			pvPolicy: corev1api.PersistentVolumeReclaimDelete,
+			pvInfo:   &volume.PVInfo{ReclaimPolicy: "Delete", Labels: map[string]string{"a": "1"}},
+			expected: false,
+		},
+		{
+			name:     "patch needed when reclaim policy differs",
+			pvLabels: map[string]string{"a": "1"},
+			pvPolicy: corev1api.PersistentVolumeReclaimRetain,
+			pvInfo:   &volume.PVInfo{ReclaimPolicy: "Delete", Labels: map[string]string{"a": "1"}},
+			expected: true,
+		},
+		{
+			name:     "patch needed when PV missing a label from pvInfo",
+			pvLabels: map[string]string{},
+			pvPolicy: corev1api.PersistentVolumeReclaimDelete,
+			pvInfo:   &volume.PVInfo{ReclaimPolicy: "Delete", Labels: map[string]string{"a": "1"}},
+			expected: true,
+		},
+		{
+			name:     "patch needed when label value differs",
+			pvLabels: map[string]string{"a": "2"},
+			pvPolicy: corev1api.PersistentVolumeReclaimDelete,
+			pvInfo:   &volume.PVInfo{ReclaimPolicy: "Delete", Labels: map[string]string{"a": "1"}},
+			expected: true,
+		},
+		{
+			name:     "no patch needed with empty labels on both sides",
+			pvLabels: nil,
+			pvPolicy: corev1api.PersistentVolumeReclaimDelete,
+			pvInfo:   &volume.PVInfo{ReclaimPolicy: "Delete", Labels: map[string]string{}},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pv := &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Labels: tc.pvLabels},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeReclaimPolicy: tc.pvPolicy,
+				},
+			}
+			assert.Equal(t, tc.expected, needPatch(pv, tc.pvInfo))
+		})
 	}
 }
 
