@@ -37,6 +37,7 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
+	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -221,14 +222,15 @@ func TestUpdateResult(t *testing.T) {
 
 func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 	tests := []struct {
-		name             string
-		volumeInfo       []*volume.BackupVolumeInfo
-		restoredPVCNames map[string]struct{}
-		restore          *velerov1api.Restore
-		restoredPVC      []*corev1api.PersistentVolumeClaim
-		restoredPV       []*corev1api.PersistentVolume
-		expectedPatch    map[string]volume.PVInfo
-		expectedErrNum   int
+		name              string
+		volumeInfo        []*volume.BackupVolumeInfo
+		restoredPVCNames  map[string]struct{}
+		restore           *velerov1api.Restore
+		restoredPVC       []*corev1api.PersistentVolumeClaim
+		restoredPV        []*corev1api.PersistentVolume
+		resourceModifiers *resourcemodifiers.ResourceModifiers
+		expectedPatch     map[string]volume.PVInfo
+		expectedErrNum    int
 	}{
 		{
 			name:           "no applicable volumeInfo",
@@ -429,6 +431,89 @@ func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 			},
 			expectedErrNum: 1,
 		},
+		{
+			name: "resource modifier removes a label",
+			volumeInfo: []*volume.BackupVolumeInfo{{
+				BackupMethod: "PodVolumeBackup",
+				PVCName:      "pvc1",
+				PVName:       "pv1",
+				PVCNamespace: "ns1",
+				PVInfo: &volume.PVInfo{
+					ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+					Labels:        map[string]string{"label1": "label1-val", "zone": "us-east-1a"},
+				},
+			}},
+			restore:          builder.ForRestore(velerov1api.DefaultNamespace, "restore").Result(),
+			restoredPVCNames: map[string]struct{}{"ns1/pvc1": {}},
+			restoredPV: []*corev1api.PersistentVolume{
+				builder.ForPersistentVolume("new-pv1").ClaimRef("ns1", "pvc1").Phase(corev1api.VolumeBound).ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result()},
+			restoredPVC: []*corev1api.PersistentVolumeClaim{
+				builder.ForPersistentVolumeClaim("ns1", "pvc1").VolumeName("new-pv1").Phase(corev1api.ClaimBound).Result(),
+			},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{
+							GroupResource: "persistentvolumes",
+						},
+						Patches: []resourcemodifiers.JSONPatch{
+							{
+								Operation: "remove",
+								Path:      "/metadata/labels/zone",
+							},
+						},
+					},
+				},
+			},
+			expectedPatch: map[string]volume.PVInfo{"new-pv1": {
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"label1": "label1-val"},
+			}},
+			expectedErrNum: 0,
+		},
+		{
+			name: "resource modifier replaces a label value",
+			volumeInfo: []*volume.BackupVolumeInfo{{
+				BackupMethod: "CSISnapshot",
+				PVCName:      "pvc1",
+				PVName:       "pv1",
+				PVCNamespace: "ns1",
+				PVInfo: &volume.PVInfo{
+					ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+					Labels:        map[string]string{"zone": "us-east-1a"},
+				},
+			}},
+			restore:          builder.ForRestore(velerov1api.DefaultNamespace, "restore").Result(),
+			restoredPVCNames: map[string]struct{}{"ns1/pvc1": {}},
+			restoredPV: []*corev1api.PersistentVolume{
+				builder.ForPersistentVolume("new-pv1").ClaimRef("ns1", "pvc1").Phase(corev1api.VolumeBound).ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result()},
+			restoredPVC: []*corev1api.PersistentVolumeClaim{
+				builder.ForPersistentVolumeClaim("ns1", "pvc1").VolumeName("new-pv1").Phase(corev1api.ClaimBound).Result(),
+			},
+			resourceModifiers: &resourcemodifiers.ResourceModifiers{
+				Version: "v1",
+				ResourceModifierRules: []resourcemodifiers.ResourceModifierRule{
+					{
+						Conditions: resourcemodifiers.Conditions{
+							GroupResource: "persistentvolumes",
+						},
+						Patches: []resourcemodifiers.JSONPatch{
+							{
+								Operation: "replace",
+								Path:      "/metadata/labels/zone",
+								Value:     "eastus-1",
+							},
+						},
+					},
+				},
+			},
+			expectedPatch: map[string]volume.PVInfo{"new-pv1": {
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"zone": "eastus-1"},
+			}},
+			expectedErrNum: 0,
+		},
 	}
 
 	for _, tc := range tests {
@@ -437,11 +522,12 @@ func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 			logger     = velerotest.NewLogger()
 		)
 		ctx := &finalizerContext{
-			logger:          logger,
-			crClient:        fakeClient,
-			restore:         tc.restore,
-			restoredPVCList: tc.restoredPVCNames,
-			volumeInfo:      tc.volumeInfo,
+			logger:            logger,
+			crClient:          fakeClient,
+			restore:           tc.restore,
+			restoredPVCList:   tc.restoredPVCNames,
+			volumeInfo:        tc.volumeInfo,
+			resourceModifiers: tc.resourceModifiers,
 		}
 
 		for _, pv := range tc.restoredPV {

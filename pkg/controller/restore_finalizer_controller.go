@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,8 @@ import (
 	storagev1api "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/clock"
@@ -37,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
+	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/constant"
@@ -167,14 +171,32 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, errors.Wrap(err, "error getting itemOperationList")
 	}
 
+	var resModifiers *resourcemodifiers.ResourceModifiers
+	if restore.Spec.ResourceModifier != nil && strings.EqualFold(restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType) {
+		cm := &corev1api.ConfigMap{}
+		if err := r.crClient.Get(ctx, client.ObjectKey{Namespace: restore.Namespace, Name: restore.Spec.ResourceModifier.Name}, cm); err != nil {
+			log.WithError(err).Warnf("failed to get resource modifier configmap %s/%s, proceeding without resource modifiers", restore.Namespace, restore.Spec.ResourceModifier.Name)
+		} else {
+			resModifiers, err = resourcemodifiers.GetResourceModifiersFromConfig(cm)
+			if err != nil {
+				log.WithError(err).Warn("failed to parse resource modifier rules, proceeding without resource modifiers")
+				resModifiers = nil
+			} else if err = resModifiers.Validate(); err != nil {
+				log.WithError(err).Warn("resource modifier validation failed, proceeding without resource modifiers")
+				resModifiers = nil
+			}
+		}
+	}
+
 	finalizerCtx := &finalizerContext{
-		logger:           log,
-		restore:          restore,
-		crClient:         r.crClient,
-		volumeInfo:       volumeInfo,
-		restoredPVCList:  restoredPVCList,
-		multiHookTracker: r.multiHookTracker,
-		resourceTimeout:  r.resourceTimeout,
+		logger:            log,
+		restore:           restore,
+		crClient:          r.crClient,
+		volumeInfo:        volumeInfo,
+		restoredPVCList:   restoredPVCList,
+		multiHookTracker:  r.multiHookTracker,
+		resourceTimeout:   r.resourceTimeout,
+		resourceModifiers: resModifiers,
 		restoreItemOperationList: restoreItemOperationList{
 			items: restoreItemOperations,
 		},
@@ -292,6 +314,7 @@ type finalizerContext struct {
 	restoreItemOperationList restoreItemOperationList
 	multiHookTracker         *hook.MultiHookTracker
 	resourceTimeout          time.Duration
+	resourceModifiers        *resourcemodifiers.ResourceModifiers
 }
 
 func (ctx *finalizerContext) execute() (results.Result, results.Result) {
@@ -423,6 +446,13 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 						updatedPV := pv.DeepCopy()
 						updatedPV.Labels = volInfo.PVInfo.Labels
 						updatedPV.Spec.PersistentVolumeReclaimPolicy = corev1api.PersistentVolumeReclaimPolicy(volInfo.PVInfo.ReclaimPolicy)
+
+						if ctx.resourceModifiers != nil {
+							if err := ctx.applyResourceModifiersToPV(updatedPV, log); err != nil {
+								log.WithError(err).Warn("failed to apply resource modifier rules to PV, patching without modifications")
+							}
+						}
+
 						if err := kubeutil.PatchResource(pv, updatedPV, ctx.crClient); err != nil {
 							return false, err
 						}
@@ -563,6 +593,25 @@ func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
 	}
 
 	return false
+}
+
+func (ctx *finalizerContext) applyResourceModifiersToPV(pv *corev1api.PersistentVolume, log logrus.FieldLogger) error {
+	pvMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pv)
+	if err != nil {
+		return errors.Wrap(err, "failed to convert PV to unstructured")
+	}
+	obj := &unstructured.Unstructured{Object: pvMap}
+	obj.SetAPIVersion("v1")
+	obj.SetKind("PersistentVolume")
+
+	if errList := ctx.resourceModifiers.ApplyResourceModifierRules(obj, "persistentvolumes", ctx.crClient.Scheme(), log); len(errList) > 0 {
+		return fmt.Errorf("resource modifier rule errors: %v", errList)
+	}
+
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pv); err != nil {
+		return errors.Wrap(err, "failed to convert unstructured back to PV")
+	}
+	return nil
 }
 
 // WaitRestoreExecHook waits for restore exec hooks to finish then update the hook execution results
