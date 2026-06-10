@@ -719,9 +719,9 @@ func TestApplyResourceModifiersToPV(t *testing.T) {
 
 			err := ctx.applyResourceModifiersToPV(pv, logger)
 			if tc.expectErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 			assert.Equal(t, tc.expectedLabels, pv.Labels)
 		})
