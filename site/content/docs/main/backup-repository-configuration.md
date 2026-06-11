@@ -31,7 +31,9 @@ data:
   <kopia>: |
     {
       "cacheLimitMB": 2048,
-      "fullMaintenanceInterval": "fastGC"
+      "fullMaintenanceInterval": "fastGC",
+      "ThrottleUploadBytes": "838860800",
+      "ThrottleDownloadBytes": "838860800"
     }
   <other-repository-type>: |
     {
@@ -58,6 +60,16 @@ Below is the supported configurations by Velero and the specific backup reposito
 Per kopia [Maintenance Safety](https://kopia.io/docs/advanced/maintenance/#maintenance-safety), it is expected that velero backup deletion will not result in immediate kopia repository data removal. Reducing full maintenance interval using above options should help reduce time taken to remove blobs not in use.
 
 On the other hand, the not-in-use data will be deleted permanently after the full maintenance, so shorter full maintenance intervals may weaken the data safety if they are used incorrectly.
+
+`ThrottleUploadBytes`: specifies the maximum upload speed in bytes per second for the repository. This can be used to throttle the upload bandwidth. The value should be specified as a string representing bytes per second (e.g., "838860800" for ~800 MB/s). This parameter applies during repository operations that write data.
+
+`ThrottleDownloadBytes`: specifies the maximum download speed in bytes per second for the repository. This can be used to throttle the download bandwidth. The value should be specified as a string representing bytes per second (e.g., "838860800" for ~800 MB/s). This parameter applies during repository operations that read data.
+
+`ThrottleReadOPS`: specifies the maximum number of read operations per second. This can be used to throttle the rate of read operations to the storage backend.
+
+`ThrottleWriteOPS`: specifies the maximum number of write operations per second. This can be used to throttle the rate of write operations to the storage backend.
+
+`ThrottleListOPS`: specifies the maximum number of list operations per second. This can be used to throttle the rate of list operations to the storage backend.
 
 [1]: file-system-backup.md
 [2]: csi-snapshot-data-movement.md
