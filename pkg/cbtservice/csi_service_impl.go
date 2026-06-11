@@ -111,8 +111,8 @@ func (s *ServiceImpl) GetChangedBlocks(ctx context.Context, snapshot string, cha
 	}
 
 	args := iterator.Args{
-		SnapshotName:     snapshot,
-		PrevSnapshotName: changeID,
+		SnapshotName:   snapshot,
+		PrevSnapshotID: changeID,
 		Emitter: &emitterImpl{
 			logger:         s.logger,
 			recordCallBack: record,

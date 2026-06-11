@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"k8s.io/client-go/util/retry"
@@ -54,6 +55,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/csi"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -160,12 +162,13 @@ func (p *pvcBackupItemAction) getOrCreateVolumeHelper(backup *velerov1api.Backup
 	return p.getVolumeHelperWithCache(backup)
 }
 
-func (p *pvcBackupItemAction) validatePVCandPV(
+func (p *pvcBackupItemAction) validatePVCAndPV(
 	pvc corev1api.PersistentVolumeClaim,
 	item runtime.Unstructured,
 ) (
 	valid bool,
 	updateItem runtime.Unstructured,
+	pv *corev1api.PersistentVolume,
 	err error,
 ) {
 	updateItem = item
@@ -174,6 +177,7 @@ func (p *pvcBackupItemAction) validatePVCandPV(
 	if pvc.Spec.StorageClassName == nil {
 		return false,
 			updateItem,
+			nil,
 			errors.Errorf(
 				"Cannot snapshot PVC %s/%s, PVC has no storage class.",
 				pvc.Namespace, pvc.Name)
@@ -185,9 +189,9 @@ func (p *pvcBackupItemAction) validatePVCandPV(
 	)
 
 	// Do nothing if this is not a CSI provisioned volume
-	pv, err := kubeutil.GetPVForPVC(&pvc, p.crClient)
+	pv, err = kubeutil.GetPVForPVC(&pvc, p.crClient)
 	if err != nil {
-		return false, updateItem, errors.WithStack(err)
+		return false, updateItem, nil, errors.WithStack(err)
 	}
 
 	if pv.Spec.PersistentVolumeSource.CSI == nil {
@@ -202,10 +206,10 @@ func (p *pvcBackupItemAction) validatePVCandPV(
 			})
 		data, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pvc)
 		updateItem = &unstructured.Unstructured{Object: data}
-		return false, updateItem, err
+		return false, updateItem, nil, err
 	}
 
-	return true, updateItem, nil
+	return true, updateItem, pv, nil
 }
 
 func (p *pvcBackupItemAction) createVolumeSnapshot(
@@ -301,12 +305,14 @@ func (p *pvcBackupItemAction) Execute(
 	); err != nil {
 		return nil, nil, "", nil, errors.WithStack(err)
 	}
-	if valid, item, err := p.validatePVCandPV(
+
+	valid, item, pv, validErr := p.validatePVCAndPV(
 		pvc,
 		item,
-	); !valid {
-		if err != nil {
-			return nil, nil, "", nil, err
+	)
+	if !valid {
+		if validErr != nil {
+			return nil, nil, "", nil, validErr
 		}
 		return item, nil, "", nil, nil
 	}
@@ -390,6 +396,7 @@ func (p *pvcBackupItemAction) Execute(
 			p.crClient,
 			vs,
 			&pvc,
+			pv,
 			operationID,
 			vsc,
 		)
@@ -528,6 +535,7 @@ func newDataUpload(
 	backup *velerov1api.Backup,
 	vs *snapshotv1api.VolumeSnapshot,
 	pvc *corev1api.PersistentVolumeClaim,
+	pv *corev1api.PersistentVolume,
 	operationID string,
 	vsc *snapshotv1api.VolumeSnapshotContent,
 ) *velerov2alpha1.DataUpload {
@@ -580,6 +588,20 @@ func newDataUpload(
 		dataUpload.Spec.DataMoverConfig[uploaderUtil.ParallelFilesUpload] = strconv.Itoa(backup.Spec.UploaderConfig.ParallelFilesUpload)
 	}
 
+	if vs.Annotations[util.VSphereCNSChangeIDAnno] != "" {
+		dataUpload.Spec.CSISnapshot.CBTSpec.ChangeID = vs.Annotations[util.VSphereCNSChangeIDAnno]
+	}
+
+	if vs.Annotations[util.VSphereCNSSnapshotAnno] != "" {
+		// "csi.vsphere.volume/snapshot" annotation's format should be "<fcd-id>+<snap-id>".
+		splitParts := strings.Split(vs.Annotations[util.VSphereCNSSnapshotAnno], "+")
+		if len(splitParts) == 2 {
+			dataUpload.Spec.CSISnapshot.CBTSpec.VolumeID = splitParts[0]
+		}
+	} else if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
+		dataUpload.Spec.CSISnapshot.CBTSpec.VolumeID = pv.Spec.CSI.VolumeHandle
+	}
+
 	return dataUpload
 }
 
@@ -589,10 +611,11 @@ func createDataUpload(
 	crClient crclient.Client,
 	vs *snapshotv1api.VolumeSnapshot,
 	pvc *corev1api.PersistentVolumeClaim,
+	pv *corev1api.PersistentVolume,
 	operationID string,
 	vsc *snapshotv1api.VolumeSnapshotContent,
 ) (*velerov2alpha1.DataUpload, error) {
-	dataUpload := newDataUpload(backup, vs, pvc, operationID, vsc)
+	dataUpload := newDataUpload(backup, vs, pvc, pv, operationID, vsc)
 
 	err := crClient.Create(ctx, dataUpload)
 	if err != nil {

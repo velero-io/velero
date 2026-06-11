@@ -60,6 +60,9 @@ type DataUploadSpec struct {
 	// OperationTimeout specifies the time used to wait internal operations,
 	// before returning error as timeout.
 	OperationTimeout metav1.Duration `json:"operationTimeout"`
+
+	// BackupType specifies the backup type of the DataUpload for , such as full or incremental.
+	BackupType BackupType `json:"backupType,omitempty"`
 }
 
 type SnapshotType string
@@ -67,6 +70,18 @@ type SnapshotType string
 const (
 	SnapshotTypeCSI SnapshotType = "CSI"
 )
+
+type CBTSpec struct {
+	// For Vanilla k8s, changeID is same as the backupVSC snapshot handle.
+	// For VCF k8s service workload cluster,
+	// changeID is read from the annotation "csi.vsphere.volume/change-id" of the VS.
+	ChangeID string `json:"changeID"`
+
+	// For Vanilla k8s, volumeID is same as the PV's volume handle.
+	// For VCF k8s service workload cluster,
+	// volumeID is read from the annotation "csi.vsphere.volume/snapshot" of the VS.
+	VolumeID string `json:"volumeID"`
+}
 
 // CSISnapshotSpec is the specification for a CSI snapshot.
 type CSISnapshotSpec struct {
@@ -83,7 +98,20 @@ type CSISnapshotSpec struct {
 	// Driver is the driver used by the VolumeSnapshotContent
 	// +optional
 	Driver string `json:"driver,omitempty"`
+
+	// CBTSpec is the CBT information for the snapshot.
+	// It is required when the snapshot type is CSI and the backup repository supports CBT.
+	CBTSpec CBTSpec `json:"cbtSpec"`
 }
+
+// BackupType represents the backup type of a DataUpload, such as full or incremental.
+// +kubebuilder:validation:Enum=Full;Incremental
+type BackupType string
+
+const (
+	BackupTypeFull        BackupType = "Full"
+	BackupTypeIncremental BackupType = "Incremental"
+)
 
 // DataUploadPhase represents the lifecycle phase of a DataUpload.
 // +kubebuilder:validation:Enum=New;Accepted;Prepared;InProgress;Canceling;Canceled;Completed;Failed
