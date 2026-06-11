@@ -100,6 +100,10 @@ type Request struct {
 	// NamespacedFilterPatterns preserves the order of patterns for first-match semantics
 	// and caches pre-compiled globs to avoid repeated compilation in the hot path.
 	NamespacedFilterPatterns []NamespacedFilterPattern
+
+	// NamespaceFilterCache memoizes the resolved filter for a given namespace.
+	// sync.Map is used because item backuppers access this concurrently.
+	NamespaceFilterCache sync.Map
 }
 
 // NamespacedFilterPattern pairs a namespace pattern string with its pre-compiled
@@ -149,22 +153,37 @@ func (r *Request) StopWorkerPool() {
 
 // GetNamespaceFilter returns the resolved filter for a namespace, or nil
 // if the namespace should use global filters. Uses first-match semantics
-// when multiple patterns could match the same namespace.
+// when multiple patterns could match the same namespace, but exact matches
+// always take precedence over glob patterns regardless of definition order.
 func (r *Request) GetNamespaceFilter(namespace string) *ResolvedNamespaceFilter {
 	if r.NamespacedFilterMap == nil {
 		return nil
 	}
 
-	// First check for exact match
+	// 1. Check the concurrent cache first
+	if val, ok := r.NamespaceFilterCache.Load(namespace); ok {
+		if val == nil {
+			return nil
+		}
+		return val.(*ResolvedNamespaceFilter)
+	}
+
+	// 2. Check for exact match first
 	if f, ok := r.NamespacedFilterMap[namespace]; ok {
+		r.NamespaceFilterCache.Store(namespace, f)
 		return f
 	}
 
-	// Walk patterns in definition order using pre-compiled globs (no allocation per call)
+	// 3. Walk patterns in definition order using pre-compiled globs
 	for _, p := range r.NamespacedFilterPatterns {
 		if p.Compiled != nil && p.Compiled.Match(namespace) {
-			return r.NamespacedFilterMap[p.Pattern]
+			filter := r.NamespacedFilterMap[p.Pattern]
+			r.NamespaceFilterCache.Store(namespace, filter)
+			return filter
 		}
 	}
+
+	// 4. Cache the miss
+	r.NamespaceFilterCache.Store(namespace, nil)
 	return nil
 }
