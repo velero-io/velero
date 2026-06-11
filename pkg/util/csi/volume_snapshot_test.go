@@ -403,6 +403,8 @@ func TestEnsureDeleteVS(t *testing.T) {
 }
 
 func TestEnsureDeleteVSC(t *testing.T) {
+	logger := logging.DefaultLogger(logrus.DebugLevel, logging.FormatText)
+
 	vscObj := &snapshotv1api.VolumeSnapshotContent{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "fake-vsc",
@@ -470,7 +472,7 @@ func TestEnsureDeleteVSC(t *testing.T) {
 					},
 				},
 			},
-			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted, finalizers in VSC [fake-finalizer-1 fake-finalizer-2]",
+			err: "timeout waiting for VolumeSnapshotContent fake-vsc deletion after finalizer removal: context deadline exceeded",
 		},
 		{
 			name:      "wait timeout, no finalizer",
@@ -502,7 +504,7 @@ func TestEnsureDeleteVSC(t *testing.T) {
 				fakeSnapshotClient.Fake.PrependReactor(reactor.verb, reactor.resource, reactor.reactorFunc)
 			}
 
-			err := EnsureDeleteVSC(t.Context(), fakeSnapshotClient.SnapshotV1(), test.vscName, time.Millisecond)
+			err := EnsureDeleteVSC(t.Context(), fakeSnapshotClient.SnapshotV1(), test.vscName, time.Millisecond, logger)
 			if test.err != "" {
 				assert.EqualError(t, err, test.err)
 			} else {

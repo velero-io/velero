@@ -220,7 +220,7 @@ func RemoveVSCProtect(ctx context.Context, snapshotClient snapshotter.SnapshotV1
 // EnsureDeleteVSC asserts the existence of a VSC by name, deletes it and waits for its
 // disappearance and returns errors on any failure.
 func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1Interface,
-	vscName string, timeout time.Duration) error {
+	vscName string, timeout time.Duration, logger logrus.FieldLogger) error {
 	err := snapshotClient.VolumeSnapshotContents().Delete(ctx, vscName, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return errors.Wrap(err, "error to delete volume snapshot content")
@@ -243,6 +243,48 @@ func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1I
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// Check if the timeout is due to finalizers blocking deletion
+			if updated != nil && len(updated.Finalizers) > 0 {
+				logger.WithFields(logrus.Fields{
+					"vscName":    vscName,
+					"finalizers": updated.Finalizers,
+				}).Warn("VolumeSnapshotContent deletion timed out due to finalizers, attempting finalizer removal as fallback")
+
+				// Attempt to remove finalizers as a fallback
+				removeErr := RemoveVSCProtect(ctx, snapshotClient, vscName, timeout)
+				if removeErr != nil {
+					logger.WithError(removeErr).WithField("vscName", vscName).Error("Failed to remove finalizers from VolumeSnapshotContent")
+					return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted, finalizers in VSC %v, finalizer removal also failed: %v", vscName, updated.Finalizers, removeErr)
+				}
+
+				logger.WithField("vscName", vscName).Info("Successfully removed finalizers from VolumeSnapshotContent, retrying deletion")
+
+				// Retry deletion after finalizer removal
+				err = snapshotClient.VolumeSnapshotContents().Delete(ctx, vscName, metav1.DeleteOptions{})
+				if err != nil && !apierrors.IsNotFound(err) {
+					return errors.Wrap(err, "error to delete volume snapshot content after finalizer removal")
+				}
+
+				// Wait for deletion to complete
+				err = wait.PollUntilContextTimeout(ctx, waitInternal, timeout, true, func(ctx context.Context) (bool, error) {
+					_, err := snapshotClient.VolumeSnapshotContents().Get(ctx, vscName, metav1.GetOptions{})
+					if apierrors.IsNotFound(err) {
+						return true, nil
+					}
+					if err != nil {
+						return false, errors.Wrapf(err, "error to get VolumeSnapshotContent %s", vscName)
+					}
+					return false, nil
+				})
+
+				if err != nil {
+					return errors.Wrapf(err, "timeout waiting for VolumeSnapshotContent %s deletion after finalizer removal", vscName)
+				}
+
+				logger.WithField("vscName", vscName).Info("VolumeSnapshotContent successfully deleted after finalizer removal")
+				return nil
+			}
+
 			return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted, finalizers in VSC %v", vscName, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to assure VolumeSnapshotContent is deleted, %s", vscName)
