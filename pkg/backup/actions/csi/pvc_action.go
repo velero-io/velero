@@ -226,7 +226,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 
 	p.log.Debugf("Fetching VolumeSnapshotClass for %s", storageClass.Provisioner)
 	vsClass, err := csi.GetVolumeSnapshotClass(
-		storageClass.Provisioner,
+		storageClass,
 		backup,
 		&pvc,
 		p.log,
