@@ -137,3 +137,9 @@ func (b *BackupStorageLocationBuilder) Credential(selector *corev1api.SecretKeyS
 	b.object.Spec.Credential = selector
 	return b
 }
+
+// Config sets the BackupStorageLocation's provider config.
+func (b *BackupStorageLocationBuilder) Config(config map[string]string) *BackupStorageLocationBuilder {
+	b.object.Spec.Config = config
+	return b
+}
