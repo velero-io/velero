@@ -109,6 +109,8 @@ toc:
         url: /build-from-source
       - page: Run locally
         url: /run-locally
+      - page: Debug locally with vscode
+        url: /vscode
       - page: Code standards
         url: /code-standards
       - page: Website guidelines
