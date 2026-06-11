@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -53,6 +54,9 @@ const (
 	repoSyncPeriod                      = 5 * time.Minute
 	defaultMaintainFrequency            = 7 * 24 * time.Hour
 	defaultMaintenanceStatusQueueLength = 25
+
+	msgBSLChangedOnStartup = "BSL configuration changed while Velero was not running, re-establishing connection"
+	msgBSLChanged          = "re-establish on BSL change, create or delete"
 )
 
 var maintenanceStatusQueueLength = defaultMaintenanceStatusQueueLength
@@ -69,6 +73,9 @@ type BackupRepoReconciler struct {
 	logLevel              logrus.Level
 	logFormat             *logging.FormatFlag
 	metrics               *metrics.ServerMetrics
+
+	startupValidationDone bool
+	startupMutex          sync.Mutex
 }
 
 func NewBackupRepoReconciler(
@@ -84,17 +91,17 @@ func NewBackupRepoReconciler(
 	metrics *metrics.ServerMetrics,
 ) *BackupRepoReconciler {
 	c := &BackupRepoReconciler{
-		client,
-		namespace,
-		logger,
-		clocks.RealClock{},
-		maintenanceFrequency,
-		backupRepoConfig,
-		repositoryManager,
-		repoMaintenanceConfig,
-		logLevel,
-		logFormat,
-		metrics,
+		Client:                client,
+		namespace:             namespace,
+		logger:                logger,
+		clock:                 clocks.RealClock{},
+		maintenanceFrequency:  maintenanceFrequency,
+		backupRepoConfig:      backupRepoConfig,
+		repositoryManager:     repositoryManager,
+		repoMaintenanceConfig: repoMaintenanceConfig,
+		logLevel:              logLevel,
+		logFormat:             logFormat,
+		metrics:               metrics,
 	}
 
 	return c
@@ -154,7 +161,7 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 	requests := []reconcile.Request{}
 	for i := range list.Items {
 		r.logger.WithField("BSL", bsl.Name).Infof("Invalidating Backup Repository %s", list.Items[i].Name)
-		if err := r.patchBackupRepository(context.Background(), &list.Items[i], repoNotReady("re-establish on BSL change, create or delete")); err != nil {
+		if err := r.patchBackupRepository(context.Background(), &list.Items[i], repoNotReady(msgBSLChanged)); err != nil {
 			r.logger.WithField("BSL", bsl.Name).WithError(err).Errorf("fail to patch BackupRepository %s", list.Items[i].Name)
 			continue
 		}
@@ -164,15 +171,142 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 	return requests
 }
 
-// needInvalidBackupRepo returns true if the BSL's storage type, bucket, prefix, CACert, or config has changed
+// validateBackupRepositoriesOnStartup checks all BackupRepositories on controller startup
+// and invalidates any that have mismatched BSL configuration (e.g. BSL changed while Velero was down).
+func (r *BackupRepoReconciler) validateBackupRepositoriesOnStartup(ctx context.Context) error {
+	r.logger.Info("Starting validation of backup repositories on startup")
+
+	repoList := &velerov1api.BackupRepositoryList{}
+	if err := r.List(ctx, repoList); err != nil {
+		return errors.Wrap(err, "error listing BackupRepositories")
+	}
+
+	bslList := &velerov1api.BackupStorageLocationList{}
+	if err := r.List(ctx, bslList); err != nil {
+		return errors.Wrap(err, "error listing BackupStorageLocations")
+	}
+
+	bslMap := make(map[string]*velerov1api.BackupStorageLocation, len(bslList.Items))
+	for i := range bslList.Items {
+		bslMap[bslList.Items[i].Name] = &bslList.Items[i]
+	}
+
+	invalidatedCount := 0
+	for i := range repoList.Items {
+		repo := &repoList.Items[i]
+		if repo.Status.Phase != velerov1api.BackupRepositoryPhaseReady {
+			continue
+		}
+
+		bsl, exists := bslMap[repo.Spec.BackupStorageLocation]
+		if !exists {
+			r.logger.WithField("repo", repo.Name).Warn("BSL not found for repository, skipping validation")
+			continue
+		}
+
+		if !r.needInvalidBackupRepoOnStartup(repo, bsl) {
+			continue
+		}
+
+		r.logger.WithFields(logrus.Fields{
+			"repo": repo.Name,
+			"bsl":  bsl.Name,
+		}).Info("Invalidating stale BackupRepository on startup")
+
+		if err := r.patchBackupRepository(ctx, repo, repoNotReady(msgBSLChangedOnStartup)); err != nil {
+			r.logger.WithField("repo", repo.Name).WithError(err).Error("Failed to invalidate repository")
+			continue
+		}
+		invalidatedCount++
+	}
+
+	r.logger.WithField("invalidatedCount", invalidatedCount).Info("Completed backup repository validation on startup")
+	return nil
+}
+
+// compareBSLConfigs returns true if two BSL configurations differ in fields that affect repository connectivity.
+func (r *BackupRepoReconciler) compareBSLConfigs(
+	oldBucket, newBucket string,
+	oldPrefix, newPrefix string,
+	oldCACert, newCACert []byte,
+	oldConfig, newConfig map[string]string,
+	contextName string,
+) bool {
+	logger := r.logger.WithField("context", contextName)
+
+	if oldBucket != newBucket {
+		logger.WithFields(logrus.Fields{
+			"old bucket": oldBucket,
+			"new bucket": newBucket,
+		}).Info("BSL's bucket has changed, invalid backup repositories")
+		return true
+	}
+
+	if oldPrefix != newPrefix {
+		logger.WithFields(logrus.Fields{
+			"old prefix": oldPrefix,
+			"new prefix": newPrefix,
+		}).Info("BSL's prefix has changed, invalid backup repositories")
+		return true
+	}
+
+	if !bytes.Equal(oldCACert, newCACert) {
+		logger.Info("BSL's CACert has changed, invalid backup repositories")
+		return true
+	}
+
+	if !reflect.DeepEqual(oldConfig, newConfig) {
+		logger.Info("BSL's storage config has changed, invalid backup repositories")
+		return true
+	}
+
+	return false
+}
+
+// needInvalidBackupRepoOnStartup checks stored BSL annotations against current BSL to detect changes while Velero was down.
+func (r *BackupRepoReconciler) needInvalidBackupRepoOnStartup(repo *velerov1api.BackupRepository, currentBSL *velerov1api.BackupStorageLocation) bool {
+	if repo.Annotations == nil ||
+		(repo.Annotations[velerov1api.BSLBucketAnnotation] == "" &&
+			repo.Annotations[velerov1api.BSLPrefixAnnotation] == "" &&
+			repo.Annotations[velerov1api.BSLConfigAnnotation] == "") {
+		r.logger.WithField("repo", repo.Name).Debug("No BSL annotations found (pre-upgrade repo), skipping startup validation")
+		return false
+	}
+
+	currentStorage := currentBSL.Spec.StorageType.ObjectStorage
+	if currentStorage == nil {
+		currentStorage = &velerov1api.ObjectStorageLocation{}
+	}
+
+	var storedCACert []byte
+	if v, ok := repo.Annotations[velerov1api.BSLCACertAnnotation]; ok && v != "" {
+		storedCACert = []byte(v)
+	}
+
+	var storedConfig map[string]string
+	if configJSON, ok := repo.Annotations[velerov1api.BSLConfigAnnotation]; ok && configJSON != "" {
+		if err := json.Unmarshal([]byte(configJSON), &storedConfig); err != nil {
+			r.logger.WithField("repo", repo.Name).WithError(err).Warn("Failed to parse stored BSL config")
+			return true
+		}
+	}
+
+	return r.compareBSLConfigs(
+		repo.Annotations[velerov1api.BSLBucketAnnotation], currentStorage.Bucket,
+		repo.Annotations[velerov1api.BSLPrefixAnnotation], currentStorage.Prefix,
+		storedCACert, currentStorage.CACert,
+		storedConfig, currentBSL.Spec.Config,
+		repo.Name,
+	)
+}
+
+// needInvalidBackupRepo returns true if the BSL's storage type, bucket, prefix, CACert, or config has changed (runtime).
 func (r *BackupRepoReconciler) needInvalidBackupRepo(oldObj client.Object, newObj client.Object) bool {
 	oldBSL := oldObj.(*velerov1api.BackupStorageLocation)
 	newBSL := newObj.(*velerov1api.BackupStorageLocation)
 
 	oldStorage := oldBSL.Spec.StorageType.ObjectStorage
 	newStorage := newBSL.Spec.StorageType.ObjectStorage
-	oldConfig := oldBSL.Spec.Config
-	newConfig := newBSL.Spec.Config
 
 	if oldStorage == nil {
 		oldStorage = &velerov1api.ObjectStorageLocation{}
@@ -182,52 +316,39 @@ func (r *BackupRepoReconciler) needInvalidBackupRepo(oldObj client.Object, newOb
 		newStorage = &velerov1api.ObjectStorageLocation{}
 	}
 
-	logger := r.logger.WithField("BSL", newBSL.Name)
-
-	if oldStorage.Bucket != newStorage.Bucket {
-		logger.WithFields(logrus.Fields{
-			"old bucket": oldStorage.Bucket,
-			"new bucket": newStorage.Bucket,
-		}).Info("BSL's bucket has changed, invalid backup repositories")
-
-		return true
-	}
-
-	if oldStorage.Prefix != newStorage.Prefix {
-		logger.WithFields(logrus.Fields{
-			"old prefix": oldStorage.Prefix,
-			"new prefix": newStorage.Prefix,
-		}).Info("BSL's prefix has changed, invalid backup repositories")
-
-		return true
-	}
-
-	// Check if either CACert or CACertRef has changed
-	if !bytes.Equal(oldStorage.CACert, newStorage.CACert) {
-		logger.Info("BSL's CACert has changed, invalid backup repositories")
-		return true
-	}
-
-	// Check if CACertRef has changed
+	// CACertRef changes (runtime only — not stored in annotations for startup)
 	if (oldStorage.CACertRef == nil && newStorage.CACertRef != nil) ||
 		(oldStorage.CACertRef != nil && newStorage.CACertRef == nil) ||
 		(oldStorage.CACertRef != nil && newStorage.CACertRef != nil &&
 			(oldStorage.CACertRef.Name != newStorage.CACertRef.Name ||
 				oldStorage.CACertRef.Key != newStorage.CACertRef.Key)) {
-		logger.Info("BSL's CACertRef has changed, invalid backup repositories")
+		r.logger.WithField("BSL", newBSL.Name).Info("BSL's CACertRef has changed, invalid backup repositories")
 		return true
 	}
 
-	if !reflect.DeepEqual(oldConfig, newConfig) {
-		logger.Info("BSL's storage config has changed, invalid backup repositories")
-
-		return true
-	}
-
-	return false
+	return r.compareBSLConfigs(
+		oldStorage.Bucket, newStorage.Bucket,
+		oldStorage.Prefix, newStorage.Prefix,
+		oldStorage.CACert, newStorage.CACert,
+		oldBSL.Spec.Config, newBSL.Spec.Config,
+		newBSL.Name,
+	)
 }
 
 func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	r.startupMutex.Lock()
+	if !r.startupValidationDone {
+		r.startupValidationDone = true
+		r.startupMutex.Unlock()
+
+		r.logger.Info("Running startup validation for backup repositories")
+		if err := r.validateBackupRepositoriesOnStartup(ctx); err != nil {
+			r.logger.WithError(err).Error("Failed to validate backup repositories on startup")
+		}
+	} else {
+		r.startupMutex.Unlock()
+	}
+
 	log := r.logger.WithField("backupRepo", req.String())
 	backupRepo := &velerov1api.BackupRepository{}
 	if err := r.Get(ctx, req.NamespacedName, backupRepo); err != nil {
@@ -326,6 +447,11 @@ func (r *BackupRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 		log.Infof("Init repo with config %v", config)
 	}
 
+	bsl, err := r.getBSL(ctx, req)
+	if err != nil {
+		return errors.Wrap(err, "error getting BSL for repository initialization")
+	}
+
 	// defaulting - if the patch fails, return an error so the item is returned to the queue
 	if err := r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
 		if rr.Spec.MaintenanceFrequency.Duration <= 0 {
@@ -344,6 +470,7 @@ func (r *BackupRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 	return r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
 		rr.Status.Phase = velerov1api.BackupRepositoryPhaseReady
 		rr.Status.LastMaintenanceTime = &metav1.Time{Time: time.Now()}
+		storeBSLAnnotations(rr, bsl)
 	})
 }
 
@@ -558,7 +685,20 @@ func (r *BackupRepoReconciler) checkNotReadyRepo(ctx context.Context, req *veler
 	if err := ensureRepo(req, r.repositoryManager); err != nil {
 		return false, r.patchBackupRepository(ctx, req, repoNotReady(err.Error()))
 	}
-	err := r.patchBackupRepository(ctx, req, repoReady())
+
+	bsl, err := r.getBSL(ctx, req)
+	if err != nil {
+		log.WithError(err).Warn("Cannot get BSL to update annotations, marking ready without annotations")
+		if patchErr := r.patchBackupRepository(ctx, req, repoReady()); patchErr != nil {
+			return false, patchErr
+		}
+		return true, nil
+	}
+
+	err = r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
+		repoReady()(rr)
+		storeBSLAnnotations(rr, bsl)
+	})
 	if err != nil {
 		return false, err
 	}
@@ -576,6 +716,28 @@ func repoReady() func(*velerov1api.BackupRepository) {
 	return func(r *velerov1api.BackupRepository) {
 		r.Status.Phase = velerov1api.BackupRepositoryPhaseReady
 		r.Status.Message = ""
+	}
+}
+
+func storeBSLAnnotations(repo *velerov1api.BackupRepository, bsl *velerov1api.BackupStorageLocation) {
+	if repo.Annotations == nil {
+		repo.Annotations = make(map[string]string)
+	}
+	if bsl.Spec.StorageType.ObjectStorage != nil {
+		repo.Annotations[velerov1api.BSLBucketAnnotation] = bsl.Spec.StorageType.ObjectStorage.Bucket
+		repo.Annotations[velerov1api.BSLPrefixAnnotation] = bsl.Spec.StorageType.ObjectStorage.Prefix
+		if len(bsl.Spec.StorageType.ObjectStorage.CACert) > 0 {
+			repo.Annotations[velerov1api.BSLCACertAnnotation] = string(bsl.Spec.StorageType.ObjectStorage.CACert)
+		} else {
+			delete(repo.Annotations, velerov1api.BSLCACertAnnotation)
+		}
+	}
+	if bsl.Spec.Config != nil {
+		if data, err := json.Marshal(bsl.Spec.Config); err == nil {
+			repo.Annotations[velerov1api.BSLConfigAnnotation] = string(data)
+		}
+	} else {
+		repo.Annotations[velerov1api.BSLConfigAnnotation] = "{}"
 	}
 }
 

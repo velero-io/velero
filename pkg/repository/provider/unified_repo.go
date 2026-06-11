@@ -259,7 +259,7 @@ func (urp *unifiedRepoProvider) BoostRepoConnect(ctx context.Context, param Repo
 		return nil
 	}
 
-	return urp.ConnectToRepo(ctx, param)
+	return urp.PrepareRepo(ctx, param)
 }
 
 func (urp *unifiedRepoProvider) PruneRepo(ctx context.Context, param RepoParam) error {

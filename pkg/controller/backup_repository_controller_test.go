@@ -403,6 +403,15 @@ func TestInitializeRepo(t *testing.T) {
 	err := reconciler.Client.Create(t.Context(), rr)
 	require.NoError(t, err)
 
+	bsl := &velerov1api.BackupStorageLocation{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "default",
+		},
+	}
+	err = reconciler.Client.Create(t.Context(), bsl)
+	require.NoError(t, err)
+
 	err = reconciler.initializeRepo(t.Context(), rr, reconciler.logger)
 	require.NoError(t, err)
 	assert.Equal(t, velerov1api.BackupRepositoryPhaseReady, rr.Status.Phase)
