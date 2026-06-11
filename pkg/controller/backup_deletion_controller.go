@@ -312,6 +312,12 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			for _, snapshot := range snapshots {
 				log.WithField("providerSnapshotID", snapshot.Status.ProviderSnapshotID).Info("Removing snapshot associated with backup")
 
+				// Skip deletion if ProviderSnapshotID is empty (snapshot creation failed)
+				if snapshot.Status.ProviderSnapshotID == "" {
+					log.Info("Skipping snapshot deletion due to empty ProviderSnapshotID")
+					continue
+				}
+
 				volumeSnapshotter, ok := volumeSnapshotters[snapshot.Spec.Location]
 				if !ok {
 					if volumeSnapshotter, err = r.volumeSnapshottersForVSL(ctx, backup.Namespace, snapshot.Spec.Location, pluginManager); err != nil {
