@@ -13,11 +13,11 @@ The field supports values such as `Filesystem` and `Block`.
 
 Kubernetes PVCs also include a `spec.accessModes` field that describes how the volume can be mounted.
 Common values are `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, and `ReadWriteOncePod`.
-Kubernetes matching semantics for access modes require all requested modes to be satisfied by the PV/PVC relationship, so this proposal uses an all-of match for `pvcAccessModes`.
+For resource policies, `pvcAccessModes` uses an exact set match against the PVC's `spec.accessModes`, so a policy does not match PVCs that have missing or additional access modes.
 
 ## Goals
 - Add a `pvcVolumeMode` VolumePolicy condition to match volumes by a single `spec.volumeMode` value of their associated PVC.
-- Add a `pvcAccessModes` VolumePolicy condition to match volumes whose associated PVC contains all configured `spec.accessModes` values.
+- Add a `pvcAccessModes` VolumePolicy condition to match volumes whose associated PVC has exactly the configured `spec.accessModes` values, regardless of order.
 - Keep the new conditions consistent with existing VolumePolicy behavior, where all conditions in a policy must match and the first matching policy wins.
 
 ## Non-Goals
@@ -53,7 +53,7 @@ volumePolicies:
 ```
 
 ### Match PVCs by access mode
-A user wants to apply a policy to PVCs that include `ReadWriteOnce` in `spec.accessModes`.
+A user wants to apply a policy only to PVCs whose `spec.accessModes` is exactly `ReadWriteOnce`.
 
 ```yaml
 version: v1
@@ -65,9 +65,9 @@ volumePolicies:
     type: skip
 ```
 
-### Match all configured access modes
-A user wants to match volumes whose associated PVC includes both `ReadOnlyMany` and `ReadWriteMany`.
-A PVC that includes only one of these modes does not match.
+### Match an exact access mode set
+A user wants to match volumes whose associated PVC access modes are exactly `ReadOnlyMany` and `ReadWriteMany`.
+A PVC that includes only one of these modes, or includes additional modes, does not match.
 
 ```yaml
 version: v1
@@ -81,7 +81,7 @@ volumePolicies:
 ```
 
 ### Combine PVC spec criteria
-A user wants to select block-mode PVCs that also include `ReadWriteOnce`.
+A user wants to select block-mode PVCs whose access modes are exactly `ReadWriteOnce`.
 Because VolumePolicy conditions are conjunctive, the volume must satisfy both conditions.
 
 ```yaml
@@ -130,13 +130,13 @@ Matching is case-sensitive, so `block` does not match `Block`.
 
 `pvcAccessModes` is a list of strings.
 The intended values are Kubernetes PVC access mode values, including `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, and `ReadWriteOncePod`.
-The condition matches only when every configured access mode is present in the PVC's `spec.accessModes`.
+The condition matches only when the configured access modes exactly equal the PVC's `spec.accessModes`, ignoring order.
 Matching is case-sensitive, so `readwriteonce` does not match `ReadWriteOnce`.
 
 The implementation validates that `pvcVolumeMode`, when present, is a string.
 The implementation validates that `pvcAccessModes`, when present, is a list of strings.
 The implementation does not strictly reject unknown string values so that the condition format remains tolerant of Kubernetes additions or storage-provider-specific behavior.
-Unknown values simply do not match unless the PVC has the same string value.
+Unknown `pvcVolumeMode` values match only when the PVC has the same string value, and unknown `pvcAccessModes` values match only as part of the same exact access-mode set.
 
 ### Volume condition struct
 The parsed condition struct is extended as follows.
@@ -221,11 +221,10 @@ func (c *pvcVolumeModeCondition) match(v *structuredVolume) bool {
 ```
 
 ### PVC access modes condition
-`pvcAccessModesCondition` matches when all configured access modes are present in the associated PVC's access modes.
-This all-of match aligns with Kubernetes access mode matching semantics.
+`pvcAccessModesCondition` matches when the configured access modes exactly equal the associated PVC's access modes, ignoring order.
 The comparison is case-sensitive and does not normalize values.
 An empty configured list is treated as no constraint and always matches.
-A non-empty configured list does not match if the structured volume has no PVC access modes.
+A non-empty configured list does not match if the structured volume has no PVC access modes, has a different number of access modes, or has a different access-mode set.
 
 ```go
 type pvcAccessModesCondition struct {
@@ -236,15 +235,11 @@ func (c *pvcAccessModesCondition) match(v *structuredVolume) bool {
     if len(c.accessModes) == 0 {
         return true
     }
-    if len(v.pvcAccessModes) == 0 {
+    if len(v.pvcAccessModes) == 0 || len(v.pvcAccessModes) != len(c.accessModes) {
         return false
     }
-    for _, conditionAccessMode := range c.accessModes {
-        if !slices.Contains(v.pvcAccessModes, conditionAccessMode) {
-            return false
-        }
-    }
-    return true
+
+    return sets.New(c.accessModes...).Equal(sets.New(v.pvcAccessModes...))
 }
 ```
 
@@ -266,7 +261,7 @@ YAML shape validation is handled when resource policy conditions are unmarshaled
 `pvcVolumeMode` must be a string, and `pvcAccessModes` must be a list of strings.
 Condition-level validation intentionally does not reject unknown string values.
 This keeps the policy format forward-compatible with future Kubernetes values and consistent with other string-based VolumePolicy conditions.
-Unknown values simply do not match normal PVCs unless the PVC contains the same value.
+Unknown values simply do not match normal PVCs unless the evaluated PVC has the same exact value or access-mode set.
 
 ### Policy builder integration
 The policy builder appends the new conditions only when the corresponding YAML fields are present.
@@ -300,7 +295,7 @@ If `pvcVolumeMode` is omitted from a policy, Velero does not add a volume mode c
 For non-PVC volumes such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, the parsed PVC fields are empty and policies requiring `pvcVolumeMode` or `pvcAccessModes` do not match.
 Across multiple policies, the first matching policy wins.
 
-For example, this policy matches only PVC-backed volumes that are both `Block` mode and have `ReadWriteOnce` in their access modes.
+For example, this policy matches only PVC-backed volumes that are both `Block` mode and have exactly `ReadWriteOnce` as their access modes.
 
 ```yaml
 version: v1
@@ -325,10 +320,10 @@ One alternative is to make `pvcVolumeMode` a list, similar to `pvcPhase`.
 This was not chosen because Kubernetes PVC `spec.volumeMode` is a single value and the policy condition is intended to describe an exact match against that value.
 Using a string avoids implying that multiple volume modes can apply to one PVC.
 
-### Any-of access mode matching
-Another alternative is to make `pvcAccessModes` match when any configured access mode is present on the PVC.
-This was not chosen because Kubernetes access mode matching is based on satisfying all requested access modes.
-Using all-of matching avoids selecting PVCs that satisfy only part of the requested access mode set.
+### Contains-based access mode matching
+Another alternative is to make `pvcAccessModes` match when any or all configured access modes are present on the PVC.
+This was not chosen because contains-based matching would also select PVCs with additional access modes.
+Using exact set matching keeps `pvcAccessModes` consistent with `pvcVolumeMode`'s exact-match behavior and avoids matching PVCs whose access mode set differs from the policy.
 
 ### Strict validation of allowed Kubernetes values
 Another alternative is to reject `pvcVolumeMode` or `pvcAccessModes` values that are not currently known Kubernetes constants.
@@ -349,7 +344,7 @@ Existing VolumePolicy behavior remains unchanged when `pvcVolumeMode` and `pvcAc
 PVCs without a parsed `spec.volumeMode` value do not match non-empty `pvcVolumeMode` conditions.
 PVCs without `spec.accessModes` do not match non-empty `pvcAccessModes` conditions.
 
-Unknown `pvcVolumeMode` or `pvcAccessModes` string values in a policy are accepted as strings but will not match normal Kubernetes PVCs unless the PVC contains the same string value.
+Unknown `pvcVolumeMode` or `pvcAccessModes` string values in a policy are accepted as strings but will not match normal Kubernetes PVCs unless the evaluated PVC has the same exact value or access-mode set.
 
 ## Implementation
 Implementation requires changes in the resource policies package and documentation.

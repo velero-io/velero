@@ -287,6 +287,11 @@ The policies YAML config file would look like this:
         # pvc matches specific phase(s)
         pvcPhase:
           - Pending
+        # pvc matches specific volume mode
+        pvcVolumeMode: Block
+        # pvc matches specific access mode(s)
+        pvcAccessModes:
+          - ReadWriteOnce
       action:
         type: skip
     - conditions:
@@ -380,6 +385,8 @@ Currently, Velero supports the volume attributes listed below:
 - storageClass: matching volumes those with specified `storageClass`, such as `gp2`, `ebs-sc` in eks
 - volume sources: matching volumes that used specified volume sources. Currently we support nfs or csi backend volume source
 - pvcPhase: matching volumes based on the phase of their associated PVCs (Pending, Bound, Lost)
+- pvcVolumeMode: matching volumes based on the volume mode of their associated PVCs (Filesystem, Block)
+- pvcAccessModes: matching volumes based on the access modes of their associated PVCs (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod). All configured access modes must be present on the PVC.
 
 Velero supported conditions and format listed below:
 - capacity
@@ -519,6 +526,72 @@ Velero supported conditions and format listed below:
             - gp2
         action:
           type: skip
+      ```
+
+- pvc VolumeMode
+
+  This condition filters PVC-backed volumes based on the volume mode of their associated PVCs. The condition is specified as a single volume mode to match. The volume matches this condition if the PVC's volume mode exactly matches the configured value. Matching is case-sensitive, so `block` does not match `Block`. Supported volume modes are: `Filesystem` and `Block`. If `pvcVolumeMode` is omitted from a policy, volume mode is not restricted. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcVolumeMode: Block
+    ```
+
+    Some examples:
+  - Skip Block PVCs: Skip backup of volumes whose associated PVC uses `Block` volume mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+        action:
+          type: skip
+      ```
+  - Combine with other conditions: You can combine PVC volume mode conditions with other conditions like PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+          pvcPhase:
+            - Bound
+        action:
+          type: snapshot
+      ```
+
+- pvc AccessModes
+
+  This condition filters PVC-backed volumes based on the access modes of their associated PVCs. The condition is specified as a list of access modes to match. The volume matches this condition only if the PVC has all of the access modes in the list. Matching is case-sensitive, so `readwriteonce` does not match `ReadWriteOnce`. Supported access modes are: `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, and `ReadWriteOncePod`. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcAccessModes:
+      - ReadWriteOnce
+    ```
+
+    Some examples:
+  - Skip ReadWriteOnce PVCs: Skip backup of volumes whose associated PVC includes the `ReadWriteOnce` access mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+        action:
+          type: skip
+      ```
+  - Match multiple access modes: Apply an action to volumes whose associated PVC includes both `ReadOnlyMany` and `ReadWriteMany`.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadOnlyMany
+            - ReadWriteMany
+        action:
+          type: snapshot
+      ```
+  - Combine with other conditions: You can combine PVC access mode conditions with other conditions like PVC volume mode, PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+          pvcVolumeMode: Block
+        action:
+          type: snapshot
       ```
 
 
