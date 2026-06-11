@@ -193,7 +193,14 @@ func BackupRepoStartupValidationTest() {
 						return ""
 					}
 					result := strings.TrimSpace(string(output))
-					fmt.Printf("BackupRepository bsl-prefix annotation: %q\n", result)
+
+					// Debug: dump full repo status for troubleshooting
+					debugCmd := exec.CommandContext(ctx, "kubectl", "get", "backuprepositories",
+						"-n", veleroCfg.VeleroNamespace,
+						"-o", fmt.Sprintf("jsonpath={range .items[?(@.spec.repositoryType=='%s')]}{.status.phase} | {.status.message} | bucket={.metadata.annotations.velero\\.io/bsl-bucket} prefix={.metadata.annotations.velero\\.io/bsl-prefix}{end}", velerov1api.BackupRepositoryTypeKopia))
+					debugOutput, _ := debugCmd.Output()
+					fmt.Printf("BackupRepo debug: %s\n", string(debugOutput))
+
 					return result
 				}, 5*time.Minute, 10*time.Second).Should(Equal(newPrefix),
 					fmt.Sprintf("BackupRepository BSL prefix annotation should be updated to %q", newPrefix))
