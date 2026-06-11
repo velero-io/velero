@@ -107,6 +107,11 @@ define BUILDX_ERROR
 buildx not enabled, refusing to run this recipe
 see: https://velero.io/docs/main/build-from-source/#making-images-and-updating-velero for more info
 endef
+
+define DOCKER_ONLY_ERROR
+this target requires docker buildx/manifest and is not supported with CONTAINER_TOOL=$(CONTAINER_TOOL).
+use docker for multi-arch image targets, or build single-arch images with podman directly.
+endef
 # comma cannot be escaped and can only be used in Make function arguments by putting into variable
 comma=,
 
@@ -221,6 +226,9 @@ shell: build-dirs build-env
 		/bin/sh $(CMD)
 
 container:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 ifneq ($(BUILDX_ENABLED), true)
 	$(error $(BUILDX_ERROR))
 endif
@@ -250,6 +258,9 @@ container-linux-%:
 	@BUILDX_ARCH=$* $(MAKE) container-linux
 
 container-linux:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building container: $(IMAGE):$(VERSION)-linux-$(BUILDX_ARCH)"
 
 	@docker buildx build --pull \
@@ -273,6 +284,9 @@ container-windows-%:
 	@BUILDX_OSVERSION=$(firstword $(subst -, ,$*)) BUILDX_ARCH=$(lastword $(subst -, ,$*)) $(MAKE) container-windows
 
 container-windows:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building container: $(IMAGE):$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)"
 
 	@docker buildx build --pull \
@@ -294,6 +308,9 @@ container-windows:
 	@echo "built container: $(IMAGE):$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)"
 
 push-manifest:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building manifest: $(IMAGE_TAG) for $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})"
 	@docker manifest create --amend --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
 
@@ -375,6 +392,9 @@ build-image:
 	@# This makes sure we don't leave the orphaned image behind.
 	$(eval old_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 ifeq ($(BUILDX_ENABLED), true)
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@cd hack/build-image && $(CONTAINER_TOOL) buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 else
 	@cd hack/build-image && $(CONTAINER_TOOL) build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
@@ -385,6 +405,9 @@ endif
 	fi
 
 push-build-image:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@# this target will push the build-image it assumes you already have docker
 	@# credentials needed to accomplish this.
 	@# Pushing will be skipped if a custom Dockerfile was used to build the image.
