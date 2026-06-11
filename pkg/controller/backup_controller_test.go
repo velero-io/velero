@@ -273,6 +273,107 @@ func TestProcessBackupValidationFailures(t *testing.T) {
 	}
 }
 
+func TestProcessBackupVeleroNamespaceValidation(t *testing.T) {
+	defaultBackupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+
+	tests := []struct {
+		name                       string
+		backup                     *velerov1api.Backup
+		expectedIncludedNamespaces []string
+		expectedExcludedNamespaces []string
+		expectValidationError      bool
+	}{
+		{
+			name:                       "velero namespace explicitly as only IncludedNamespace returns validation error",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("velero").Result(),
+			expectedExcludedNamespaces: nil,
+			expectValidationError:      true,
+		},
+		{
+			name:                       "all namespaces (empty includes) auto-excludes velero namespace",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).Result(),
+			expectedExcludedNamespaces: []string{"velero"},
+		},
+		{
+			name:                       "velero namespace already excluded stays excluded",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).ExcludedNamespaces("velero").Result(),
+			expectedExcludedNamespaces: []string{"velero"},
+		},
+		{
+			name:                       "glob pattern matching velero namespace auto-excludes it",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("vel*").Result(),
+			expectedExcludedNamespaces: []string{"velero"},
+		},
+		{
+			name:                       "glob pattern in excludes matching velero namespace keeps it excluded",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).ExcludedNamespaces("vel*").Result(),
+			expectedExcludedNamespaces: []string{"vel*"},
+		},
+		{
+			name:                       "glob pattern not matching velero namespace does not auto-exclude",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("prod-*").Result(),
+			expectedExcludedNamespaces: nil,
+		},
+		{
+			name:                       "single char wildcard matching velero namespace auto-excludes it",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("veler?").Result(),
+			expectedExcludedNamespaces: []string{"velero"},
+		},
+		{
+			name:                       "character class wildcard matching velero namespace auto-excludes it",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("[vV]elero").Result(),
+			expectedExcludedNamespaces: []string{"velero"},
+			expectValidationError:      true,
+		},
+		{
+			name:                       "velero plus other namespaces in includes removes velero and backs up the others",
+			backup:                     builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).IncludedNamespaces("velero", "default", "kube-system").Result(),
+			expectedIncludedNamespaces: []string{"default", "kube-system"},
+			expectedExcludedNamespaces: []string{"velero"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			formatFlag := logging.FormatText
+			logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, defaultBackupLocation)
+
+			c := &backupReconciler{
+				logger:                logger,
+				discoveryHelper:       discoveryHelper,
+				kbClient:              fakeClient,
+				defaultBackupLocation: defaultBackupLocation.Name,
+				clock:                 &clock.RealClock{},
+				formatFlag:            formatFlag,
+				metrics:               metrics.NewServerMetrics(),
+				backupTracker:         NewBackupTracker(),
+			}
+
+			require.NotNil(t, test.backup)
+
+			res := c.prepareBackupRequest(ctx, test.backup, logger)
+			defer res.WorkerPool.Stop()
+			require.NotNil(t, res)
+
+			if test.expectValidationError {
+				assert.NotEmpty(t, res.Status.ValidationErrors)
+			} else {
+				assert.Empty(t, res.Status.ValidationErrors)
+			}
+			assert.Equal(t, test.expectedExcludedNamespaces, res.Spec.ExcludedNamespaces)
+			if test.expectedIncludedNamespaces != nil {
+				assert.Equal(t, test.expectedIncludedNamespaces, res.Spec.IncludedNamespaces)
+			}
+		})
+	}
+}
+
 func TestBackupLocationLabel(t *testing.T) {
 	tests := []struct {
 		name                   string
@@ -743,6 +844,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -783,6 +885,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -827,6 +930,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -868,6 +972,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -909,6 +1014,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -951,6 +1057,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -993,6 +1100,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1035,6 +1143,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1077,6 +1186,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1120,6 +1230,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1163,6 +1274,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1206,6 +1318,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1250,6 +1363,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1294,6 +1408,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1338,6 +1453,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1383,6 +1499,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1427,6 +1544,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 				},
@@ -1476,6 +1594,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
 					IncludedClusterScopedResources:   []string{"storageclasses"},
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
 					ExcludedNamespaceScopedResources: append([]string{"secrets"}, autoExcludeNamespaceScopedResources...),
@@ -1526,6 +1645,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
 					IncludedClusterScopedResources:   []string{"storageclasses"},
+					ExcludedNamespaces:               []string{velerov1api.DefaultNamespace},
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
 					ExcludedNamespaceScopedResources: append([]string{"secrets"}, autoExcludeNamespaceScopedResources...),
