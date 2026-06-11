@@ -334,6 +334,16 @@ ifneq ($(SKIP_TESTS), 1)
 	@hack/lint.sh
 endif
 
+lint-fix:
+ifneq ($(SKIP_TESTS), 1)
+	@$(MAKE) shell CMD="-c 'hack/lint.sh fix'"
+endif
+
+local-lint-fix:
+ifneq ($(SKIP_TESTS), 1)
+	@hack/lint.sh fix
+endif
+
 update:
 	@$(MAKE) shell CMD="-c 'hack/update-all.sh'"
 
