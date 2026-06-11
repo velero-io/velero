@@ -293,10 +293,23 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{}, nil
 		}
 
+		// Reserve a slot atomically BEFORE doing expensive GetExposed operation
+		// This prevents race condition where multiple tasks waste time on GetExposed
+		// when the concurrent limit is already reached
+		if err := r.dataPathMgr.ReserveSlot(pvb.Name); err != nil {
+			if err == datapath.ConcurrentLimitExceed {
+				log.Debug("Data path concurrent limit reached, requeue later")
+				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			}
+			return r.errorOut(ctx, pvb, err, "error reserving data path slot", log)
+		}
+
 		res, err := r.exposer.GetExposed(ctx, getPVBOwnerObject(pvb), r.client, r.nodeName, r.resourceTimeout)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(pvb.Name)
 			return r.errorOut(ctx, pvb, err, "exposed PVB is not ready", log)
 		} else if res == nil {
+			r.dataPathMgr.ReleaseReservation(pvb.Name)
 			return r.errorOut(ctx, pvb, errors.New("no expose result is available for the current node"), "exposed PVB is not ready", log)
 		}
 
@@ -312,6 +325,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		asyncBR, err = r.dataPathMgr.CreateMicroServiceBRWatcher(ctx, r.client, r.kubeClient, r.mgr, datapath.TaskTypeBackup,
 			pvb.Name, pvb.Namespace, res.ByPod.HostingPod.Name, res.ByPod.HostingContainer, pvb.Name, callbacks, false, log)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(pvb.Name)
 			if err == datapath.ConcurrentLimitExceed {
 				log.Debug("Data path instance is concurrent limited requeue later")
 				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
@@ -319,6 +333,8 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				return r.errorOut(ctx, pvb, err, "error to create data path", log)
 			}
 		}
+
+		// Reservation is automatically completed in CreateMicroServiceBRWatcher
 
 		r.metrics.RegisterPodVolumeBackupEnqueue(r.nodeName)
 
