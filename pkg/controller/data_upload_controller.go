@@ -648,6 +648,12 @@ func (r *DataUploadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return true
 		}
 
+		// Include Prepared phase to ensure tasks get regular reconcile calls
+		// This prevents tasks from getting stuck when they're waiting for slots
+		if du.Status.Phase == velerov2alpha1api.DataUploadPhasePrepared {
+			return true
+		}
+
 		if du.Spec.Cancel && !isDataUploadInFinalState(du) {
 			return true
 		}
