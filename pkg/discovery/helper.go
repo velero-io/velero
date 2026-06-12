@@ -171,7 +171,7 @@ func (h *helper) Refresh() error {
 	}
 
 	h.resources = discovery.FilteredBy(
-		And(filterByVerbs, skipSubresource),
+		And(h.filterByVerbsWithLogging, h.skipSubresourceWithLogging),
 		serverResources,
 	)
 
@@ -266,9 +266,36 @@ func filterByVerbs(groupVersion string, r *metav1.APIResource) bool {
 	return discovery.SupportsAllVerbs{Verbs: []string{"list", "create", "get", "delete"}}.Match(groupVersion, r)
 }
 
+func (h *helper) filterByVerbsWithLogging(groupVersion string, r *metav1.APIResource) bool {
+	if filterByVerbs(groupVersion, r) {
+		return true
+	}
+
+	h.logger.WithFields(logrus.Fields{
+		"groupVersion": groupVersion,
+		"resource":     r.Name,
+		"verbs":        r.Verbs,
+	}).Info("Skipping resource because it does not support required verbs")
+
+	return false
+}
+
 func skipSubresource(_ string, r *metav1.APIResource) bool {
 	// if we have a slash, then this is a subresource and we shouldn't include it.
 	return !strings.Contains(r.Name, "/")
+}
+
+func (h *helper) skipSubresourceWithLogging(groupVersion string, r *metav1.APIResource) bool {
+	if skipSubresource(groupVersion, r) {
+		return true
+	}
+
+	h.logger.WithFields(logrus.Fields{
+		"groupVersion": groupVersion,
+		"resource":     r.Name,
+	}).Info("Skipping subresource")
+
+	return false
 }
 
 // sortResources sources resources by moving extensions to the end of the slice. The order of all
