@@ -20,14 +20,14 @@ import (
 	"testing"
 	"time"
 
-	cron "github.com/robfig/cron/v3"
+	cron "github.com/netresearch/go-cron"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	testclocks "k8s.io/utils/clock/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -94,7 +94,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                "schedule with phase New and SkipImmediately gets validated and does not trigger a backup",
-			schedule:            newScheduleBuilder(velerov1.SchedulePhaseNew).CronSchedule("@every 5m").SkipImmediately(pointer.Bool(true)).Result(),
+			schedule:            newScheduleBuilder(velerov1.SchedulePhaseNew).CronSchedule("@every 5m").SkipImmediately(ptr.To(true)).Result(),
 			fakeClockTime:       "2017-01-01 12:00:00",
 			expectedPhase:       string(velerov1.SchedulePhaseEnabled),
 			expectedLastSkipped: "2017-01-01 12:00:00",
@@ -123,7 +123,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                 "schedule that's already run but has SkippedImmediately=false gets LastBackup updated",
-			schedule:             newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(pointer.Bool(false)).Result(),
+			schedule:             newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(ptr.To(false)).Result(),
 			fakeClockTime:        "2017-01-01 12:00:00",
 			expectedBackupCreate: builder.ForBackup("ns", "name-20170101120000").ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, "name")).Result(),
 			expectedLastBackup:   "2017-01-01 12:00:00",
@@ -138,7 +138,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                "schedule that's already run but has SkippedImmediately=true do not get LastBackup updated",
-			schedule:            newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(pointer.Bool(true)).Result(),
+			schedule:            newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(ptr.To(true)).Result(),
 			fakeClockTime:       "2017-01-01 12:00:00",
 			expectedLastBackup:  "2000-01-01 00:00:00",
 			expectedLastSkipped: "2017-01-01 12:00:00",
@@ -216,7 +216,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 			// we expect reconcile to flip SkipImmediately to false if it's true or the server is configured to skip immediately and the schedule doesn't have it set
 			if scheduleb4reconcile.Spec.SkipImmediately != nil && *scheduleb4reconcile.Spec.SkipImmediately ||
 				test.reconcilerSkipImmediately && scheduleb4reconcile.Spec.SkipImmediately == nil {
-				assert.Equal(t, schedule.Spec.SkipImmediately, pointer.Bool(false))
+				assert.Equal(t, schedule.Spec.SkipImmediately, ptr.To(false))
 			}
 
 			backups := &velerov1.BackupList{}

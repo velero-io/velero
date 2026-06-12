@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/repo/logging"
-	"github.com/pkg/errors"
 )
 
 func mustHaveString(key string, flags map[string]string) (string, error) {

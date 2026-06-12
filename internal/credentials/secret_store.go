@@ -17,7 +17,7 @@ limitations under the License.
 package credentials
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 

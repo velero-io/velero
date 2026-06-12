@@ -17,13 +17,12 @@ limitations under the License.
 package common
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"
 
 	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
 )
 
 // NewGRPCErrorWithCode wraps err in a gRPC status error with the error's stack trace
@@ -61,25 +60,19 @@ func NewGRPCError(err error, details ...protoadapt.MessageV1) error {
 // ErrorStack gets a stack trace, if it exists, from the provided error, and
 // returns it as a *proto.Stack.
 func ErrorStack(err error) *proto.Stack {
-	stackTracer, ok := err.(StackTracer)
-	if !ok {
+	stack := errors.GetReportableStackTrace(err)
+	if stack == nil {
 		return nil
 	}
 
 	stackTrace := new(proto.Stack)
-	for _, frame := range stackTracer.StackTrace() {
-		location := logging.GetFrameLocationInfo(frame)
-
+	for _, frame := range stack.Frames {
 		stackTrace.Frames = append(stackTrace.Frames, &proto.StackFrame{
-			File:     location.File,
-			Line:     int32(location.Line),
-			Function: location.Function,
+			File:     frame.Filename,
+			Line:     int32(frame.Lineno),
+			Function: frame.Function,
 		})
 	}
 
 	return stackTrace
-}
-
-type StackTracer interface {
-	StackTrace() errors.StackTrace
 }

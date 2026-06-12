@@ -24,7 +24,7 @@ import (
 	k8scheme "k8s.io/client-go/kubernetes/scheme"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"

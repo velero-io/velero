@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content/index"
@@ -32,7 +33,6 @@ import (
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot/snapshotmaintenance"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/pkg/kopia"

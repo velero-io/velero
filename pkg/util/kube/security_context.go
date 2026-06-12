@@ -19,7 +19,7 @@ package kube
 import (
 	"strconv"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )

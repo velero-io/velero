@@ -38,7 +38,7 @@ import (
 	repomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
 	storagemocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 type comparableError struct {

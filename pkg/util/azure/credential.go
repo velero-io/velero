@@ -23,7 +23,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // NewCredential constructs a Credential that tries the config credential, workload identity credential

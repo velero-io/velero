@@ -21,7 +21,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"

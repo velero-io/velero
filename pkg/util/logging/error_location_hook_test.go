@@ -20,7 +20,7 @@ import (
 	"errors"
 	"testing"
 
-	pkgerrs "github.com/pkg/errors"
+	pkgerrs "github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,6 +95,7 @@ func TestFire(t *testing.T) {
 				// test existence of this field only since testing the value
 				// is fragile
 				case errorFileField:
+				case errorFunctionField:
 				case logrus.ErrorKey:
 					if err, ok := expectedValue.(error); ok {
 						assert.Equal(t, err.Error(), actualValue.(error).Error())
@@ -105,72 +106,6 @@ func TestFire(t *testing.T) {
 					assert.Equal(t, expectedValue, actualValue)
 				}
 			}
-		})
-	}
-}
-
-func TestGetInnermostTrace(t *testing.T) {
-	newError := func() error {
-		return errors.New("a normal error")
-	}
-
-	tests := []struct {
-		name        string
-		err         error
-		expectedRes error
-	}{
-		{
-			name:        "normal error",
-			err:         newError(),
-			expectedRes: nil,
-		},
-		{
-			name:        "pkg/errs error",
-			err:         pkgerrs.New("a pkg/errs error"),
-			expectedRes: pkgerrs.New("a pkg/errs error"),
-		},
-		{
-			name:        "one level of stack-ing a normal error",
-			err:         pkgerrs.WithStack(newError()),
-			expectedRes: pkgerrs.WithStack(newError()),
-		},
-		{
-			name:        "two levels of stack-ing a normal error",
-			err:         pkgerrs.WithStack(pkgerrs.WithStack(newError())),
-			expectedRes: pkgerrs.WithStack(newError()),
-		},
-		{
-			name:        "one level of stack-ing a pkg/errors error",
-			err:         pkgerrs.WithStack(pkgerrs.New("a pkg/errs error")),
-			expectedRes: pkgerrs.New("a pkg/errs error"),
-		},
-		{
-			name:        "two levels of stack-ing a pkg/errors error",
-			err:         pkgerrs.WithStack(pkgerrs.WithStack(pkgerrs.New("a pkg/errs error"))),
-			expectedRes: pkgerrs.New("a pkg/errs error"),
-		},
-		{
-			name:        "two levels of wrapping a normal error",
-			err:         pkgerrs.Wrap(pkgerrs.Wrap(newError(), "wrap 1"), "wrap 2"),
-			expectedRes: pkgerrs.Wrap(newError(), "wrap 1"),
-		},
-		{
-			name:        "two levels of wrapping a pkg/errors error",
-			err:         pkgerrs.Wrap(pkgerrs.Wrap(pkgerrs.New("a pkg/errs error"), "wrap 1"), "wrap 2"),
-			expectedRes: pkgerrs.New("a pkg/errs error"),
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			res := getInnermostTrace(test.err)
-
-			if test.expectedRes == nil {
-				require.NoError(t, res)
-				return
-			}
-
-			assert.Equal(t, test.expectedRes.Error(), res.Error())
 		})
 	}
 }

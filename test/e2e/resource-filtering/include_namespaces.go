@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	. "github.com/vmware-tanzu/velero/test/e2e/test"

@@ -31,9 +31,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -467,7 +467,7 @@ func (ctx *restoreContext) execute() (results.Result, results.Result) {
 	backupResources, err := archive.NewParser(ctx.log, ctx.fileSystem).Parse(ctx.restoreDir)
 	// If ErrNotExist occurs, it implies that the backup to be restored includes zero items.
 	// Need to add a warning about it and jump out of the function.
-	if errors.Cause(err) == archive.ErrNotExist {
+	if errors.Is(err, archive.ErrNotExist) {
 		warnings.AddVeleroError(errors.Wrap(err, "zero items to be restored"))
 		return warnings, errs
 	}

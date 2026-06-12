@@ -36,10 +36,10 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
-	"github.com/joho/godotenv"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
+	"github.com/vmware-tanzu/velero/pkg/util/dotenv"
 	. "github.com/vmware-tanzu/velero/test"
 )
 
@@ -127,7 +127,7 @@ func loadCredentialsIntoEnv(credentialsFile string) error {
 		return nil
 	}
 
-	if err := godotenv.Overload(credentialsFile); err != nil {
+	if err := dotenv.Overload(credentialsFile); err != nil {
 		return errors.Wrapf(err, "error loading environment from credentials file (%s)", credentialsFile)
 	}
 	return nil

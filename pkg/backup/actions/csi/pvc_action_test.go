@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/pkg/label"
 
@@ -37,7 +37,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
@@ -668,7 +668,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-1",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -676,7 +676,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-2", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-2",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -708,7 +708,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-csi", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-csi",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -716,7 +716,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -759,7 +759,7 @@ volumePolicies:
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs-1", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs-1",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -767,7 +767,7 @@ volumePolicies:
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs-2", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs-2",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -817,7 +817,7 @@ volumePolicies:
 					},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-linstor",
-						StorageClassName: pointer.String("sc-linstor"),
+						StorageClassName: ptr.To("sc-linstor"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -829,7 +829,7 @@ volumePolicies:
 					},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -942,7 +942,7 @@ func TestFilterPVCsByVolumePolicyWithVolumeHelper(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-csi", Namespace: "ns-1"},
 			Spec: corev1api.PersistentVolumeClaimSpec{
 				VolumeName:       "pv-csi",
-				StorageClassName: pointer.String("sc-csi"),
+				StorageClassName: ptr.To("sc-csi"),
 			},
 			Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 		},
@@ -950,7 +950,7 @@ func TestFilterPVCsByVolumePolicyWithVolumeHelper(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs", Namespace: "ns-1"},
 			Spec: corev1api.PersistentVolumeClaimSpec{
 				VolumeName:       "pv-nfs",
-				StorageClassName: pointer.String("sc-nfs"),
+				StorageClassName: ptr.To("sc-nfs"),
 			},
 			Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 		},
@@ -1364,7 +1364,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvcName),
+					PersistentVolumeClaimName: ptr.To(pvcName),
 				},
 			},
 		}
@@ -1372,7 +1372,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 		if hasStatus {
 			vs.Status = &snapshotv1api.VolumeSnapshotStatus{}
 			if hasVGSName {
-				vs.Status.VolumeGroupSnapshotName = pointer.String(vgs.Name)
+				vs.Status.VolumeGroupSnapshotName = ptr.To(vgs.Name)
 			}
 		}
 
@@ -1526,12 +1526,12 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 				},
 			},
 			Status: &snapshotv1api.VolumeSnapshotStatus{
-				ReadyToUse:              pointer.Bool(true),
+				ReadyToUse:              ptr.To(true),
 				VolumeGroupSnapshotName: vgsNamePtr,
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvcName),
+					PersistentVolumeClaimName: ptr.To(pvcName),
 				},
 			},
 		}
@@ -1546,7 +1546,7 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 	}{
 		{
 			name:                    "should update owned VS",
-			vs:                      makeVS("vs-owned", true, pointer.String(vgs.Name), "pvc-1"),
+			vs:                      makeVS("vs-owned", true, ptr.To(vgs.Name), "pvc-1"),
 			expectOwnerCleared:      true,
 			expectFinalizersCleared: true,
 			expectLabelPatched:      true,
@@ -1639,7 +1639,7 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 					Namespace: "ns",
 				},
 				Status: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotStatus{
-					BoundVolumeGroupSnapshotContentName: pointer.String("test-vgsc"),
+					BoundVolumeGroupSnapshotContentName: ptr.To("test-vgsc"),
 				},
 			}
 
@@ -1694,14 +1694,14 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 	}{
 		{
 			name:             "deletes both VGSC and VGS",
-			vgs:              makeVGS("test-vgs", "ns", pointer.String("test-vgsc")),
+			vgs:              makeVGS("test-vgs", "ns", ptr.To("test-vgsc")),
 			existingVGSC:     makeVGSC("test-vgsc"),
 			expectVGSCDelete: true,
 			expectVGSDelete:  true,
 		},
 		{
 			name:             "VGSC not found, still deletes VGS",
-			vgs:              makeVGS("test-vgs", "ns", pointer.String("missing-vgsc")),
+			vgs:              makeVGS("test-vgs", "ns", ptr.To("missing-vgsc")),
 			existingVGSC:     nil,
 			expectVGSCDelete: false,
 			expectVGSDelete:  true,
@@ -1767,7 +1767,7 @@ func TestFindExistingVSForBackup(t *testing.T) {
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvc),
+					PersistentVolumeClaimName: ptr.To(pvc),
 				},
 			},
 		}
@@ -2120,7 +2120,7 @@ func TestPVCRequestSize(t *testing.T) {
 					Name: "testVSC",
 				},
 				Status: &snapshotv1api.VolumeSnapshotContentStatus{
-					RestoreSize: pointer.Int64(rsQty.Value()),
+					RestoreSize: ptr.To(rsQty.Value()),
 				},
 			}
 

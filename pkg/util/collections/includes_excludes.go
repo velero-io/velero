@@ -22,8 +22,8 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gobwas/glob"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/validation"
 	"k8s.io/apimachinery/pkg/runtime/schema"

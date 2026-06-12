@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

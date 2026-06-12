@@ -19,7 +19,7 @@ package common
 import (
 	"runtime/debug"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 )
 
@@ -37,7 +37,7 @@ func HandlePanic(p any) error {
 	if panicErr, ok := p.(error); !ok {
 		err = errors.Errorf("plugin panicked: %v", p)
 	} else {
-		if _, ok := panicErr.(StackTracer); ok {
+		if errors.GetReportableStackTrace(panicErr) != nil {
 			err = panicErr
 		} else {
 			errWithStacktrace := errors.Errorf("%v, stack trace: %s", panicErr, debug.Stack())
