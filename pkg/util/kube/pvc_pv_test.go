@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -707,7 +708,7 @@ func TestEnsureDeletePVC(t *testing.T) {
 	}
 }
 
-func TestEnsureDeletePV(t *testing.T) {
+func TestEnsurePVDeleted(t *testing.T) {
 	pvObject := &corev1api.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "fake-pv",
@@ -2046,6 +2047,310 @@ func TestGetVolumeTopology(t *testing.T) {
 			} else {
 				assert.Equal(t, test.expected, affinity)
 			}
+		})
+	}
+}
+
+func TestEnsureDeletePV(t *testing.T) {
+	pvObj := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-pv",
+		},
+	}
+
+	tests := []struct {
+		name          string
+		pvName        string
+		timeout       time.Duration
+		kubeClientObj []runtime.Object
+		kubeReactors  []reactor
+		expectedErr   string
+	}{
+		{
+			name:   "delete error",
+			pvName: "fake-pv",
+			kubeReactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("delete error")
+					},
+				},
+			},
+			expectedErr: "error to delete pv fake-pv: delete error",
+		},
+		{
+			name:          "success without wait",
+			pvName:        "fake-pv",
+			timeout:       0,
+			kubeClientObj: []runtime.Object{pvObj},
+		},
+		{
+			name:    "success with wait",
+			pvName:  "fake-pv",
+			timeout: time.Second,
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, apierrors.NewNotFound(corev1api.Resource("persistentvolumes"), "fake-pv")
+					},
+				},
+			},
+			kubeClientObj: []runtime.Object{pvObj},
+		},
+		{
+			name:          "get error during wait",
+			pvName:        "fake-pv",
+			timeout:       time.Millisecond,
+			kubeClientObj: []runtime.Object{pvObj},
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("get error")
+					},
+				},
+			},
+			expectedErr: "error to ensure pv deleted for fake-pv: error to get pv fake-pv: get error",
+		},
+		{
+			name:          "wait timeout",
+			pvName:        "fake-pv",
+			timeout:       time.Millisecond,
+			kubeClientObj: []runtime.Object{pvObj},
+			kubeReactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil // fake delete, pv will still be in tracker
+					},
+				},
+			},
+			expectedErr: "timeout to assure pv fake-pv is deleted, finalizers in pv []",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
+			for _, reactor := range test.kubeReactors {
+				fakeKubeClient.Fake.PrependReactor(reactor.verb, reactor.resource, reactor.reactorFunc)
+			}
+
+			err := EnsureDeletePV(t.Context(), fakeKubeClient.CoreV1(), test.pvName, test.timeout)
+			if test.expectedErr != "" {
+				assert.EqualError(t, err, test.expectedErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRebindPV(t *testing.T) {
+	sourcePV := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "source-pv",
+			Labels: map[string]string{
+				"key1": "val1",
+			},
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					Driver:       "fake-driver",
+					VolumeHandle: "fake-handle",
+				},
+			},
+			AccessModes:                   []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce},
+			PersistentVolumeReclaimPolicy: corev1api.PersistentVolumeReclaimRetain,
+			StorageClassName:              "fake-sc",
+		},
+	}
+
+	targetPVC := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "fake-ns",
+			Name:      "target-pvc",
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"key1": "val3",
+					"key2": "val2",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		pvName        string
+		sourcePV      *corev1api.PersistentVolume
+		targetPVC     *corev1api.PersistentVolumeClaim
+		kubeClientObj []runtime.Object
+		kubeReactors  []reactor
+		expectedErr   string
+		expected      *corev1api.PersistentVolume
+	}{
+		{
+			name:        "source is nil",
+			expectedErr: "source PV is required to rebind PV",
+		},
+		{
+			name:        "target pvc is nil",
+			sourcePV:    sourcePV,
+			expectedErr: "target PVC is required to rebind PV",
+		},
+		{
+			name:      "create error",
+			pvName:    "rebind-pv",
+			sourcePV:  sourcePV,
+			targetPVC: targetPVC,
+			kubeReactors: []reactor{
+				{
+					verb:     "create",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("create error")
+					},
+				},
+			},
+			expectedErr: "create error",
+		},
+		{
+			name:      "success",
+			pvName:    "rebind-pv",
+			sourcePV:  sourcePV,
+			targetPVC: targetPVC,
+			expected: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rebind-pv",
+					Labels: map[string]string{
+						"key1": "val3",
+						"key2": "val2",
+					},
+				},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1api.PersistentVolumeSource{
+						CSI: &corev1api.CSIPersistentVolumeSource{
+							Driver:       "fake-driver",
+							VolumeHandle: "fake-handle",
+							FSType:       "ext4",
+						},
+					},
+					AccessModes:                   sourcePV.Spec.AccessModes,
+					PersistentVolumeReclaimPolicy: corev1api.PersistentVolumeReclaimDelete,
+					StorageClassName:              sourcePV.Spec.StorageClassName,
+					ClaimRef: &corev1api.ObjectReference{
+						Kind:      targetPVC.Kind,
+						Namespace: "fake-ns",
+						Name:      "target-pvc",
+					},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
+			for _, reactor := range test.kubeReactors {
+				fakeKubeClient.Fake.PrependReactor(reactor.verb, reactor.resource, reactor.reactorFunc)
+			}
+
+			pv, err := RebindPV(t.Context(), fakeKubeClient.CoreV1(), test.pvName, test.sourcePV, test.targetPVC, corev1api.PersistentVolumeReclaimDelete, "ext4")
+
+			if test.expectedErr != "" {
+				assert.EqualError(t, err, test.expectedErr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, test.expected, pv)
+			}
+		})
+	}
+}
+
+func TestClonePVSource(t *testing.T) {
+	fsTypeExt4 := "ext4"
+
+	tests := []struct {
+		name      string
+		source    *corev1api.PersistentVolumeSource
+		newFSType string
+		expected  corev1api.PersistentVolumeSource
+	}{
+		{
+			name: "no new fsType",
+			source: &corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					Driver: "fake-driver",
+				},
+			},
+			newFSType: "",
+			expected: corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					Driver: "fake-driver",
+				},
+			},
+		},
+		{
+			name: "csi source with new fsType",
+			source: &corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					Driver: "fake-driver",
+					FSType: "ext3",
+				},
+			},
+			newFSType: "ext4",
+			expected: corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					Driver: "fake-driver",
+					FSType: "ext4",
+				},
+			},
+		},
+		{
+			name: "awsEBS source with new fsType",
+			source: &corev1api.PersistentVolumeSource{
+				AWSElasticBlockStore: &corev1api.AWSElasticBlockStoreVolumeSource{
+					VolumeID: "fake-id",
+				},
+			},
+			newFSType: "ext4",
+			expected: corev1api.PersistentVolumeSource{
+				AWSElasticBlockStore: &corev1api.AWSElasticBlockStoreVolumeSource{
+					VolumeID: "fake-id",
+					FSType:   "ext4",
+				},
+			},
+		},
+		{
+			name: "azureDisk source with new fsType",
+			source: &corev1api.PersistentVolumeSource{
+				AzureDisk: &corev1api.AzureDiskVolumeSource{
+					DiskName: "fake-disk",
+				},
+			},
+			newFSType: "ext4",
+			expected: corev1api.PersistentVolumeSource{
+				AzureDisk: &corev1api.AzureDiskVolumeSource{
+					DiskName: "fake-disk",
+					FSType:   &fsTypeExt4,
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := clonePVSource(test.source, test.newFSType)
+			assert.Equal(t, test.expected, actual)
 		})
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -91,6 +92,9 @@ type GenericRestoreRebindVolumeParam struct {
 
 	// OperationTimeout specifies the time wait for resources operations in Expose
 	OperationTimeout time.Duration
+
+	// TargetFSType is the file system type of the target volume
+	TargetFSType string
 }
 
 // GenericRestoreExposer is the interfaces for a generic restore exposer
@@ -422,16 +426,19 @@ func (e *genericRestoreExposer) RebindVolume(ctx context.Context, ownerObject co
 
 	curLog.WithField("restore PV", restorePV.Name).WithField("retained", (retained != nil)).Info("Restore PV is retained")
 
+	var rebindPV *corev1api.PersistentVolume
+
 	defer func() {
 		if retained != nil {
 			curLog.WithField("retained PV", retained.Name).Info("Deleting retained PV on error")
 			kube.DeletePVIfAny(ctx, e.kubeClient.CoreV1(), retained.Name, curLog)
 		}
-	}()
 
-	if retained != nil {
-		restorePV = retained
-	}
+		if rebindPV != nil {
+			curLog.WithField("rebind PV", rebindPV.Name).Info("Deleting rebind PV on error")
+			kube.DeletePVIfAny(ctx, e.kubeClient.CoreV1(), rebindPV.Name, curLog)
+		}
+	}()
 
 	err = kube.EnsureDeletePod(ctx, e.kubeClient.CoreV1(), restorePodName, ownerObject.Namespace, param.OperationTimeout)
 	if err != nil {
@@ -445,41 +452,37 @@ func (e *genericRestoreExposer) RebindVolume(ctx context.Context, ownerObject co
 
 	curLog.WithField("restore PVC", restorePVCName).Info("Restore PVC is deleted")
 
-	_, err = kube.RebindPVC(ctx, e.kubeClient.CoreV1(), targetPVC, restorePV.Name)
+	rebindPV, err = kube.RebindPV(ctx, e.kubeClient.CoreV1(), uuid.NewString(), retained, targetPVC, orgReclaim, param.TargetFSType)
 	if err != nil {
-		return errors.Wrapf(err, "error to rebind target PVC %s/%s to %s", targetPVC.Namespace, targetPVC.Name, restorePV.Name)
+		return errors.Wrapf(err, "error rebinding PV for target PVC %s", param.TargetPVCName)
 	}
 
-	curLog.WithField("tartet PVC", fmt.Sprintf("%s/%s", targetPVC.Namespace, targetPVC.Name)).WithField("restore PV", restorePV.Name).Info("Target PVC is rebound to restore PV")
+	curLog.WithField("rebind PV", rebindPV.Name).Info("Rebind PV is created")
 
-	var matchLabel map[string]string
-	if targetPVC.Spec.Selector != nil {
-		matchLabel = targetPVC.Spec.Selector.MatchLabels
-	}
-
-	restorePVName := restorePV.Name
-	restorePV, err = kube.ResetPVBinding(ctx, e.kubeClient.CoreV1(), restorePV, matchLabel, targetPVC)
+	err = kube.EnsureDeletePV(ctx, e.kubeClient.CoreV1(), retained.Name, param.OperationTimeout)
 	if err != nil {
-		return errors.Wrapf(err, "error to reset binding info for restore PV %s", restorePVName)
+		return errors.Wrapf(err, "error deleting PV %s", retained.Name)
 	}
 
-	curLog.WithField("restore PV", restorePV.Name).Info("Restore PV is rebound")
-
-	restorePV, err = kube.WaitPVBound(ctx, e.kubeClient.CoreV1(), restorePV.Name, targetPVC.Name, targetPVC.Namespace, param.OperationTimeout)
-	if err != nil {
-		return errors.Wrapf(err, "error to wait restore PV bound, restore PV %s", restorePVName)
-	}
-
-	curLog.WithField("restore PV", restorePV.Name).Info("Restore PV is ready")
+	curLog.WithField("retained PV", retained.Name).Info("Retained PV is deleted")
 
 	retained = nil
 
-	_, err = kube.SetPVReclaimPolicy(ctx, e.kubeClient.CoreV1(), restorePV, orgReclaim)
+	_, err = kube.RebindPVC(ctx, e.kubeClient.CoreV1(), targetPVC, rebindPV.Name)
 	if err != nil {
-		curLog.WithField("restore PV", restorePV.Name).WithError(err).Warn("Restore PV's reclaim policy is not restored")
-	} else {
-		curLog.WithField("restore PV", restorePV.Name).Info("Restore PV's reclaim policy is restored")
+		return errors.Wrapf(err, "error to rebind target PVC %s/%s to %s", targetPVC.Namespace, targetPVC.Name, rebindPV.Name)
 	}
+
+	curLog.WithField("rebind PV", rebindPV.Name).Info("Target PVC is rebound to rebind PV")
+
+	_, err = kube.WaitPVBound(ctx, e.kubeClient.CoreV1(), rebindPV.Name, targetPVC.Name, targetPVC.Namespace, param.OperationTimeout)
+	if err != nil {
+		return errors.Wrapf(err, "error to wait rebind PV ready, rebind PV %s", rebindPV.Name)
+	}
+
+	curLog.WithField("rebind PV", rebindPV.Name).Info("Rebind PV is ready")
+
+	rebindPV = nil
 
 	return nil
 }

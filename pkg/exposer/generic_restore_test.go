@@ -352,8 +352,6 @@ func TestRebindVolume(t *testing.T) {
 		},
 	}
 
-	hookCount := 0
-
 	tests := []struct {
 		name            string
 		kubeClientObj   []runtime.Object
@@ -446,6 +444,50 @@ func TestRebindVolume(t *testing.T) {
 			err: "error to delete restore PVC fake-restore: error to delete pvc fake-restore: fake-delete-error",
 		},
 		{
+			name:            "rebind pv fail",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				restorePVCObj,
+				restorePVObj,
+				restorePod,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "create",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("fake-create-error")
+					},
+				},
+			},
+			err: "error rebinding PV for target PVC fake-target-pvc: fake-create-error",
+		},
+		{
+			name:            "delete retained pv fail",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				restorePVCObj,
+				restorePVObj,
+				restorePod,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("fake-delete-error")
+					},
+				},
+			},
+			err: "error deleting PV fake-restore-pv: error to delete pv fake-restore-pv: fake-delete-error",
+		},
+		{
 			name:            "rebind target pvc fail",
 			targetPVCName:   "fake-target-pvc",
 			targetNamespace: "fake-ns",
@@ -465,10 +507,10 @@ func TestRebindVolume(t *testing.T) {
 					},
 				},
 			},
-			err: "error to rebind target PVC fake-ns/fake-target-pvc to fake-restore-pv: error patching PVC: fake-patch-error",
+			err: "error to rebind target PVC fake-ns/fake-target-pvc to",
 		},
 		{
-			name:            "reset pv binding fail",
+			name:            "wait rebind PV ready fail",
 			targetPVCName:   "fake-target-pvc",
 			targetNamespace: "fake-ns",
 			ownerRestore:    restore,
@@ -478,34 +520,7 @@ func TestRebindVolume(t *testing.T) {
 				restorePVObj,
 				restorePod,
 			},
-			kubeReactors: []reactor{
-				{
-					verb:     "patch",
-					resource: "persistentvolumes",
-					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
-						if hookCount == 0 {
-							hookCount++
-							return false, nil, nil
-						} else {
-							return true, nil, errors.New("fake-patch-error")
-						}
-					},
-				},
-			},
-			err: "error to reset binding info for restore PV fake-restore-pv: error patching PV: fake-patch-error",
-		},
-		{
-			name:            "wait restore PV bound fail",
-			targetPVCName:   "fake-target-pvc",
-			targetNamespace: "fake-ns",
-			ownerRestore:    restore,
-			kubeClientObj: []runtime.Object{
-				targetPVCObj,
-				restorePVCObj,
-				restorePVObj,
-				restorePod,
-			},
-			err: "error to wait restore PV bound, restore PV fake-restore-pv: error to wait for bound of PV: context deadline exceeded",
+			err: "error to wait rebind PV ready, rebind PV",
 		},
 	}
 
@@ -533,14 +548,16 @@ func TestRebindVolume(t *testing.T) {
 				}
 			}
 
-			hookCount = 0
-
 			err := exposer.RebindVolume(t.Context(), ownerObject, GenericRestoreRebindVolumeParam{
 				TargetPVCName:    test.targetPVCName,
 				TargetNamespace:  test.targetNamespace,
 				OperationTimeout: time.Millisecond,
 			})
-			assert.EqualError(t, err, test.err)
+			if test.err != "" {
+				assert.ErrorContains(t, err, test.err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
