@@ -1,0 +1,1 @@
+Handle WaitForCacheSync failures for resources without watch support

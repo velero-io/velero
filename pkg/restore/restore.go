@@ -319,6 +319,7 @@ func (kr *kubernetesRestorer) RestoreWithResolvers(
 		resourceTerminatingTimeout:     kr.resourceTerminatingTimeout,
 		resourceTimeout:                kr.resourceTimeout,
 		resourceClients:                make(map[resourceClientKey]client.Dynamic),
+		resourcesWithoutInformerCache:  sets.New[schema.GroupVersionResource](),
 		restoredItems:                  req.RestoredItems,
 		renamedPVs:                     make(map[string]string),
 		pvRenamer:                      kr.pvRenamer,
@@ -368,6 +369,7 @@ type restoreContext struct {
 	resourceTimeout                time.Duration
 	resourceClients                map[resourceClientKey]client.Dynamic
 	dynamicInformerFactory         *informerFactoryWithContext
+	resourcesWithoutInformerCache  sets.Set[schema.GroupVersionResource]
 	restoredItems                  map[itemKey]restoredItemStatus
 	renamedPVs                     map[string]string
 	pvRenamer                      func(string) (string, error)
@@ -612,7 +614,8 @@ func (ctx *restoreContext) execute() (results.Result, results.Result) {
 		}
 		ctx.dynamicInformerFactory.factory.Start(ctx.dynamicInformerFactory.context.Done())
 		ctx.log.Info("waiting informer cache sync ...")
-		ctx.dynamicInformerFactory.factory.WaitForCacheSync(ctx.dynamicInformerFactory.context.Done())
+		syncResults := ctx.dynamicInformerFactory.factory.WaitForCacheSync(ctx.dynamicInformerFactory.context.Done())
+		ctx.processCacheSyncResults(syncResults)
 	}
 
 	// reset processedItems and totalItems before processing full resource list
@@ -1055,6 +1058,17 @@ func (ctx *restoreContext) getResourceClient(groupResource schema.GroupResource,
 	return client, nil
 }
 
+// processCacheSyncResults processes WaitForCacheSync results and tracks resources
+// that failed to sync, logging appropriate informational messages.
+func (ctx *restoreContext) processCacheSyncResults(syncResults map[schema.GroupVersionResource]bool) {
+	for gvr, synced := range syncResults {
+		if !synced {
+			ctx.resourcesWithoutInformerCache.Insert(gvr)
+			ctx.log.Infof("Informer cache sync failed for %s (likely due to API server restrictions on watch operations). Using direct API calls for this resource.", gvr)
+		}
+	}
+}
+
 func (ctx *restoreContext) getResourceLister(groupResource schema.GroupResource, obj *unstructured.Unstructured, namespace string) (cache.GenericNamespaceLister, error) {
 	_, _, err := ctx.discoveryHelper.KindFor(obj.GroupVersionKind())
 	if err != nil {
@@ -1065,7 +1079,8 @@ func (ctx *restoreContext) getResourceLister(groupResource schema.GroupResource,
 	if !informer.Informer().HasSynced() {
 		ctx.dynamicInformerFactory.factory.Start(ctx.dynamicInformerFactory.context.Done())
 		ctx.log.Infof("waiting informer cache sync for %s, %s/%s ...", groupResource, namespace, obj.GetName())
-		ctx.dynamicInformerFactory.factory.WaitForCacheSync(ctx.dynamicInformerFactory.context.Done())
+		syncResults := ctx.dynamicInformerFactory.factory.WaitForCacheSync(ctx.dynamicInformerFactory.context.Done())
+		ctx.processCacheSyncResults(syncResults)
 	}
 
 	if namespace == "" {
@@ -1083,6 +1098,20 @@ func getResourceID(groupResource schema.GroupResource, namespace, name string) s
 }
 
 func (ctx *restoreContext) getResource(groupResource schema.GroupResource, obj *unstructured.Unstructured, namespace string) (*unstructured.Unstructured, error) {
+	gvr := groupResource.WithVersion(obj.GroupVersionKind().Version)
+
+	// If this resource failed to sync its informer cache (e.g., authorization.openshift.io resources
+	// that don't support watch), bypass the cache and use direct API calls
+	if ctx.resourcesWithoutInformerCache.Has(gvr) {
+		ctx.log.Debugf("Using direct API call for %s, %s/%s (informer cache unavailable)", groupResource, namespace, obj.GetName())
+		client, err := ctx.getResourceClient(groupResource, obj, namespace)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Error getting client for %s", getResourceID(groupResource, namespace, obj.GetName()))
+		}
+		return client.Get(obj.GetName(), metav1.GetOptions{})
+	}
+
+	// Use informer cache for resources that synced successfully
 	lister, err := ctx.getResourceLister(groupResource, obj, namespace)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error getting lister for %s", getResourceID(groupResource, namespace, obj.GetName()))
