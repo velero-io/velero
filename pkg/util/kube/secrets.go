@@ -18,9 +18,14 @@ package kube
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/cockroachdb/errors"
+	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -48,4 +53,87 @@ func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.
 	}
 
 	return key, nil
+}
+
+const (
+	// BackupPVCSecretLabel is the label applied to secrets copied to the Velero namespace
+	// for backup PVC provisioning. The value is the owning DataUpload name.
+	BackupPVCSecretLabel = "velero.io/backup-pvc-secret"
+)
+
+// ErrSecretCollision is returned when a secret with the same name but different data
+// already exists in the target namespace, indicating another DataUpload is using it.
+var ErrSecretCollision = errors.New("secret collision: same name exists with different data")
+
+// CopySecret copies a secret from sourceNamespace to targetNamespace.
+// If a secret with the same name already exists in the target with identical data, it is a no-op.
+// If a secret with the same name exists with different data (collision from another DataUpload),
+// it returns ErrSecretCollision so the caller can requeue.
+func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secretName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
+	srcSecret, err := client.Secrets(sourceNamespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "error getting secret %s/%s", sourceNamespace, secretName)
+	}
+
+	newSecret := &corev1api.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: targetNamespace,
+			Labels: map[string]string{
+				BackupPVCSecretLabel: ownerName,
+			},
+		},
+		Type: srcSecret.Type,
+		Data: srcSecret.Data,
+	}
+
+	_, err = client.Secrets(targetNamespace).Create(ctx, newSecret, metav1.CreateOptions{})
+	if err == nil {
+		log.Infof("Copied secret %s from %s to %s", secretName, sourceNamespace, targetNamespace)
+		return nil
+	}
+
+	if !apierrors.IsAlreadyExists(err) {
+		return errors.Wrapf(err, "error creating secret %s in %s", secretName, targetNamespace)
+	}
+
+	existing, err := client.Secrets(targetNamespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "error getting existing secret %s/%s", targetNamespace, secretName)
+	}
+
+	if reflect.DeepEqual(existing.Data, srcSecret.Data) {
+		log.Infof("Secret %s already exists in %s with same data, skipping copy", secretName, targetNamespace)
+		return nil
+	}
+
+	log.Infof("Secret %s already exists in %s with different data, collision detected", secretName, targetNamespace)
+	return ErrSecretCollision
+}
+
+// DeleteSecretIfAny deletes a secret if it exists, logging but not returning errors.
+func DeleteSecretIfAny(ctx context.Context, client corev1client.CoreV1Interface, secretName, namespace string, log logrus.FieldLogger) {
+	err := client.Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Debugf("Secret %s/%s not found, skipping delete", namespace, secretName)
+		} else {
+			log.WithError(err).Errorf("Failed to delete secret %s/%s", namespace, secretName)
+		}
+	}
+}
+
+// DeleteSecretsWithLabel deletes all secrets in a namespace matching a label key=value pair.
+func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Interface, namespace, labelKey, labelValue string, log logrus.FieldLogger) {
+	secrets, err := client.Secrets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelKey + "=" + labelValue,
+	})
+	if err != nil {
+		log.WithError(err).Errorf("Failed to list secrets with label %s=%s in %s", labelKey, labelValue, namespace)
+		return
+	}
+
+	for i := range secrets.Items {
+		DeleteSecretIfAny(ctx, client, secrets.Items[i].Name, namespace, log)
+	}
 }
