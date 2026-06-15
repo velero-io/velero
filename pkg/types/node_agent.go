@@ -59,6 +59,12 @@ type BackupPVC struct {
 
 	// Annotations permits setting annotations for the backupPVC
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// SecretNames is a list of secret names to copy from the source PVC namespace
+	// to the Velero namespace before creating the backupPVC. The secrets are deleted
+	// after the DataUpload completes. This is needed for CSI drivers that require
+	// namespace-scoped secrets for volume provisioning (e.g., encrypted volumes).
+	SecretNames []string `json:"secretNames,omitempty"`
 }
 
 type RestorePVC struct {
