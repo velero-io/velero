@@ -19,8 +19,8 @@ package restore
 import (
 	"encoding/json"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
-	"github.com/pkg/errors"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

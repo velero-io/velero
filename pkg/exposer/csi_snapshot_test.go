@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotFake "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned/fake"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -1413,7 +1413,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					Kind:       backup.Kind,
 					Name:       backup.Name,
 					UID:        backup.UID,
-					Controller: pointer.BoolPtr(true),
+					Controller: ptr.To(true),
 				},
 			},
 		},
@@ -1424,7 +1424,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 			VolumeMode:       &volumeMode,
 			DataSource:       dataSource,
 			DataSourceRef:    nil,
-			StorageClassName: pointer.String("fake-storage-class"),
+			StorageClassName: ptr.To("fake-storage-class"),
 			Resources: corev1api.VolumeResourceRequirements{
 				Requests: corev1api.ResourceList{
 					corev1api.ResourceStorage: resource.MustParse("1Gi"),
@@ -1444,7 +1444,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					Kind:       backup.Kind,
 					Name:       backup.Name,
 					UID:        backup.UID,
-					Controller: pointer.BoolPtr(true),
+					Controller: ptr.To(true),
 				},
 			},
 		},
@@ -1455,7 +1455,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 			VolumeMode:       &volumeMode,
 			DataSource:       dataSource,
 			DataSourceRef:    nil,
-			StorageClassName: pointer.String("fake-storage-class"),
+			StorageClassName: ptr.To("fake-storage-class"),
 			Resources: corev1api.VolumeResourceRequirements{
 				Requests: corev1api.ResourceList{
 					corev1api.ResourceStorage: resource.MustParse("1Gi"),

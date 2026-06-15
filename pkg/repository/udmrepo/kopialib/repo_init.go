@@ -26,11 +26,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/format"
 	"github.com/kopia/kopia/repo/maintenance"
-	"github.com/pkg/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/kopia"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"

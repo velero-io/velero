@@ -29,8 +29,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	"github.com/joho/godotenv"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+
+	"github.com/vmware-tanzu/velero/pkg/util/dotenv"
 )
 
 const (
@@ -68,7 +69,7 @@ func LoadCredentials(config map[string]string) (map[string]string, error) {
 	}
 
 	// put the credential file content into a map
-	creds, err := godotenv.Read(credFile)
+	creds, err := dotenv.Read(credFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read credentials from file %s", credFile)
 	}

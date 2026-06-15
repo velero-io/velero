@@ -122,7 +122,15 @@ Before using Volume Group Snapshots with Velero, ensure your environment meets t
 - Kubernetes 1.20+ (when VolumeGroupSnapshot API was introduced)
 - Check your version: `kubectl version --short`
 
-### 2. VolumeGroupSnapshot CRDs
+### 2. External-Snapshotter Version
+Velero 1.18.1+ uses the VolumeGroupSnapshot v1beta2 API. This requires external-snapshotter v8.2.0 or later, which introduced v1beta2 support. Older versions of external-snapshotter only ship v1beta1 CRDs and are not compatible with VGS in Velero 1.18.1+.
+
+```bash
+# Check your external-snapshotter CRD version
+kubectl get crd volumegroupsnapshotcontents.groupsnapshot.storage.k8s.io -o jsonpath='{.spec.versions[*].name}'
+```
+
+### 3. VolumeGroupSnapshot CRDs
 Check the Volume Group Snapshot CRDs on your cluster:
 
 ```bash
@@ -130,7 +138,7 @@ Check the Volume Group Snapshot CRDs on your cluster:
 kubectl get crd | grep volumegroup
 ```
 
-### 3. CSI Driver Support
+### 4. CSI Driver Support
 Verify your CSI driver supports Volume Group Snapshots:
 
 ```bash
@@ -141,7 +149,7 @@ kubectl get volumegroupsnapshotclass
 kubectl describe csidriver ebs.csi.aws.com
 ```
 
-### 4. VolumeGroupSnapshotClass Configuration
+### 5. VolumeGroupSnapshotClass Configuration
 Ensure a VolumeGroupSnapshotClass exists for your storage and is properly labeled for Velero discovery:
 
 ```bash

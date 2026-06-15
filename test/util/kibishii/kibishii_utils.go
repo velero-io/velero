@@ -28,8 +28,8 @@ import (
 
 	"context"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/pkg/errors"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"

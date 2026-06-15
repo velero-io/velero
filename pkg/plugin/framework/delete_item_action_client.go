@@ -21,7 +21,7 @@ import (
 
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"

@@ -36,8 +36,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/pkg/errors"
 
 	. "github.com/vmware-tanzu/velero/test/e2e/test"
 	. "github.com/vmware-tanzu/velero/test/util/k8s"

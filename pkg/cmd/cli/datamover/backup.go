@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/bombsimon/logrusr/v3"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	corev1api "k8s.io/api/core/v1"

@@ -28,8 +28,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	veleroV1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"

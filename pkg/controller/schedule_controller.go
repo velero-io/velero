@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
-	cron "github.com/robfig/cron/v3"
+	"github.com/cockroachdb/errors"
+	cron "github.com/netresearch/go-cron"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

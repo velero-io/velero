@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -191,7 +191,7 @@ func runCrashd(o *option) error {
 	if o.verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-	return exec.Execute("velero-debug-collector", bytes.NewReader(scriptBytes), o.asCrashdArgMap())
+	return exec.Execute("velero-debug-collector", bytes.NewReader(scriptBytes), o.asCrashdArgMap(), false)
 }
 
 func kubeconfigAndContext(fs *pflag.FlagSet) (string, string) {

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/snapshot/upload"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/pkg/uploader"

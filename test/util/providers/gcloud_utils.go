@@ -26,7 +26,7 @@ import (
 	"context"
 
 	"cloud.google.com/go/storage"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/iterator"
