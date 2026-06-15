@@ -133,7 +133,7 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: engineerd/setup-kind@v0.6.2
+      - uses: engineerd/setup-kind@v0.6.0
         with:
           skipClusterLogsExport: true
           version: "v0.32.0"
