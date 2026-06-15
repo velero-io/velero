@@ -421,7 +421,16 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// patch PV's reclaim policy and label using the corresponding data stored in volume info
 					if needPatch(pv, volInfo.PVInfo) {
 						updatedPV := pv.DeepCopy()
-						updatedPV.Labels = volInfo.PVInfo.Labels
+
+						if updatedPV.Labels == nil {
+							updatedPV.Labels = make(map[string]string)
+						}
+						for k, v := range volInfo.PVInfo.Labels {
+							if _, exists := updatedPV.Labels[k]; !exists {
+								updatedPV.Labels[k] = v
+							}
+						}
+
 						updatedPV.Spec.PersistentVolumeReclaimPolicy = corev1api.PersistentVolumeReclaimPolicy(volInfo.PVInfo.ReclaimPolicy)
 						if err := kubeutil.PatchResource(pv, updatedPV, ctx.crClient); err != nil {
 							return false, err
@@ -553,11 +562,8 @@ func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
 	}
 
 	newPVLabels, pvLabels := newPV.Labels, pvInfo.Labels
-	for k, v := range pvLabels {
+	for k := range pvLabels {
 		if _, ok := newPVLabels[k]; !ok {
-			return true
-		}
-		if newPVLabels[k] != v {
 			return true
 		}
 	}

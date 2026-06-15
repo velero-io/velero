@@ -634,6 +634,87 @@ func Test_restoreFinalizerReconciler_finishProcessing(t *testing.T) {
 	}
 }
 
+func TestNeedPatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		newPV    *corev1api.PersistentVolume
+		pvInfo   *volume.PVInfo
+		expected bool
+	}{
+		{
+			name: "reclaim policy differs",
+			newPV: builder.ForPersistentVolume("pv1").
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimRetain),
+				Labels:        map[string]string{},
+			},
+			expected: true,
+		},
+		{
+			name: "backup has label new PV does not",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("existing", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"existing": "val", "missing": "val"},
+			},
+			expected: true,
+		},
+		{
+			name: "same labels same values",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("key", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"key": "val"},
+			},
+			expected: false,
+		},
+		{
+			name: "same label key different values",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "us-west-2a")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+			},
+			expected: false,
+		},
+		{
+			name: "new PV has labels backup does not",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("provisioner-label", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{},
+			},
+			expected: false,
+		},
+		{
+			name: "both labels nil",
+			newPV: builder.ForPersistentVolume("pv1").
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        nil,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := needPatch(tc.newPV, tc.pvInfo)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
 func TestRestoreOperationList(t *testing.T) {
 	var empty []*itemoperation.RestoreOperation
 	tests := []struct {
