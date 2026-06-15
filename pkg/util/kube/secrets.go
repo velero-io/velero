@@ -58,7 +58,7 @@ func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.
 const (
 	// BackupPVCSecretLabel is the label applied to secrets copied to the Velero namespace
 	// for backup PVC provisioning. The value is the owning DataUpload name.
-	BackupPVCSecretLabel = "velero.io/backup-pvc-secret"
+	BackupPVCSecretLabel = "velero.io/backup-pvc-secret" //nolint:gosec // not a credential
 )
 
 // ErrSecretCollision is returned when a secret with the same name but different data

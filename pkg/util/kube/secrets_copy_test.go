@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestCopySecret(t *testing.T) {
@@ -146,7 +146,7 @@ func TestDeleteSecretIfAny(t *testing.T) {
 
 		_, err := fakeClient.CoreV1().Secrets("velero").Get(
 			context.Background(), "test-secret", metav1.GetOptions{})
-		assert.True(t, err != nil)
+		assert.Error(t, err)
 	})
 
 	t.Run("no error when secret does not exist", func(t *testing.T) {
@@ -178,7 +178,7 @@ func TestDeleteSecretsWithLabel(t *testing.T) {
 
 	_, err := fakeClient.CoreV1().Secrets("velero").Get(
 		context.Background(), "secret-1", metav1.GetOptions{})
-	assert.True(t, err != nil, "secret-1 should be deleted")
+	require.Error(t, err, "secret-1 should be deleted")
 
 	_, err = fakeClient.CoreV1().Secrets("velero").Get(
 		context.Background(), "secret-2", metav1.GetOptions{})
