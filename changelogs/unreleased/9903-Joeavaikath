@@ -1,1 +1,1 @@
-Apply ResourceModifier rules during restore finalization for dynamic PVs
+Fix restore finalization overwriting dynamically provisioned PV labels with stale backup values
