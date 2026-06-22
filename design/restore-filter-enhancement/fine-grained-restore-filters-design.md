@@ -1,5 +1,7 @@
 # Fine Grained Restore Filters via Resource Policies
 
+This is a continuation of the work done for backup filters enhancement introduced by [PR 9783](https://github.com/velero-io/velero/pull/9783), referred to as Phase 1 throughout this design.
+
 ## Glossary & Abbreviation
 
 **Restore Filter**: The mechanism in Velero that determines which resources from a backup archive are restored into the target cluster. Restore filters currently operate on four dimensions: namespace, resource type, label, and cluster scope.  
@@ -49,6 +51,7 @@ Two approaches were evaluated:
 - The backup's ConfigMap may no longer exist at restore time
 - The backup's ConfigMap is semantically about backup behavior, not restore
 - The ConfigMap may have been updated since the backup was taken
+- The ConfigMap may not exist on the target cluster, because it's maybe on a different velero instance.
 
 **Option B — Add `RestoreSpec.ResourcePolicy` (minimal CRD change).** Add a single `TypedLocalObjectReference` field to `RestoreSpec`, mirroring the existing `BackupSpec.ResourcePolicy` and `RestoreSpec.ResourceModifier` patterns. This is a small, focused CRD change that follows an established pattern in the codebase.
 
@@ -63,7 +66,7 @@ This design uses **Option B**. The rationale:
 
 ### Why Not Just Reuse `BackupSpec.ResourcePolicy` Semantics?
 
-The backup-side `ResourcePolicy` ConfigMap contains multiple policy types (`volumePolicies`, `includeExcludePolicy`, `namespacedFilterPolicies`, `clusterScopedFilterPolicy`). Volume policies and include/exclude policies are backup-specific concepts that don't apply to restore. Rather than forcing users to create a ConfigMap with backup-specific sections just to specify restore filters, this design introduces a restore-specific ConfigMap format that contains only `namespacedFilterPolicies` and `clusterScopedFilterPolicy` (and potentially other restore-specific policies in the future).
+The backup-side `ResourcePolicy` ConfigMap contains multiple policy types (`volumePolicies`, `includeExcludePolicy`, `namespacedFilterPolicies`, `clusterScopedFilterPolicy`). Rather than forcing users to create a ConfigMap with backup-specific sections just to specify restore filters, this design introduces a restore-specific ConfigMap format that contains only `namespacedFilterPolicies` and `clusterScopedFilterPolicy` (and potentially other restore-specific policies in the future).
 
 The restore-side ConfigMap uses the **same YAML structure** for both sections. The `NamespacedFilterPolicy` and `ClusterScopedFilterPolicy` types are reused without modification. This means:
 - Users who already understand the backup-side format can immediately use the restore-side one
@@ -89,7 +92,6 @@ The restore-side ConfigMap uses the **same YAML structure** for both sections. T
 - Supporting regex patterns for resource names (glob patterns only, consistent with Phase 1)
 - Modifying the restore plugin `ResourceSelector` system (`AppliesTo()` / `resolvedAction.ShouldUse()`)
 - CLI flags for inline specification of namespace-scoped restore filters (configuration is in ConfigMap YAML)
-- Restore-side `includeExcludePolicy` (the global `includeExcludePolicy` is a backup-side concept; restore already has `IncludedResources`/`ExcludedResources` on `RestoreSpec`)
 
 ## Architecture of Restore-Side Filters
 
@@ -262,14 +264,6 @@ Resources are enumerated from the backup archive (not from the live cluster — 
 The `restoreItem()` function is called for each selected item and also for "additional items" requested by restore plugins.
 
 **Important:** Like the backup-side Stage 2 which is permissive for unlisted kinds requested by plugins, the restore-side Phase B is permissive for AdditionalItems requested by plugins regarding kind, name, and label selectors. This means if a plugin requests an AdditionalItem, it bypasses the fine-grained `namespacedFilterPolicies` and `clusterScopedFilterPolicy` checks, though it must still pass global resource/namespace exclusions. This is intentional to ensure that semantic dependencies (like a PV needed by a PVC) are successfully restored even if their specific resource kind or name pattern wasn't explicitly allowed in the user's namespace-scoped filter policy.
-
-### Interaction with Backup-Side Filters
-
-Restore-side namespace-scoped filters are **independent** of backup-side ones:
-
-- A backup may have been produced with `namespacedFilterPolicies` that excluded certain resources. Those resources are simply absent from the archive. Restore-side filters operate on what's in the archive.
-- A backup may have been produced without any `namespacedFilterPolicies` (a full backup). Restore-side filters can selectively restore from it.
-- The backup's ResourcePolicy ConfigMap and the restore's ResourcePolicy ConfigMap are separate objects. They can contain different rules.
 
 ### Interaction with NamespaceMapping
 
@@ -468,11 +462,7 @@ Before the items loop, resolve the effective `ResourceFilter` (hoisted for perfo
 2. **Cluster-scoped item with the kind listed in `clusterScopedFilterPolicy`** — apply that kind's label/name filters (refinement overlay; unlisted cluster-scoped kinds fall through to global)
 3. **All other cases** — fall back to the existing global label selector logic
 
-**Note on cluster-scoped resources:** There is no separate kind-level skip step in `getOrderedResourceCollection()` for cluster-scoped resources analogous to Step 3. `clusterScopedFilterPolicy` is a refinement overlay — unlisted cluster-scoped kinds are not skipped; they fall through to existing global filter handling. Behavior changes only when the kind is explicitly listed in `clusterScopedFilterMap`, and only in `getSelectedRestoreableItems()` (above) and `restoreItem()` (Step 5 below).
-
-**Step 5 — Re-check in restoreItem() for additional items**
-
-In `restoreItem()`, after the existing global checks, add per-namespace and cluster-scoped checks for items that come from plugin "additional items" requests:
+**Note on cluster-scoped resources:** There is no separate kind-level skip step in `getOrderedResourceCollection()` for cluster-scoped resources analogous to Step 3. `clusterScopedFilterPolicy` is a refinement overlay — unlisted cluster-scoped kinds are not skipped; they fall through to existing global filter handling. Behavior changes only when the kind is explicitly listed in `clusterScopedFilterMap`, and only in `getSelectedRestoreableItems()` (above).
 
 ### Backup Workflow
 
