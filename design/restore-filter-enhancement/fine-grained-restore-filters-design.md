@@ -242,7 +242,6 @@ For label selectors, **replacement** semantics are used on both sides, because l
 | **Data source** | Live cluster — items are listed from Kubernetes API | Backup archive — items are read from tarball |
 | **Operator intent** | "What should go into the archive for this namespace?" | "Of what's in the archive, what should I restore for this namespace?" |
 | **Global exclusion gate** | `includeExcludePolicy` in ResourcePolicy ConfigMap | `RestoreSpec.IncludedResources` / `ExcludedResources` |
-| **Per-namespace kind list** | Exclusive allowlist — only listed kinds collected; globally excluded kinds cannot be re-included | Exclusive allowlist intersected with global filter — only listed kinds that also pass global filter are restored |
 | **Namespaces without a matching policy** | Fall back to `BackupSpec.IncludedResources` + `includeExcludePolicy` | Fall back to `RestoreSpec.IncludedResources` / `ExcludedResources` |
 | **Per-namespace label selector** | Replaces global label selector for that kind | Replaces global label selector for that kind |
 | **clusterScopedFilterPolicy behavior** | Refinement overlay (unlisted kinds fall back to global) | Refinement overlay (unlisted kinds fall back to global) |
@@ -732,7 +731,7 @@ spec:
 
 ### `velero restore describe`
 
-The output is extended to display namespace-scoped and cluster-scoped filter policies when present:
+The output is extended to display resource policy configmap name when present:
 
 ```
 Name:         selective-restore
@@ -761,25 +760,6 @@ Namespace Mapping:  <none>
 Label Selector:  <none>
 
 Resource Policy:  restore-filter-policy
-
-Namespace-Scoped Filter Policies:
-  ns-a:
-    Resource Filters:
-      Deployment, ConfigMap:
-        Label selector:     app=my-app
-        Included names:     <none>
-        Excluded names:     <none>
-
-Cluster-Scoped Filter Policy:
-  Resource Filters:
-    ClusterRole, ClusterRoleBinding:
-      Label selector:     <none>
-      Included names:     [my-app-*]
-      Excluded names:     <none>
-    CustomResourceDefinition:
-      Label selector:     app=my-app
-      Included names:     <none>
-      Excluded names:     <none>
 
 Restore PVs:  auto
 
