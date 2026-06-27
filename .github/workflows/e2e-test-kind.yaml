@@ -33,14 +33,14 @@ jobs:
       # Look for a CLI that's made for this PR
       - name: Fetch built CLI
         id: cli-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ./_output/bin/linux/amd64/velero
           # The cache key a combination of the current PR number and the commit SHA
           key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
       - name: Fetch built image
         id: image-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ./velero.tar
           # The cache key a combination of the current PR number and the commit SHA
@@ -63,7 +63,7 @@ jobs:
           DOCKERFILE_SHA=$(curl -s https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2026/debian-12/Dockerfile\&per_page=1 | jq -r '.[0].sha')
           echo "dockerfile_sha=${DOCKERFILE_SHA}" >> $GITHUB_OUTPUT
       - name: Cache MinIO Image
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         id: minio-cache
         with:
           path: ./minio-image.tar
@@ -76,6 +76,29 @@ jobs:
           cd /tmp/bitnami-containers/bitnami/minio/2026/debian-12
           docker build -t bitnami/minio:local .
           docker save bitnami/minio:local > ${{ github.workspace }}/minio-image.tar
+      # Save the freshly built artifacts to the cache explicitly, before this
+      # job reports completion. actions/cache@v4 saves in a post-job hook that
+      # runs *after* the job finishes, so the dependent run-e2e-test jobs (which
+      # start as soon as build completes) would race the save and miss the cache
+      # on a force push. See #9927.
+      - name: Save built CLI to cache
+        if: steps.cli-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./_output/bin/linux/amd64/velero
+          key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Save built image to cache
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./velero.tar
+          key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Save MinIO image to cache
+        if: steps.minio-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./minio-image.tar
+          key: minio-bitnami-${{ steps.minio-version.outputs.dockerfile_sha }}
   # Create json of k8s versions to test
   # from guide: https://stackoverflow.com/a/65094398/4590470
   setup-test-matrix:
@@ -123,7 +146,7 @@ jobs:
 
       # Fetch the pre-built MinIO image from the build job
       - name: Fetch built MinIO Image
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         id: minio-cache
         with:
           path: ./minio-image.tar
@@ -142,13 +165,13 @@ jobs:
           node_image: "kindest/node:v${{ matrix.k8s }}"
       - name: Fetch built CLI
         id: cli-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ./_output/bin/linux/amd64/velero
           key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
       - name: Fetch built Image
         id: image-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ./velero.tar
           key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
