@@ -2,8 +2,6 @@ module github.com/vmware-tanzu/velero
 
 go 1.25.0
 
-toolchain go1.25.8
-
 require (
 	cloud.google.com/go/storage v1.56.0
 	github.com/Azure/azure-pipeline-go v0.2.3
