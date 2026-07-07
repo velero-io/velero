@@ -159,6 +159,7 @@ The completion command only generates the shell script.
 Completion functions issue read-only list requests to the Kubernetes API server using the user's existing kubeconfig credentials.
 No new permissions are required beyond what the user already has for the commands themselves.
 No data is written, cached, or transmitted to external services.
+Users without list permission for a resource type will receive empty completions, consistent with kubectl's behavior.
 
 ## Compatibility
 
@@ -166,6 +167,10 @@ The bash completion output format changes from v1 to v2.
 Users who have previously generated and sourced bash completion scripts will need to regenerate them with `velero completion bash`.
 This is the expected workflow when upgrading any CLI tool.
 Zsh and fish completion scripts are unchanged in format.
+
+`GenBashCompletionV2` requires bash 4.0+ for associative array support.
+macOS ships with bash 3.2 by default, but zsh has been the default shell since macOS Catalina (10.15).
+Users on bash 3.2 can either upgrade bash via Homebrew or use `velero completion zsh`.
 
 Existing command behavior is unaffected.
 The `ValidArgsFunction` field is only invoked during shell completion; it has no effect on normal command execution.
