@@ -32,6 +32,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
@@ -61,7 +62,13 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
   velero restore create --from-schedule schedule-1 --allow-partially-failed
 
   # Create a restore for only persistentvolumeclaims and persistentvolumes within a backup.
-  velero restore create --from-backup backup-2 --include-resources persistentvolumeclaims,persistentvolumes`,
+  velero restore create --from-backup backup-2 --include-resources persistentvolumeclaims,persistentvolumes
+
+Notes:
+- Global filters (--include-resources, --selector, etc.) apply to all included namespaces
+- Namespace-scoped filters defined in --resource-policies-configmap refine global filters for matching namespaces (globally excluded kinds cannot be re-included)
+- Fine-grained global filter policies defined in --resource-policies-configmap refine global filters for cluster-scoped resources
+- Use 'velero restore describe' to view the referenced resource policies ConfigMap after restore creation`,
 		Args: cobra.MaximumNArgs(1),
 		Run: func(c *cobra.Command, args []string) {
 			cmd.CheckError(o.Complete(args, f))
@@ -100,6 +107,7 @@ type CreateOptions struct {
 	AllowPartiallyFailed      flag.OptionalBool
 	ItemOperationTimeout      time.Duration
 	ResourceModifierConfigMap string
+	ResourcePoliciesConfigMap string
 	WriteSparseFiles          flag.OptionalBool
 	ParallelFilesDownload     int
 	client                    kbclient.WithWatch
@@ -153,6 +161,8 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVarP(&o.Wait, "wait", "w", o.Wait, "Wait for the operation to complete.")
 
 	flags.StringVar(&o.ResourceModifierConfigMap, "resource-modifier-configmap", "", "Reference to the resource modifier configmap that restore will use")
+
+	flags.StringVar(&o.ResourcePoliciesConfigMap, "resource-policies-configmap", "", "Reference to the ConfigMap containing restore resource filter policies")
 
 	f = flags.VarPF(&o.WriteSparseFiles, "write-sparse-files", "", "Whether to write sparse files during restoring volumes")
 	f.NoOptDefVal = cmd.TRUE
@@ -310,6 +320,15 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		}
 	}
 
+	var resPolicies *corev1api.TypedLocalObjectReference
+
+	if o.ResourcePoliciesConfigMap != "" {
+		resPolicies = &corev1api.TypedLocalObjectReference{
+			Kind: resourcepolicies.ConfigmapRefType,
+			Name: o.ResourcePoliciesConfigMap,
+		}
+	}
+
 	restore := &api.Restore{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:   f.Namespace(),
@@ -332,6 +351,7 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 			PreserveNodePorts:       o.PreserveNodePorts.Value,
 			IncludeClusterResources: o.IncludeClusterResources.Value,
 			ResourceModifier:        resModifiers,
+			ResourcePolicy:          resPolicies,
 			ItemOperationTimeout: metav1.Duration{
 				Duration: o.ItemOperationTimeout,
 			},
