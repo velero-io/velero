@@ -53,14 +53,33 @@ A new file `pkg/cmd/cli/completion_functions.go` in the `cli` package provides s
 | `CompleteBackupRepositoryNames(f client.Factory)` | `velerov1api.BackupRepositoryList` |
 
 Each function returns a `func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective)` closure.
-The closure:
+
+Internally, all six functions delegate to a single private helper:
+
+```go
+func completeNames(f client.Factory, list kbclient.ObjectList) completionFunc
+```
+
+This helper uses `k8s.io/apimachinery/pkg/api/meta.ExtractList()` and `meta.Accessor()` from the Kubernetes apimachinery library to extract object names from any `ObjectList` type without Go generics.
+Each public function is a one-liner that passes the appropriate list type:
+
+```go
+func CompleteBackupNames(f client.Factory) completionFunc {
+    return completeNames(f, &velerov1api.BackupList{})
+}
+```
+
+The `completeNames` closure:
 
 1. Calls `f.KubebuilderClient()` to get a controller-runtime client.
-2. Lists resources in `f.Namespace()`.
-3. Filters names by `strings.HasPrefix(name, toComplete)`.
-4. Returns the matching names with `cobra.ShellCompDirectiveNoFileComp`.
+2. Deep-copies the list object to prevent state accumulation across repeated tab presses.
+3. Lists resources in `f.Namespace()` with a **3-second context timeout** to avoid blocking the user's shell if the API server is slow or unreachable.
+4. Extracts individual objects from the list using `meta.ExtractList()`.
+5. For each object, uses `meta.Accessor()` to read its name and filters by `strings.HasPrefix(name, toComplete)`.
+6. Returns the matching names with `cobra.ShellCompDirectiveNoFileComp`.
 
-If either the client construction or the list call fails, the function returns `nil, cobra.ShellCompDirectiveNoFileComp` (silent failure, no file completion fallback).
+If any step fails — client construction, the list call, or `meta.ExtractList` — the function returns `nil, cobra.ShellCompDirectiveNoFileComp` (silent failure, no file completion fallback).
+If `meta.Accessor` fails on an individual item, that item is skipped and completion continues with the remaining items.
 
 A package-level type alias keeps the function signatures readable:
 
@@ -126,7 +145,8 @@ The factory is captured by closure from the command constructor, so no changes t
 ### Generic completion function using Go generics
 
 A single generic function parameterized by list type and item type was considered to avoid the six similar functions.
-This was rejected because the list types do not share a common interface for extracting item names (no `GetItems()` method), so the generic version would need function parameters for constructing the list and extracting names, making it no simpler than individual functions.
+Go generics were unnecessary because the Kubernetes apimachinery library already provides a type-agnostic way to extract names from any `ObjectList` via `meta.ExtractList()` and `meta.Accessor()`.
+The implementation uses these runtime interfaces in a single `completeNames` helper, achieving the same DRY goal without generics while keeping the six public wrapper functions as a stable API surface.
 
 ### Passing the factory to the completion command
 
@@ -149,6 +169,16 @@ Zsh and fish completion scripts are unchanged in format.
 
 Existing command behavior is unaffected.
 The `ValidArgsFunction` field is only invoked during shell completion; it has no effect on normal command execution.
+
+## Testing
+
+Unit tests in `pkg/cmd/cli/completion_functions_test.go` cover:
+
+- **Core logic (`TestCompleteNames`):** Table-driven tests exercising all six resource types across scenarios: empty cluster, full match, prefix filtering, and no match.
+- **Error resilience (`TestCompleteNames_KubebuilderClientError`):** Verifies that a factory error (e.g., missing kubeconfig) returns nil completions without panicking.
+- **Wrapper isolation (`TestCompleteWrappers`):** Creates one object of every resource type on a single fake client, then verifies each `Complete*Names` wrapper returns only its own resource type.
+
+Tests use `factorymocks.Factory` and `velerotest.NewFakeControllerRuntimeClient` from the existing test infrastructure.
 
 ## Implementation
 
