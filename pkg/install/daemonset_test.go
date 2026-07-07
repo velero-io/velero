@@ -86,6 +86,10 @@ func TestDaemonSet(t *testing.T) {
 	assert.Equal(t, "/data/test/kubelet/pods", ds.Spec.Template.Spec.Volumes[0].HostPath.Path)
 	assert.Equal(t, "/data/test/kubelet/plugins", ds.Spec.Template.Spec.Volumes[1].HostPath.Path)
 
+	ds = DaemonSet("velero", WithKubeletRootDir(`C:\var\lib\kubelet`))
+	assert.Equal(t, "C:/var/lib/kubelet/pods", ds.Spec.Template.Spec.Volumes[0].HostPath.Path)
+	assert.Equal(t, "C:/var/lib/kubelet/plugins", ds.Spec.Template.Spec.Volumes[1].HostPath.Path)
+
 	ds = DaemonSet("velero", WithNodeAgentDisableHostPath(true))
 	assert.Len(t, ds.Spec.Template.Spec.Volumes, 1)
 	assert.Len(t, ds.Spec.Template.Spec.Containers[0].VolumeMounts, 1)
