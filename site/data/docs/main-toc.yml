@@ -55,6 +55,8 @@ toc:
         url: /backup-repository-configuration
       - page: Verifying Self-signed Certificates
         url: /self-signed-certificates
+      - page: Per-BSL Worker Identity
+        url: /bsl-worker-identity
       - page: Changing RBAC permissions
         url: /rbac
       - page: Behind proxy

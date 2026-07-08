@@ -137,3 +137,9 @@ func (b *BackupStorageLocationBuilder) Credential(selector *corev1api.SecretKeyS
 	b.object.Spec.Credential = selector
 	return b
 }
+
+// Worker sets the BackupStorageLocation's worker configuration.
+func (b *BackupStorageLocationBuilder) Worker(worker *velerov1api.BackupStorageLocationWorker) *BackupStorageLocationBuilder {
+	b.object.Spec.Worker = worker
+	return b
+}

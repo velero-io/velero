@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/backup"
+	"github.com/vmware-tanzu/velero/pkg/bslworker"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
@@ -567,7 +569,31 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		return clientmgmt.NewManager(logger, s.logLevel, s.pluginRegistry)
 	}
 
-	backupStoreGetter := persistence.NewObjectBackupStoreGetterWithSecretStore(s.credentialFileStore, s.credentialSecretStore)
+	// Optionally enable per-BackupStorageLocation worker identity: object-store
+	// operations for BSLs that set spec.worker run in a dedicated worker pod under a
+	// distinct identity, reached over mutual TLS.
+	var (
+		bslWorkerCA      *bslworker.CA
+		bslWorkerFactory *bslworker.WorkerGetterFactory
+		bslGetterOpts    []persistence.ObjectBackupStoreGetterOption
+	)
+	if features.IsEnabled(velerov1api.BSLWorkerIdentityFeatureFlag) {
+		ca, err := bslworker.EnsureCA(s.ctx, s.crClient, s.namespace)
+		if err != nil {
+			s.logger.Fatal(err, "unable to set up BSL worker CA")
+		}
+		clientDir := filepath.Join(s.config.CredentialsDirectory, "bsl-worker-client")
+		certFile, keyFile, caFile, err := bslworker.WriteClientMaterials(ca, clientDir)
+		if err != nil {
+			s.logger.Fatal(err, "unable to write BSL worker client certificate")
+		}
+		bslWorkerCA = ca
+		bslWorkerFactory = bslworker.NewWorkerGetterFactory(s.logger, s.namespace, certFile, keyFile, caFile)
+		bslGetterOpts = append(bslGetterOpts, persistence.WithWorkerObjectStoreGetterFactory(bslWorkerFactory))
+		s.logger.Info("BackupStorageLocation worker identity feature is enabled")
+	}
+
+	backupStoreGetter := persistence.NewObjectBackupStoreGetterWithSecretStore(s.credentialFileStore, s.credentialSecretStore, bslGetterOpts...)
 
 	backupTracker := controller.NewBackupTracker()
 
@@ -626,6 +652,22 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	)
 	if err := bslr.SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerBackupStorageLocation)
+	}
+
+	if features.IsEnabled(velerov1api.BSLWorkerIdentityFeatureFlag) {
+		bslWorkerReconciler := controller.NewBackupStorageLocationWorkerReconciler(
+			s.mgr.GetClient(),
+			s.mgr.GetAPIReader(),
+			s.namespace,
+			bslWorkerCA,
+			bslWorkerFactory,
+			s.config.LogLevel.Parse().String(),
+			s.config.LogFormat.String(),
+			s.logger,
+		)
+		if err := bslWorkerReconciler.SetupWithManager(s.mgr); err != nil {
+			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerBackupStorageLocation+"-worker")
+		}
 	}
 
 	pvbInformer, err := s.mgr.GetCache().GetInformer(s.ctx, &velerov1api.PodVolumeBackup{})

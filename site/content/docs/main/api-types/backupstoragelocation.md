@@ -109,4 +109,30 @@ The configurable parameters are as follows:
 | `credential` | [corev1.SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#secretkeyselector-v1-core) | Optional Field | The credential information to be used with this location. |
 | `credential/name` | String | Optional Field | The name of the secret within the Velero namespace which contains the credential information. |
 | `credential/key` | String | Optional Field | The key to use within the secret. |
+| `worker` | BackupStorageLocationWorker | Optional Field | When set, this location's object-store operations run in a dedicated worker pod under a distinct pod identity instead of in the Velero server process. Requires the `EnableBSLWorkerIdentity` feature flag. See [Per-BSL worker identity](../bsl-worker-identity). |
+{{< /table >}}
+
+#### Worker config parameters
+
+Set `worker` to run this location's object-store operations under a per-BSL pod identity
+(e.g. a distinct Azure AD Workload Identity, AWS IRSA role, or GCP Workload Identity)
+rather than the Velero server pod's identity. Requires the `EnableBSLWorkerIdentity`
+feature flag on the Velero server. See [Per-BSL worker identity](../bsl-worker-identity)
+for the full guide.
+
+{{< table caption="Worker config parameters" >}}
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `worker/serviceAccountName` | String | Required Field | The Kubernetes ServiceAccount the worker pod runs as. Must exist in the worker namespace and be bound to the tenant identity. |
+| `worker/namespace` | String | Velero namespace | Namespace to run the worker pod in. Defaults to the Velero namespace. |
+| `worker/podLabels` | map[string]string | Optional Field | Extra labels added to the worker pod, e.g. `azure.workload.identity/use: "true"` so an admission webhook injects the identity. |
+| `worker/podAnnotations` | map[string]string | Optional Field | Extra annotations added to the worker pod. |
+| `worker/tokenVolumes` | []ProjectedServiceAccountToken | Optional Field | Explicit projected service-account-token volumes to mount into the worker, for providers/setups without an injecting webhook. |
+| `worker/tokenVolumes/audience` | String | Required Field | The audience the projected token is issued for (e.g. `api://AzureADTokenExchange`). |
+| `worker/tokenVolumes/expirationSeconds` | int64 | Optional Field | Requested token expiration in seconds. |
+| `worker/tokenVolumes/mountPath` | String | Required Field | Directory the token volume is mounted at inside the worker container. |
+| `worker/tokenVolumes/path` | String | Required Field | File name for the token within `mountPath`. |
+| `worker/resources` | [corev1.ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core) | Optional Field | Resource requests/limits for the worker container. |
+| `worker/nodeSelector` | map[string]string | Optional Field | Node selector for scheduling the worker pod. |
+| `worker/tolerations` | [][corev1.Toleration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#toleration-v1-core) | Optional Field | Tolerations for scheduling the worker pod. |
 {{< /table >}}

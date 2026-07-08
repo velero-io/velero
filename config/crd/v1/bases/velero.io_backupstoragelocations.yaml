@@ -160,6 +160,183 @@ spec:
                   the corresponding object storage. A value of 0 disables validation.
                 nullable: true
                 type: string
+              worker:
+                description: |-
+                  Worker, when set, runs this BackupStorageLocation's object-store operations in a
+                  dedicated worker pod under a distinct identity, instead of in the Velero server
+                  process. This allows the location to consume a per-BSL pod/workload identity
+                  (e.g. Azure AD Workload Identity, AWS IRSA, GCP Workload Identity).
+                  Requires the EnableBSLWorkerIdentity feature flag.
+                properties:
+                  namespace:
+                    description: |-
+                      Namespace is the namespace the worker pod runs in. It defaults to the Velero
+                      namespace. The ServiceAccount referenced by ServiceAccountName must live in this
+                      namespace.
+                    type: string
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector overrides the worker pod's node selection.
+                    type: object
+                  podAnnotations:
+                    additionalProperties:
+                      type: string
+                    description: PodAnnotations are additional annotations applied
+                      to the worker pod.
+                    type: object
+                  podLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      PodLabels are additional labels applied to the worker pod, e.g.
+                      `azure.workload.identity/use: "true"` to opt into a provider's admission webhook.
+                    type: object
+                  resources:
+                    description: |-
+                      Resources overrides the worker container's resource requirements. When unset, the
+                      worker inherits the Velero server container defaults.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  serviceAccountName:
+                    description: |-
+                      ServiceAccountName is the ServiceAccount the worker pod runs as. It must exist in
+                      Namespace and carry the desired pod/workload identity.
+                    type: string
+                  tokenVolumes:
+                    description: |-
+                      TokenVolumes declares explicit projected service-account-token volumes mounted into
+                      the worker pod. This is useful for portability when no provider admission webhook
+                      injects a federated token automatically.
+                    items:
+                      description: |-
+                        ProjectedServiceAccountToken configures a single projected service-account-token volume
+                        mounted into the worker pod.
+                      properties:
+                        audience:
+                          description: |-
+                            Audience is the intended audience of the token (provider specific, e.g.
+                            "api://AzureADTokenExchange" for Azure Workload Identity).
+                          type: string
+                        expirationSeconds:
+                          description: |-
+                            ExpirationSeconds is the requested duration of validity of the token. The default,
+                            when unset, is decided by the API server.
+                          format: int64
+                          type: integer
+                        mountPath:
+                          description: |-
+                            MountPath is the directory the token volume is mounted at inside the worker
+                            container.
+                          type: string
+                        path:
+                          description: Path is the file name, relative to MountPath,
+                            that the token is projected to.
+                          type: string
+                      required:
+                      - audience
+                      - mountPath
+                      - path
+                      type: object
+                    type: array
+                  tolerations:
+                    description: Tolerations overrides the worker pod's tolerations.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                            Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                required:
+                - serviceAccountName
+                type: object
             required:
             - objectStorage
             - provider

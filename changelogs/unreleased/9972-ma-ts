@@ -1,0 +1,1 @@
+Add per-BackupStorageLocation pod identity support: a BSL can run its object-store operations in a dedicated worker pod under a distinct service account / workload identity (e.g. Azure AD Workload Identity), gated by the EnableBSLWorkerIdentity feature flag

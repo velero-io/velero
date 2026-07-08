@@ -105,6 +105,70 @@ func TestBackupStorageLocationValidate(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "valid - worker with service account",
+			bsl: &BackupStorageLocation{
+				Spec: BackupStorageLocationSpec{
+					Worker: &BackupStorageLocationWorker{
+						ServiceAccountName: "tenant-sa",
+					},
+					StorageType: StorageType{
+						ObjectStorage: &ObjectStorageLocation{Bucket: "test-bucket"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid - worker without service account",
+			bsl: &BackupStorageLocation{
+				Spec: BackupStorageLocationSpec{
+					Worker: &BackupStorageLocationWorker{},
+					StorageType: StorageType{
+						ObjectStorage: &ObjectStorageLocation{Bucket: "test-bucket"},
+					},
+				},
+			},
+			expectError: true,
+		},
+		{
+			name: "valid - worker with complete token volume",
+			bsl: &BackupStorageLocation{
+				Spec: BackupStorageLocationSpec{
+					Worker: &BackupStorageLocationWorker{
+						ServiceAccountName: "tenant-sa",
+						TokenVolumes: []ProjectedServiceAccountToken{
+							{
+								Audience:  "api://AzureADTokenExchange",
+								MountPath: "/var/run/secrets/tokens",
+								Path:      "azure-identity-token",
+							},
+						},
+					},
+					StorageType: StorageType{
+						ObjectStorage: &ObjectStorageLocation{Bucket: "test-bucket"},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid - worker token volume missing fields",
+			bsl: &BackupStorageLocation{
+				Spec: BackupStorageLocationSpec{
+					Worker: &BackupStorageLocationWorker{
+						ServiceAccountName: "tenant-sa",
+						TokenVolumes: []ProjectedServiceAccountToken{
+							{Audience: "api://AzureADTokenExchange"},
+						},
+					},
+					StorageType: StorageType{
+						ObjectStorage: &ObjectStorageLocation{Bucket: "test-bucket"},
+					},
+				},
+			},
+			expectError: true,
+		},
 	}
 
 	for _, test := range tests {
