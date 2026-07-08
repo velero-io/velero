@@ -56,13 +56,13 @@ func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.
 }
 
 const (
-	// BackupPVCSecretLabel is the label applied to secrets copied to the Velero namespace
-	// for backup PVC provisioning. The value is the owning DataUpload name.
+	// BackupPVCSecretLabel is the label applied to secrets and configmaps copied to the
+	// Velero namespace for backup PVC provisioning. The value is the owning DataUpload name.
 	BackupPVCSecretLabel = "velero.io/backup-pvc-secret" //nolint:gosec // not a credential
 )
 
-// ErrSecretCollision is returned when a secret with the same name but different data
-// already exists in the target namespace, indicating another DataUpload is using it.
+// ErrSecretCollision is returned when a secret or configmap with the same name but different
+// data already exists in the target namespace, indicating another DataUpload is using it.
 var ErrSecretCollision = errors.New("secret collision: same name exists with different data")
 
 // CopySecret copies a secret from sourceNamespace to targetNamespace.
@@ -135,5 +135,77 @@ func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Inter
 
 	for i := range secrets.Items {
 		DeleteSecretIfAny(ctx, client, secrets.Items[i].Name, namespace, log)
+	}
+}
+
+// CopyConfigMap copies a configmap from sourceNamespace to targetNamespace.
+// If a configmap with the same name already exists in the target with identical data, it is a no-op.
+// If a configmap with the same name exists with different data (collision from another DataUpload),
+// it returns ErrSecretCollision so the caller can requeue.
+func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
+	srcCM, err := client.ConfigMaps(sourceNamespace).Get(ctx, cmName, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "error getting configmap %s/%s", sourceNamespace, cmName)
+	}
+
+	newCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: targetNamespace,
+			Labels: map[string]string{
+				BackupPVCSecretLabel: ownerName,
+			},
+		},
+		Data: srcCM.Data,
+	}
+
+	_, err = client.ConfigMaps(targetNamespace).Create(ctx, newCM, metav1.CreateOptions{})
+	if err == nil {
+		log.Infof("Copied configmap %s from %s to %s", cmName, sourceNamespace, targetNamespace)
+		return nil
+	}
+
+	if !apierrors.IsAlreadyExists(err) {
+		return errors.Wrapf(err, "error creating configmap %s in %s", cmName, targetNamespace)
+	}
+
+	existing, err := client.ConfigMaps(targetNamespace).Get(ctx, cmName, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "error getting existing configmap %s/%s", targetNamespace, cmName)
+	}
+
+	if reflect.DeepEqual(existing.Data, srcCM.Data) {
+		log.Infof("ConfigMap %s already exists in %s with same data, skipping copy", cmName, targetNamespace)
+		return nil
+	}
+
+	log.Infof("ConfigMap %s already exists in %s with different data, collision detected", cmName, targetNamespace)
+	return ErrSecretCollision
+}
+
+// DeleteConfigMapIfAny deletes a configmap if it exists, logging but not returning errors.
+func DeleteConfigMapIfAny(ctx context.Context, client corev1client.CoreV1Interface, cmName, namespace string, log logrus.FieldLogger) {
+	err := client.ConfigMaps(namespace).Delete(ctx, cmName, metav1.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Debugf("ConfigMap %s/%s not found, skipping delete", namespace, cmName)
+		} else {
+			log.WithError(err).Errorf("Failed to delete configmap %s/%s", namespace, cmName)
+		}
+	}
+}
+
+// DeleteConfigMapsWithLabel deletes all configmaps in a namespace matching a label key=value pair.
+func DeleteConfigMapsWithLabel(ctx context.Context, client corev1client.CoreV1Interface, namespace, labelKey, labelValue string, log logrus.FieldLogger) {
+	cms, err := client.ConfigMaps(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelKey + "=" + labelValue,
+	})
+	if err != nil {
+		log.WithError(err).Errorf("Failed to list configmaps with label %s=%s in %s", labelKey, labelValue, namespace)
+		return
+	}
+
+	for i := range cms.Items {
+		DeleteConfigMapIfAny(ctx, client, cms.Items[i].Name, namespace, log)
 	}
 }

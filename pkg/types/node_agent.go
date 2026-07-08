@@ -65,6 +65,13 @@ type BackupPVC struct {
 	// after the DataUpload completes. This is needed for CSI drivers that require
 	// namespace-scoped secrets for volume provisioning (e.g., encrypted volumes).
 	SecretNames []string `json:"secretNames,omitempty"`
+
+	// ConfigMapNames is a list of configmap names to copy from the source PVC namespace
+	// to the Velero namespace before creating the backupPVC. The configmaps are deleted
+	// after the DataUpload completes. This is needed for CSI drivers that require
+	// namespace-scoped configmaps for volume provisioning (e.g., tenant-specific
+	// Vault connection overrides for encrypted volumes).
+	ConfigMapNames []string `json:"configMapNames,omitempty"`
 }
 
 type RestorePVC struct {

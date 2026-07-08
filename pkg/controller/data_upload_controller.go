@@ -270,24 +270,6 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
 		}
 
-		// Copy secrets required for backup PVC provisioning (e.g., encrypted volumes with KMS).
-		// This must happen before Expose() since Expose() errors are non-retryable.
-		// On collision (same secret name, different data from another DataUpload), requeue.
-		if du.Spec.CSISnapshot != nil {
-			if bpvcConfig, exists := r.backupPVCConfig[du.Spec.CSISnapshot.StorageClass]; exists {
-				for _, secretName := range bpvcConfig.SecretNames {
-					if copyErr := kube.CopySecret(ctx, r.kubeClient.CoreV1(), secretName,
-						du.Spec.SourceNamespace, du.Namespace, du.Name, log); copyErr != nil {
-						if errors.Is(copyErr, kube.ErrSecretCollision) {
-							log.Infof("Secret %s collision detected, requeue later", secretName)
-							return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
-						}
-						return r.errorOut(ctx, du, copyErr, "error copying secret for backup PVC", log)
-					}
-				}
-			}
-		}
-
 		log.Info("Data upload starting")
 
 		accepted, err := r.acceptDataUpload(ctx, du)
@@ -301,6 +283,26 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		log.Info("Data upload is accepted")
+
+		// Copy secrets and configmaps required for backup PVC provisioning
+		// (e.g., encrypted volumes with KMS). Done after accept so only the
+		// accepting node handles it, avoiding multi-node contest.
+		if du.Spec.CSISnapshot != nil {
+			if bpvcConfig, exists := r.backupPVCConfig[du.Spec.CSISnapshot.StorageClass]; exists {
+				for _, secretName := range bpvcConfig.SecretNames {
+					if copyErr := kube.CopySecret(ctx, r.kubeClient.CoreV1(), secretName,
+						du.Spec.SourceNamespace, du.Namespace, du.Name, log); copyErr != nil {
+						return r.errorOut(ctx, du, copyErr, "error copying secret for backup PVC", log)
+					}
+				}
+				for _, cmName := range bpvcConfig.ConfigMapNames {
+					if copyErr := kube.CopyConfigMap(ctx, r.kubeClient.CoreV1(), cmName,
+						du.Spec.SourceNamespace, du.Namespace, du.Name, log); copyErr != nil {
+						return r.errorOut(ctx, du, copyErr, "error copying configmap for backup PVC", log)
+					}
+				}
+			}
+		}
 
 		exposeParam, err := r.setupExposeParam(du)
 		if err != nil {

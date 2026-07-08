@@ -516,6 +516,8 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 
 	kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		kube.BackupPVCSecretLabel, ownerObject.Name, e.log)
+	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
+		kube.BackupPVCSecretLabel, ownerObject.Name, e.log)
 
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
