@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Velero CLI currently has no dynamic shell completion for resource names.
+Velero CLI currently has no dynamic shell completion for resource names ([#9782](https://github.com/vmware-tanzu/velero/issues/9782)).
 Tab-completing `velero backup describe <TAB>` produces no suggestions, even when backups exist on the cluster.
 This proposal adds dynamic completion for all commands that take Velero resource names as positional arguments or flag values, using cobra's `ValidArgsFunction` and `RegisterFlagCompletionFunc` mechanisms.
 
