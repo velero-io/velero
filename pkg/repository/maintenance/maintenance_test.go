@@ -1224,6 +1224,274 @@ func TestBuildJob(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Invalid label key is skipped",
+			m: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest:    "100m",
+					MemoryRequest: "128Mi",
+					CPULimit:      "200m",
+					MemoryLimit:   "256Mi",
+				},
+				PodLabels: map[string]string{
+					"valid-label":   "valid-value",
+					"INVALID KEY!!": "some-value",
+				},
+			},
+			deploy:          deploy2,
+			logLevel:        logrus.InfoLevel,
+			logFormat:       logging.NewFormatFlag(),
+			expectedJobName: "test-123-maintain-job",
+			expectedError:   false,
+			expectedEnv: []corev1api.EnvVar{
+				{
+					Name:  "test-name",
+					Value: "test-value",
+				},
+			},
+			expectedEnvFrom: []corev1api.EnvFromSource{
+				{
+					ConfigMapRef: &corev1api.ConfigMapEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-configmap",
+						},
+					},
+				},
+				{
+					SecretRef: &corev1api.SecretEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			},
+			expectedPodLabel: map[string]string{
+				RepositoryNameLabel: "test-123",
+				"valid-label":      "valid-value",
+			},
+			expectedSecurityContext:    nil,
+			expectedPodSecurityContext: nil,
+			expectedImagePullSecrets: []corev1api.LocalObjectReference{
+				{
+					Name: "imagePullSecret1",
+				},
+			},
+		},
+		{
+			name: "Invalid label value is skipped",
+			m: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest:    "100m",
+					MemoryRequest: "128Mi",
+					CPULimit:      "200m",
+					MemoryLimit:   "256Mi",
+				},
+				PodLabels: map[string]string{
+					"valid-label":   "valid-value",
+					"another-label": "this value has spaces and is invalid",
+				},
+			},
+			deploy:          deploy2,
+			logLevel:        logrus.InfoLevel,
+			logFormat:       logging.NewFormatFlag(),
+			expectedJobName: "test-123-maintain-job",
+			expectedError:   false,
+			expectedEnv: []corev1api.EnvVar{
+				{
+					Name:  "test-name",
+					Value: "test-value",
+				},
+			},
+			expectedEnvFrom: []corev1api.EnvFromSource{
+				{
+					ConfigMapRef: &corev1api.ConfigMapEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-configmap",
+						},
+					},
+				},
+				{
+					SecretRef: &corev1api.SecretEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			},
+			expectedPodLabel: map[string]string{
+				RepositoryNameLabel: "test-123",
+				"valid-label":      "valid-value",
+			},
+			expectedSecurityContext:    nil,
+			expectedPodSecurityContext: nil,
+			expectedImagePullSecrets: []corev1api.LocalObjectReference{
+				{
+					Name: "imagePullSecret1",
+				},
+			},
+		},
+		{
+			name: "Label value exceeding 63 characters is skipped",
+			m: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest:    "100m",
+					MemoryRequest: "128Mi",
+					CPULimit:      "200m",
+					MemoryLimit:   "256Mi",
+				},
+				PodLabels: map[string]string{
+					"valid-label":      "valid-value",
+					"long-value-label": "this-value-is-way-too-long-for-a-kubernetes-label-value-and-exceeds-sixty-three-characters",
+				},
+			},
+			deploy:          deploy2,
+			logLevel:        logrus.InfoLevel,
+			logFormat:       logging.NewFormatFlag(),
+			expectedJobName: "test-123-maintain-job",
+			expectedError:   false,
+			expectedEnv: []corev1api.EnvVar{
+				{
+					Name:  "test-name",
+					Value: "test-value",
+				},
+			},
+			expectedEnvFrom: []corev1api.EnvFromSource{
+				{
+					ConfigMapRef: &corev1api.ConfigMapEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-configmap",
+						},
+					},
+				},
+				{
+					SecretRef: &corev1api.SecretEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			},
+			expectedPodLabel: map[string]string{
+				RepositoryNameLabel: "test-123",
+				"valid-label":      "valid-value",
+			},
+			expectedSecurityContext:    nil,
+			expectedPodSecurityContext: nil,
+			expectedImagePullSecrets: []corev1api.LocalObjectReference{
+				{
+					Name: "imagePullSecret1",
+				},
+			},
+		},
+		{
+			name: "User-provided label cannot overwrite RepositoryNameLabel",
+			m: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest:    "100m",
+					MemoryRequest: "128Mi",
+					CPULimit:      "200m",
+					MemoryLimit:   "256Mi",
+				},
+				PodLabels: map[string]string{
+					RepositoryNameLabel: "user-override-attempt",
+					"valid-label":      "valid-value",
+				},
+			},
+			deploy:          deploy2,
+			logLevel:        logrus.InfoLevel,
+			logFormat:       logging.NewFormatFlag(),
+			expectedJobName: "test-123-maintain-job",
+			expectedError:   false,
+			expectedEnv: []corev1api.EnvVar{
+				{
+					Name:  "test-name",
+					Value: "test-value",
+				},
+			},
+			expectedEnvFrom: []corev1api.EnvFromSource{
+				{
+					ConfigMapRef: &corev1api.ConfigMapEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-configmap",
+						},
+					},
+				},
+				{
+					SecretRef: &corev1api.SecretEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			},
+			expectedPodLabel: map[string]string{
+				RepositoryNameLabel: "test-123",
+				"valid-label":      "valid-value",
+			},
+			expectedSecurityContext:    nil,
+			expectedPodSecurityContext: nil,
+			expectedImagePullSecrets: []corev1api.LocalObjectReference{
+				{
+					Name: "imagePullSecret1",
+				},
+			},
+		},
+		{
+			name: "Invalid annotation key is skipped",
+			m: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest:    "100m",
+					MemoryRequest: "128Mi",
+					CPULimit:      "200m",
+					MemoryLimit:   "256Mi",
+				},
+				PodAnnotations: map[string]string{
+					"valid-annotation":  "any value is fine for annotations, even with spaces!",
+					"INVALID KEY ANNO!": "some-value",
+				},
+			},
+			deploy:          deploy2,
+			logLevel:        logrus.InfoLevel,
+			logFormat:       logging.NewFormatFlag(),
+			expectedJobName: "test-123-maintain-job",
+			expectedError:   false,
+			expectedEnv: []corev1api.EnvVar{
+				{
+					Name:  "test-name",
+					Value: "test-value",
+				},
+			},
+			expectedEnvFrom: []corev1api.EnvFromSource{
+				{
+					ConfigMapRef: &corev1api.ConfigMapEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-configmap",
+						},
+					},
+				},
+				{
+					SecretRef: &corev1api.SecretEnvSource{
+						LocalObjectReference: corev1api.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			},
+			expectedPodLabel: map[string]string{
+				RepositoryNameLabel:           "test-123",
+				"azure.workload.identity/use": "fake-label-value",
+			},
+			expectedPodAnnotation: map[string]string{
+				"valid-annotation": "any value is fine for annotations, even with spaces!",
+			},
+			expectedSecurityContext:    nil,
+			expectedPodSecurityContext: nil,
+			expectedImagePullSecrets: []corev1api.LocalObjectReference{
+				{
+					Name: "imagePullSecret1",
+				},
+			},
+		},
 	}
 
 	param := provider.RepoParam{
@@ -1245,10 +1513,14 @@ func TestBuildJob(t *testing.T) {
 		},
 	}
 
+	defaultBackupRepo := param.BackupRepo
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.backupRepository != nil {
 				param.BackupRepo = tc.backupRepository
+			} else {
+				param.BackupRepo = defaultBackupRepo
 			}
 
 			// Create a fake clientset with resources
@@ -1327,6 +1599,10 @@ func TestBuildJob(t *testing.T) {
 				assert.Equal(t, expectedArgs, container.Args)
 
 				assert.Equal(t, tc.expectedPodLabel, job.Spec.Template.Labels)
+
+				if tc.expectedPodAnnotation != nil {
+					assert.Equal(t, tc.expectedPodAnnotation, job.Spec.Template.Annotations)
+				}
 
 				assert.Equal(t, tc.expectedImagePullSecrets, job.Spec.Template.Spec.ImagePullSecrets)
 			}
