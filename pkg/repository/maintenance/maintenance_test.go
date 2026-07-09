@@ -1267,7 +1267,7 @@ func TestBuildJob(t *testing.T) {
 			},
 			expectedPodLabel: map[string]string{
 				RepositoryNameLabel: "test-123",
-				"valid-label":      "valid-value",
+				"valid-label":       "valid-value",
 			},
 			expectedSecurityContext:    nil,
 			expectedPodSecurityContext: nil,
@@ -1320,7 +1320,7 @@ func TestBuildJob(t *testing.T) {
 			},
 			expectedPodLabel: map[string]string{
 				RepositoryNameLabel: "test-123",
-				"valid-label":      "valid-value",
+				"valid-label":       "valid-value",
 			},
 			expectedSecurityContext:    nil,
 			expectedPodSecurityContext: nil,
@@ -1373,7 +1373,7 @@ func TestBuildJob(t *testing.T) {
 			},
 			expectedPodLabel: map[string]string{
 				RepositoryNameLabel: "test-123",
-				"valid-label":      "valid-value",
+				"valid-label":       "valid-value",
 			},
 			expectedSecurityContext:    nil,
 			expectedPodSecurityContext: nil,
@@ -1394,7 +1394,7 @@ func TestBuildJob(t *testing.T) {
 				},
 				PodLabels: map[string]string{
 					RepositoryNameLabel: "user-override-attempt",
-					"valid-label":      "valid-value",
+					"valid-label":       "valid-value",
 				},
 			},
 			deploy:          deploy2,
@@ -1426,7 +1426,7 @@ func TestBuildJob(t *testing.T) {
 			},
 			expectedPodLabel: map[string]string{
 				RepositoryNameLabel: "test-123",
-				"valid-label":      "valid-value",
+				"valid-label":       "valid-value",
 			},
 			expectedSecurityContext:    nil,
 			expectedPodSecurityContext: nil,
