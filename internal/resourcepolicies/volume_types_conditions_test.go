@@ -563,6 +563,15 @@ func TestGetVolumeTypeFromVolume(t *testing.T) {
 			},
 			expected: Ephemeral,
 		},
+		{
+			name: "Test Image",
+			inputVol: &corev1api.Volume{
+				VolumeSource: corev1api.VolumeSource{
+					Image: &corev1api.ImageVolumeSource{},
+				},
+			},
+			expected: Image,
+		},
 	}
 
 	for _, tc := range testCases {

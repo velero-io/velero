@@ -45,6 +45,7 @@ const (
 	Glusterfs            SupportedVolume = "glusterfs"
 	GCEPersistentDisk    SupportedVolume = "gcePersistentDisk"
 	HostPath             SupportedVolume = "hostPath"
+	Image                SupportedVolume = "image"
 	ISCSI                SupportedVolume = "iscsi"
 	Local                SupportedVolume = "local"
 	NFS                  SupportedVolume = "nfs"
@@ -242,6 +243,9 @@ func getVolumeTypeFromVolume(vol *corev1api.Volume) SupportedVolume {
 	}
 	if vol.EmptyDir != nil {
 		return EmptyDir
+	}
+	if vol.Image != nil {
+		return Image
 	}
 	return ""
 }
