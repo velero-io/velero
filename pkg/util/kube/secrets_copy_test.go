@@ -184,3 +184,154 @@ func TestDeleteSecretsWithLabel(t *testing.T) {
 		context.Background(), "secret-2", metav1.GetOptions{})
 	assert.NoError(t, err, "secret-2 should still exist")
 }
+
+func TestCopyConfigMap(t *testing.T) {
+	log := logrus.New()
+
+	tests := []struct {
+		name        string
+		cmName      string
+		sourceNS    string
+		targetNS    string
+		ownerName   string
+		objects     []k8sruntime.Object
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:      "successfully copies configmap to target namespace",
+			cmName:    "ceph-csi-kms-config",
+			sourceNS:  "app-ns",
+			targetNS:  "velero",
+			ownerName: "du-123",
+			objects: []k8sruntime.Object{
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
+					Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+			},
+		},
+		{
+			name:        "returns error when source configmap does not exist",
+			cmName:      "missing-cm",
+			sourceNS:    "app-ns",
+			targetNS:    "velero",
+			ownerName:   "du-123",
+			objects:     []k8sruntime.Object{},
+			expectErr:   true,
+			errContains: "error getting configmap",
+		},
+		{
+			name:      "no-op when target already has configmap with same data",
+			cmName:    "ceph-csi-kms-config",
+			sourceNS:  "app-ns",
+			targetNS:  "velero",
+			ownerName: "du-123",
+			objects: []k8sruntime.Object{
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
+					Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "velero"},
+					Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+			},
+		},
+		{
+			name:      "returns collision error when target has configmap with different data",
+			cmName:    "ceph-csi-kms-config",
+			sourceNS:  "app-ns",
+			targetNS:  "velero",
+			ownerName: "du-123",
+			objects: []k8sruntime.Object{
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
+					Data:       map[string]string{"vaultAddress": "https://vault-a.example.com"},
+				},
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "velero"},
+					Data:       map[string]string{"vaultAddress": "https://vault-b.example.com"},
+				},
+			},
+			expectErr:   true,
+			errContains: "secret collision",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewSimpleClientset(tt.objects...)
+
+			err := CopyConfigMap(context.Background(), fakeClient.CoreV1(),
+				tt.cmName, tt.sourceNS, tt.targetNS, tt.ownerName, log)
+
+			if tt.expectErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				return
+			}
+
+			require.NoError(t, err)
+
+			copied, getErr := fakeClient.CoreV1().ConfigMaps(tt.targetNS).Get(
+				context.Background(), tt.cmName, metav1.GetOptions{})
+			require.NoError(t, getErr)
+			assert.NotNil(t, copied)
+		})
+	}
+}
+
+func TestDeleteConfigMapIfAny(t *testing.T) {
+	log := logrus.New()
+
+	t.Run("deletes existing configmap", func(t *testing.T) {
+		cm := &corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cm", Namespace: "velero"},
+		}
+		fakeClient := fake.NewSimpleClientset(cm)
+
+		DeleteConfigMapIfAny(context.Background(), fakeClient.CoreV1(), "test-cm", "velero", log)
+
+		_, err := fakeClient.CoreV1().ConfigMaps("velero").Get(
+			context.Background(), "test-cm", metav1.GetOptions{})
+		assert.Error(t, err)
+	})
+
+	t.Run("no error when configmap does not exist", func(t *testing.T) {
+		fakeClient := fake.NewSimpleClientset()
+		DeleteConfigMapIfAny(context.Background(), fakeClient.CoreV1(), "missing", "velero", log)
+	})
+}
+
+func TestDeleteConfigMapsWithLabel(t *testing.T) {
+	log := logrus.New()
+
+	fakeClient := fake.NewSimpleClientset(
+		&corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cm-1", Namespace: "velero",
+				Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+			},
+		},
+		&corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cm-2", Namespace: "velero",
+				Labels: map[string]string{BackupPVCSecretLabel: "du-456"},
+			},
+		},
+	)
+
+	DeleteConfigMapsWithLabel(context.Background(), fakeClient.CoreV1(), "velero",
+		BackupPVCSecretLabel, "du-123", log)
+
+	_, err := fakeClient.CoreV1().ConfigMaps("velero").Get(
+		context.Background(), "cm-1", metav1.GetOptions{})
+	require.Error(t, err, "cm-1 should be deleted")
+
+	_, err = fakeClient.CoreV1().ConfigMaps("velero").Get(
+		context.Background(), "cm-2", metav1.GetOptions{})
+	assert.NoError(t, err, "cm-2 should still exist")
+}
