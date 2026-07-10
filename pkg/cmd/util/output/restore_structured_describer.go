@@ -325,7 +325,9 @@ func describeRestoreCSISnapshotsInSF(ctx context.Context, kbClient kbclient.Clie
 				},
 			}
 		} else {
-			csiRestores[key] = "specify --details for more information"
+			csiRestores[key] = map[string]any{
+				"snapshot": "specify --details for more information",
+			}
 		}
 	}
 
@@ -340,7 +342,9 @@ func describeRestoreCSISnapshotsInSF(ctx context.Context, kbClient kbclient.Clie
 				},
 			}
 		} else {
-			csiRestores[key] = "specify --details for more information"
+			csiRestores[key] = map[string]any{
+				"dataMovement": "specify --details for more information",
+			}
 		}
 	}
 

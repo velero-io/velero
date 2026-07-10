@@ -379,7 +379,9 @@ func TestDescribeRestoreCSISnapshotsInSF_NoData(t *testing.T) {
 			details: false,
 			expect: map[string]any{
 				"csiSnapshotRestores": map[string]any{
-					"ns-1/pvc-1": "specify --details for more information",
+					"ns-1/pvc-1": map[string]any{
+						"snapshot": "specify --details for more information",
+					},
 				},
 			},
 		},
@@ -482,7 +484,9 @@ func describeCSISnapshotsRestoresInSF(d *StructuredDescriber, restoreVolInfo []v
 				},
 			}
 		} else {
-			csiRestores[key] = "specify --details for more information"
+			csiRestores[key] = map[string]any{
+				"snapshot": "specify --details for more information",
+			}
 		}
 	}
 
@@ -497,7 +501,9 @@ func describeCSISnapshotsRestoresInSF(d *StructuredDescriber, restoreVolInfo []v
 				},
 			}
 		} else {
-			csiRestores[key] = "specify --details for more information"
+			csiRestores[key] = map[string]any{
+				"dataMovement": "specify --details for more information",
+			}
 		}
 	}
 
