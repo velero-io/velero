@@ -249,6 +249,28 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		}
 	}
 
+	// Copy secrets and configmaps from source namespace to Velero namespace if configured.
+	// These are needed by CSI drivers that require namespace-scoped resources for volume
+	// provisioning (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
+	if value, exists := csiExposeParam.BackupPVCConfig[csiExposeParam.StorageClass]; exists {
+		for _, secretName := range value.SecretNames {
+			if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
+				csiExposeParam.SourceNamespace, ownerObject.Namespace, ownerObject.Name, curLog); copyErr != nil {
+				err = errors.Wrapf(copyErr, "error copying secret %s from %s to %s",
+					secretName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
+				return err
+			}
+		}
+		for _, cmName := range value.ConfigMapNames {
+			if copyErr := kube.CopyConfigMap(ctx, e.kubeClient.CoreV1(), cmName,
+				csiExposeParam.SourceNamespace, ownerObject.Namespace, ownerObject.Name, curLog); copyErr != nil {
+				err = errors.Wrapf(copyErr, "error copying configmap %s from %s to %s",
+					cmName, csiExposeParam.SourceNamespace, ownerObject.Namespace)
+				return err
+			}
+		}
+	}
+
 	backupPVC, err := e.createBackupPVC(ctx, ownerObject, backupVS.Name, backupPVCStorageClass, csiExposeParam.AccessMode, volumeSize, backupPVCReadOnly, backupPVCAnnotations, csiExposeParam.DataMover)
 	if err != nil {
 		return errors.Wrap(err, "error to create backup pvc")
