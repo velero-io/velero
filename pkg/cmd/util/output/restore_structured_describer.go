@@ -237,7 +237,6 @@ func describePodVolumeRestoresInSF(d *StructuredDescriber, restores []velerov1ap
 	}
 
 	restoresByPhase := groupRestoresByPhase(restores)
-	phaseDetails := map[string]any{}
 
 	for _, phase := range []string{
 		string(velerov1api.PodVolumeRestorePhaseCompleted),
@@ -252,7 +251,7 @@ func describePodVolumeRestoresInSF(d *StructuredDescriber, restores []velerov1ap
 			continue
 		}
 		if !details {
-			phaseDetails[phase] = len(restoresByPhase[phase])
+			podVolumeInfo[phase] = len(restoresByPhase[phase])
 			continue
 		}
 
@@ -267,10 +266,9 @@ func describePodVolumeRestoresInSF(d *StructuredDescriber, restores []velerov1ap
 				restoreGroup.label: strings.Join(restoreGroup.volumes, ", "),
 			})
 		}
-		phaseDetails[phase] = podEntries
+		podVolumeInfo[phase] = podEntries
 	}
 
-	podVolumeInfo["details"] = phaseDetails
 	d.Describe("podVolumeRestores", podVolumeInfo)
 }
 

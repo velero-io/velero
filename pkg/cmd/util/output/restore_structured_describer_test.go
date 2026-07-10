@@ -287,9 +287,7 @@ func TestDescribePodVolumeRestoresInSF(t *testing.T) {
 			expect: map[string]any{
 				"podVolumeRestores": map[string]any{
 					"uploaderType": "kopia",
-					"details": map[string]any{
-						"Completed": 2,
-					},
+					"Completed":    2,
 				},
 			},
 		},
@@ -300,11 +298,9 @@ func TestDescribePodVolumeRestoresInSF(t *testing.T) {
 			expect: map[string]any{
 				"podVolumeRestores": map[string]any{
 					"uploaderType": "kopia",
-					"details": map[string]any{
-						"Completed": []map[string]string{
-							{"ns-1/pod-1": "vol-1"},
-							{"ns-1/pod-2": "vol-2"},
-						},
+					"Completed": []map[string]string{
+						{"ns-1/pod-1": "vol-1"},
+						{"ns-1/pod-2": "vol-2"},
 					},
 				},
 			},
@@ -316,10 +312,8 @@ func TestDescribePodVolumeRestoresInSF(t *testing.T) {
 			expect: map[string]any{
 				"podVolumeRestores": map[string]any{
 					"uploaderType": "kopia",
-					"details": map[string]any{
-						"Completed": 2,
-						"Failed":    1,
-					},
+					"Completed":    2,
+					"Failed":       1,
 				},
 			},
 		},
