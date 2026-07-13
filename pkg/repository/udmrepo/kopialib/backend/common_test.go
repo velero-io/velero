@@ -111,9 +111,9 @@ func TestSetupNewRepositoryOptions(t *testing.T) {
 
 func TestSetupConnectOptions(t *testing.T) {
 	defaultCacheOption := content.CachingOptions{
-		ContentCacheSizeBytes:         2000 << 20,
+		ContentCacheSizeBytes:  2000 << 20,
 		MetadataCacheSizeBytes: 2000 << 20,
-		MaxListCacheDuration:      content.DurationSeconds(time.Duration(30) * time.Second),
+		MaxListCacheDuration:   content.DurationSeconds(time.Duration(30) * time.Second),
 	}
 
 	testCases := []struct {
