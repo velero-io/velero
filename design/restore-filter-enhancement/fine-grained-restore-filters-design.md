@@ -146,6 +146,22 @@ namespacedFilterPolicies:
 
 Only resource kinds listed in `resourceFilters` entries are restored for the matched namespaces; unlisted kinds are implicitly excluded (globally excluded kinds cannot be re-included — see precedence model).
 
+#### Peek-and-Map Fallback for Unresolved Kinds
+
+The `kinds` field accepts both plural resource names (e.g., `configmaps`, `mycustomkinds.mygroup.io`) and singular `Kind` names (e.g., `ConfigMap`, `MyCustomKind`). 
+
+To ensure consistent case-insensitive behavior across all code paths, Velero normalizes all input `kinds` to lowercase *before* attempting discovery or fallback matching.
+
+During a restore, Velero attempts to resolve `Kind` names to fully-qualified plural resource names using the cluster's discovery helper. However, for Custom Resources (CRDs), the CRD might not exist in the cluster yet when the restore begins. 
+
+To handle this, Velero implements a **peek-and-map fallback**:
+1. If a normalized `Kind` cannot be resolved via the discovery helper at the start of the restore, Velero stores the normalized string as provided in the policy.
+2. Later, when iterating through the backup tarball, if Velero encounters a resource type (e.g., `mycustomkinds.mygroup.io`) that doesn't match any resolved filters, it peeks at the `Kind` of the first item in the tarball for that resource type.
+3. It then checks if this actual `Kind` (case-insensitively) matches any of the unresolved normalized strings in the user's policy.
+4. If a match is found, the filter is applied and cached for subsequent lookups. 
+
+This ensures that users can intuitively write `kinds: [MyCustomKind]` and it will work reliably, even if the CRD hasn't been restored yet. This logic applies to both `namespacedFilterPolicies` and `clusterScopedFilterPolicy`.
+
 #### Catch-All Resource Filter (Empty `kinds` or `["*"]`)
 
 A `ResourceFilter` entry with an empty (or omitted) `kinds` field, or a field explicitly set to `["*"]`, acts as a **catch-all**. Its `labelSelector` or `orLabelSelectors` (if provided) is applied to **all resource types in the namespace that are not already matched by a kind-specific filter entry**. If no selectors are provided, all unlisted resources are included. Using `["*"]` is highly recommended as it makes the catch-all intention explicit and self-documenting.

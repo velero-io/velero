@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 
@@ -764,6 +765,10 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			}
 			require.NoError(t, h.restorer.discoveryHelper.Refresh())
 
+			// We need to fetch the policies using the actual function
+			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
+			require.NoError(t, err)
+
 			data := &Request{
 				Log:              h.log,
 				Restore:          tc.restore,
@@ -771,6 +776,7 @@ func TestRestoreResourceFiltering(t *testing.T) {
 				PodVolumeBackups: nil,
 				VolumeSnapshots:  nil,
 				BackupReader:     tc.tarball,
+				ResPolicies:      resPolicies,
 			}
 			warnings, errs := h.restorer.Restore(
 				data,

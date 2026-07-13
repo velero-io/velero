@@ -785,7 +785,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 		Phase(velerov1api.BackupPhaseCompleted).
 		Result()))
 
-	r.validateAndComplete(restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors, "No backups found for schedule")
 	assert.Empty(t, restore.Spec.BackupName)
 
@@ -801,7 +801,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 			Result(),
 	))
 
-	r.validateAndComplete(restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors, "No completed backups found for schedule")
 	assert.Empty(t, restore.Spec.BackupName)
 
@@ -832,9 +832,138 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 			ScheduleName: "schedule-1",
 		},
 	}
-	r.validateAndComplete(restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Nil(t, restore.Status.ValidationErrors)
 	assert.Equal(t, "foo", restore.Spec.BackupName)
+}
+
+func TestValidateAndCompleteWithResourcePolicySpecified(t *testing.T) {
+	formatFlag := logging.FormatText
+
+	var (
+		logger           = velerotest.NewLogger()
+		pluginManager    = &pluginmocks.Manager{}
+		fakeClient       = velerotest.NewFakeControllerRuntimeClient(t)
+		fakeGlobalClient = velerotest.NewFakeControllerRuntimeClient(t)
+		backupStore      = &persistencemocks.BackupStore{}
+	)
+
+	r := NewRestoreReconciler(
+		t.Context(),
+		velerov1api.DefaultNamespace,
+		nil,
+		fakeClient,
+		logger,
+		logrus.DebugLevel,
+		func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+		NewFakeSingleObjectBackupStoreGetter(backupStore),
+		metrics.NewServerMetrics(),
+		formatFlag,
+		60*time.Minute,
+		false,
+		fakeGlobalClient,
+		10*time.Minute,
+	)
+
+	restore := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "restore-1",
+		},
+		Spec: velerov1api.RestoreSpec{
+			BackupName: "backup-1",
+			ResourcePolicy: &corev1api.TypedLocalObjectReference{
+				Kind: "configmap",
+				Name: "test-configmap",
+			},
+		},
+	}
+
+	location := builder.ForBackupStorageLocation("velero", "default").Provider("myCloud").Bucket("bucket").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	require.NoError(t, r.kbClient.Create(t.Context(), location))
+
+	require.NoError(t, r.kbClient.Create(
+		t.Context(),
+		defaultBackup().
+			ObjectMeta(
+				builder.WithName("backup-1"),
+			).StorageLocation("default").
+			Phase(velerov1api.BackupPhaseCompleted).
+			Result(),
+	))
+
+	r.validateAndComplete(t.Context(), restore)
+	assert.Contains(t, restore.Status.ValidationErrors[0], "fail to get ResourcePolicies velero/test-configmap ConfigMap")
+
+	restore1 := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "restore-1",
+		},
+		Spec: velerov1api.RestoreSpec{
+			BackupName: "backup-1",
+			ResourcePolicy: &corev1api.TypedLocalObjectReference{
+				Kind: "configmap",
+				Name: "test-configmap",
+			},
+		},
+	}
+
+	cm1 := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-configmap",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+		Data: map[string]string{
+			"policy.yaml": `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+    - kinds:
+      - pods
+`,
+		},
+	}
+	require.NoError(t, r.kbClient.Create(t.Context(), cm1))
+
+	r.validateAndComplete(t.Context(), restore1)
+	assert.Nil(t, restore1.Status.ValidationErrors)
+
+	restore2 := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "restore-1",
+		},
+		Spec: velerov1api.RestoreSpec{
+			BackupName: "backup-1",
+			ResourcePolicy: &corev1api.TypedLocalObjectReference{
+				// intentional to ensure case insensitivity works as expected
+				Kind: "confIGMaP",
+				Name: "test-configmap-invalid",
+			},
+		},
+	}
+
+	cm2 := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-configmap-invalid",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+		Data: map[string]string{
+			"policy.yaml": `version: v1
+volumePolicies:
+  - conditions:
+      capacity: '0,10Gi'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: invalid_action
+`,
+		},
+	}
+	require.NoError(t, r.kbClient.Create(t.Context(), cm2))
+
+	r.validateAndComplete(t.Context(), restore2)
+	assert.Contains(t, restore2.Status.ValidationErrors[0], "fail to validate ResourcePolicies in ConfigMap velero/test-configmap-invalid")
 }
 
 func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
@@ -892,7 +1021,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 			Result(),
 	))
 
-	r.validateAndComplete(restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors[0], "failed to get resource modifiers configmap")
 
 	restore1 := &velerov1api.Restore{
@@ -920,7 +1049,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), cm1))
 
-	r.validateAndComplete(restore1)
+	r.validateAndComplete(t.Context(), restore1)
 	assert.Nil(t, restore1.Status.ValidationErrors)
 
 	restore2 := &velerov1api.Restore{
@@ -949,7 +1078,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), invalidVersionCm))
 
-	r.validateAndComplete(restore2)
+	r.validateAndComplete(t.Context(), restore2)
 	assert.Contains(t, restore2.Status.ValidationErrors[0], "Error in parsing resource modifiers provided in configmap")
 
 	restore3 := &velerov1api.Restore{
@@ -977,7 +1106,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), invalidOperatorCm))
 
-	r.validateAndComplete(restore3)
+	r.validateAndComplete(t.Context(), restore3)
 	assert.Contains(t, restore3.Status.ValidationErrors[0], "Validation error in resource modifiers provided in configmap")
 }
 
