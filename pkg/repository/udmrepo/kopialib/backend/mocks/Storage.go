@@ -57,6 +57,20 @@ func (_m *Storage) DeleteBlob(ctx context.Context, blobID blob.ID) error {
 	return r0
 }
 
+// ExtendBlobRetention provides a mock function with given fields: ctx, blobID, opts
+func (_m *Storage) ExtendBlobRetention(ctx context.Context, blobID blob.ID, opts blob.ExtendOptions) error {
+	ret := _m.Called(ctx, blobID, opts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, blob.ID, blob.ExtendOptions) error); ok {
+		r0 = rf(ctx, blobID, opts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // DisplayName provides a mock function with given fields:
 func (_m *Storage) DisplayName() string {
 	ret := _m.Called()
@@ -80,6 +94,20 @@ func (_m *Storage) FlushCaches(ctx context.Context) error {
 		r0 = rf(ctx)
 	} else {
 		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IsReadOnly provides a mock function with given fields:
+func (_m *Storage) IsReadOnly() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
 	}
 
 	return r0
