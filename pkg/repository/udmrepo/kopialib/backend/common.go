@@ -69,9 +69,9 @@ func SetupNewRepositoryOptions(ctx context.Context, flags map[string]string) rep
 func SetupConnectOptions(ctx context.Context, repoOptions udmrepo.RepoOptions) repo.ConnectOptions {
 	return repo.ConnectOptions{
 		CachingOptions: content.CachingOptions{
-			ContentCacheSizeBytes:         maxDataCacheMB << 20,
+			ContentCacheSizeBytes:  maxDataCacheMB << 20,
 			MetadataCacheSizeBytes: maxMetadataCacheMB << 20,
-			MaxListCacheDuration:      content.DurationSeconds(time.Duration(maxCacheDurationSecond) * time.Second),
+			MaxListCacheDuration:   content.DurationSeconds(time.Duration(maxCacheDurationSecond) * time.Second),
 		},
 		ClientOptions: repo.ClientOptions{
 			Hostname:    optionalHaveString(udmrepo.GenOptionOwnerDomain, repoOptions.GeneralOptions),
