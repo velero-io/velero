@@ -757,16 +757,18 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 		statusToBeUpdated *velerov1api.PodVolumeBackupStatus
 		expectedErr       string
 		expectedPVBPhase  velerov1api.PodVolumeBackupPhase
+		expectedPVBCount  int
 	}{
 		{
 			name: "contains no pvb should report no error",
 			ctx:  timeoutCtx,
 		},
 		{
-			name:        "context canceled",
-			ctx:         timeoutCtx,
-			pvb:         pvb,
-			expectedErr: "timed out waiting for all PodVolumeBackups to complete",
+			name:             "context canceled should still return tracked pvbs",
+			ctx:              timeoutCtx,
+			pvb:              pvb,
+			expectedErr:      "timed out waiting for all PodVolumeBackups to complete",
+			expectedPVBCount: 1,
 		},
 		{
 			name: "failed pvbs",
@@ -832,6 +834,10 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 			assert.Equal(t, c.expectedErr, logHook.entry.Message)
 		} else {
 			assert.Nil(t, logHook.entry)
+		}
+
+		if c.expectedPVBCount > 0 {
+			require.Len(t, pvbs, c.expectedPVBCount)
 		}
 
 		if c.expectedPVBPhase != "" {
