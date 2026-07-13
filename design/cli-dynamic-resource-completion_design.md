@@ -20,7 +20,7 @@ The zsh and fish generators already support `ValidArgsFunction` natively.
 ## Goals
 
 - Add dynamic shell completion for all 20 commands that accept existing Velero resource names as positional arguments.
-- Add dynamic flag completion for 5 flags that reference existing Velero resources (`--from-backup`, `--from-schedule`, `--storage-location`, `--volume-snapshot-locations`).
+- Add dynamic flag completion for 7 flags that reference existing Velero resources (`--from-backup`, `--from-schedule`, `--storage-location`, `--volume-snapshot-locations`, `--backup`, `--restore`).
 - Fail silently when the cluster is unreachable, matching the behavior of `oc` and `kubectl`.
 
 ## Non Goals
@@ -76,7 +76,8 @@ The `completeNames` closure:
 3. Lists resources in `f.Namespace()` with a **3-second context timeout** to avoid blocking the user's shell if the API server is slow or unreachable.
 4. Extracts individual objects from the list using `meta.ExtractList()`.
 5. For each object, uses `meta.Accessor()` to read its name and filters by `strings.HasPrefix(name, toComplete)`.
-6. Returns the matching names with `cobra.ShellCompDirectiveNoFileComp`.
+6. Removes names already present in `args` so that commands accepting multiple names (e.g., `velero backup delete b1 b2`) do not re-suggest previously typed arguments. This follows the same pattern used by kubectl.
+7. Returns the matching names with `cobra.ShellCompDirectiveNoFileComp`.
 
 If any step fails — client construction, the list call, or `meta.ExtractList` — the function returns `nil, cobra.ShellCompDirectiveNoFileComp` (silent failure, no file completion fallback).
 If `meta.Accessor` fails on an individual item, that item is skipped and completion continues with the remaining items.
@@ -114,6 +115,8 @@ Because Velero exposes both `velero backup get` and `velero get backups` via the
 | `backup create` | `--volume-snapshot-locations` | `CompleteVolumeSnapshotLocationNames` |
 | `restore create` | `--from-backup` | `CompleteBackupNames` |
 | `restore create` | `--from-schedule` | `CompleteScheduleNames` |
+| `debug` | `--backup` | `CompleteBackupNames` |
+| `debug` | `--restore` | `CompleteRestoreNames` |
 
 The return value of `RegisterFlagCompletionFunc` is discarded (`_ =`) because it only fails if the named flag does not exist, which would be a compile-time coding error.
 
