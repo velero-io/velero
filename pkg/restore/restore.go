@@ -552,7 +552,9 @@ func resolveRestoreNamespacedFilterPolicies(
 	// Build a quick lookup map for globally excluded resources
 	globalExcludes := make(map[string]bool)
 	for _, ex := range excludedResources {
-		globalExcludes[ex] = true
+		// We lowercase the excluded resources here because the kinds in the resource filters
+		// are lowercased during resolution, and we want to ensure case-insensitive matching.
+		globalExcludes[strings.ToLower(ex)] = true
 	}
 
 	for _, policy := range policies {

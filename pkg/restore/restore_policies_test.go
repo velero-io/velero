@@ -2,9 +2,11 @@ package restore
 
 import (
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -282,4 +284,49 @@ func TestResolveRestoreClusterScopedFilterPolicy_Validation(t *testing.T) {
 	_, err := resolveRestoreClusterScopedFilterPolicy(policy, helper, log)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ambiguous policy: duplicate kind")
+}
+
+func TestResolveRestoreNamespacedFilterPolicies_GlobalExcludesWarning(t *testing.T) {
+	log, hook := logrustest.NewNullLogger()
+	helper := test.NewFakeDiscoveryHelper(true, nil)
+
+	policies := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns-1"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds: []string{"ConfigMaps"},
+				},
+			},
+		},
+	}
+
+	excludedResources := []string{"ConfigMaps"} // Same case
+	_, _, err := resolveRestoreNamespacedFilterPolicies(policies, excludedResources, helper, log)
+	require.NoError(t, err)
+
+	// Check if a warning was emitted
+	found := false
+	for _, entry := range hook.Entries {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "namespacedFilterPolicies entry lists a kind that is globally excluded") {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected warning about globally excluded resource")
+
+	hook.Reset()
+
+	excludedResourcesDiffCase := []string{"configmaps"} // Different case
+	_, _, err = resolveRestoreNamespacedFilterPolicies(policies, excludedResourcesDiffCase, helper, log)
+	require.NoError(t, err)
+
+	found = false
+	for _, entry := range hook.Entries {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "namespacedFilterPolicies entry lists a kind that is globally excluded") {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected warning about globally excluded resource even if case differs")
 }
