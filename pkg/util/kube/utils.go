@@ -103,7 +103,10 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 			return true, err
 		}
 		if clusterNS != nil && (clusterNS.GetDeletionTimestamp() != nil || clusterNS.Status.Phase == corev1api.NamespaceTerminating) {
-			if resourceDeletionStatusTracker.Contains(clusterNS.Kind, clusterNS.Name, clusterNS.Name) {
+			// Use namespace.Kind (not clusterNS.Kind) so this key matches the one Add()
+			// writes below: client.Get() strips TypeMeta (Kind=""), but getNamespace()
+			// sets Kind="Namespace". Mismatched keys made Contains never match.
+			if resourceDeletionStatusTracker.Contains(namespace.Kind, namespace.Name, namespace.Name) {
 				namespaceAlreadyInDeletionTracker = true
 				return true, errors.Errorf("namespace %s is already present in the polling set, skipping execution", namespace.Name)
 			}
