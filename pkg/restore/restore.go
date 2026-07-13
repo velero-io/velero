@@ -2347,6 +2347,9 @@ func hasPodVolumeBackup(unstructuredPV *unstructured.Unstructured, ctx *restoreC
 
 	var found bool
 	for _, pvb := range ctx.podVolumeBackups {
+		if pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseCompleted || pvb.Status.SnapshotID == "" {
+			continue
+		}
 		if pvb.Spec.Pod.Namespace == pv.Spec.ClaimRef.Namespace && pvb.GetAnnotations()[configs.PVCNameAnnotation] == pv.Spec.ClaimRef.Name {
 			found = true
 			break
