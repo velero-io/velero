@@ -14,7 +14,32 @@ spec:
     singular: backup
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+        - description: Status of the backup
+          jsonPath: .status.phase
+          name: Status
+          type: string
+        - description: Backup Start Timestamp
+          jsonPath: .status.startTimestamp
+          name: Start Timestamp
+          type: date
+        - description: Backup Completion Timestamp
+          jsonPath: .status.completionTimestamp
+          name: Completion Timestamp
+          type: date
+        - description: Backup Expiration Timestamp
+          jsonPath: .status.expiration
+          name: Expiration
+          type: date
+        - description: Total Items
+          jsonPath: .status.progress.totalItems
+          name: Total Items
+          type: integer
+        - description: Items Backed Up
+          jsonPath: .status.progress.itemsBackedUp
+          name: Items Backed Up
+          type: integer
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
