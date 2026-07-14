@@ -108,6 +108,16 @@ type ObjectStoreGetter interface {
 	GetObjectStore(provider string) (velero.ObjectStore, error)
 }
 
+// WorkerObjectStoreGetterFactory produces an ObjectStoreGetter that proxies a
+// BackupStorageLocation's object-store operations to its dedicated worker pod. It is
+// consulted when BackupStorageLocationSpec.Worker is set, so those operations run
+// under the worker's identity (e.g. an Azure AD Workload Identity) instead of the
+// Velero server's. Implementations live in pkg/bslworker and are injected via
+// WithWorkerObjectStoreGetterFactory to avoid an import cycle.
+type WorkerObjectStoreGetterFactory interface {
+	GetterFor(location *velerov1api.BackupStorageLocation, logger logrus.FieldLogger) (ObjectStoreGetter, error)
+}
+
 // ObjectBackupStoreGetter is a type that can get a velero.BackupStore for a
 // given BackupStorageLocation and ObjectStore.
 type ObjectBackupStoreGetter interface {
@@ -115,22 +125,43 @@ type ObjectBackupStoreGetter interface {
 }
 
 type objectBackupStoreGetter struct {
-	credentialStore credentials.FileStore
-	secretStore     credentials.SecretStore
+	credentialStore     credentials.FileStore
+	secretStore         credentials.SecretStore
+	workerGetterFactory WorkerObjectStoreGetterFactory
+}
+
+// ObjectBackupStoreGetterOption configures an ObjectBackupStoreGetter.
+type ObjectBackupStoreGetterOption func(*objectBackupStoreGetter)
+
+// WithWorkerObjectStoreGetterFactory configures the getter to route object-store
+// operations for BackupStorageLocations that set Spec.Worker through the given
+// factory, so they run in a dedicated worker pod under a distinct identity.
+func WithWorkerObjectStoreGetterFactory(f WorkerObjectStoreGetterFactory) ObjectBackupStoreGetterOption {
+	return func(g *objectBackupStoreGetter) {
+		g.workerGetterFactory = f
+	}
 }
 
 // NewObjectBackupStoreGetter returns a ObjectBackupStoreGetter that can get a velero.BackupStore.
-func NewObjectBackupStoreGetter(credentialStore credentials.FileStore) ObjectBackupStoreGetter {
-	return &objectBackupStoreGetter{credentialStore: credentialStore}
+func NewObjectBackupStoreGetter(credentialStore credentials.FileStore, opts ...ObjectBackupStoreGetterOption) ObjectBackupStoreGetter {
+	g := &objectBackupStoreGetter{credentialStore: credentialStore}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // NewObjectBackupStoreGetterWithSecretStore returns an ObjectBackupStoreGetter with SecretStore
 // support for resolving caCertRef from Kubernetes Secrets.
-func NewObjectBackupStoreGetterWithSecretStore(credentialStore credentials.FileStore, secretStore credentials.SecretStore) ObjectBackupStoreGetter {
-	return &objectBackupStoreGetter{
+func NewObjectBackupStoreGetterWithSecretStore(credentialStore credentials.FileStore, secretStore credentials.SecretStore, opts ...ObjectBackupStoreGetterOption) ObjectBackupStoreGetter {
+	g := &objectBackupStoreGetter{
 		credentialStore: credentialStore,
 		secretStore:     secretStore,
 	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocation, objectStoreGetter ObjectStoreGetter, logger logrus.FieldLogger) (BackupStore, error) {
@@ -184,15 +215,36 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 		objectStoreConfig["caCert"] = string(location.Spec.ObjectStorage.CACert)
 	}
 
+	// Determine whether this BSL's object-store operations should run in a dedicated
+	// worker pod under its own identity. This requires both the Worker spec and an
+	// injected factory (present only when the feature is enabled and wired in).
+	useWorker := location.Spec.Worker != nil && b.workerGetterFactory != nil
+	if location.Spec.Worker != nil && b.workerGetterFactory == nil {
+		logger.Warnf("BackupStorageLocation %q sets spec.worker but worker identity support is not enabled; falling back to the Velero server identity", location.Name)
+	}
+
 	// If the BSL specifies a credential, fetch its path on disk and pass to
-	// plugin via the config.
-	if location.Spec.Credential != nil {
+	// plugin via the config. Worker-backed BSLs are skipped: they authenticate
+	// with the worker pod's own identity, and a path on the central Velero pod's
+	// filesystem is not readable from the worker pod.
+	if location.Spec.Credential != nil && !useWorker {
 		credsFile, err := b.credentialStore.Path(location.Spec.Credential)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get credentials")
 		}
 
 		objectStoreConfig["credentialsFile"] = credsFile
+	}
+
+	// For worker-backed BSLs, obtain an ObjectStoreGetter that proxies to the worker
+	// pod so that Init (and every subsequent operation) runs under the worker's
+	// identity instead of the Velero server's.
+	if useWorker {
+		workerGetter, err := b.workerGetterFactory.GetterFor(location, logger)
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting worker object store getter")
+		}
+		objectStoreGetter = workerGetter
 	}
 
 	objectStore, err := objectStoreGetter.GetObjectStore(location.Spec.Provider)

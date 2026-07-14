@@ -37,6 +37,14 @@ type BackupStorageLocationSpec struct {
 	// +optional
 	Credential *corev1api.SecretKeySelector `json:"credential,omitempty"`
 
+	// Worker, when set, runs this BackupStorageLocation's object-store operations in a
+	// dedicated worker pod under a distinct identity, instead of in the Velero server
+	// process. This allows the location to consume a per-BSL pod/workload identity
+	// (e.g. Azure AD Workload Identity, AWS IRSA, GCP Workload Identity).
+	// Requires the EnableBSLWorkerIdentity feature flag.
+	// +optional
+	Worker *BackupStorageLocationWorker `json:"worker,omitempty"`
+
 	StorageType `json:",inline"`
 
 	// Default indicates this location is the default backup storage location.
@@ -159,6 +167,68 @@ type ObjectStorageLocation struct {
 	CACertRef *corev1api.SecretKeySelector `json:"caCertRef,omitempty"`
 }
 
+// BackupStorageLocationWorker configures the dedicated worker pod that runs object-store
+// operations for a BackupStorageLocation under a distinct identity.
+type BackupStorageLocationWorker struct {
+	// ServiceAccountName is the ServiceAccount the worker pod runs as. It must exist in
+	// Namespace and carry the desired pod/workload identity.
+	ServiceAccountName string `json:"serviceAccountName"`
+
+	// Namespace is the namespace the worker pod runs in. It defaults to the Velero
+	// namespace. The ServiceAccount referenced by ServiceAccountName must live in this
+	// namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// PodLabels are additional labels applied to the worker pod, e.g.
+	// `azure.workload.identity/use: "true"` to opt into a provider's admission webhook.
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// PodAnnotations are additional annotations applied to the worker pod.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
+	// TokenVolumes declares explicit projected service-account-token volumes mounted into
+	// the worker pod. This is useful for portability when no provider admission webhook
+	// injects a federated token automatically.
+	// +optional
+	TokenVolumes []ProjectedServiceAccountToken `json:"tokenVolumes,omitempty"`
+
+	// Resources overrides the worker container's resource requirements. When unset, the
+	// worker inherits the Velero server container defaults.
+	// +optional
+	Resources *corev1api.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeSelector overrides the worker pod's node selection.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Tolerations overrides the worker pod's tolerations.
+	// +optional
+	Tolerations []corev1api.Toleration `json:"tolerations,omitempty"`
+}
+
+// ProjectedServiceAccountToken configures a single projected service-account-token volume
+// mounted into the worker pod.
+type ProjectedServiceAccountToken struct {
+	// Audience is the intended audience of the token (provider specific, e.g.
+	// "api://AzureADTokenExchange" for Azure Workload Identity).
+	Audience string `json:"audience"`
+
+	// ExpirationSeconds is the requested duration of validity of the token. The default,
+	// when unset, is decided by the API server.
+	// +optional
+	ExpirationSeconds *int64 `json:"expirationSeconds,omitempty"`
+
+	// MountPath is the directory the token volume is mounted at inside the worker
+	// container.
+	MountPath string `json:"mountPath"`
+
+	// Path is the file name, relative to MountPath, that the token is projected to.
+	Path string `json:"path"`
+}
+
 // BackupStorageLocationPhase is the lifecycle phase of a Velero BackupStorageLocation.
 // +kubebuilder:validation:Enum=Available;Unavailable
 // +kubebuilder:default=Unavailable
@@ -193,6 +263,17 @@ func (bsl *BackupStorageLocation) Validate() error {
 		bsl.Spec.ObjectStorage.CACert != nil &&
 		bsl.Spec.ObjectStorage.CACertRef != nil {
 		return errors.New("cannot specify both caCert and caCertRef in objectStorage")
+	}
+	if bsl.Spec.Worker != nil {
+		if bsl.Spec.Worker.ServiceAccountName == "" {
+			return errors.New("worker.serviceAccountName must be set when worker is specified")
+		}
+		for i := range bsl.Spec.Worker.TokenVolumes {
+			tv := bsl.Spec.Worker.TokenVolumes[i]
+			if tv.Audience == "" || tv.MountPath == "" || tv.Path == "" {
+				return errors.New("each worker.tokenVolumes entry must set audience, mountPath and path")
+			}
+		}
 	}
 	return nil
 }

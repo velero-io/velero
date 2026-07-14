@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1073,6 +1074,74 @@ func TestNewObjectBackupStoreGetterConfig(t *testing.T) {
 			require.Equal(t, tc.wantConfig, objStore.Config)
 		})
 	}
+}
+
+// fakeWorkerGetterFactory is a test WorkerObjectStoreGetterFactory that returns a
+// preconfigured ObjectStoreGetter and records the location it was invoked with.
+type fakeWorkerGetterFactory struct {
+	getter     ObjectStoreGetter
+	err        error
+	calledWith *velerov1api.BackupStorageLocation
+}
+
+func (f *fakeWorkerGetterFactory) GetterFor(location *velerov1api.BackupStorageLocation, _ logrus.FieldLogger) (ObjectStoreGetter, error) {
+	f.calledWith = location
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.getter, nil
+}
+
+// TestNewObjectBackupStoreGetterWorker verifies that BackupStorageLocations with a
+// Worker spec are routed through the injected worker getter (running under the
+// worker's identity) and that the central-pod credentials file is not passed along.
+func TestNewObjectBackupStoreGetterWorker(t *testing.T) {
+	provider := "provider"
+	bucket := "bucket"
+
+	workerSpec := &velerov1api.BackupStorageLocationWorker{ServiceAccountName: "tenant-sa"}
+	credential := builder.ForSecretKeySelector("creds", "key").Result()
+
+	t.Run("worker-backed BSL is served by the worker getter and skips credentialsFile", func(t *testing.T) {
+		localStore := newInMemoryObjectStore(bucket)
+		workerStore := newInMemoryObjectStore(bucket)
+
+		factory := &fakeWorkerGetterFactory{getter: &objectStoreGetter{provider: workerStore}}
+		getter := NewObjectBackupStoreGetter(
+			velerotest.NewFakeCredentialsFileStore("/tmp/credentials/secret-file", nil),
+			WithWorkerObjectStoreGetterFactory(factory),
+		)
+
+		location := builder.ForBackupStorageLocation("velero", "bsl-1").
+			Provider(provider).Bucket(bucket).Credential(credential).Worker(workerSpec).Result()
+
+		_, err := getter.Get(location, &objectStoreGetter{provider: localStore}, velerotest.NewLogger())
+		require.NoError(t, err)
+
+		// The worker store must have been initialized, not the local one.
+		require.NotNil(t, factory.calledWith)
+		assert.Equal(t, "bsl-1", factory.calledWith.Name)
+		assert.Equal(t, map[string]string{"bucket": bucket, "prefix": ""}, workerStore.Config)
+		assert.Nil(t, localStore.Config)
+		// The central-pod credentials file path must not leak to the worker.
+		_, hasCreds := workerStore.Config["credentialsFile"]
+		assert.False(t, hasCreds)
+	})
+
+	t.Run("worker spec without an injected factory falls back to the local getter", func(t *testing.T) {
+		localStore := newInMemoryObjectStore(bucket)
+
+		getter := NewObjectBackupStoreGetter(velerotest.NewFakeCredentialsFileStore("/tmp/credentials/secret-file", nil))
+
+		location := builder.ForBackupStorageLocation("velero", "bsl-2").
+			Provider(provider).Bucket(bucket).Credential(credential).Worker(workerSpec).Result()
+
+		_, err := getter.Get(location, &objectStoreGetter{provider: localStore}, velerotest.NewLogger())
+		require.NoError(t, err)
+
+		// Without a factory, the local store handles it and keeps the credentials file.
+		assert.Equal(t, "/tmp/credentials/secret-file", localStore.Config["credentialsFile"])
+	})
 }
 
 func TestGetBackupVolumeInfos(t *testing.T) {

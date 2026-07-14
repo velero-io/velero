@@ -46,4 +46,9 @@ const (
 
 	// APIGroupVersionsFeatureFlag is the feature flag string that defines whether or not to handle multiple API Group Versions
 	APIGroupVersionsFeatureFlag = "EnableAPIGroupVersions"
+
+	// BSLWorkerIdentityFeatureFlag is the feature flag string that defines whether or not a
+	// BackupStorageLocation may run its object-store operations in a dedicated worker pod
+	// under a distinct pod identity (see BackupStorageLocationSpec.Worker).
+	BSLWorkerIdentityFeatureFlag = "EnableBSLWorkerIdentity"
 )
