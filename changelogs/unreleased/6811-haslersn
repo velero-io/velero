@@ -1,0 +1,1 @@
+Do not run preHook/postHook on Succeeded/Pending/Failed pods and log error for Pending/Failed/Unknown pods with hooks.
