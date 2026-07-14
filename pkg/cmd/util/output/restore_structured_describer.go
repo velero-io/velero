@@ -203,6 +203,14 @@ func describeRestoreSpecInSF(d *StructuredDescriber, spec velerov1api.RestoreSpe
 		specInfo["resourceModifier"] = describeResourceModifierInSF(spec.ResourceModifier)
 	}
 
+	// resource policy
+	if spec.ResourcePolicy != nil {
+		specInfo["resourcePolicy"] = map[string]any{
+			"type": spec.ResourcePolicy.Kind,
+			"name": spec.ResourcePolicy.Name,
+		}
+	}
+
 	// uploader config
 	if spec.UploaderConfig != nil {
 		uploaderConfig := map[string]any{}
@@ -439,10 +447,10 @@ func describeRestoreItemOperationsInSF(ctx context.Context, kbClient kbclient.Cl
 	opsList := make([]map[string]any, 0, len(operations))
 	for _, op := range operations {
 		opEntry := map[string]any{
-			"resource":               fmt.Sprintf("%s %s/%s", op.Spec.ResourceIdentifier, op.Spec.ResourceIdentifier.Namespace, op.Spec.ResourceIdentifier.Name),
+			"resource":                fmt.Sprintf("%s %s/%s", op.Spec.ResourceIdentifier, op.Spec.ResourceIdentifier.Namespace, op.Spec.ResourceIdentifier.Name),
 			"restoreItemActionPlugin": op.Spec.RestoreItemAction,
-			"operationID":            op.Spec.OperationID,
-			"phase":                  op.Status.Phase,
+			"operationID":             op.Spec.OperationID,
+			"phase":                   op.Status.Phase,
 		}
 		if op.Status.Error != "" {
 			opEntry["error"] = op.Status.Error
