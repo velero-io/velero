@@ -1,7 +1,11 @@
 ![100]
-
+[![Nightly Status](https://us-central1-velero-gcp.cloudfunctions.net/velero-nightly)](https://www.googleapis.com/storage/v1/b/velero-nightly-result/o)
 [![Build Status][1]][2] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3811/badge)](https://bestpractices.coreinfrastructure.org/projects/3811)
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/velero-io/velero)
+
+
+
+
 
 ## Overview
 
