@@ -86,7 +86,7 @@ backup which created the backup repository, then Velero will not be able to conn
 ### Configure Node Agent DaemonSet spec
 
 After installation, some PaaS/CaaS platforms based on Kubernetes also require modifications the node-agent DaemonSet spec. 
-The steps in this section are only needed if you are installing on RancherOS, Nutanix, OpenShift, VMware Tanzu Kubernetes Grid 
+The steps in this section are only needed if you are installing on RancherOS, k0s, Nutanix, OpenShift, VMware Tanzu Kubernetes Grid 
 Integrated Edition (formerly VMware Enterprise PKS), or Microsoft Azure.  
 
 
@@ -106,6 +106,25 @@ to
 ```yaml
 hostPath:
   path: /opt/rke/var/lib/kubelet/pods
+```
+
+
+**k0s**
+
+
+Update the host path for volumes in the node-agent DaemonSet in the Velero namespace from `/var/lib/kubelet/pods` to 
+`/var/lib/k0s/kubelet/pods/`.  
+
+```yaml
+hostPath:
+  path: /var/lib/kubelet/pods
+```
+
+to
+
+```yaml
+hostPath:
+  path: /var/lib/k0s/kubelet/pods/
 ```
 
 **Nutanix**
