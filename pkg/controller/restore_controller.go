@@ -369,7 +369,7 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 	// the schedule
 	if restore.Spec.ScheduleName != "" {
 		selector := labels.SelectorFromSet(labels.Set(map[string]string{
-			api.ScheduleNameLabel: restore.Spec.ScheduleName,
+			api.ScheduleNameLabel: label.GetValidName(restore.Spec.ScheduleName),
 		}))
 
 		backupList := &api.BackupList{}
