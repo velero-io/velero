@@ -37,6 +37,8 @@ ark get backups [flags]
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
 ```
 
+**Note:** For backups in the "New" state (not yet executed), the EXPIRES column will display "N/A" instead of a date, indicating that the backup is not yet eligible for expiration or garbage collection.
+
 ### SEE ALSO
 * [ark get](ark_get.md)	 - Get ark resources
 
