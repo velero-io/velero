@@ -1040,8 +1040,59 @@ func (ctx *restoreContext) processSelectedResource(
 				// have to try to create them multiple times.
 				existingNamespaces.Insert(targetNS)
 			}
-			// For namespaces resources we don't need to following steps
+			// For namespaces resources we restore metadata when existing resource policy is update, else continue
 			if groupResource == kuberesource.Namespaces {
+				if existingNamespaces.Has(targetNS) && velerov1api.PolicyTypeUpdate == ctx.restore.Spec.ExistingResourcePolicy {
+					// Fetch the current namespace from the cluster
+					existingNS, err := ctx.namespaceClient.Get(go_context.TODO(), targetNS, metav1.GetOptions{})
+					if err != nil {
+						errs.AddVeleroError(errors.Wrap(err, "fetching existing namespace"))
+						continue
+					}
+
+					// Retrieve the backup namespace definition
+					backupNS := getNamespace(
+						ctx.log.WithField("namespace", namespace),
+						archive.GetItemFilePath(ctx.restoreDir, "namespaces", "", namespace),
+						targetNS,
+					)
+
+					// Convert both namespaces to unstructured for patching
+					existingNSUnstructured, err := runtime.DefaultUnstructuredConverter.ToUnstructured(existingNS)
+					if err != nil {
+						errs.AddVeleroError(errors.Wrap(err, "converting existing namespace to unstructured"))
+						continue
+					}
+					backupNSUnstructured, err := runtime.DefaultUnstructuredConverter.ToUnstructured(backupNS)
+					if err != nil {
+						errs.AddVeleroError(errors.Wrap(err, "converting backup namespace to unstructured"))
+						continue
+					}
+
+					// Add restore labels to backup object to ensure accurate patch diff
+					backupNSUnstructuredObj := &unstructured.Unstructured{Object: backupNSUnstructured}
+					addRestoreLabels(backupNSUnstructuredObj, ctx.restore.Name, ctx.restore.Spec.BackupName)
+					// Construct the GroupResource for namespaces
+					namespaceGR := schema.GroupResource{Group: "", Resource: "namespaces"}
+
+					// Use getResourceClient to obtain a dynamic client for the namespace resource
+					resourceClient, err := ctx.getResourceClient(namespaceGR, &unstructured.Unstructured{Object: backupNSUnstructured}, "")
+					if err != nil {
+						errs.AddVeleroError(errors.Wrap(err, "getting dynamic client for Namespace resource"))
+						continue
+					}
+
+					// Process the update policy using the existing function
+					warningsFromUpdateRP, errsFromUpdateRP := ctx.processUpdateResourcePolicy(
+						&unstructured.Unstructured{Object: existingNSUnstructured},
+						&unstructured.Unstructured{Object: existingNSUnstructured}, // Pass existingNS with restore labels for the second parameter
+						backupNSUnstructuredObj,
+						targetNS,
+						resourceClient,
+					)
+					warnings.Merge(&warningsFromUpdateRP)
+					errs.Merge(&errsFromUpdateRP)
+				}
 				continue
 			}
 
@@ -2563,7 +2614,10 @@ func (ctx *restoreContext) getOrderedResourceCollection(
 				continue
 			}
 
-			if namespace == "" && !boolptr.IsSetToTrue(ctx.restore.Spec.IncludeClusterResources) && !ctx.namespaceIncludesExcludes.IncludeEverything() {
+			if groupResource.Resource == "namespaces" {
+				// Allow restoring namespaces even when cluster-scoped resources are excluded.
+				// No-op: intentionally do not `continue` here.
+			} else if namespace == "" && !boolptr.IsSetToTrue(ctx.restore.Spec.IncludeClusterResources) && !ctx.namespaceIncludesExcludes.IncludeEverything() {
 				ctx.log.Infof("Skipping resource %s because it's cluster-scoped and only specific namespaces are included in the restore", resource)
 				continue
 			}
