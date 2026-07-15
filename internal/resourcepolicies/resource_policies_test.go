@@ -1242,3 +1242,53 @@ func TestPVCPhaseMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestActionGetDataMover(t *testing.T) {
+	testCases := []struct {
+		name         string
+		action       *Action
+		expectedMove string
+		expectedOK   bool
+	}{
+		{
+			name:       "nil action",
+			action:     nil,
+			expectedOK: false,
+		},
+		{
+			name:       "snapshot action without parameters",
+			action:     &Action{Type: Snapshot},
+			expectedOK: false,
+		},
+		{
+			name:         "snapshot action with velero-fs dataMover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero-fs"}},
+			expectedMove: "velero-fs",
+			expectedOK:   true,
+		},
+		{
+			name:         "snapshot action with velero-block dataMover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero-block"}},
+			expectedMove: "velero-block",
+			expectedOK:   true,
+		},
+		{
+			name:       "non-snapshot action ignores dataMover",
+			action:     &Action{Type: FSBackup, Parameters: map[string]any{"dataMover": "velero-fs"}},
+			expectedOK: false,
+		},
+		{
+			name:       "snapshot action with non-string dataMover",
+			action:     &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": 123}},
+			expectedOK: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataMover, ok := tc.action.GetDataMover()
+			assert.Equal(t, tc.expectedOK, ok)
+			assert.Equal(t, tc.expectedMove, dataMover)
+		})
+	}
+}

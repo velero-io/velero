@@ -46,12 +46,53 @@ const (
 	Custom VolumeActionType = "custom"
 )
 
+const (
+	// DataMoverParameter is the key of the action parameter that selects the data
+	// mover to be used for the matched volumes when the action type is snapshot.
+	DataMoverParameter = "dataMover"
+
+	// DataMoverVelero refers to the default built-in data mover. The default data
+	// mover may change among releases; currently it is the file system data mover.
+	DataMoverVelero = "velero"
+	// DataMoverVeleroFS refers to the Velero file system data mover.
+	DataMoverVeleroFS = "velero-fs"
+	// DataMoverVeleroBlock refers to the Velero block data mover.
+	DataMoverVeleroBlock = "velero-block"
+)
+
+// validDataMovers is the set of data mover values accepted in the snapshot
+// action's dataMover parameter.
+var validDataMovers = map[string]struct{}{
+	DataMoverVelero:      {},
+	DataMoverVeleroFS:    {},
+	DataMoverVeleroBlock: {},
+}
+
 // Action defined as one action for a specific way of backup
 type Action struct {
 	// Type defined specific type of action, currently only support 'skip'
 	Type VolumeActionType `yaml:"type"`
 	// Parameters defined map of parameters when executing a specific action
 	Parameters map[string]any `yaml:"parameters,omitempty"`
+}
+
+// GetDataMover returns the data mover configured in the snapshot action's
+// parameters. The second return value is false when the dataMover parameter is
+// not set, in which case callers should fall back to the per-backup DataMover
+// value. It only applies to the snapshot action type.
+func (a *Action) GetDataMover() (string, bool) {
+	if a == nil || a.Type != Snapshot || len(a.Parameters) == 0 {
+		return "", false
+	}
+	raw, ok := a.Parameters[DataMoverParameter]
+	if !ok {
+		return "", false
+	}
+	dataMover, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	return dataMover, true
 }
 
 // ResourceFilter defines a filter for specific resource kinds.

@@ -97,6 +97,22 @@ func (a *Action) validate() error {
 		return fmt.Errorf("invalid action type %s", a.Type)
 	}
 
-	// TODO validate parameters
+	// validate parameters
+	if raw, ok := a.Parameters[DataMoverParameter]; ok {
+		// the dataMover parameter is only meaningful for the snapshot action
+		if a.Type != Snapshot {
+			return fmt.Errorf("parameter %q is only supported for the %q action, but the action type is %q",
+				DataMoverParameter, Snapshot, a.Type)
+		}
+		dataMover, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("parameter %q must be a string, got %T", DataMoverParameter, raw)
+		}
+		if _, ok := validDataMovers[dataMover]; !ok {
+			return fmt.Errorf("invalid %q value %q, valid values are %q, %q, %q",
+				DataMoverParameter, dataMover, DataMoverVelero, DataMoverVeleroFS, DataMoverVeleroBlock)
+		}
+	}
+
 	return nil
 }
