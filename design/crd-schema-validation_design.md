@@ -48,7 +48,7 @@ type crdSchemaExpectation struct {
 func expectedCRDSchemas() []crdSchemaExpectation
 ```
 
-For each registered kind, the `Spec`/`Status` field types are read off the registered item type via reflection. `jsonFieldNames(t reflect.Type)` walks a struct's fields (following anonymous/embedded fields) and collects the top-level `json` tag names, skipping untagged and `json:"-"` fields.
+For each registered kind, the `Spec`/`Status` field types are read off the registered item type via reflection. `jsonFieldNames(t reflect.Type)` walks a struct's fields and collects the top-level `json` tag names, skipping untagged and `json:"-"` fields. It follows `encoding/json`'s own promotion rule for anonymous/embedded fields: an embedded field with **no** JSON tag is flattened into the parent (its own fields collected in place of a name for the embedded field itself), while an embedded field with an **explicit** tag name (e.g. an embedded `Metadata` tagged `json:"metadata,omitempty"`) is treated as an ordinary named field and is not flattened.
 
 ### Installed schema extraction and comparison
 
@@ -90,12 +90,12 @@ A new server flag, `--crd-schema-check`, is added to `pkg/cmd/server/config/conf
 
 ## Implementation
 
-- **Expected schema + validation logic.** New `pkg/cmd/server/crd_check.go`: `crdSchemaExpectation`, `expectedCRDSchemas()`, `jsonFieldNames()`, `schemaPropertyNames()` (fail-closed: returns an explicit "path traversable" bool distinct from "no properties at this node"), `validateCRDSchemas()`, `runCRDSchemaValidation()` (CRD-fetch errors and missing-version-schema errors now feed into the aggregated failure instead of being skipped), `checkMissing()`.
+- **Expected schema + validation logic.** New `pkg/cmd/server/crd_check.go`: `crdSchemaExpectation`, `expectedCRDSchemas()`, `jsonFieldNames()` (flattens anonymous embedded fields only when they carry no explicit json tag, matching `encoding/json` promotion rules), `schemaPropertyNames()` (fail-closed: returns an explicit "path traversable" bool distinct from "no properties at this node"), `validateCRDSchemas()`, `runCRDSchemaValidation()` (CRD-fetch errors and missing-version-schema errors now feed into the aggregated failure instead of being skipped), `checkMissing()`.
 - **Server flag and config.** Add `CRDSchemaCheck *flag.Enum` to `Config` in `pkg/cmd/server/config/config.go`, default it to `flag.NewEnum("warn", "warn", "strict", "skip")` in `GetDefaultConfig`, and bind `--crd-schema-check` via `flags.Var` in `Config.BindFlags` (rejects invalid values at parse time).
 - **Call site.** In `pkg/cmd/server/server.go`, call `s.validateCRDSchemas()` in `run()` right after `veleroResourcesExist()` succeeds.
 - **Unit tests.** New `pkg/cmd/server/crd_check_test.go` covering `jsonFieldNames` (tags, embedding, `omitempty`/`-`), `schemaPropertyNames` (path traversal), `checkMissing` (matching/missing/extra fields), `expectedCRDSchemas` (all registered kinds produce an expectation), and `runCRDSchemaValidation` across `warn`/`strict`/`skip` against a fake apiextensions client.
 
-Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910) (latest relevant commit as of this update: `ec5465abe`, "fail closed in strict mode, reject invalid flag values").
+Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910) (latest relevant commit as of this update: `9e9dbac8a`, "fix(crd-schema-check): don't flatten embedded fields with an explicit json tag").
 
 ## Security Considerations
 
