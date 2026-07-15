@@ -52,7 +52,7 @@ For each registered kind, the `Spec`/`Status` field types are read off the regis
 
 ### Installed schema extraction and comparison
 
-`schemaPropertyNames(schema *apiextv1.JSONSchemaProps, path string)` walks the CRD's `openAPIV3Schema` down a dotted path (`"spec"` or `"status"`) and returns the property names defined at that node.
+`schemaPropertyNames(schema *apiextv1.JSONSchemaProps, path string) (sets.Set[string], bool)` walks the CRD's `openAPIV3Schema` down a dotted path (`"spec"` or `"status"`) and returns the property names defined at that node, plus a boolean distinguishing "path could not be traversed" (`false` — e.g. the CRD's schema has no `spec`/`status` section at all) from "the node exists but legitimately declares no properties" (`true`, empty set). This distinction is what makes the check fail closed: `checkMissing` treats an untraversable path as an empty installed-field set, so every expected field is reported missing, instead of silently treating an absent section as "nothing to check" (an earlier version of the check returned `nil` for both cases, which let a CRD with a missing `spec`/`status` section pass validation entirely).
 
 `checkMissing(goType, schema, section, crdName)` diffs the expected (Go) field set against the installed (CRD) field set and returns only fields the **server expects but the CRD does not have** — i.e. an outdated CRD. Fields present in the CRD but not in the current Go type are intentionally not flagged, since a CRD newer than the server is forward-compatible.
 
@@ -63,8 +63,8 @@ For each registered kind, the `Spec`/`Status` field types are read off the regis
 1. Returns immediately, logging at info level, if `s.config.CRDSchemaCheck == "skip"`.
 2. Builds an `apiextclient.Interface` from the server's existing kube client config — no new RBAC is required, since Velero's server already needs `get` on CRDs for other startup checks.
 3. Delegates to `runCRDSchemaValidation()`, which for each expected CRD:
-   - `Get`s the CRD by name (`<plural>.velero.io`); a fetch error is logged as a warning and that CRD is skipped rather than failing the whole check.
-   - Locates the schema for the CRD version matching `apiGroupVersion`.
+   - `Get`s the CRD by name (`<plural>.velero.io`); a fetch error is logged as a warning **and** recorded as a missing-schema entry for that CRD, so it contributes to the aggregated failure in `strict` mode instead of being silently skipped.
+   - Locates the schema for the CRD version matching `apiGroupVersion`; a missing version schema is recorded the same fail-closed way.
    - Runs `checkMissing` against both `spec` and `status`.
    - Aggregates all missing fields across all CRDs into one message, naming each as `<crd>: <section>.<field>` and suggesting `velero install --crds-only`.
 4. In `strict` mode, the aggregated message is returned as an error (server startup fails). In `warn` mode (default), it is logged at error level and startup continues.
@@ -83,18 +83,19 @@ if err := s.validateCRDSchemas(); err != nil {
 
 A new server flag, `--crd-schema-check`, is added to `pkg/cmd/server/config/config.go`:
 
-- New `Config.CRDSchemaCheck string` field, default `"warn"`.
+- `Config.CRDSchemaCheck` is a `*flag.Enum` (Velero's existing `pflag.Value`-implementing enum flag type in `pkg/cmd/util/flag`), constructed via `flag.NewEnum("warn", "warn", "strict", "skip")` — default `"warn"`, restricted to those three values.
 - Valid values: `warn` (log an error-level message but continue starting — default, preserves current behavior for existing deployments), `strict` (fail startup on mismatch), `skip` (perform no check).
-- A named-mode string flag was chosen over a bool so that `skip` remains available independently of `strict`/`warn` — for example during a rolling upgrade window where a mismatch is expected and should not even be logged.
+- Using `flag.Enum` instead of a plain string means an invalid value (e.g. `--crd-schema-check=bogus`) is rejected by pflag at flag-parse time with a clear error, instead of silently falling through the mode switch inside `validateCRDSchemas`.
+- A named-mode flag was chosen over a bool so that `skip` remains available independently of `strict`/`warn` — for example during a rolling upgrade window where a mismatch is expected and should not even be logged.
 
 ## Implementation
 
-- **Expected schema + validation logic.** New `pkg/cmd/server/crd_check.go`: `crdSchemaExpectation`, `expectedCRDSchemas()`, `jsonFieldNames()`, `schemaPropertyNames()`, `validateCRDSchemas()`, `runCRDSchemaValidation()`, `checkMissing()`.
-- **Server flag and config.** Add `CRDSchemaCheck` to `Config` in `pkg/cmd/server/config/config.go`, default it to `"warn"` in `GetDefaultConfig`, and bind `--crd-schema-check` in `Config.BindFlags`.
+- **Expected schema + validation logic.** New `pkg/cmd/server/crd_check.go`: `crdSchemaExpectation`, `expectedCRDSchemas()`, `jsonFieldNames()`, `schemaPropertyNames()` (fail-closed: returns an explicit "path traversable" bool distinct from "no properties at this node"), `validateCRDSchemas()`, `runCRDSchemaValidation()` (CRD-fetch errors and missing-version-schema errors now feed into the aggregated failure instead of being skipped), `checkMissing()`.
+- **Server flag and config.** Add `CRDSchemaCheck *flag.Enum` to `Config` in `pkg/cmd/server/config/config.go`, default it to `flag.NewEnum("warn", "warn", "strict", "skip")` in `GetDefaultConfig`, and bind `--crd-schema-check` via `flags.Var` in `Config.BindFlags` (rejects invalid values at parse time).
 - **Call site.** In `pkg/cmd/server/server.go`, call `s.validateCRDSchemas()` in `run()` right after `veleroResourcesExist()` succeeds.
 - **Unit tests.** New `pkg/cmd/server/crd_check_test.go` covering `jsonFieldNames` (tags, embedding, `omitempty`/`-`), `schemaPropertyNames` (path traversal), `checkMissing` (matching/missing/extra fields), `expectedCRDSchemas` (all registered kinds produce an expectation), and `runCRDSchemaValidation` across `warn`/`strict`/`skip` against a fake apiextensions client.
 
-Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910).
+Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910) (latest relevant commit as of this update: `ec5465abe`, "fail closed in strict mode, reject invalid flag values").
 
 ## Security Considerations
 
