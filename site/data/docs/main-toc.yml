@@ -35,6 +35,8 @@ toc:
         url: /resource-filtering
       - page: Fine-Grained Backup Filters
         url: /fine-grained-backup-filters
+      - page: Fine-grained restore filters
+        url: /fine-grained-restore-filters
       - page: Namespace glob patterns
         url: /namespace-glob-patterns
       - page: Backup reference
