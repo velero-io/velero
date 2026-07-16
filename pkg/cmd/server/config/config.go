@@ -182,6 +182,7 @@ type Config struct {
 	ItemBlockWorkerCount                int
 	ConcurrentBackups                   int
 	GlobalBackupVolumePoliciesConfigMap string
+	CRDSchemaCheck                      *flag.Enum
 }
 
 func GetDefaultConfig() *Config {
@@ -215,6 +216,7 @@ func GetDefaultConfig() *Config {
 		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
 		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
 		ConcurrentBackups:              DefaultConcurrentBackups,
+		CRDSchemaCheck:                 flag.NewEnum("warn", "warn", "strict", "skip"),
 	}
 
 	return config
@@ -281,5 +283,10 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"global-backup-volume-policies-configmap",
 		c.GlobalBackupVolumePoliciesConfigMap,
 		"The name of a ConfigMap in the Velero install namespace holding global backup volume policies that are merged into every backup. Optional.",
+	)
+	flags.Var(
+		c.CRDSchemaCheck,
+		"crd-schema-check",
+		fmt.Sprintf("CRD schema validation mode during server startup. Valid values are %s.", strings.Join(c.CRDSchemaCheck.AllowedValues(), ", ")),
 	)
 }

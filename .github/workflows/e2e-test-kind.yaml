@@ -99,6 +99,7 @@ jobs:
             \"k8s\":$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -v -E "alpha|beta" | grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]'),\
             \"labels\":[\
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
+              \"CRDSchemaCheck\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
