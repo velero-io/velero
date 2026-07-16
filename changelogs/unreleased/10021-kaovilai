@@ -1,0 +1,1 @@
+Replace helm/kind-action with a direct kind CLI install using retrying curl, fixing intermittent E2E CI failures caused by transient network resets during the kind binary download
