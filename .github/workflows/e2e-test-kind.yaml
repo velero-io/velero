@@ -137,11 +137,16 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: helm/kind-action@v1
-        with:
-          cluster_name: "kind"
-          version: "v0.32.0"
-          node_image: "kindest/node:v${{ matrix.k8s }}"
+      - name: Install kind
+        run: |
+          KIND_VERSION="v0.32.0"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            -o ./kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name kind --image "kindest/node:v${{ matrix.k8s }}" --wait 300s
       - name: Fetch built CLI
         id: cli-cache
         uses: actions/cache@v4
@@ -166,7 +171,7 @@ jobs:
           EOF
 
           # Match kubectl version to k8s server version
-          curl -LO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -LO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
           git clone https://github.com/vmware-tanzu-experiments/distributed-data-generator.git -b main /tmp/kibishii
