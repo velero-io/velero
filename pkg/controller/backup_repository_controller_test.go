@@ -34,6 +34,7 @@ import (
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/repository/maintenance"
@@ -84,6 +85,27 @@ func mockBackupRepositoryCR() *velerov1api.BackupRepository {
 	}
 }
 
+func mockBackupStorageLocationCR() *velerov1api.BackupStorageLocation {
+	return &velerov1api.BackupStorageLocation{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "default",
+		},
+		Spec: velerov1api.BackupStorageLocationSpec{
+			Provider: "aws",
+			StorageType: velerov1api.StorageType{
+				ObjectStorage: &velerov1api.ObjectStorageLocation{
+					Bucket: "test-bucket",
+					Prefix: "test-prefix",
+				},
+			},
+			Config: map[string]string{
+				"region": "us-east-1",
+			},
+		},
+	}
+}
+
 func TestPatchBackupRepository(t *testing.T) {
 	rr := mockBackupRepositoryCR()
 	reconciler := mockBackupRepoReconciler(t, "", nil, nil)
@@ -108,11 +130,15 @@ func TestCheckNotReadyRepo(t *testing.T) {
 		err := reconciler.Client.Create(t.Context(), rr)
 		require.NoError(t, err)
 
-		_, err = reconciler.checkNotReadyRepo(t.Context(), rr, reconciler.logger)
+		bsl := mockBackupStorageLocationCR()
+
+		_, err = reconciler.checkNotReadyRepo(t.Context(), rr, bsl, reconciler.logger)
 		require.NoError(t, err)
 		assert.Equal(t, velerov1api.BackupRepositoryPhaseReady, rr.Status.Phase)
 		// ResticIdentifier should remain empty for kopia
 		assert.Empty(t, rr.Spec.ResticIdentifier)
+		// the BSL config hash should be recorded when the repo becomes ready
+		assert.Equal(t, bslConfigHash(bsl), rr.Annotations[velerov1api.BSLConfigHashAnnotation])
 	})
 }
 
@@ -403,9 +429,172 @@ func TestInitializeRepo(t *testing.T) {
 	err := reconciler.Client.Create(t.Context(), rr)
 	require.NoError(t, err)
 
-	err = reconciler.initializeRepo(t.Context(), rr, reconciler.logger)
+	bsl := mockBackupStorageLocationCR()
+
+	err = reconciler.initializeRepo(t.Context(), rr, bsl, reconciler.logger)
 	require.NoError(t, err)
 	assert.Equal(t, velerov1api.BackupRepositoryPhaseReady, rr.Status.Phase)
+	// the BSL config hash should be recorded when the repo becomes ready
+	assert.Equal(t, bslConfigHash(bsl), rr.Annotations[velerov1api.BSLConfigHashAnnotation])
+}
+
+func TestBSLConfigHash(t *testing.T) {
+	baseHash := bslConfigHash(mockBackupStorageLocationCR())
+
+	assert.Equal(t, baseHash, bslConfigHash(mockBackupStorageLocationCR()), "hash should be deterministic")
+
+	mutations := []struct {
+		name   string
+		mutate func(*velerov1api.BackupStorageLocation)
+	}{
+		{
+			name:   "bucket change",
+			mutate: func(bsl *velerov1api.BackupStorageLocation) { bsl.Spec.ObjectStorage.Bucket = "other-bucket" },
+		},
+		{
+			name:   "prefix change",
+			mutate: func(bsl *velerov1api.BackupStorageLocation) { bsl.Spec.ObjectStorage.Prefix = "other-prefix" },
+		},
+		{
+			name:   "CACert change",
+			mutate: func(bsl *velerov1api.BackupStorageLocation) { bsl.Spec.ObjectStorage.CACert = []byte("fake-cert") },
+		},
+		{
+			name: "CACertRef change",
+			mutate: func(bsl *velerov1api.BackupStorageLocation) {
+				bsl.Spec.ObjectStorage.CACertRef = &corev1api.SecretKeySelector{
+					LocalObjectReference: corev1api.LocalObjectReference{Name: "cert-secret"},
+					Key:                  "ca.crt",
+				}
+			},
+		},
+		{
+			name:   "config change",
+			mutate: func(bsl *velerov1api.BackupStorageLocation) { bsl.Spec.Config["region"] = "us-west-2" },
+		},
+	}
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			bsl := mockBackupStorageLocationCR()
+			test.mutate(bsl)
+			assert.NotEqual(t, baseHash, bslConfigHash(bsl))
+		})
+	}
+
+	t.Run("fields not affecting repo connectivity don't change the hash", func(t *testing.T) {
+		bsl := mockBackupStorageLocationCR()
+		bsl.Spec.Provider = "other-provider"
+		bsl.Spec.AccessMode = velerov1api.BackupStorageLocationAccessModeReadOnly
+		bsl.Spec.Credential = &corev1api.SecretKeySelector{
+			LocalObjectReference: corev1api.LocalObjectReference{Name: "creds"},
+			Key:                  "cloud",
+		}
+		assert.Equal(t, baseHash, bslConfigHash(bsl))
+	})
+
+	t.Run("nil object storage", func(t *testing.T) {
+		bsl := mockBackupStorageLocationCR()
+		bsl.Spec.StorageType.ObjectStorage = nil
+		bsl.Spec.Config = nil
+		assert.NotEmpty(t, bslConfigHash(bsl))
+		assert.NotEqual(t, baseHash, bslConfigHash(bsl))
+	})
+}
+
+func TestInvalidateStaleReposForBSLOnCreate(t *testing.T) {
+	bsl := mockBackupStorageLocationCR()
+
+	repoForBSL := func(name string, phase velerov1api.BackupRepositoryPhase, hash string) *velerov1api.BackupRepository {
+		repo := &velerov1api.BackupRepository{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: velerov1api.DefaultNamespace,
+				Name:      name,
+				Labels: map[string]string{
+					velerov1api.StorageLocationLabel: label.GetValidName(bsl.Name),
+				},
+			},
+			Spec: velerov1api.BackupRepositorySpec{
+				BackupStorageLocation: bsl.Name,
+			},
+			Status: velerov1api.BackupRepositoryStatus{
+				Phase: phase,
+			},
+		}
+		if hash != "" {
+			repo.Annotations = map[string]string{velerov1api.BSLConfigHashAnnotation: hash}
+		}
+		return repo
+	}
+
+	tests := []struct {
+		name             string
+		repo             *velerov1api.BackupRepository
+		expectInvalidate bool
+	}{
+		{
+			name:             "ready repo with mismatched hash is invalidated",
+			repo:             repoForBSL("repo", velerov1api.BackupRepositoryPhaseReady, "stale-hash"),
+			expectInvalidate: true,
+		},
+		{
+			name: "ready repo with matching hash is untouched",
+			repo: repoForBSL("repo", velerov1api.BackupRepositoryPhaseReady, bslConfigHash(bsl)),
+		},
+		{
+			name: "ready repo without hash is untouched",
+			repo: repoForBSL("repo", velerov1api.BackupRepositoryPhaseReady, ""),
+		},
+		{
+			name: "not-ready repo is untouched",
+			repo: repoForBSL("repo", velerov1api.BackupRepositoryPhaseNotReady, "stale-hash"),
+		},
+		{
+			name: "repo of another BSL is untouched",
+			repo: func() *velerov1api.BackupRepository {
+				repo := repoForBSL("repo", velerov1api.BackupRepositoryPhaseReady, "stale-hash")
+				repo.Labels[velerov1api.StorageLocationLabel] = "other-bsl"
+				return repo
+			}(),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler := mockBackupRepoReconciler(t, "", nil, nil)
+			require.NoError(t, reconciler.Client.Create(t.Context(), test.repo))
+
+			originalPhase := test.repo.Status.Phase
+			requests := reconciler.invalidateStaleReposForBSLOnCreate(t.Context(), bsl)
+
+			after := &velerov1api.BackupRepository{}
+			require.NoError(t, reconciler.Client.Get(t.Context(), types.NamespacedName{Namespace: test.repo.Namespace, Name: test.repo.Name}, after))
+
+			if test.expectInvalidate {
+				assert.Len(t, requests, 1)
+				assert.Equal(t, velerov1api.BackupRepositoryPhaseNotReady, after.Status.Phase)
+				assert.Equal(t, msgBSLConfigChanged, after.Status.Message)
+			} else {
+				assert.Empty(t, requests)
+				assert.Equal(t, originalPhase, after.Status.Phase)
+				assert.Empty(t, after.Status.Message)
+			}
+		})
+	}
+
+	t.Run("list error returns no requests", func(t *testing.T) {
+		reconciler := NewBackupRepoReconciler(
+			velerov1api.DefaultNamespace,
+			velerotest.NewLogger(),
+			clientFake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build(),
+			nil,
+			testMaintenanceFrequency,
+			"",
+			"",
+			logrus.InfoLevel,
+			nil,
+			nil,
+		)
+		assert.Empty(t, reconciler.invalidateStaleReposForBSLOnCreate(t.Context(), bsl))
+	})
 }
 
 func TestBackupRepoReconcile(t *testing.T) {
@@ -1580,12 +1769,13 @@ func TestInitializeRepoWithRepositoryTypes(t *testing.T) {
 			nil,
 		)
 
-		err := reconciler.initializeRepo(t.Context(), rr, reconciler.logger)
+		err := reconciler.initializeRepo(t.Context(), rr, location, reconciler.logger)
 		require.NoError(t, err)
 
 		// Verify ResticIdentifier is NOT set for kopia
 		assert.Empty(t, rr.Spec.ResticIdentifier)
 		assert.Equal(t, velerov1api.BackupRepositoryPhaseReady, rr.Status.Phase)
+		assert.Equal(t, bslConfigHash(location), rr.Annotations[velerov1api.BSLConfigHashAnnotation])
 	})
 }
 
