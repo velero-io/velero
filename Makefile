@@ -489,6 +489,15 @@ gen-docs:
 test-e2e: local
 	$(MAKE) -e VERSION=$(VERSION) -C test/ run-e2e
 
+# Runs the e2e suite against a kind cluster and MinIO that live entirely inside a
+# single privileged wrapper container (nested dockerd). The kind cluster, its
+# kubeconfig, and MinIO never exist on the host - only the wrapper image/container
+# touch the host engine. See hack/e2e-kind.sh and test/e2e/README.md for details
+# and prerequisites.
+.PHONY: test-e2e-kind
+test-e2e-kind:
+	./hack/e2e-kind.sh
+
 .PHONY: test-perf
 test-perf: local
 	$(MAKE) -e VERSION=$(VERSION) -C test/ run-perf
