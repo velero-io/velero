@@ -62,7 +62,7 @@ For each registered kind, the `Spec`/`Status` field types are read off the regis
 
 1. Returns immediately, logging at info level, if `s.config.CRDSchemaCheck == "skip"`.
 2. Builds an `apiextclient.Interface` from the server's existing kube client config — no new RBAC is required, since Velero's server already needs `get` on CRDs for other startup checks.
-3. Delegates to `runCRDSchemaValidation()`, which for each expected CRD:
+3. Delegates to `runCRDSchemaValidation(ctx, client, expectations, mode, logger)`, passing the server's own `s.ctx` (rather than `context.TODO()`) so the CRD `Get` calls respect server shutdown/cancellation. For each expected CRD:
    - `Get`s the CRD by name (`<plural>.velero.io`); a fetch error is logged as a warning **and** recorded as a missing-schema entry for that CRD, so it contributes to the aggregated failure in `strict` mode instead of being silently skipped.
    - Locates the schema for the CRD version matching `apiGroupVersion`; a missing version schema is recorded the same fail-closed way.
    - Runs `checkMissing` against both `spec` and `status`.
@@ -95,7 +95,7 @@ A new server flag, `--crd-schema-check`, is added to `pkg/cmd/server/config/conf
 - **Call site.** In `pkg/cmd/server/server.go`, call `s.validateCRDSchemas()` in `run()` right after `veleroResourcesExist()` succeeds.
 - **Unit tests.** New `pkg/cmd/server/crd_check_test.go` covering `jsonFieldNames` (tags, embedding, `omitempty`/`-`), `schemaPropertyNames` (path traversal), `checkMissing` (matching/missing/extra fields), `expectedCRDSchemas` (all registered kinds produce an expectation), and `runCRDSchemaValidation` across `warn`/`strict`/`skip` against a fake apiextensions client.
 
-Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910) (latest relevant commit as of this update: `9e9dbac8a`, "fix(crd-schema-check): don't flatten embedded fields with an explicit json tag").
+Reference implementation: [PR #9910](https://github.com/velero-io/velero/pull/9910) (latest relevant commit as of this update: `1ef22a132`, threads the server's `context.Context` through `runCRDSchemaValidation` instead of `context.TODO()`; note the PR branch was rebased, so this SHA supersedes earlier ones referenced above).
 
 ## Security Considerations
 
