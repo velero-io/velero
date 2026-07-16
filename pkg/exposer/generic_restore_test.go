@@ -1104,7 +1104,7 @@ end diagnose restore exposer`,
 			expected: `begin diagnose restore exposer
 Pod velero/fake-restore, phase Pending, node name fake-node, message 
 Pod condition Initialized, status True, reason , message fake-pod-message
-node-agent is not running in node fake-node, err: daemonset pod not found in running state in node fake-node
+node-agent is not running in node fake-node, err: daemonset pod not found in node fake-node
 PVC velero/fake-restore, phase Pending, binding to 
 end diagnose restore exposer`,
 		},
