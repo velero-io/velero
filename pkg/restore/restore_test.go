@@ -452,6 +452,99 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			},
 		},
 		{
+			name: "notin label selector excludes matching resources",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"1"}},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPersistentVolume("pv-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-2/pod-2"},
+				test.Deployments(): {"ns-1/deploy-1"},
+				test.PVs():         {"/pv-2"},
+			},
+		},
+		{
+			name: "in label selector only restores matching resources",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpIn, Values: []string{"1", "2"}},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").ObjectMeta(builder.WithLabels("pr-label", "3")).Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+					builder.ForPersistentVolume("pv-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-1/pod-1"},
+				test.Deployments(): {"ns-2/deploy-2"},
+				test.PVs():         {"/pv-1"},
+			},
+		},
+		{
+			name: "doesnotexist label selector only restores resources without the label key",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpDoesNotExist},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("other-label", "x")).Result(),
+					builder.ForPersistentVolume("pv-2").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-2/pod-2"},
+				test.Deployments(): {"ns-1/deploy-1"},
+				test.PVs():         {"/pv-1"},
+			},
+		},
+		{
 			name: "OrLabelSelectors only restores matching resources",
 			restore: defaultRestore().OrLabelSelector([]*metav1.LabelSelector{{MatchLabels: map[string]string{"a1": "b1"}}, {MatchLabels: map[string]string{"a2": "b2"}},
 				{MatchLabels: map[string]string{"a3": "b3"}}, {MatchLabels: map[string]string{"a4": "b4"}}}).Result(),
