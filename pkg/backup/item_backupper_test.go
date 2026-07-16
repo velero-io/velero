@@ -21,20 +21,20 @@ import (
 	"testing"
 
 	"github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/vmware-tanzu/velero/pkg/util/collections"
 )
 
 func Test_resourceKey(t *testing.T) {
@@ -493,4 +493,285 @@ func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
 			}
 		})
 	}
+}
+
+// includeAllIE is a minimal IncludesExcludesInterface that includes everything —
+// used in tests where the global resource include/exclude logic is not under test.
+type includeAllIE struct{}
+
+func (includeAllIE) ShouldInclude(string) bool { return true }
+func (includeAllIE) ShouldExclude(string) bool { return false }
+
+// makeTestUnstructured creates an unstructured object with the given namespace, name, and labels.
+func makeTestUnstructured(namespace, name string, labels map[string]string) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetNamespace(namespace)
+	obj.SetName(name)
+	if labels != nil {
+		obj.SetLabels(labels)
+	}
+	return obj
+}
+
+// makeNameIE creates an IncludesExcludes that includes only the given glob patterns.
+func makeNameIE(include ...string) *collections.IncludesExcludes {
+	ie := collections.NewIncludesExcludes()
+	ie.Includes(include...)
+	return ie
+}
+
+// newTestItemBackupper builds a minimal itemBackupper suitable for itemInclusionChecks tests.
+func newTestItemBackupper(req *Request) *itemBackupper {
+	return &itemBackupper{
+		backupRequest: req,
+	}
+}
+
+// baseRequest returns a Request with NamespaceIncludesExcludes and ResourceIncludesExcludes
+// configured to include everything, so only the filter-map logic under test is exercised.
+func baseRequest() *Request {
+	return &Request{
+		Backup:                    builder.ForBackup("velero", "test-backup").Result(),
+		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().Includes("*"),
+		ResourceIncludesExcludes:  includeAllIE{},
+		SkippedPVTracker:          NewSkipPVTracker(),
+	}
+}
+
+var configMapsGR = schema.GroupResource{Group: "", Resource: "configmaps"}
+var clusterRolesGR = schema.GroupResource{Group: "rbac.authorization.k8s.io", Resource: "clusterroles"}
+
+// TestItemInclusionChecks_ExcludeLabel_OverridesNamespaceFilter verifies that
+// velero.io/exclude-from-backup=true takes precedence over a namespacedFilterPolicies
+// entry that would otherwise include the resource.
+func TestItemInclusionChecks_ExcludeLabel_OverridesNamespaceFilter(t *testing.T) {
+	req := baseRequest()
+	req.NamespacedFilterMap = map[string]*ResolvedNamespaceFilter{
+		"ns-a": {
+			ResourceFilterMap: map[string]*ResolvedResourceFilter{
+				configMapsGR.String(): {}, // include all ConfigMaps in ns-a
+			},
+		},
+	}
+	req.NamespacedFilterPatterns = []NamespacedFilterPattern{}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	obj := makeTestUnstructured("ns-a", "my-config", map[string]string{
+		velerov1api.ExcludeFromBackupLabel: "true",
+	})
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, configMapsGR)
+	assert.False(t, result, "resource with exclude-from-backup=true must be excluded even when matched by namespacedFilterPolicies")
+}
+
+// TestItemInclusionChecks_ExcludeLabel_OverridesCatchAll verifies that
+// velero.io/exclude-from-backup=true takes precedence over the catch-all filter.
+func TestItemInclusionChecks_ExcludeLabel_OverridesCatchAll(t *testing.T) {
+	catchAllFilter := &ResolvedResourceFilter{} // include everything via catch-all
+	req := baseRequest()
+	req.NamespacedFilterMap = map[string]*ResolvedNamespaceFilter{
+		"ns-a": {
+			ResourceFilterMap: map[string]*ResolvedResourceFilter{},
+			CatchAllFilter:    catchAllFilter,
+		},
+	}
+	req.NamespacedFilterPatterns = []NamespacedFilterPattern{}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	obj := makeTestUnstructured("ns-a", "my-config", map[string]string{
+		velerov1api.ExcludeFromBackupLabel: "true",
+	})
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, configMapsGR)
+	assert.False(t, result, "resource with exclude-from-backup=true must be excluded even when matched by catch-all filter")
+}
+
+// TestItemInclusionChecks_ExcludeLabel_OverridesClusterScopedFilter verifies that
+// velero.io/exclude-from-backup=true takes precedence over clusterScopedFilterPolicy.
+func TestItemInclusionChecks_ExcludeLabel_OverridesClusterScopedFilter(t *testing.T) {
+	req := baseRequest()
+	req.ClusterScopedFilterMap = map[string]*ResolvedResourceFilter{
+		clusterRolesGR.String(): {}, // include all ClusterRoles
+	}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	// Cluster-scoped object: no namespace
+	obj := makeTestUnstructured("", "my-role", map[string]string{
+		velerov1api.ExcludeFromBackupLabel: "true",
+	})
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, clusterRolesGR)
+	assert.False(t, result, "cluster-scoped resource with exclude-from-backup=true must be excluded even when in clusterScopedFilterPolicy")
+}
+
+// TestItemInclusionChecks_ClusterScoped_NotInFilterMap_PassesThrough verifies that
+// a dynamically injected cluster-scoped resource NOT listed in ClusterScopedFilterMap
+// passes through itemInclusionChecks (permissive passthrough at Stage 2).
+func TestItemInclusionChecks_ClusterScoped_NotInFilterMap_PassesThrough(t *testing.T) {
+	req := baseRequest()
+	req.ClusterScopedFilterMap = map[string]*ResolvedResourceFilter{
+		clusterRolesGR.String(): {}, // only ClusterRoles are listed
+	}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	// VolumeSnapshotClass is NOT in the filter map
+	volumeSnapshotClassGR := schema.GroupResource{Group: "snapshot.storage.k8s.io", Resource: "volumesnapshotclasses"}
+	obj := makeTestUnstructured("", "standard", nil)
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, volumeSnapshotClassGR)
+	assert.True(t, result, "cluster-scoped resource not in ClusterScopedFilterMap must pass through (permissive Stage 2 for unlisted kinds)")
+}
+
+// TestItemInclusionChecks_ClusterScoped_NameIE_Matching verifies that a cluster-scoped
+// resource listed in ClusterScopedFilterMap with a NameIE filter is included/excluded
+// based on its name.
+func TestItemInclusionChecks_ClusterScoped_NameIE_Matching(t *testing.T) {
+	req := baseRequest()
+	req.ClusterScopedFilterMap = map[string]*ResolvedResourceFilter{
+		clusterRolesGR.String(): {
+			NameIE: makeNameIE("my-app-*"),
+		},
+	}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	// Matching name
+	matching := makeTestUnstructured("", "my-app-reader", nil)
+	assert.True(t, ib.itemInclusionChecks(log, false, matching, matching, clusterRolesGR),
+		"ClusterRole matching name pattern must be included")
+
+	// Non-matching name
+	nonMatching := makeTestUnstructured("", "other-role", nil)
+	assert.False(t, ib.itemInclusionChecks(log, false, nonMatching, nonMatching, clusterRolesGR),
+		"ClusterRole not matching name pattern must be excluded")
+}
+
+// TestItemInclusionChecks_GlobalExclusion_OverridesNamespaceFilter verifies that
+// a resource kind globally excluded by includeExcludePolicy is rejected at Stage 2
+// even when a namespacedFilterPolicies entry lists that kind. The global
+// ResourceIncludesExcludes.ShouldInclude check fires before the per-namespace filter.
+func TestItemInclusionChecks_GlobalExclusion_OverridesNamespaceFilter(t *testing.T) {
+	// excludeSecretsIE excludes "secrets" globally, includes everything else.
+	excludeSecretsIE := &excludeResourceIE{excluded: "secrets"}
+
+	req := &Request{
+		Backup:                    builder.ForBackup("velero", "test-backup").Result(),
+		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().Includes("*"),
+		ResourceIncludesExcludes:  excludeSecretsIE,
+		SkippedPVTracker:          NewSkipPVTracker(),
+		// namespacedFilterPolicies says to back up Secrets in ns-a
+		NamespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+			"ns-a": {
+				ResourceFilterMap: map[string]*ResolvedResourceFilter{
+					"secrets.": {}, // Secret listed in per-namespace filter
+				},
+			},
+		},
+		NamespacedFilterPatterns: []NamespacedFilterPattern{},
+	}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	secretsGR := schema.GroupResource{Group: "", Resource: "secrets"}
+	obj := makeTestUnstructured("ns-a", "my-secret", nil)
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, secretsGR)
+	assert.False(t, result,
+		"Secret must be excluded because it is globally excluded by ResourceIncludesExcludes, "+
+			"even though namespacedFilterPolicies lists it")
+}
+
+// TestItemInclusionChecks_PluginItem_UnlistedKind_NoCatchAll_PassesThrough verifies the
+// intentional permissive passthrough at Stage 2 for plugin-injected additional items.
+// When a namespace has a namespacedFilterPolicies entry but the item's kind is not listed
+// in that policy and there is no catch-all entry, itemInclusionChecks must still allow
+// the item through.
+//
+// Rationale: plugin-injected additional items (returned by BackupItemAction) must be able
+// to reach the archive even when their kind was not explicitly listed in the filter policy,
+// because rejecting them here would break backup completeness. For example, a CSI plugin
+// may inject a VolumeSnapshotContent that is required for a correct restore.
+// Kind-level exclusion for the primary collection pass is enforced at Stage 1 in
+// item_collector.go, not at Stage 2 here.
+func TestItemInclusionChecks_PluginItem_UnlistedKind_NoCatchAll_PassesThrough(t *testing.T) {
+	req := baseRequest()
+	// Namespace filter only lists ConfigMaps; Secrets are not listed and there is no catch-all.
+	req.NamespacedFilterMap = map[string]*ResolvedNamespaceFilter{
+		"ns-a": {
+			ResourceFilterMap: map[string]*ResolvedResourceFilter{
+				configMapsGR.String(): {},
+			},
+			CatchAllFilter: nil,
+		},
+	}
+	req.NamespacedFilterPatterns = []NamespacedFilterPattern{}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	secretsGR := schema.GroupResource{Group: "", Resource: "secrets"}
+	obj := makeTestUnstructured("ns-a", "plugin-injected-secret", nil)
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, secretsGR)
+	assert.True(t, result,
+		"plugin-injected additional item of an unlisted kind must pass through Stage 2 "+
+			"even when its namespace has a namespacedFilterPolicies entry with no catch-all; "+
+			"kind exclusion is enforced at Stage 1 (item_collector.go), not here")
+}
+
+// TestItemInclusionChecks_PluginItem_UnlistedKind_WithCatchAll_PassesThrough verifies that
+// a plugin-injected additional item of a kind not listed in the namespace filter also passes
+// through Stage 2 when a catch-all entry is present. The catch-all is validated to never
+// carry a NameIE (names/excludedNames are prohibited on catch-all entries), so the name
+// check is always a no-op for catch-all-matched items and the item is included.
+func TestItemInclusionChecks_PluginItem_UnlistedKind_WithCatchAll_PassesThrough(t *testing.T) {
+	req := baseRequest()
+	// Namespace filter lists ConfigMaps explicitly; a catch-all covers everything else.
+	// The catch-all has no NameIE — this is enforced by validation.
+	req.NamespacedFilterMap = map[string]*ResolvedNamespaceFilter{
+		"ns-a": {
+			ResourceFilterMap: map[string]*ResolvedResourceFilter{
+				configMapsGR.String(): {},
+			},
+			CatchAllFilter: &ResolvedResourceFilter{
+				// NameIE intentionally nil: validation forbids names/excludedNames on catch-all
+				NameIE: nil,
+			},
+		},
+	}
+	req.NamespacedFilterPatterns = []NamespacedFilterPattern{}
+
+	ib := newTestItemBackupper(req)
+	log := logrus.New()
+
+	secretsGR := schema.GroupResource{Group: "", Resource: "secrets"}
+	obj := makeTestUnstructured("ns-a", "plugin-injected-secret", nil)
+
+	result := ib.itemInclusionChecks(log, false, obj, obj, secretsGR)
+	assert.True(t, result,
+		"plugin-injected additional item matched by catch-all must pass through Stage 2; "+
+			"the catch-all has no NameIE so the name check is a no-op")
+}
+
+// excludeResourceIE is an IncludesExcludesInterface that excludes a single resource
+// type and includes everything else. Used to simulate includeExcludePolicy global exclusions.
+type excludeResourceIE struct {
+	excluded string
+}
+
+func (e *excludeResourceIE) ShouldInclude(typeName string) bool {
+	return typeName != e.excluded
+}
+func (e *excludeResourceIE) ShouldExclude(typeName string) bool {
+	return typeName == e.excluded
 }

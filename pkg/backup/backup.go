@@ -26,16 +26,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+	"github.com/gobwas/glob"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
@@ -43,6 +46,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	"github.com/vmware-tanzu/velero/internal/volumehelper"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -350,6 +354,52 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 			srie.CombineWithPolicy(backupRequest.ResPolicies.GetIncludeExcludePolicy())
 		}
 		backupRequest.ResourceIncludesExcludes = srie
+	}
+
+	if backupRequest.ResPolicies != nil {
+		clusterScopedFilterPolicy := backupRequest.ResPolicies.GetClusterScopedFilterPolicy()
+		if clusterScopedFilterPolicy != nil {
+			backupRequest.ClusterScopedFilterMap, err = resolveClusterScopedFilterPolicy(
+				clusterScopedFilterPolicy,
+				kb.discoveryHelper,
+				log,
+			)
+			if err != nil {
+				return err
+			}
+			log.Infof("Resolved clusterScopedFilterPolicy: %d kind group(s) in cluster-scoped filter map",
+				len(backupRequest.ClusterScopedFilterMap))
+		}
+
+		nfPolicies := backupRequest.ResPolicies.GetNamespacedFilterPolicies()
+		if len(nfPolicies) > 0 {
+			backupRequest.NamespacedFilterMap, backupRequest.NamespacedFilterPatterns, err = resolveNamespacedFilterPolicies(
+				nfPolicies,
+				kb.discoveryHelper,
+				log,
+			)
+			if err != nil {
+				return err
+			}
+			log.Infof("Resolved namespacedFilterPolicies: %d namespace pattern(s) registered",
+				len(backupRequest.NamespacedFilterPatterns))
+			for _, p := range backupRequest.NamespacedFilterPatterns {
+				nsf := backupRequest.NamespacedFilterMap[p.Pattern]
+				log.WithFields(logrus.Fields{
+					"namespacePattern": p.Pattern,
+					"kindCount":        len(nsf.ResourceFilterMap),
+					"hasCatchAll":      nsf.CatchAllFilter != nil,
+				}).Debug("namespacedFilterPolicies: namespace pattern registered")
+				for kind := range nsf.ResourceFilterMap {
+					if backupRequest.ResourceIncludesExcludes.ShouldExclude(kind) {
+						log.WithFields(logrus.Fields{
+							"namespacePattern": p.Pattern,
+							"kind":             kind,
+						}).Warn("namespacedFilterPolicies entry lists a kind that is globally excluded by includeExcludePolicy; the per-namespace filter entry has no effect")
+					}
+				}
+			}
+		}
 	}
 
 	log.Infof("Backing up all volumes using pod volume backup: %t", boolptr.IsSetToTrue(backupRequest.Backup.Spec.DefaultVolumesToFsBackup))
@@ -1340,4 +1390,141 @@ func putVolumeInfos(
 	}
 
 	return backupStore.PutBackupVolumeInfos(backupName, backupVolumeInfoBuf)
+}
+
+func resolveClusterScopedFilterPolicy(
+	policy *resourcepolicies.ClusterScopedFilterPolicy,
+	helper discovery.Helper,
+	log logrus.FieldLogger,
+) (map[string]*ResolvedResourceFilter, error) {
+	rfMap := make(map[string]*ResolvedResourceFilter)
+
+	for _, rf := range policy.ResourceFilters {
+		resolved, err := resolveResourceFilter(rf)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, kind := range rf.Kinds {
+			gr, apiResource, err := helper.ResourceFor(
+				schema.GroupVersionResource{Resource: kind},
+			)
+			if err != nil {
+				log.WithField("kind", kind).Warnf(
+					"Cannot resolve kind via discovery, using as-is: %v", err)
+				rfMap[kind] = resolved
+				continue
+			}
+			if apiResource.Namespaced {
+				log.WithField("kind", kind).Warnf(
+					"kind %q in clusterScopedFilterPolicy is namespace-scoped; "+
+						"it will never match in a cluster-scoped filter — did you mean namespacedFilterPolicies?", kind)
+			}
+			rfMap[gr.GroupResource().String()] = resolved
+		}
+	}
+
+	return rfMap, nil
+}
+
+func resolveResourceFilter(rf resourcepolicies.ResourceFilter) (*ResolvedResourceFilter, error) {
+	var selector labels.Selector
+	if len(rf.LabelSelector) > 0 {
+		var err error
+		selector, err = labels.ValidatedSelectorFromSet(labels.Set(rf.LabelSelector))
+		if err != nil {
+			return nil, fmt.Errorf("invalid label selector in resource filter: %w", err)
+		}
+	}
+
+	var orSelectors []labels.Selector
+	for _, ols := range rf.OrLabelSelectors {
+		s, err := labels.ValidatedSelectorFromSet(labels.Set(ols))
+		if err != nil {
+			return nil, fmt.Errorf("invalid OR label selector in resource filter: %w", err)
+		}
+		orSelectors = append(orSelectors, s)
+	}
+
+	var nameIE *collections.IncludesExcludes
+	if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {
+		nameIE = collections.NewIncludesExcludes()
+		nameIE.Includes(rf.Names...)
+		nameIE.Excludes(rf.ExcludedNames...)
+	}
+
+	return &ResolvedResourceFilter{
+		LabelSelector:    selector,
+		OrLabelSelectors: orSelectors,
+		NameIE:           nameIE,
+	}, nil
+}
+
+func resolveNamespacedFilterPolicies(
+	policies []resourcepolicies.NamespacedFilterPolicy,
+	helper discovery.Helper,
+	log logrus.FieldLogger,
+) (map[string]*ResolvedNamespaceFilter, []NamespacedFilterPattern, error) {
+	result := make(map[string]*ResolvedNamespaceFilter)
+	var patternOrder []NamespacedFilterPattern
+
+	for _, policy := range policies {
+		rfMap := make(map[string]*ResolvedResourceFilter)
+		var nsFilter *ResolvedNamespaceFilter
+
+		for _, rf := range policy.ResourceFilters {
+			resolved, err := resolveResourceFilter(rf)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if rf.IsCatchAll() {
+				if nsFilter == nil {
+					nsFilter = &ResolvedNamespaceFilter{ResourceFilterMap: rfMap}
+				}
+				nsFilter.CatchAllFilter = resolved
+			} else {
+				// Resolve each kind to a fully-qualified group-resource string with improved error handling
+				for _, kind := range rf.Kinds {
+					gr, apiResource, err := helper.ResourceFor(
+						schema.GroupVersionResource{Resource: kind},
+					)
+					if err != nil {
+						// Log warning but continue - allows for forward compatibility
+						log.WithField("kind", kind).Warnf(
+							"Cannot resolve kind via discovery, using as-is: %v", err)
+						rfMap[kind] = resolved
+						continue
+					}
+					if !apiResource.Namespaced {
+						log.WithField("kind", kind).Warnf(
+							"kind %q in namespacedFilterPolicies is cluster-scoped; "+
+								"it will never match in a namespace-scoped filter — did you mean clusterScopedFilterPolicy?", kind)
+					}
+					rfMap[gr.GroupResource().String()] = resolved
+				}
+			}
+		}
+
+		if nsFilter == nil {
+			nsFilter = &ResolvedNamespaceFilter{}
+		}
+		nsFilter.ResourceFilterMap = rfMap
+		for _, nsPattern := range policy.Namespaces {
+			result[nsPattern] = nsFilter
+			// Pre-compile glob patterns once here; exact names are matched via map
+			// and never reach the pattern loop, so only wildcard patterns need Compiled set.
+			entry := NamespacedFilterPattern{Pattern: nsPattern}
+			if strings.ContainsAny(nsPattern, "*?[") {
+				if compiled, cerr := glob.Compile(nsPattern); cerr == nil {
+					entry.Compiled = compiled
+				} else {
+					// Pattern already validated; this branch should not be reached
+					log.WithField("pattern", nsPattern).Warnf("Failed to pre-compile glob pattern: %v", cerr)
+				}
+			}
+			patternOrder = append(patternOrder, entry)
+		}
+	}
+	return result, patternOrder, nil
 }

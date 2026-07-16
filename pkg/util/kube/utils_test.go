@@ -730,3 +730,95 @@ func TestVerifyJsonConfigs(t *testing.T) {
 		})
 	}
 }
+
+func TestGetVolumeModeByPVC(t *testing.T) {
+	modeFilesystem := corev1api.PersistentVolumeFilesystem
+	modeBlock := corev1api.PersistentVolumeBlock
+
+	tests := []struct {
+		name     string
+		pvc      *corev1api.PersistentVolumeClaim
+		expected corev1api.PersistentVolumeMode
+	}{
+		{
+			name: "nil VolumeMode returns Filesystem",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: nil,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Filesystem VolumeMode returns Filesystem",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: &modeFilesystem,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Block VolumeMode returns Block",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: &modeBlock,
+				},
+			},
+			expected: corev1api.PersistentVolumeBlock,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := GetVolumeModeByPVC(test.pvc)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
+func TestGetVolumeModeByPV(t *testing.T) {
+	modeFilesystem := corev1api.PersistentVolumeFilesystem
+	modeBlock := corev1api.PersistentVolumeBlock
+
+	tests := []struct {
+		name     string
+		pv       *corev1api.PersistentVolume
+		expected corev1api.PersistentVolumeMode
+	}{
+		{
+			name: "nil VolumeMode returns Filesystem",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: nil,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Filesystem VolumeMode returns Filesystem",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: &modeFilesystem,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Block VolumeMode returns Block",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: &modeBlock,
+				},
+			},
+			expected: corev1api.PersistentVolumeBlock,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := GetVolumeModeByPV(test.pv)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}

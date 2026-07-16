@@ -549,12 +549,203 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "snapshot action with valid dataMover velero-fs",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"dataMover": "velero-fs"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with valid dataMover velero-block",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"dataMover": "velero-block"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with valid dataMover velero",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"dataMover": "velero"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with invalid dataMover value",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"dataMover": "unknown-mover"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "snapshot action with non-string dataMover value",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"dataMover": 123},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "dataMover parameter on non-snapshot action is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       FSBackup,
+							Parameters: map[string]any{"dataMover": "velero-fs"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "snapshot action without parameters still valid",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action:     Action{Type: Snapshot},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			policies := &Policies{}
 			err1 := policies.BuildPolicy(tc.res)
 			err2 := policies.Validate()
+
+			if tc.wantErr {
+				if err1 == nil && err2 == nil {
+					t.Fatalf("Expected error %v, but not get error", tc.wantErr)
+				}
+			} else {
+				if err1 != nil || err2 != nil {
+					t.Fatalf("Expected error %v, but got error %v %v", tc.wantErr, err1, err2)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateForRestore(t *testing.T) {
+	testCases := []struct {
+		name    string
+		res     *ResourcePolicies
+		wantErr bool
+	}{
+		{
+			name: "valid restore policies",
+			res: &ResourcePolicies{
+				Version: "v1",
+				ClusterScopedFilterPolicy: &ClusterScopedFilterPolicy{
+					ResourceFilters: []ResourceFilter{
+						{
+							Kinds: []string{"ClusterRole"},
+						},
+					},
+				},
+				NamespacedFilterPolicies: []NamespacedFilterPolicy{
+					{
+						Namespaces: []string{"default"},
+						ResourceFilters: []ResourceFilter{
+							{
+								Kinds: []string{"Pod"},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unsupported volumePolicies for restore",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{Type: "skip"},
+						Conditions: map[string]any{
+							"capacity": "10Gi",
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "unsupported includeExcludePolicy for restore",
+			res: &ResourcePolicies{
+				Version: "v1",
+				IncludeExcludePolicy: &IncludeExcludePolicy{
+					IncludedClusterScopedResources: []string{"persistentvolumes"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "wrong version",
+			res: &ResourcePolicies{
+				Version: "v2",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			policies := &Policies{}
+			err1 := policies.BuildPolicy(tc.res)
+			err2 := policies.ValidateForRestore()
 
 			if tc.wantErr {
 				if err1 == nil && err2 == nil {

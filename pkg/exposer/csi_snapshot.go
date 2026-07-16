@@ -20,11 +20,12 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotter "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned/typed/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,12 +35,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/pkg/datamover"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/csi"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -108,6 +109,12 @@ type CSISnapshotExposeWaitParam struct {
 	// NodeClient is the client that is used to find the hosting pod
 	NodeClient client.Client
 	NodeName   string
+}
+
+type cbtInfo struct {
+	changeID   string
+	volumeID   string
+	snapshotID string
 }
 
 // NewCSISnapshotExposer create a new instance of CSI snapshot exposer
@@ -256,6 +263,14 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 
 	affinity := kube.GetLoadAffinityByStorageClass(csiExposeParam.Affinity, backupPVCStorageClass, curLog)
 
+	var cbtInfo cbtInfo
+	if csiExposeParam.DataMover == datamover.DataMoverTypeVeleroBlock {
+		cbtInfo, err = e.getCBTInfo(ctx, backupVS, backupVSC, csiExposeParam.SourcePVName)
+		if err != nil {
+			return errors.Wrap(err, "error to get CBT info")
+		}
+	}
+
 	backupPod, err := e.createBackupPod(
 		ctx,
 		ownerObject,
@@ -273,6 +288,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		intoleratableNodes,
 		volumeTopology,
 		csiExposeParam.SnapshotMetadataServiceConfigs,
+		&cbtInfo,
 	)
 	if err != nil {
 		return errors.Wrap(err, "error to create backup pod")
@@ -287,6 +303,49 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 	}()
 
 	return nil
+}
+
+func (e *csiSnapshotExposer) getCBTInfo(ctx context.Context, vs *snapshotv1api.VolumeSnapshot, vsc *snapshotv1api.VolumeSnapshotContent, sourcePVName string) (cbtInfo, error) {
+	cbtInfo := cbtInfo{}
+	if vs == nil || vsc == nil {
+		return cbtInfo, errors.New("vs or vsc is nil")
+	}
+
+	cbtInfo.snapshotID = vs.Name
+
+	if vs.Annotations != nil &&
+		(vs.Annotations[util.VSphereCNSChangeIDAnno] != "" ||
+			vs.Annotations[util.VSphereCNSSnapshotAnno] != "") {
+		cbtInfo.changeID = vs.Annotations[util.VSphereCNSChangeIDAnno]
+
+		splitSnapshotAnno := strings.Split(vs.Annotations[util.VSphereCNSSnapshotAnno], "+")
+		if len(splitSnapshotAnno) >= 2 {
+			cbtInfo.volumeID = splitSnapshotAnno[0]
+		}
+
+		e.log.Debugf("volumeID %s and changeID %s are read from VKS annotations.", cbtInfo.volumeID, cbtInfo.changeID)
+	} else {
+		pv, err := e.kubeClient.CoreV1().PersistentVolumes().Get(ctx, sourcePVName, metav1.GetOptions{})
+		if err != nil {
+			return cbtInfo, fmt.Errorf("failed to get pv %s: %w", sourcePVName, err)
+		}
+
+		if vsc.Status != nil && vsc.Status.SnapshotHandle != nil {
+			cbtInfo.changeID = *vsc.Status.SnapshotHandle
+		}
+
+		if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
+			cbtInfo.volumeID = pv.Spec.CSI.VolumeHandle
+		}
+
+		e.log.Debugf("volumeID %s and changeID %s are read from PV and VS's handles.", cbtInfo.volumeID, cbtInfo.changeID)
+	}
+
+	if cbtInfo.volumeID == "" {
+		return cbtInfo, fmt.Errorf("volumeID must not be empty for CBT")
+	}
+
+	return cbtInfo, nil
 }
 
 func (e *csiSnapshotExposer) GetExposed(ctx context.Context, ownerObject corev1api.ObjectReference, timeout time.Duration, param any) (*ExposeResult, error) {
@@ -618,6 +677,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 	intoleratableNodes []string,
 	volumeTopology *corev1api.NodeSelector,
 	csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
+	cbtInfo *cbtInfo,
 ) (*corev1api.Pod, error) {
 	podName := ownerObject.Name
 
@@ -668,6 +728,12 @@ func (e *csiSnapshotExposer) createBackupPod(
 		fmt.Sprintf("--volume-mode=%s", volumeMode),
 		fmt.Sprintf("--data-upload=%s", ownerObject.Name),
 		fmt.Sprintf("--resource-timeout=%s", operationTimeout.String()),
+	}
+
+	if cbtInfo != nil {
+		args = append(args, fmt.Sprintf("--change-id=%s", cbtInfo.changeID))
+		args = append(args, fmt.Sprintf("--volume-id=%s", cbtInfo.volumeID))
+		args = append(args, fmt.Sprintf("--snapshot-id=%s", cbtInfo.snapshotID))
 	}
 
 	args = append(args, podInfo.logFormatArgs...)

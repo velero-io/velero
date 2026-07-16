@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -53,13 +53,25 @@ func TestWaitExecHandleHooks(t *testing.T) {
 		// delta to wait since last change applied or pod added
 		wait    time.Duration
 		updated *corev1api.Pod
+		// waitForSignal, if set, blocks the goroutine after applying this change
+		// until the channel is closed. Use this to ensure the handler processes
+		// an intermediate pod state before the next change is applied.
+		waitForSignal chan struct{}
 	}
 	type expectedExecution struct {
 		hook  *velerov1api.ExecHook
 		name  string
 		error error
 		pod   *corev1api.Pod
+		// onCalled, if set, is invoked by the mock when ExecutePodCommand is called.
+		// Use this together with change.waitForSignal to synchronize state transitions.
+		onCalled func()
 	}
+	// hookFired is used by the test case that has two containers with hooks in
+	// different containers. It ensures the second pod state change is only sent
+	// after the first hook has fired, preventing the informer from coalescing
+	// both updates and skipping the intermediate state.
+	hookFired := make(chan struct{})
 	tests := []struct {
 		name string
 		// Used as argument to HandleHooks and first state added to ListerWatcher
@@ -622,6 +634,8 @@ func TestWaitExecHandleHooks(t *testing.T) {
 							},
 						}).
 						Result(),
+					// Signal after this hook fires so the goroutine can apply the next change.
+					onCalled: func() { close(hookFired) },
 				},
 				{
 					name: "my-hook-1",
@@ -678,6 +692,10 @@ func TestWaitExecHandleHooks(t *testing.T) {
 							},
 						}).
 						Result(),
+					// Block until the hook for container1 has fired before sending the
+					// next change. Without this, the informer may coalesce both updates
+					// and deliver only resourceVersion:3, skipping the intermediate state.
+					waitForSignal: hookFired,
 				},
 				// 2nd modification: container2 starts running, resourceVersion 3
 				{
@@ -838,11 +856,15 @@ func TestWaitExecHandleHooks(t *testing.T) {
 			go func() {
 				// This is the state of the pod that will be seen by the AddFunc handler.
 				source.Add(test.initialPod)
-				// Changes holds the versions of the pod over time. Each of these states
-				// will be seen by the UpdateFunc handler.
+				// Changes holds the versions of the pod over time. The informer may
+				// coalesce rapid updates, so use waitForSignal when a test requires the
+				// handler to observe a specific intermediate state before the next change.
 				for _, change := range test.changes {
 					time.Sleep(change.wait)
 					source.Modify(change.updated)
+					if change.waitForSignal != nil {
+						<-change.waitForSignal
+					}
 				}
 			}()
 
@@ -857,7 +879,11 @@ func TestWaitExecHandleHooks(t *testing.T) {
 			for _, e := range test.expectedExecutions {
 				obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(e.pod)
 				require.NoError(t, err)
-				podCommandExecutor.On("ExecutePodCommand", mock.Anything, obj, e.pod.Namespace, e.pod.Name, e.name, e.hook).Return(e.error)
+				call := podCommandExecutor.On("ExecutePodCommand", mock.Anything, obj, e.pod.Namespace, e.pod.Name, e.name, e.hook).Return(e.error)
+				if e.onCalled != nil {
+					onCalled := e.onCalled
+					call.Run(func(mock.Arguments) { onCalled() })
+				}
 			}
 
 			ctx := t.Context()

@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotFake "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned/fake"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -72,11 +72,25 @@ type FakeClient struct {
 	patchError     error
 	updateConflict error
 	listError      error
+	getErrorMap    map[string]error // key: object kind or name
 }
 
 func (c *FakeClient) Get(ctx context.Context, key kbclient.ObjectKey, obj kbclient.Object, opts ...kbclient.GetOption) error {
 	if c.getError != nil {
 		return c.getError
+	}
+
+	// Check if there's a specific error for this object type
+	if c.getErrorMap != nil {
+		objType := fmt.Sprintf("%T", obj)
+		if err, ok := c.getErrorMap[objType]; ok {
+			return err
+		}
+
+		// Check if there's a specific error for this object name
+		if err, ok := c.getErrorMap[key.Name]; ok {
+			return err
+		}
 	}
 
 	return c.Client.Get(ctx, key, obj)
@@ -209,9 +223,13 @@ func initDataUploaderReconcilerWithError(needError ...error) (*DataUploadReconci
 	if err != nil {
 		return nil, err
 	}
+	err = snapshotv1api.AddToScheme(scheme)
+	if err != nil {
+		return nil, err
+	}
 
 	fakeClient := &FakeClient{
-		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(vsObject, node).Build(),
 	}
 
 	for k := range needError {
@@ -505,7 +523,7 @@ func TestReconcile(t *testing.T) {
 		{
 			name:     "du succeeds for accepted",
 			du:       dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).SnapshotType(fakeSnapshotType).Result(),
-			pvc:      builder.ForPersistentVolumeClaim("fake-ns", "test-pvc").Result(),
+			pvc:      builder.ForPersistentVolumeClaim("fake-ns", "test-pvc").VolumeName("test-pv").Result(),
 			expected: dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Phase(velerov2alpha1api.DataUploadPhaseAccepted).Result(),
 		},
 		{
@@ -636,6 +654,15 @@ func TestReconcile(t *testing.T) {
 			if test.pvc != nil {
 				err = r.client.Create(ctx, test.pvc)
 				require.NoError(t, err)
+
+				// Create the corresponding PV if PVC references one
+				if test.pvc.Spec.VolumeName != "" {
+					pv := builder.ForPersistentVolume(test.pvc.Spec.VolumeName).
+						CSI("csi.driver", "test-volume-id").
+						ClaimRef(test.pvc.Namespace, test.pvc.Name).Result()
+					err = r.client.Create(ctx, pv)
+					require.NoError(t, err)
+				}
 			}
 
 			if test.dataMgr != nil {

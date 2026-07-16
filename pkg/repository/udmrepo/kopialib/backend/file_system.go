@@ -23,9 +23,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
-	"github.com/pkg/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/logging"

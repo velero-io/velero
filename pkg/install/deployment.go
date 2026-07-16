@@ -50,6 +50,7 @@ type podTemplateConfig struct {
 	serviceAccountName              string
 	uploaderType                    string
 	defaultSnapshotMoveData         bool
+	csiSnapshotEarlyFrequentPolling bool
 	privilegedNodeAgent             bool
 	disableInformerCache            bool
 	scheduleSkipImmediately         bool
@@ -163,6 +164,12 @@ func WithDefaultVolumesToFsBackup(b bool) podTemplateOption {
 func WithDefaultSnapshotMoveData(b bool) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.defaultSnapshotMoveData = b
+	}
+}
+
+func WithCSISnapshotEarlyFrequentPolling(b bool) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.csiSnapshotEarlyFrequentPolling = b
 	}
 }
 
@@ -485,6 +492,15 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 			{
 				Name:  "ALIBABA_CLOUD_CREDENTIALS_FILE",
 				Value: "/credentials/cloud",
+			},
+		}...)
+	}
+
+	if c.csiSnapshotEarlyFrequentPolling {
+		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, []corev1api.EnvVar{
+			{
+				Name:  "CSI_SNAPSHOT_EARLY_FREQUENT_POLLING",
+				Value: "true",
 			},
 		}...)
 	}

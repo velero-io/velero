@@ -219,6 +219,11 @@ func DescribeRestore(
 			DescribeResourceModifier(d, restore.Spec.ResourceModifier)
 		}
 
+		if restore.Spec.ResourcePolicy != nil {
+			d.Println()
+			DescribeResourcePolicies(d, restore.Spec.ResourcePolicy)
+		}
+
 		describeUploaderConfigForRestore(d, restore.Spec)
 
 		d.Println()

@@ -96,7 +96,9 @@ RUN ARCH=$(go env GOARCH) && \
     chmod +x /usr/bin/goreleaser
 
 # get golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+# Use "go install" so the download goes through GOPROXY instead of the GitHub
+# release API/CDN, which has been returning intermittent/persistent HTTP 504s.
+RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
 # install kubectl
 RUN curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/$(go env GOARCH)/kubectl

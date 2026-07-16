@@ -287,6 +287,11 @@ The policies YAML config file would look like this:
         # pvc matches specific phase(s)
         pvcPhase:
           - Pending
+        # pvc matches specific volume mode
+        pvcVolumeMode: Block
+        # pvc matches specific access mode(s)
+        pvcAccessModes:
+          - ReadWriteOnce
       action:
         type: skip
     - conditions:
@@ -380,6 +385,8 @@ Currently, Velero supports the volume attributes listed below:
 - storageClass: matching volumes those with specified `storageClass`, such as `gp2`, `ebs-sc` in eks
 - volume sources: matching volumes that used specified volume sources. Currently we support nfs or csi backend volume source
 - pvcPhase: matching volumes based on the phase of their associated PVCs (Pending, Bound, Lost)
+- pvcVolumeMode: matching volumes based on the volume mode of their associated PVCs (Filesystem, Block)
+- pvcAccessModes: matching volumes based on the access modes of their associated PVCs (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod). All configured access modes must be present on the PVC.
 
 Velero supported conditions and format listed below:
 - capacity
@@ -521,6 +528,72 @@ Velero supported conditions and format listed below:
           type: skip
       ```
 
+- pvc VolumeMode
+
+  This condition filters PVC-backed volumes based on the volume mode of their associated PVCs. The condition is specified as a single volume mode to match. The volume matches this condition if the PVC's volume mode exactly matches the configured value. Matching is case-sensitive, so `block` does not match `Block`. Supported volume modes are: `Filesystem` and `Block`. If `pvcVolumeMode` is omitted from a policy, volume mode is not restricted. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcVolumeMode: Block
+    ```
+
+    Some examples:
+  - Skip Block PVCs: Skip backup of volumes whose associated PVC uses `Block` volume mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+        action:
+          type: skip
+      ```
+  - Combine with other conditions: You can combine PVC volume mode conditions with other conditions like PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+          pvcPhase:
+            - Bound
+        action:
+          type: snapshot
+      ```
+
+- pvc AccessModes
+
+  This condition filters PVC-backed volumes based on the access modes of their associated PVCs. The condition is specified as a list of access modes to match. The volume matches this condition only if the PVC has all of the access modes in the list. Matching is case-sensitive, so `readwriteonce` does not match `ReadWriteOnce`. Supported access modes are: `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, and `ReadWriteOncePod`. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcAccessModes:
+      - ReadWriteOnce
+    ```
+
+    Some examples:
+  - Skip ReadWriteOnce PVCs: Skip backup of volumes whose associated PVC includes the `ReadWriteOnce` access mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+        action:
+          type: skip
+      ```
+  - Match multiple access modes: Apply an action to volumes whose associated PVC includes both `ReadOnlyMany` and `ReadWriteMany`.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadOnlyMany
+            - ReadWriteMany
+        action:
+          type: snapshot
+      ```
+  - Combine with other conditions: You can combine PVC access mode conditions with other conditions like PVC volume mode, PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+          pvcVolumeMode: Block
+        action:
+          type: snapshot
+      ```
+
 
 
 ### Resource policies rules
@@ -631,3 +704,85 @@ volumePolicies:
 3. The outcome would be that velero would perform `fs-backup` operation on both the volumes
    - `fs-backup` on `Volume 1` because `Volume 1` satisfies the criteria for `fs-backup` action. 
    - Also, for Volume 2 as no matching action was found so legacy approach will be used as a fallback option for this volume (`fs-backup` operation will be done as `defaultVolumesToFSBackup: true` is specified by the user).
+
+### Global backup volume policies
+
+Resource policies (volume policies) are normally opt-in per backup via `--resource-policies-configmap`. An administrator can instead configure a cluster-wide baseline that applies to **every** backup by starting the Velero server with the `--global-backup-volume-policies-configmap` flag, pointing at a ConfigMap in the Velero install namespace:
+
+```bash
+velero server --global-backup-volume-policies-configmap global-volume-policy
+```
+
+The ConfigMap uses the exact same format as a per-backup resource policies ConfigMap (a single data key holding a `ResourcePolicies` YAML document):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: global-volume-policy
+  namespace: velero
+data:
+  policies.yaml: |
+    version: v1
+    volumePolicies:
+      - conditions:
+          storageClass:
+            - gp2
+        action:
+          type: skip
+```
+
+#### Behavior
+
+- **Only `volumePolicies` apply globally.** If the global ConfigMap contains `includeExcludePolicy`, `clusterScopedFilterPolicy`, or `namespacedFilterPolicies`, those sections are ignored and a warning is logged. Those filters are tied to a specific backup use case, so they remain per-backup only.
+- **Merge semantics.** When a backup runs, the effective `volumePolicies` list is the backup-level policies followed by the global policies:
+
+  ```
+  merged.volumePolicies = backup.volumePolicies ++ global.volumePolicies
+  ```
+
+  Because the first matching policy wins, a backup can override the global baseline for a specific volume while still inheriting every global rule it does not override. If a backup references no resource policy, the global policy applies on its own.
+- **Validation.** The global ConfigMap is validated at server startup (the server fails to start if it is missing or invalid) and again on each backup (a backup whose global policy has become missing or invalid is moved to the `FailedValidation` phase).
+
+#### Example
+
+Global policy (`--global-backup-volume-policies-configmap=global-volume-policy`): skip `gp2` volumes.
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+```
+
+Backup-level policy (`--resource-policies-configmap backup01`): `fs-backup` NFS volumes.
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      nfs: {}
+    action:
+      type: fs-backup
+```
+
+Effective (merged) policy used for the backup — backup rules first, then global:
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      nfs: {}
+    action:
+      type: fs-backup
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+```
+
+When a global policy contributes to a backup, `velero backup describe` surfaces the contributing ConfigMap under a `Global volume policies` section.

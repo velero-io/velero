@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,6 +80,7 @@ func (d *DataUploadRetrieveAction) Execute(input *velero.RestoreItemActionExecut
 		SourceNamespace:       dataUpload.Spec.SourceNamespace,
 		DataMoverResult:       dataUpload.Status.DataMoverResult,
 		NodeOS:                dataUpload.Status.NodeOS,
+		FSType:                dataUpload.Spec.SourceFSType,
 	}
 
 	jsonBytes, err := json.Marshal(dataUploadResult)

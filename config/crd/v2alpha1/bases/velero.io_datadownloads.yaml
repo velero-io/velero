@@ -121,6 +121,9 @@ spec:
                 description: TargetVolume is the information of the target PVC and
                   PV.
                 properties:
+                  fsType:
+                    description: FSType is the file system type of the target volume.
+                    type: string
                   namespace:
                     description: Namespace is the target namespace
                     type: string

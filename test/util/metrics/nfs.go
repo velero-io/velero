@@ -21,7 +21,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 func GetNFSPathDiskUsage(ctx context.Context, nfsServerPath string) (string, error) {

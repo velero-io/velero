@@ -189,6 +189,7 @@ type BackupRepo interface {
 	Close(ctx context.Context) error
 }
 
+// ObjectReader is used to read data from an object in the backup repository.
 type ObjectReader interface {
 	io.ReadCloser
 	io.Seeker
@@ -197,11 +198,16 @@ type ObjectReader interface {
 	Length() int64
 }
 
+// ObjectWriter is used to write data to an object in the backup repository.
+// The sequential and random write behavior is determined by the backup repository implementation,
+// it may not exactly follow io.Writer or io.WriterAt, in terms of writer point movement, io pattern, etc.
+// The uploaders should refer to the backup repository implementation to use the ObjectWriter correctly.
 type ObjectWriter interface {
-	io.WriteCloser
+	// Write writes data to the object in the sequential manner.
+	Write([]byte) (int, error)
 
-	// WriterAt is used in the cases that the object is not written sequentially
-	io.WriterAt
+	// WriterAt is used in the cases that the object is not written sequentially.
+	WriteAt([]byte, int64) (int, error)
 
 	// Checkpoint is periodically called to preserve the state of data written to the repo so far.
 	// Checkpoint returns a unified identifier that represent the current state.
@@ -211,4 +217,7 @@ type ObjectWriter interface {
 	// Result waits for the completion of the object write.
 	// Result returns the object's unified identifier after the write completes.
 	Result() (ID, error)
+
+	// Close closes the object writer and releases all resources.
+	Close() error
 }

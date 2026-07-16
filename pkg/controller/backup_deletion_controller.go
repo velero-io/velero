@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -295,7 +295,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			err = delete.InvokeDeleteActions(deleteCtx)
 			if err != nil {
 				log.WithError(err).Error("Error invoking delete item actions")
-				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.New("error invoking delete item actions"))
+				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.Wrap(err, "error invoking delete item actions"))
 				return ctrl.Result{}, err2
 			}
 		}

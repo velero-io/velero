@@ -18,12 +18,14 @@ package resourcepolicies
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v3"
+	"github.com/cockroachdb/errors"
+	"go.yaml.in/yaml/v3"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -45,13 +47,15 @@ type capacity struct {
 }
 
 type structuredVolume struct {
-	capacity     resource.Quantity
-	storageClass string
-	nfs          *nFSVolumeSource
-	csi          *csiVolumeSource
-	volumeType   SupportedVolume
-	pvcLabels    map[string]string
-	pvcPhase     string
+	capacity       resource.Quantity
+	storageClass   string
+	nfs            *nFSVolumeSource
+	csi            *csiVolumeSource
+	volumeType     SupportedVolume
+	pvcLabels      map[string]string
+	pvcPhase       string
+	pvcVolumeMode  string
+	pvcAccessModes []string
 }
 
 func (s *structuredVolume) parsePV(pv *corev1api.PersistentVolume) {
@@ -76,6 +80,15 @@ func (s *structuredVolume) parsePVC(pvc *corev1api.PersistentVolumeClaim) {
 			s.pvcLabels = pvc.Labels
 		}
 		s.pvcPhase = string(pvc.Status.Phase)
+		if pvc.Spec.VolumeMode != nil {
+			s.pvcVolumeMode = string(*pvc.Spec.VolumeMode)
+		}
+		if len(pvc.Spec.AccessModes) > 0 {
+			s.pvcAccessModes = make([]string, 0, len(pvc.Spec.AccessModes))
+			for _, accessMode := range pvc.Spec.AccessModes {
+				s.pvcAccessModes = append(s.pvcAccessModes, string(accessMode))
+			}
+		}
 	}
 }
 
@@ -127,15 +140,52 @@ func (c *pvcPhaseCondition) match(v *structuredVolume) bool {
 	if v.pvcPhase == "" {
 		return false
 	}
-	for _, phase := range c.phases {
-		if v.pvcPhase == phase {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.phases, v.pvcPhase)
 }
 
 func (c *pvcPhaseCondition) validate() error {
+	return nil
+}
+
+// pvcVolumeModeCondition defines a condition that matches if the PVC's volume mode matches the provided volume mode.
+type pvcVolumeModeCondition struct {
+	volumeMode string
+}
+
+func (c *pvcVolumeModeCondition) match(v *structuredVolume) bool {
+	// No volume mode specified: always match.
+	if c.volumeMode == "" {
+		return true
+	}
+
+	// Here allows unknown strings for forward compatibility. If Kubernetes adds another volume mode later,
+	// Velero would not reject the policy just because the string is unfamiliar.
+	return v.pvcVolumeMode == c.volumeMode
+}
+
+func (c *pvcVolumeModeCondition) validate() error {
+	return nil
+}
+
+// pvcAccessModesCondition defines a condition that matches if the PVC has exactly the provided access modes.
+type pvcAccessModesCondition struct {
+	accessModes []string
+}
+
+func (c *pvcAccessModesCondition) match(v *structuredVolume) bool {
+	// No access modes specified: always match.
+	if len(c.accessModes) == 0 {
+		return true
+	}
+
+	if len(v.pvcAccessModes) != len(c.accessModes) {
+		return false
+	}
+
+	return sets.New(c.accessModes...).Equal(sets.New(v.pvcAccessModes...))
+}
+
+func (c *pvcAccessModesCondition) validate() error {
 	return nil
 }
 

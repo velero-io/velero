@@ -30,7 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+	"github.com/gobwas/glob"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -39,7 +40,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -5727,4 +5730,420 @@ func (f *fakeSingleObjectBackupStoreGetter) Get(*velerov1.BackupStorageLocation,
 // that will return only the given BackupStore.
 func NewFakeSingleObjectBackupStoreGetter(store persistence.BackupStore) persistence.ObjectBackupStoreGetter {
 	return &fakeSingleObjectBackupStoreGetter{store: store}
+}
+func TestResolveResourceFilter(t *testing.T) {
+	tests := []struct {
+		name        string
+		rf          resourcepolicies.ResourceFilter
+		expectErr   bool
+		checkResult func(*testing.T, *ResolvedResourceFilter)
+	}{
+		{
+			name: "valid label selector",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: map[string]string{"app": "foo"},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r)
+				require.NotNil(t, r.LabelSelector)
+				assert.True(t, r.LabelSelector.Matches(labels.Set{"app": "foo"}))
+			},
+		},
+		{
+			name: "invalid label selector",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: map[string]string{"invalid/label/key": "value"},
+			},
+			expectErr: true,
+		},
+		{
+			name: "valid or label selectors",
+			rf: resourcepolicies.ResourceFilter{
+				OrLabelSelectors: []map[string]string{
+					{"app": "foo"},
+					{"app": "bar"},
+				},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r)
+				require.Len(t, r.OrLabelSelectors, 2)
+			},
+		},
+		{
+			name: "invalid or label selectors",
+			rf: resourcepolicies.ResourceFilter{
+				OrLabelSelectors: []map[string]string{
+					{"invalid/label/key": "value"},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "names and excluded names",
+			rf: resourcepolicies.ResourceFilter{
+				Names:         []string{"inc1", "inc2"},
+				ExcludedNames: []string{"exc1"},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r)
+				require.NotNil(t, r.NameIE)
+				assert.True(t, r.NameIE.ShouldInclude("inc1"))
+				assert.False(t, r.NameIE.ShouldInclude("exc1"))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := resolveResourceFilter(tc.rf)
+			if tc.expectErr {
+				require.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				if tc.checkResult != nil {
+					tc.checkResult(t, res)
+				}
+			}
+		})
+	}
+}
+
+type mockDiscoveryHelper struct {
+	discovery.Helper
+	ResourceForFunc func(input schema.GroupVersionResource) (schema.GroupVersionResource, metav1.APIResource, error)
+}
+
+func (m *mockDiscoveryHelper) ResourceFor(input schema.GroupVersionResource) (schema.GroupVersionResource, metav1.APIResource, error) {
+	if m.ResourceForFunc != nil {
+		return m.ResourceForFunc(input)
+	}
+	return m.Helper.ResourceFor(input)
+}
+
+func TestResolveClusterScopedFilterPolicy(t *testing.T) {
+	helper := test.NewFakeDiscoveryHelper(true, nil)
+	log := test.NewLogger()
+
+	policy := &resourcepolicies.ClusterScopedFilterPolicy{
+		ResourceFilters: []resourcepolicies.ResourceFilter{
+			{
+				Kinds:         []string{"pods", "secrets"},
+				LabelSelector: map[string]string{"app": "foo"},
+			},
+			{
+				Kinds:         []string{"invalid-kind"},
+				LabelSelector: map[string]string{"invalid/label/key": "value"},
+			},
+		},
+	}
+
+	// Test with invalid label selector to trigger error
+	_, err := resolveClusterScopedFilterPolicy(policy, helper, log)
+	require.Error(t, err)
+
+	// Test valid policy
+	validPolicy := &resourcepolicies.ClusterScopedFilterPolicy{
+		ResourceFilters: []resourcepolicies.ResourceFilter{
+			{
+				Kinds:         []string{"pods", "secrets"},
+				LabelSelector: map[string]string{"app": "foo"},
+			},
+		},
+	}
+	res, err := resolveClusterScopedFilterPolicy(validPolicy, helper, log)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	assert.Contains(t, res, "pods")
+	assert.Contains(t, res, "secrets")
+	assert.True(t, res["pods"].LabelSelector.Matches(labels.Set{"app": "foo"}))
+
+	// Test warning branches
+	mockHelper := &mockDiscoveryHelper{
+		Helper: helper,
+		ResourceForFunc: func(input schema.GroupVersionResource) (schema.GroupVersionResource, metav1.APIResource, error) {
+			if input.Resource == "invalid-resource" {
+				return schema.GroupVersionResource{}, metav1.APIResource{}, errors.New("cannot resolve")
+			}
+			if input.Resource == "namespaced-resource" {
+				return schema.GroupVersionResource{Resource: "namespaced-resource"}, metav1.APIResource{Namespaced: true, Name: "namespaced-resource"}, nil
+			}
+			return helper.ResourceFor(input)
+		},
+	}
+
+	policyWithWarns := &resourcepolicies.ClusterScopedFilterPolicy{
+		ResourceFilters: []resourcepolicies.ResourceFilter{
+			{
+				Kinds: []string{"invalid-resource", "namespaced-resource"},
+			},
+		},
+	}
+	res2, err2 := resolveClusterScopedFilterPolicy(policyWithWarns, mockHelper, log)
+	require.NoError(t, err2)
+	assert.Contains(t, res2, "invalid-resource")
+	assert.Contains(t, res2, "namespaced-resource")
+}
+
+func TestResolveNamespacedFilterPolicies(t *testing.T) {
+	helper := test.NewFakeDiscoveryHelper(true, nil)
+	log := test.NewLogger()
+
+	policies := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns1", "ns-*"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds:         []string{"pods"},
+					LabelSelector: map[string]string{"app": "foo"},
+				},
+				{
+					Kinds:         []string{"*"},
+					LabelSelector: map[string]string{"catch": "all"},
+				},
+			},
+		},
+	}
+
+	res, patterns, err := resolveNamespacedFilterPolicies(policies, helper, log)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	require.Len(t, patterns, 2)
+
+	assert.Contains(t, res, "ns1")
+	assert.Contains(t, res, "ns-*")
+
+	ns1Filter := res["ns1"]
+	require.NotNil(t, ns1Filter)
+	require.NotNil(t, ns1Filter.CatchAllFilter)
+	assert.True(t, ns1Filter.CatchAllFilter.LabelSelector.Matches(labels.Set{"catch": "all"}))
+	require.Contains(t, ns1Filter.ResourceFilterMap, "pods")
+	assert.True(t, ns1Filter.ResourceFilterMap["pods"].LabelSelector.Matches(labels.Set{"app": "foo"}))
+
+	// Test with invalid label selector
+	invalidPolicies := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns1"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds:         []string{"pods"},
+					LabelSelector: map[string]string{"invalid/label/key": "value"},
+				},
+			},
+		},
+	}
+	_, _, err = resolveNamespacedFilterPolicies(invalidPolicies, helper, log)
+	require.Error(t, err)
+
+	// Test warning branches
+	mockHelper := &mockDiscoveryHelper{
+		Helper: helper,
+		ResourceForFunc: func(input schema.GroupVersionResource) (schema.GroupVersionResource, metav1.APIResource, error) {
+			if input.Resource == "invalid-resource" {
+				return schema.GroupVersionResource{}, metav1.APIResource{}, errors.New("cannot resolve")
+			}
+			if input.Resource == "cluster-scoped-resource" {
+				return schema.GroupVersionResource{Resource: "cluster-scoped-resource"}, metav1.APIResource{Namespaced: false, Name: "cluster-scoped-resource"}, nil
+			}
+			return schema.GroupVersionResource{Resource: input.Resource}, metav1.APIResource{Namespaced: true, Name: input.Resource}, nil
+		},
+	}
+
+	policyWithWarns := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns1"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds: []string{"invalid-resource", "cluster-scoped-resource"},
+				},
+			},
+		},
+	}
+	resWarns, _, errWarns := resolveNamespacedFilterPolicies(policyWithWarns, mockHelper, log)
+	require.NoError(t, errWarns)
+	require.Contains(t, resWarns["ns1"].ResourceFilterMap, "invalid-resource")
+	require.Contains(t, resWarns["ns1"].ResourceFilterMap, "cluster-scoped-resource")
+}
+
+func TestBackupWithResPoliciesLogs(t *testing.T) {
+	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
+	defer itemBlockPool.Stop()
+
+	h := newHarness(t, itemBlockPool)
+
+	// Add some resources so discovery helper knows about them
+	h.addItems(t, test.Pods(builder.ForPod("ns1", "pod-1").Result()))
+	h.addItems(t, test.PVs(builder.ForPersistentVolume("pv-1").Result()))
+
+	backupReq := &Request{
+		Backup:           defaultBackup().ExcludedNamespaceScopedResources("pods").Result(),
+		SkippedPVTracker: NewSkipPVTracker(),
+		BackedUpItems:    NewBackedUpItemsMap(),
+		WorkerPool:       itemBlockPool,
+	}
+
+	p := new(resourcepolicies.Policies)
+	inputPolicy := &resourcepolicies.ResourcePolicies{
+		Version: "v1",
+		ClusterScopedFilterPolicy: &resourcepolicies.ClusterScopedFilterPolicy{
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{Kinds: []string{"pods", "invalid-cluster-kind"}},
+			},
+		},
+		NamespacedFilterPolicies: []resourcepolicies.NamespacedFilterPolicy{
+			{
+				Namespaces: []string{"ns1"},
+				ResourceFilters: []resourcepolicies.ResourceFilter{
+					{Kinds: []string{"persistentvolumes", "pods", "invalid-ns-kind"}},
+				},
+			},
+		},
+	}
+	require.NoError(t, p.BuildPolicy(inputPolicy))
+	backupReq.ResPolicies = p
+
+	backupFile := bytes.NewBuffer([]byte{})
+	err := h.backupper.Backup(h.log, backupReq, backupFile, nil, nil, nil)
+	require.NoError(t, err)
+
+	// Add test to cover error returns from resolve policies
+	badClusterPol := &resourcepolicies.ClusterScopedFilterPolicy{
+		ResourceFilters: []resourcepolicies.ResourceFilter{
+			{
+				Kinds:         []string{"pods"},
+				LabelSelector: map[string]string{"invalid/label/key": "value"},
+			},
+		},
+	}
+	pBadCluster := new(resourcepolicies.Policies)
+	require.NoError(t, pBadCluster.BuildPolicy(&resourcepolicies.ResourcePolicies{
+		Version:                   "v1",
+		ClusterScopedFilterPolicy: badClusterPol,
+	}))
+	backupReq.ResPolicies = pBadCluster
+	err = h.backupper.Backup(h.log, backupReq, backupFile, nil, nil, nil)
+	require.Error(t, err)
+
+	badNsPol := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns1"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds:         []string{"pods"},
+					LabelSelector: map[string]string{"invalid/label/key": "value"},
+				},
+			},
+		},
+	}
+	pBadNs := new(resourcepolicies.Policies)
+	require.NoError(t, pBadNs.BuildPolicy(&resourcepolicies.ResourcePolicies{
+		Version:                  "v1",
+		NamespacedFilterPolicies: badNsPol,
+	}))
+	backupReq.ResPolicies = pBadNs
+	err = h.backupper.Backup(h.log, backupReq, backupFile, nil, nil, nil)
+	require.Error(t, err)
+}
+
+func TestGetNamespaceFilter(t *testing.T) {
+	// Pre-compile our globs to simulate what resolveNamespacedFilterPolicies does
+	teamFrontendGlob, err := glob.Compile("team-frontend-*")
+	require.NoError(t, err)
+
+	teamGlob, err := glob.Compile("team-*")
+	require.NoError(t, err)
+
+	// Define our filter map
+	filterMap := map[string]*ResolvedNamespaceFilter{
+		"exact-match-ns":  {CatchAllFilter: &ResolvedResourceFilter{}},
+		"team-frontend-*": {CatchAllFilter: &ResolvedResourceFilter{}},
+		"team-*":          {CatchAllFilter: &ResolvedResourceFilter{}},
+	}
+
+	// Create request with patterns in a specific order (first-match semantics)
+	req := &Request{
+		NamespacedFilterMap: filterMap,
+		NamespacedFilterPatterns: []NamespacedFilterPattern{
+			{Pattern: "team-frontend-*", Compiled: teamFrontendGlob}, // Most specific first
+			{Pattern: "team-*", Compiled: teamGlob},                  // Broader second
+		},
+	}
+
+	tests := []struct {
+		name          string
+		namespace     string
+		expectNil     bool
+		expectMatched string // The pattern or exact string that should match
+	}{
+		{
+			name:          "exact string match bypasses glob matching",
+			namespace:     "exact-match-ns",
+			expectNil:     false,
+			expectMatched: "exact-match-ns",
+		},
+		{
+			name:          "reviewer requested: glob pattern matching",
+			namespace:     "team-backend-prod",
+			expectNil:     false,
+			expectMatched: "team-*",
+		},
+		{
+			name:          "reviewer requested: first-match ordering",
+			namespace:     "team-frontend-prod",
+			expectNil:     false,
+			expectMatched: "team-frontend-*", // Should match this because it's first in NamespacedFilterPatterns
+		},
+		{
+			name:      "no match returns nil",
+			namespace: "unrelated-ns",
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// First call (populates cache)
+			result := req.GetNamespaceFilter(tt.namespace)
+
+			if tt.expectNil {
+				assert.Nil(t, result)
+
+				// Verify negative cache
+				val, ok := req.NamespaceFilterCache.Load(tt.namespace)
+				assert.True(t, ok)
+				assert.Nil(t, val)
+			} else {
+				assert.NotNil(t, result)
+				// Ensure the returned filter points to the correct reference in our map
+				assert.Same(t, filterMap[tt.expectMatched], result)
+
+				// Verify positive cache
+				val, ok := req.NamespaceFilterCache.Load(tt.namespace)
+				assert.True(t, ok)
+				assert.Same(t, filterMap[tt.expectMatched], val)
+			}
+
+			// Second call (hits cache)
+			result2 := req.GetNamespaceFilter(tt.namespace)
+			assert.Same(t, result, result2)
+		})
+	}
+}
+
+func TestGetNamespaceFilter_CacheBypass(t *testing.T) {
+	req := &Request{
+		NamespacedFilterMap: make(map[string]*ResolvedNamespaceFilter),
+	}
+
+	cachedFilter := &ResolvedNamespaceFilter{}
+	req.NamespaceFilterCache.Store("cached-ns", cachedFilter)
+
+	// Since NamespacedFilterMap is empty, this would normally return nil,
+	// but the cache should return our cachedFilter.
+	assert.Same(t, cachedFilter, req.GetNamespaceFilter("cached-ns"))
 }

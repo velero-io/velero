@@ -17,8 +17,8 @@ limitations under the License.
 package kopia
 
 import (
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/snapshot/restore"
-	"github.com/pkg/errors"
 )
 
 var errFlushUnsupported = errors.New("flush is not supported")

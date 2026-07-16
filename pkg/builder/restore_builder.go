@@ -19,6 +19,7 @@ package builder
 import (
 	"time"
 
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -169,5 +170,14 @@ func (b *RestoreBuilder) CompletionTimestamp(val time.Time) *RestoreBuilder {
 // ItemOperationTimeout sets the Restore's ItemOperationTimeout
 func (b *RestoreBuilder) ItemOperationTimeout(timeout time.Duration) *RestoreBuilder {
 	b.object.Spec.ItemOperationTimeout.Duration = timeout
+	return b
+}
+
+// ResourcePoliciesConfigmap sets the Restore's resource policies configmap.
+func (b *RestoreBuilder) ResourcePoliciesConfigmap(name string) *RestoreBuilder {
+	b.object.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{
+		Kind: "configmap",
+		Name: name,
+	}
 	return b
 }

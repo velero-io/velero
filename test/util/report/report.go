@@ -19,8 +19,8 @@ package report
 import (
 	"os"
 
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v3"
+	"github.com/cockroachdb/errors"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/vmware-tanzu/velero/test"
 )

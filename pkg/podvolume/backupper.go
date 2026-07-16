@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -412,18 +412,21 @@ func (b *backupper) WaitAllPodVolumesProcessed(log logrus.FieldLogger) []*velero
 	case <-b.ctx.Done():
 		log.Error("timed out waiting for all PodVolumeBackups to complete")
 	case <-done:
-		for _, obj := range b.pvbIndexer.List() {
-			pvb, ok := obj.(*velerov1api.PodVolumeBackup)
-			if !ok {
-				log.Errorf("expected PodVolumeBackup, but got %T", obj)
-				continue
-			}
-			podVolumeBackups = append(podVolumeBackups, pvb)
-			if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed {
-				log.Errorf("pod volume backup failed: %s", pvb.Status.Message)
-			} else if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled {
-				log.Errorf("pod volume backup canceled: %s", pvb.Status.Message)
-			}
+	}
+
+	// Collect tracked PVBs regardless of whether we timed out or completed normally.
+	// On timeout, already-completed PVBs must still be persisted so their data remains restorable.
+	for _, obj := range b.pvbIndexer.List() {
+		pvb, ok := obj.(*velerov1api.PodVolumeBackup)
+		if !ok {
+			log.Errorf("expected PodVolumeBackup, but got %T", obj)
+			continue
+		}
+		podVolumeBackups = append(podVolumeBackups, pvb)
+		if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed {
+			log.Errorf("pod volume backup failed: %s", pvb.Status.Message)
+		} else if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled {
+			log.Errorf("pod volume backup canceled: %s", pvb.Status.Message)
 		}
 	}
 	return podVolumeBackups

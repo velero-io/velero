@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/bombsimon/logrusr/v3"
+	"github.com/cockroachdb/errors"
 	snapshotv1client "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"

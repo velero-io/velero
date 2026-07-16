@@ -263,6 +263,7 @@ type VeleroOptions struct {
 	DefaultVolumesToFsBackup        bool
 	UploaderType                    string
 	DefaultSnapshotMoveData         bool
+	CSISnapshotEarlyFrequentPolling bool
 	DisableInformerCache            bool
 	ScheduleSkipImmediately         bool
 	PodResources                    kube.PodResources
@@ -388,6 +389,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	if o.DefaultSnapshotMoveData {
 		deployOpts = append(deployOpts, WithDefaultSnapshotMoveData(true))
+	}
+
+	if o.CSISnapshotEarlyFrequentPolling {
+		deployOpts = append(deployOpts, WithCSISnapshotEarlyFrequentPolling(true))
 	}
 
 	if o.DisableInformerCache {

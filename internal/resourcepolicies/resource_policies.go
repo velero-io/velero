@@ -23,13 +23,14 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gobwas/glob"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
 )
 
@@ -48,12 +49,55 @@ const (
 	Custom VolumeActionType = "custom"
 )
 
+const (
+	// DataMoverParameter is the key of the action parameter that selects the data
+	// mover to be used for the matched volumes when the action type is snapshot.
+	DataMoverParameter = "dataMover"
+)
+
+// validDataMovers is the set of data mover values accepted in the snapshot
+// action's dataMover parameter.
+var validDataMovers = map[string]struct{}{
+	datamover.DataMoverTypeVelero:      {},
+	datamover.DataMoverTypeVeleroFs:    {},
+	datamover.DataMoverTypeVeleroBlock: {},
+}
+
 // Action defined as one action for a specific way of backup
 type Action struct {
 	// Type defined specific type of action, currently only support 'skip'
 	Type VolumeActionType `yaml:"type"`
 	// Parameters defined map of parameters when executing a specific action
 	Parameters map[string]any `yaml:"parameters,omitempty"`
+}
+
+// GetDataMover returns the data mover configured in the snapshot action's
+// dataMover parameter. The dataMover parameter is only meaningful for the
+// snapshot action, so it returns an error when the action is nil or its type is
+// not snapshot. When the parameter is absent, it returns the default built-in
+// data mover. The empty string and "velero" both denote the default built-in
+// data mover and are returned unchanged; normalizing them to the concrete
+// default mover is the consuming workflow's responsibility (issue #9830).
+func (a *Action) GetDataMover() (string, error) {
+	if a == nil || a.Type != Snapshot {
+		return "", fmt.Errorf("the %q parameter is only supported for the %q action", DataMoverParameter, Snapshot)
+	}
+	if len(a.Parameters) == 0 {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+	raw, ok := a.Parameters[DataMoverParameter]
+	if !ok {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+	dataMover, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string, got %T", DataMoverParameter, raw)
+	}
+	if _, ok := validDataMovers[dataMover]; !ok {
+		return "", fmt.Errorf("invalid %q value %q, valid values are %q, %q, %q",
+			DataMoverParameter, dataMover, datamover.DataMoverTypeVelero, datamover.DataMoverTypeVeleroFs, datamover.DataMoverTypeVeleroBlock)
+	}
+	return dataMover, nil
 }
 
 // ResourceFilter defines a filter for specific resource kinds.
@@ -155,8 +199,33 @@ func unmarshalResourcePolicies(yamlData *string) (*ResourcePolicies, error) {
 				return nil, fmt.Errorf("pvcLabels must be a map of string to string, got %T", raw)
 			}
 		}
+		if raw, ok := vp.Conditions["pvcVolumeMode"]; ok {
+			if _, ok := raw.(string); !ok {
+				return nil, fmt.Errorf("pvcVolumeMode must be a string, got %T", raw)
+			}
+		}
+		if raw, ok := vp.Conditions["pvcAccessModes"]; ok {
+			if err := validateStringSliceCondition("pvcAccessModes", raw); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return resPolicies, nil
+}
+
+func validateStringSliceCondition(name string, raw any) error {
+	switch values := raw.(type) {
+	case []any:
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("%s must be a list of strings, got element %T", name, value)
+			}
+		}
+	case []string:
+	default:
+		return fmt.Errorf("%s must be a list of strings, got %T", name, raw)
+	}
+	return nil
 }
 
 func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
@@ -181,6 +250,12 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 		}
 		if len(con.PVCPhase) > 0 {
 			volP.conditions = append(volP.conditions, &pvcPhaseCondition{phases: con.PVCPhase})
+		}
+		if con.PVCVolumeMode != "" {
+			volP.conditions = append(volP.conditions, &pvcVolumeModeCondition{volumeMode: con.PVCVolumeMode})
+		}
+		if len(con.PVCAccessModes) > 0 {
+			volP.conditions = append(volP.conditions, &pvcAccessModesCondition{accessModes: con.PVCAccessModes})
 		}
 		p.volumePolicies = append(p.volumePolicies, volP)
 	}
@@ -261,6 +336,34 @@ func (p *Policies) Validate() error {
 		}
 	}
 
+	if err := p.validateClusterScopedFilterPolicy(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if err := p.validateNamespacedFilterPolicies(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	return nil
+}
+
+func (p *Policies) ValidateForRestore() error {
+	if p.version != currentSupportDataVersion {
+		return fmt.Errorf("incompatible version number %s with supported version %s", p.version, currentSupportDataVersion)
+	}
+
+	if len(p.volumePolicies) > 0 {
+		return fmt.Errorf("volumePolicies are not supported for restore")
+	}
+
+	if p.GetIncludeExcludePolicy() != nil {
+		return fmt.Errorf("includeExcludePolicy is not supported for restore")
+	}
+
+	if err := p.validateClusterScopedFilterPolicy(); err != nil {
+		return errors.WithStack(err)
+	}
+
 	if err := p.validateNamespacedFilterPolicies(); err != nil {
 		return errors.WithStack(err)
 	}
@@ -296,23 +399,140 @@ func GetResourcePoliciesFromBackup(
 		if err != nil {
 			logger.Errorf("Fail to get ResourcePolicies %s ConfigMap with error %s.",
 				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err.Error())
-			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap with error %s",
-				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap: %w",
+				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err)
 		}
 		resourcePolicies, err = getResourcePoliciesFromConfig(policiesConfigMap)
 		if err != nil {
 			logger.Errorf("Fail to read ResourcePolicies from ConfigMap %s with error %s.",
 				backup.Namespace+"/"+backup.Name, err.Error())
-			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s with error %s",
-				backup.Namespace+"/"+backup.Name, err.Error())
+			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s: %w",
+				backup.Namespace+"/"+backup.Name, err)
 		} else if err = resourcePolicies.Validate(); err != nil {
 			logger.Errorf("Fail to validate ResourcePolicies in ConfigMap %s with error %s.",
 				backup.Namespace+"/"+backup.Name, err.Error())
-			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s with error %s",
-				backup.Namespace+"/"+backup.Name, err.Error())
+			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s: %w",
+				backup.Namespace+"/"+backup.Name, err)
 		}
 	}
 
+	return resourcePolicies, nil
+}
+
+// GetGlobalResourcePolicies loads and validates the cluster-wide global backup volume
+// policies from a ConfigMap in the Velero install namespace. Only the volumePolicies
+// section is honored globally; any include/exclude or fine-grained filter policies are
+// ignored (a warning is logged), as those are tied to a specific backup use case.
+func GetGlobalResourcePolicies(
+	client crclient.Client,
+	namespace string,
+	configMapName string,
+	logger logrus.FieldLogger,
+) (*Policies, error) {
+	cm := &corev1api.ConfigMap{}
+	if err := client.Get(context.Background(), crclient.ObjectKey{Namespace: namespace, Name: configMapName}, cm); err != nil {
+		return nil, fmt.Errorf("fail to get global backup volume policies ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+
+	policies, err := getResourcePoliciesFromConfig(cm)
+	if err != nil {
+		return nil, fmt.Errorf("fail to read global backup volume policies from ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+	if err := policies.Validate(); err != nil {
+		return nil, fmt.Errorf("fail to validate global backup volume policies in ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+
+	// Only volumePolicies apply globally; warn about any other filter policies that will be ignored.
+	if policies.includeExcludePolicy != nil ||
+		policies.clusterScopedFilterPolicy != nil ||
+		len(policies.namespacedFilterPolicies) > 0 {
+		logger.Warnf("Global backup volume policies ConfigMap %s/%s contains include/exclude or fine-grained "+
+			"filter policies; these are ignored, only volumePolicies apply globally.", namespace, configMapName)
+	}
+
+	// Return a fresh Policies carrying only the globally-applicable fields. Using an allowlist here
+	// (rather than nil-ing out the ignored fields) means any filter field added to Policies in the
+	// future is excluded from the global policies by default, without needing to update this code.
+	return &Policies{
+		version:        policies.version,
+		volumePolicies: policies.volumePolicies,
+	}, nil
+}
+
+// GetResourcePoliciesFromBackupWithGlobal builds the effective resource policies for a backup
+// by merging the backup-referenced resource policies with the global backup volume policies
+// (when globalConfigMapName is set). The merged volumePolicies list is the backup-level
+// policies followed by the global ones, so the first match wins and a backup can override the
+// global baseline for a specific volume while still inheriting the rest of the global rules.
+func GetResourcePoliciesFromBackupWithGlobal(
+	backup velerov1api.Backup,
+	client crclient.Client,
+	globalConfigMapName string,
+	installNamespace string,
+	logger logrus.FieldLogger,
+) (*Policies, error) {
+	backupPolicies, err := GetResourcePoliciesFromBackup(backup, client, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	if globalConfigMapName == "" {
+		return backupPolicies, nil
+	}
+
+	globalPolicies, err := GetGlobalResourcePolicies(client, installNamespace, globalConfigMapName, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	if backupPolicies == nil {
+		return globalPolicies, nil
+	}
+	// Backup-level policies first, then global, so backups can override the global baseline.
+	backupPolicies.volumePolicies = append(backupPolicies.volumePolicies, globalPolicies.volumePolicies...)
+	return backupPolicies, nil
+}
+
+// GetResourcePoliciesFromRestore retrieves the resource policies from the ConfigMap referenced in the Restore spec.
+func GetResourcePoliciesFromRestore(
+	ctx context.Context,
+	restore *velerov1api.Restore,
+	client crclient.Client,
+	logger logrus.FieldLogger,
+) (resourcePolicies *Policies, err error) {
+	if restore.Spec.ResourcePolicy != nil {
+		if !strings.EqualFold(restore.Spec.ResourcePolicy.Kind, ConfigmapRefType) {
+			return nil, fmt.Errorf("invalid ResourcePolicy kind %q, only %q is supported",
+				restore.Spec.ResourcePolicy.Kind, ConfigmapRefType)
+		}
+		policiesConfigMap := &corev1api.ConfigMap{}
+		err = client.Get(
+			ctx,
+			crclient.ObjectKey{
+				Namespace: restore.Namespace,
+				Name:      restore.Spec.ResourcePolicy.Name,
+			},
+			policiesConfigMap,
+		)
+		if err != nil {
+			logger.Errorf("Fail to get ResourcePolicies %s ConfigMap with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		}
+		resourcePolicies, err = getResourcePoliciesFromConfig(policiesConfigMap)
+		if err != nil {
+			logger.Errorf("Fail to read ResourcePolicies from ConfigMap %s with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		} else if err = resourcePolicies.ValidateForRestore(); err != nil {
+			logger.Errorf("Fail to validate ResourcePolicies in ConfigMap %s with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		}
+	}
 	return resourcePolicies, nil
 }
 
@@ -409,6 +629,47 @@ func (p *Policies) validateNamespacedFilterPolicies() error {
 			return fmt.Errorf(
 				"namespacedFilterPolicies: duplicate namespace pattern '%s' found in policies %v",
 				pattern, policyIndices)
+		}
+	}
+
+	return nil
+}
+
+func (p *Policies) validateClusterScopedFilterPolicy() error {
+	if p.clusterScopedFilterPolicy == nil {
+		return nil
+	}
+
+	if len(p.clusterScopedFilterPolicy.ResourceFilters) == 0 {
+		return fmt.Errorf("clusterScopedFilterPolicy: resourceFilters cannot be empty; remove the policy block entirely if it is not needed")
+	}
+
+	seenKinds := make(map[string]int)
+	for j, rf := range p.clusterScopedFilterPolicy.ResourceFilters {
+		if rf.IsCatchAll() {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: kinds must be specified (catch-all is not supported)", j)
+		}
+
+		for _, kind := range rf.Kinds {
+			if prevJ, ok := seenKinds[kind]; ok {
+				return fmt.Errorf("clusterScopedFilterPolicy: kind %q appears in both resourceFilters[%d] and resourceFilters[%d]", kind, prevJ, j)
+			}
+			seenKinds[kind] = j
+		}
+
+		if len(rf.LabelSelector) > 0 && len(rf.OrLabelSelectors) > 0 {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: labelSelector and orLabelSelectors cannot co-exist", j)
+		}
+
+		for k, pattern := range rf.Names {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].names[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
+		}
+		for k, pattern := range rf.ExcludedNames {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].excludedNames[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
 		}
 	}
 

@@ -17,7 +17,7 @@ limitations under the License.
 package v2
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"

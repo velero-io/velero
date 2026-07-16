@@ -5,6 +5,7 @@ on:
 
 jobs:
   stale:
+    if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@v10.1.1

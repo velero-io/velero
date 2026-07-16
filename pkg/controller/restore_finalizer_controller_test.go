@@ -634,6 +634,87 @@ func Test_restoreFinalizerReconciler_finishProcessing(t *testing.T) {
 	}
 }
 
+func TestNeedPatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		newPV    *corev1api.PersistentVolume
+		pvInfo   *volume.PVInfo
+		expected bool
+	}{
+		{
+			name: "reclaim policy differs",
+			newPV: builder.ForPersistentVolume("pv1").
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimRetain),
+				Labels:        map[string]string{},
+			},
+			expected: true,
+		},
+		{
+			name: "backup has label new PV does not",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("existing", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"existing": "val", "missing": "val"},
+			},
+			expected: true,
+		},
+		{
+			name: "same labels same values",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("key", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"key": "val"},
+			},
+			expected: false,
+		},
+		{
+			name: "same label key different values",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "us-west-2a")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+			},
+			expected: false,
+		},
+		{
+			name: "new PV has labels backup does not",
+			newPV: builder.ForPersistentVolume("pv1").
+				ObjectMeta(builder.WithLabels("provisioner-label", "val")).
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        map[string]string{},
+			},
+			expected: false,
+		},
+		{
+			name: "both labels nil",
+			newPV: builder.ForPersistentVolume("pv1").
+				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
+			pvInfo: &volume.PVInfo{
+				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+				Labels:        nil,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := needPatch(tc.newPV, tc.pvInfo)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
 func TestRestoreOperationList(t *testing.T) {
 	var empty []*itemoperation.RestoreOperation
 	tests := []struct {
@@ -739,6 +820,83 @@ func TestRestoreOperationList(t *testing.T) {
 				items: tt.items,
 			}
 			assert.Equal(t, tt.expected, l.SelectByPVC(tt.inputPVCNS, tt.inputPVCName))
+		})
+	}
+}
+
+func TestHasVolumeGroupSnapshotHandles(t *testing.T) {
+	tests := []struct {
+		name       string
+		volumeInfo []*volume.BackupVolumeInfo
+		expected   bool
+	}{
+		{
+			name:       "nil volumeInfo",
+			volumeInfo: nil,
+			expected:   false,
+		},
+		{
+			name:       "empty volumeInfo",
+			volumeInfo: []*volume.BackupVolumeInfo{},
+			expected:   false,
+		},
+		{
+			name: "no CSISnapshotInfo",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{PVCName: "pvc-1", BackupMethod: volume.NativeSnapshot},
+			},
+			expected: false,
+		},
+		{
+			name: "CSISnapshotInfo with empty VolumeGroupSnapshotHandle",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{
+					PVCName:      "pvc-1",
+					BackupMethod: volume.CSISnapshot,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						SnapshotHandle: "snap-1",
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "one volume with VolumeGroupSnapshotHandle",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{
+					PVCName:      "pvc-1",
+					BackupMethod: volume.CSISnapshot,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						SnapshotHandle:            "snap-1",
+						VolumeGroupSnapshotHandle: "vgs-handle-1",
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed volumes only one with VolumeGroupSnapshotHandle",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{PVCName: "pvc-1", BackupMethod: volume.NativeSnapshot},
+				{
+					PVCName:      "pvc-2",
+					BackupMethod: volume.CSISnapshot,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						SnapshotHandle:            "snap-2",
+						VolumeGroupSnapshotHandle: "vgs-handle-2",
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := &finalizerContext{
+				volumeInfo: tc.volumeInfo,
+			}
+			assert.Equal(t, tc.expected, ctx.hasVolumeGroupSnapshotHandles())
 		})
 	}
 }

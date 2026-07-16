@@ -19,7 +19,7 @@ package common
 import (
 	"runtime/debug"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 )
 

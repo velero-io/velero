@@ -74,6 +74,10 @@ type TargetVolumeSpec struct {
 
 	// Namespace is the target namespace
 	Namespace string `json:"namespace"`
+
+	// FSType is the file system type of the target volume.
+	// +optional
+	FSType string `json:"fsType,omitempty"`
 }
 
 // DataDownloadPhase represents the lifecycle phase of a DataDownload.

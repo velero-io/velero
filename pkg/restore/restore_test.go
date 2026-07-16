@@ -25,11 +25,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -764,6 +765,10 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			}
 			require.NoError(t, h.restorer.discoveryHelper.Refresh())
 
+			// We need to fetch the policies using the actual function
+			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
+			require.NoError(t, err)
+
 			data := &Request{
 				Log:              h.log,
 				Restore:          tc.restore,
@@ -771,6 +776,7 @@ func TestRestoreResourceFiltering(t *testing.T) {
 				PodVolumeBackups: nil,
 				VolumeSnapshots:  nil,
 				BackupReader:     tc.tarball,
+				ResPolicies:      resPolicies,
 			}
 			warnings, errs := h.restorer.Restore(
 				data,
@@ -4237,6 +4243,87 @@ func TestDetermineRestoreStatus(t *testing.T) {
 			result := determineRestoreStatus(obj, includesExcludes, "testGroupResource", log)
 
 			assert.Equal(t, test.expectedDecision, result)
+		})
+	}
+}
+
+func TestHasPodVolumeBackup(t *testing.T) {
+	pvUnstructured := func() *unstructured.Unstructured {
+		pv := &corev1api.PersistentVolume{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolume"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pv",
+			},
+			Spec: corev1api.PersistentVolumeSpec{
+				ClaimRef: &corev1api.ObjectReference{
+					Namespace: "test-ns",
+					Name:      "test-pvc",
+				},
+			},
+		}
+		obj, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(pv)
+		return &unstructured.Unstructured{Object: obj}
+	}
+
+	makePVB := func(phase velerov1api.PodVolumeBackupPhase, snapshotID string) *velerov1api.PodVolumeBackup {
+		return &velerov1api.PodVolumeBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"velero.io/pvc-name": "test-pvc",
+				},
+			},
+			Spec: velerov1api.PodVolumeBackupSpec{
+				Pod: corev1api.ObjectReference{
+					Namespace: "test-ns",
+				},
+			},
+			Status: velerov1api.PodVolumeBackupStatus{
+				Phase:      phase,
+				SnapshotID: snapshotID,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		pvbs     []*velerov1api.PodVolumeBackup
+		expected bool
+	}{
+		{
+			name:     "no pvbs",
+			pvbs:     nil,
+			expected: false,
+		},
+		{
+			name:     "completed pvb with snapshot ID",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseCompleted, "snap-123")},
+			expected: true,
+		},
+		{
+			name:     "in-progress pvb should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseInProgress, "")},
+			expected: false,
+		},
+		{
+			name:     "completed pvb with empty snapshot ID should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseCompleted, "")},
+			expected: false,
+		},
+		{
+			name:     "failed pvb should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseFailed, "")},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := &restoreContext{
+				podVolumeBackups: tc.pvbs,
+				log:              logrus.New(),
+			}
+			result := hasPodVolumeBackup(pvUnstructured(), ctx)
+			assert.Equal(t, tc.expected, result)
 		})
 	}
 }

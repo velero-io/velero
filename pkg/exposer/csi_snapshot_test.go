@@ -17,24 +17,29 @@ limitations under the License.
 package exposer
 
 import (
+	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotFake "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned/fake"
-	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
+	storagev1api "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -42,9 +47,8 @@ import (
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
-
-	storagev1api "k8s.io/api/storage/v1"
 )
 
 type reactor struct {
@@ -188,6 +192,19 @@ func TestExpose(t *testing.T) {
 				PersistentVolumeName: &pvName,
 			},
 			NodeName: "node-2",
+		},
+	}
+
+	sourcePV := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{
+					VolumeHandle: "csi-volume-handle",
+				},
+			},
 		},
 	}
 
@@ -1015,6 +1032,46 @@ func TestExpose(t *testing.T) {
 			},
 			expectedPVCAnnotation: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
 		},
+		{
+			name:        "block data mover success",
+			ownerBackup: backup,
+			exposeParam: CSISnapshotExposeParam{
+				SnapshotName:     "fake-vs",
+				SourceNamespace:  "fake-ns",
+				AccessMode:       AccessModeFileSystem,
+				OperationTimeout: time.Millisecond,
+				ExposeTimeout:    time.Millisecond,
+				StorageClass:     "fake-sc",
+				SourcePVName:     "fake-pv",
+				DataMover:        datamover.DataMoverTypeVeleroBlock,
+			},
+			snapshotClientObj: []runtime.Object{
+				vsObject,
+				vscObj,
+			},
+			kubeClientObj: []runtime.Object{
+				daemonSet,
+				scObj,
+				sourcePV,
+			},
+			expectedAffinity: &corev1api.Affinity{
+				NodeAffinity: &corev1api.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+						NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "kubernetes.io/os",
+										Operator: corev1api.NodeSelectorOpNotIn,
+										Values:   []string{"windows"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -1413,7 +1470,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					Kind:       backup.Kind,
 					Name:       backup.Name,
 					UID:        backup.UID,
-					Controller: pointer.BoolPtr(true),
+					Controller: ptr.To(true),
 				},
 			},
 		},
@@ -1424,7 +1481,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 			VolumeMode:       &volumeMode,
 			DataSource:       dataSource,
 			DataSourceRef:    nil,
-			StorageClassName: pointer.String("fake-storage-class"),
+			StorageClassName: ptr.To("fake-storage-class"),
 			Resources: corev1api.VolumeResourceRequirements{
 				Requests: corev1api.ResourceList{
 					corev1api.ResourceStorage: resource.MustParse("1Gi"),
@@ -1444,7 +1501,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					Kind:       backup.Kind,
 					Name:       backup.Name,
 					UID:        backup.UID,
-					Controller: pointer.BoolPtr(true),
+					Controller: ptr.To(true),
 				},
 			},
 		},
@@ -1455,7 +1512,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 			VolumeMode:       &volumeMode,
 			DataSource:       dataSource,
 			DataSourceRef:    nil,
-			StorageClassName: pointer.String("fake-storage-class"),
+			StorageClassName: ptr.To("fake-storage-class"),
 			Resources: corev1api.VolumeResourceRequirements{
 				Requests: corev1api.ResourceList{
 					corev1api.ResourceStorage: resource.MustParse("1Gi"),
@@ -1991,6 +2048,153 @@ end diagnose CSI exposer`,
 
 			diag := e.DiagnoseExpose(t.Context(), ownerObject)
 			assert.Equal(t, tt.expected, diag)
+		})
+	}
+}
+
+func TestGetCBTInfo(t *testing.T) {
+	handle := "snapshot-handle-1"
+
+	tests := []struct {
+		name          string
+		vs            *snapshotv1api.VolumeSnapshot
+		vsc           *snapshotv1api.VolumeSnapshotContent
+		pv            *corev1api.PersistentVolume
+		sourcePVName  string
+		want          cbtInfo
+		wantErrSubstr string
+	}{
+		{
+			name:          "return error when vs is nil",
+			vs:            nil,
+			vsc:           &snapshotv1api.VolumeSnapshotContent{},
+			sourcePVName:  "pv-1",
+			wantErrSubstr: "vs or vsc is nil",
+		},
+		{
+			name: "use annotations when change-id and snapshot annotation exist",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vs-anno",
+					Annotations: map[string]string{
+						util.VSphereCNSChangeIDAnno: "change-id-1",
+						util.VSphereCNSSnapshotAnno: "volume-id-1+snapshot-id-1",
+					},
+				},
+			},
+			vsc:          &snapshotv1api.VolumeSnapshotContent{},
+			sourcePVName: "pv-ignored",
+			want: cbtInfo{
+				changeID:   "change-id-1",
+				volumeID:   "volume-id-1",
+				snapshotID: "vs-anno",
+			},
+		},
+		{
+			name: "fallback to pv and vsc snapshot handle",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "vs-fallback"},
+			},
+			vsc: &snapshotv1api.VolumeSnapshotContent{
+				Status: &snapshotv1api.VolumeSnapshotContentStatus{
+					SnapshotHandle: &handle,
+				},
+			},
+			pv: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "pv-1"},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1api.PersistentVolumeSource{
+						CSI: &corev1api.CSIPersistentVolumeSource{
+							VolumeHandle: "csi-volume-handle-1",
+						},
+					},
+				},
+			},
+			sourcePVName: "pv-1",
+			want: cbtInfo{
+				changeID:   "snapshot-handle-1",
+				volumeID:   "csi-volume-handle-1",
+				snapshotID: "vs-fallback",
+			},
+		},
+		{
+			name: "return error when pv not found in fallback path",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "vs-no-pv"},
+			},
+			vsc:           &snapshotv1api.VolumeSnapshotContent{},
+			sourcePVName:  "pv-not-found",
+			wantErrSubstr: "failed to get pv pv-not-found",
+		},
+		{
+			name: "return error when pv has no csi volume handle",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "vs-no-volume-handle"},
+			},
+			vsc: &snapshotv1api.VolumeSnapshotContent{},
+			pv: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "pv-no-handle"},
+				Spec:       corev1api.PersistentVolumeSpec{},
+			},
+			sourcePVName:  "pv-no-handle",
+			wantErrSubstr: "volumeID must not be empty for CBT",
+		},
+		{
+			name: "return error when snapshot annotation is invalid",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vs-no-volume-handle",
+					Annotations: map[string]string{
+						util.VSphereCNSChangeIDAnno: "change-id-1",
+						util.VSphereCNSSnapshotAnno: "volume-id-1:snapshot-id-1",
+					},
+				},
+			},
+			vsc: &snapshotv1api.VolumeSnapshotContent{},
+			pv: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "pv-1"},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1api.PersistentVolumeSource{
+						CSI: &corev1api.CSIPersistentVolumeSource{
+							VolumeHandle: "csi-volume-handle-1",
+						},
+					},
+				},
+			},
+			sourcePVName:  "pv-1",
+			wantErrSubstr: "volumeID must not be empty for CBT",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.pv != nil {
+				objs = append(objs, tc.pv)
+			}
+			exposer := &csiSnapshotExposer{
+				kubeClient: kubefake.NewSimpleClientset(objs...),
+				log:        logrus.StandardLogger(),
+			}
+
+			got, err := exposer.getCBTInfo(context.Background(), tc.vs, tc.vsc, tc.sourcePVName)
+
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrSubstr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrSubstr, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.changeID != tc.want.changeID || got.volumeID != tc.want.volumeID || got.snapshotID != tc.want.snapshotID {
+				t.Fatalf("unexpected cbtInfo, want %+v, got %+v", tc.want, got)
+			}
 		})
 	}
 }

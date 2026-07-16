@@ -234,7 +234,7 @@ func TestServiceImplGetChangedBlocks(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "snap-2", capturedArgs.SnapshotName)
-		assert.Equal(t, "snap-1", capturedArgs.PrevSnapshotName)
+		assert.Equal(t, "snap-1", capturedArgs.PrevSnapshotID)
 		assert.Equal(t, "velero-ns", capturedArgs.Namespace)
 		assert.Equal(t, iterator.DefaultTokenExpirySeconds, capturedArgs.TokenExpirySecs)
 		assert.Zero(t, capturedArgs.MaxResults)

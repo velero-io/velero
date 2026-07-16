@@ -20,13 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotter "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned/typed/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -598,72 +600,102 @@ func WaitUntilVSCHandleIsReady(
 	log logrus.FieldLogger,
 	csiSnapshotTimeout time.Duration,
 ) (*snapshotv1api.VolumeSnapshotContent, error) {
-	// We'll wait 10m for the VSC to be reconciled polling
-	// every 5s unless backup's csiSnapshotTimeout is set
-	interval := 5 * time.Second
+	// We'll wait for the VSC to be reconciled, trying a fast poll interval first
+	// before falling back to a slower poll interval for the full csiSnapshotTimeout.
 	vsc := new(snapshotv1api.VolumeSnapshotContent)
+	var interval time.Duration
 
-	err := wait.PollUntilContextTimeout(
+	pollFunc := func(ctx context.Context) (bool, error) {
+		vs := new(snapshotv1api.VolumeSnapshot)
+		if err := crClient.Get(
+			ctx,
+			crclient.ObjectKeyFromObject(volSnap),
+			vs,
+		); err != nil {
+			return false,
+				errors.Wrapf(
+					err,
+					"failed to get volumesnapshot %s/%s",
+					volSnap.Namespace, volSnap.Name,
+				)
+		}
+
+		if vs.Status == nil || vs.Status.BoundVolumeSnapshotContentName == nil {
+			log.Infof("Waiting for CSI driver to reconcile volumesnapshot %s/%s. Retrying in %ds",
+				volSnap.Namespace, volSnap.Name, interval/time.Second)
+			return false, nil
+		}
+
+		if err := crClient.Get(
+			ctx,
+			crclient.ObjectKey{
+				Name: *vs.Status.BoundVolumeSnapshotContentName,
+			},
+			vsc,
+		); err != nil {
+			return false,
+				errors.Wrapf(
+					err,
+					"failed to get VolumeSnapshotContent %s for VolumeSnapshot %s/%s",
+					*vs.Status.BoundVolumeSnapshotContentName, vs.Namespace, vs.Name,
+				)
+		}
+
+		// we need to wait for the VolumeSnapshotContent
+		// to have a snapshot handle because during restore,
+		// we'll use that snapshot handle as the source for
+		// the VolumeSnapshotContent so it's statically
+		// bound to the existing snapshot.
+		if vsc.Status == nil ||
+			vsc.Status.SnapshotHandle == nil {
+			log.Infof(
+				"Waiting for VolumeSnapshotContents %s to have snapshot handle. Retrying in %ds",
+				vsc.Name, interval/time.Second)
+			if vsc.Status != nil &&
+				vsc.Status.Error != nil {
+				log.Warnf("VolumeSnapshotContent %s has error: %v",
+					vsc.Name, *vsc.Status.Error.Message)
+			}
+			return false, nil
+		}
+
+		return true, nil
+	}
+
+	var err error
+	frequentPolling, err := strconv.ParseBool(os.Getenv("CSI_SNAPSHOT_EARLY_FREQUENT_POLLING"))
+
+	if err == nil && frequentPolling {
+		// The short interval for the first ten seconds is due to the fact that
+		// Microsoft VSS backups have a hard-coded unfreeze call after 10 seconds,
+		// so we need to minimize waiting time during the first 10 seconds.
+		// First poll with a short interval and timeout.
+		interval = 1 * time.Second
+		timeout := 10 * time.Second
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
+			interval,
+			timeout,
+			true,
+			pollFunc,
+		)
+
+		if err == nil {
+			return vsc, nil
+		}
+		if !wait.Interrupted(err) {
+			return nil, err
+		}
+	}
+
+	// If the first poll timed out, poll with a longer interval and the full timeout.
+	interval = 5 * time.Second
+	err = wait.PollUntilContextTimeout(
 		context.Background(),
 		interval,
 		csiSnapshotTimeout,
 		true,
-		func(ctx context.Context) (bool, error) {
-			vs := new(snapshotv1api.VolumeSnapshot)
-			if err := crClient.Get(
-				ctx,
-				crclient.ObjectKeyFromObject(volSnap),
-				vs,
-			); err != nil {
-				return false,
-					errors.Wrapf(
-						err,
-						"failed to get volumesnapshot %s/%s",
-						volSnap.Namespace, volSnap.Name,
-					)
-			}
-
-			if vs.Status == nil || vs.Status.BoundVolumeSnapshotContentName == nil {
-				log.Infof("Waiting for CSI driver to reconcile volumesnapshot %s/%s. Retrying in %ds",
-					volSnap.Namespace, volSnap.Name, interval/time.Second)
-				return false, nil
-			}
-
-			if err := crClient.Get(
-				ctx,
-				crclient.ObjectKey{
-					Name: *vs.Status.BoundVolumeSnapshotContentName,
-				},
-				vsc,
-			); err != nil {
-				return false,
-					errors.Wrapf(
-						err,
-						"failed to get VolumeSnapshotContent %s for VolumeSnapshot %s/%s",
-						*vs.Status.BoundVolumeSnapshotContentName, vs.Namespace, vs.Name,
-					)
-			}
-
-			// we need to wait for the VolumeSnapshotContent
-			// to have a snapshot handle because during restore,
-			// we'll use that snapshot handle as the source for
-			// the VolumeSnapshotContent so it's statically
-			// bound to the existing snapshot.
-			if vsc.Status == nil ||
-				vsc.Status.SnapshotHandle == nil {
-				log.Infof(
-					"Waiting for VolumeSnapshotContents %s to have snapshot handle. Retrying in %ds",
-					vsc.Name, interval/time.Second)
-				if vsc.Status != nil &&
-					vsc.Status.Error != nil {
-					log.Warnf("VolumeSnapshotContent %s has error: %v",
-						vsc.Name, *vsc.Status.Error.Message)
-				}
-				return false, nil
-			}
-
-			return true, nil
-		},
+		pollFunc,
 	)
 
 	if err != nil {

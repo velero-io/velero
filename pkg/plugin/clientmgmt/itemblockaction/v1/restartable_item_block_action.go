@@ -17,7 +17,7 @@ limitations under the License.
 package v1
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +17,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	repotypes "github.com/vmware-tanzu/velero/pkg/repository/types"
+	datamoverutil "github.com/vmware-tanzu/velero/pkg/util/datamover"
 )
 
 type DataUploadDeleteAction struct {
@@ -88,7 +89,7 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 
 // generate the configmap which is to be created and used as a way to communicate the snapshot info to the backup deletion controller
 func genConfigmap(bak *velerov1.Backup, du velerov2alpha1.DataUpload) *corev1api.ConfigMap {
-	if !IsBuiltInDataMover(du.Spec.DataMover) || du.Status.SnapshotID == "" {
+	if !datamoverutil.IsBuiltInDataMover(du.Spec.DataMover) || du.Status.SnapshotID == "" {
 		return nil
 	}
 	snapshot := repotypes.SnapshotIdentifier{

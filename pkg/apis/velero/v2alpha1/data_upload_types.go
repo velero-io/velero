@@ -60,6 +60,10 @@ type DataUploadSpec struct {
 	// OperationTimeout specifies the time used to wait internal operations,
 	// before returning error as timeout.
 	OperationTimeout metav1.Duration `json:"operationTimeout"`
+
+	// SourceFSType is the file system type of the source volume.
+	// +optional
+	SourceFSType string `json:"sourceFSType,omitempty"`
 }
 
 type SnapshotType string
@@ -253,4 +257,8 @@ type DataUploadResult struct {
 	// SnapshotSize is the logical size in Bytes of the snapshot.
 	// +optional
 	SnapshotSize int64 `json:"snapshotSize,omitempty"`
+
+	// FSType is the file system type of the volume.
+	// +optional
+	FSType string `json:"fsType,omitempty"`
 }

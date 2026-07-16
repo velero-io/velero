@@ -20,11 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -161,6 +162,42 @@ func EnsureDeletePVC(ctx context.Context, pvcGetter corev1client.CoreV1Interface
 	return nil
 }
 
+func EnsureDeletePV(ctx context.Context, pvGetter corev1client.CoreV1Interface, pvName string, timeout time.Duration) error {
+	err := pvGetter.PersistentVolumes().Delete(ctx, pvName, metav1.DeleteOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "error to delete pv %s", pvName)
+	}
+
+	if timeout == 0 {
+		return nil
+	}
+
+	var updated *corev1api.PersistentVolume
+	err = wait.PollUntilContextTimeout(ctx, waitInternal, timeout, true, func(ctx context.Context) (bool, error) {
+		pv, err := pvGetter.PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			}
+
+			return false, errors.Wrapf(err, "error to get pv %s", pvName)
+		}
+
+		updated = pv
+		return false, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errors.Errorf("timeout to assure pv %s is deleted, finalizers in pv %v", pvName, updated.Finalizers)
+		} else {
+			return errors.Wrapf(err, "error to ensure pv deleted for %s", pvName)
+		}
+	}
+
+	return nil
+}
+
 // EnsurePVDeleted ensures a PV has been deleted. This function is supposed to be called after EnsureDeletePVC
 // If timeout is 0, it doesn't wait and return nil
 func EnsurePVDeleted(ctx context.Context, pvGetter corev1client.CoreV1Interface, pvName string, timeout time.Duration) error {
@@ -267,6 +304,86 @@ func ResetPVBinding(ctx context.Context, pvGetter corev1client.CoreV1Interface, 
 	}
 
 	return updated, nil
+}
+
+func RebindPV(ctx context.Context, pvGetter corev1client.CoreV1Interface, pvName string, source *corev1api.PersistentVolume,
+	pvc *corev1api.PersistentVolumeClaim, policy corev1api.PersistentVolumeReclaimPolicy, fsType string) (*corev1api.PersistentVolume, error) {
+	if source == nil {
+		return nil, errors.New("source PV is required to rebind PV")
+	}
+
+	if pvc == nil {
+		return nil, errors.New("target PVC is required to rebind PV")
+	}
+
+	pvLabel := make(map[string]string)
+
+	maps.Copy(pvLabel, source.Labels)
+
+	if pvc.Spec.Selector != nil {
+		maps.Copy(pvLabel, pvc.Spec.Selector.MatchLabels)
+	}
+
+	pv := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   pvName,
+			Labels: pvLabel,
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			Capacity:                      source.Spec.Capacity,
+			PersistentVolumeSource:        clonePVSource(&source.Spec.PersistentVolumeSource, fsType),
+			AccessModes:                   source.Spec.AccessModes,
+			PersistentVolumeReclaimPolicy: policy,
+			StorageClassName:              source.Spec.StorageClassName,
+			VolumeMode:                    pvc.Spec.VolumeMode,
+			NodeAffinity:                  source.Spec.NodeAffinity,
+			VolumeAttributesClassName:     source.Spec.VolumeAttributesClassName,
+			MountOptions:                  source.Spec.MountOptions,
+			ClaimRef: &corev1api.ObjectReference{
+				Kind:      pvc.Kind,
+				Namespace: pvc.Namespace,
+				Name:      pvc.Name,
+			},
+		},
+	}
+
+	return pvGetter.PersistentVolumes().Create(ctx, pv, metav1.CreateOptions{})
+}
+
+func clonePVSource(source *corev1api.PersistentVolumeSource, newFSType string) corev1api.PersistentVolumeSource {
+	newSource := source.DeepCopy()
+
+	if newSource.CSI != nil && newSource.CSI.VolumeAttributes != nil {
+		delete(newSource.CSI.VolumeAttributes, "storage.kubernetes.io/csiProvisionerIdentity")
+	}
+
+	if newFSType != "" {
+		if newSource.CSI != nil {
+			newSource.CSI.FSType = newFSType
+		} else if newSource.AWSElasticBlockStore != nil {
+			newSource.AWSElasticBlockStore.FSType = newFSType
+		} else if newSource.AzureDisk != nil {
+			newSource.AzureDisk.FSType = &newFSType
+		} else if newSource.VsphereVolume != nil {
+			newSource.VsphereVolume.FSType = newFSType
+		} else if newSource.GCEPersistentDisk != nil {
+			newSource.GCEPersistentDisk.FSType = newFSType
+		} else if newSource.Cinder != nil {
+			newSource.Cinder.FSType = newFSType
+		} else if newSource.ISCSI != nil {
+			newSource.ISCSI.FSType = newFSType
+		} else if newSource.RBD != nil {
+			newSource.RBD.FSType = newFSType
+		} else if newSource.FC != nil {
+			newSource.FC.FSType = newFSType
+		} else if newSource.Local != nil {
+			newSource.Local.FSType = &newFSType
+		} else if newSource.FlexVolume != nil {
+			newSource.FlexVolume.FSType = newFSType
+		}
+	}
+
+	return *newSource
 }
 
 // SetPVReclaimPolicy sets the specified reclaim policy to a PV
@@ -566,20 +683,69 @@ func GetPVAttachedNode(ctx context.Context, pv string, storageClient storagev1.S
 	return "", nil
 }
 
-func GetPVAttachedNodes(ctx context.Context, pv string, storageClient storagev1.StorageV1Interface) ([]string, error) {
+func getPVAttachment(ctx context.Context, pv string, storageClient storagev1.StorageV1Interface) ([]*storagev1api.VolumeAttachment, error) {
 	vaList, err := storageClient.VolumeAttachments().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing volumeattachment")
 	}
 
-	nodes := []string{}
+	attachments := []*storagev1api.VolumeAttachment{}
 	for _, va := range vaList.Items {
 		if va.Spec.Source.PersistentVolumeName != nil && *va.Spec.Source.PersistentVolumeName == pv {
-			nodes = append(nodes, va.Spec.NodeName)
+			attachments = append(attachments, &va)
 		}
 	}
 
+	return attachments, nil
+}
+
+func GetPVAttachedNodes(ctx context.Context, pv string, storageClient storagev1.StorageV1Interface) ([]string, error) {
+	attachments, err := getPVAttachment(ctx, pv, storageClient)
+	if err != nil {
+		return nil, errors.Wrap(err, "error listing volumeattachment")
+	}
+
+	nodes := []string{}
+	for _, attach := range attachments {
+		nodes = append(nodes, attach.Spec.NodeName)
+	}
+
 	return nodes, nil
+}
+
+func WaitVolumeDetached(ctx context.Context, storageClient storagev1.StorageV1Interface, pv string, timeout time.Duration) error {
+	attachments, err := getPVAttachment(ctx, pv, storageClient)
+	if err != nil {
+		return errors.Wrap(err, "error listing volumeattachment")
+	}
+
+	err = wait.PollUntilContextTimeout(ctx, waitInternal, timeout, true, func(ctx context.Context) (bool, error) {
+		left := []*storagev1api.VolumeAttachment{}
+		for _, attach := range attachments {
+			if _, err := storageClient.VolumeAttachments().Get(ctx, attach.Name, metav1.GetOptions{}); err == nil {
+				left = append(left, attach)
+			} else if !apierrors.IsNotFound(err) {
+				return false, err // Return the error if it's not a NotFound error
+			}
+		}
+
+		if len(left) == 0 {
+			return true, nil
+		}
+
+		attachments = left
+
+		return false, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errors.Errorf("timeout waiting for volume %s to be detached", pv)
+		}
+		return errors.Wrapf(err, "error waiting for volume %s to be detached", pv)
+	}
+
+	return nil
 }
 
 func GetVolumeTopology(ctx context.Context, volumeClient corev1client.CoreV1Interface, storageClient storagev1.StorageV1Interface, pvName string, scName string) (*corev1api.NodeSelector, error) {
@@ -606,4 +772,20 @@ func GetVolumeTopology(ctx context.Context, volumeClient corev1client.CoreV1Inte
 	}
 
 	return pv.Spec.NodeAffinity.Required, nil
+}
+
+func GetVolumeModeByPVC(pvc *corev1api.PersistentVolumeClaim) corev1api.PersistentVolumeMode {
+	if pvc.Spec.VolumeMode != nil {
+		return *pvc.Spec.VolumeMode
+	}
+
+	return corev1api.PersistentVolumeFilesystem
+}
+
+func GetVolumeModeByPV(pv *corev1api.PersistentVolume) corev1api.PersistentVolumeMode {
+	if pv.Spec.VolumeMode != nil {
+		return *pv.Spec.VolumeMode
+	}
+
+	return corev1api.PersistentVolumeFilesystem
 }

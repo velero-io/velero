@@ -125,6 +125,16 @@ type RestoreSpec struct {
 	// +nullable
 	ResourceModifier *corev1api.TypedLocalObjectReference `json:"resourceModifier,omitempty"`
 
+	// ResourcePolicy specifies the reference to a ConfigMap containing resource
+	// filter policies for this restore. The ConfigMap can contain a
+	// namespacedFilterPolicies section that specifies per-namespace resource type
+	// filters, label selectors, and resource name patterns, and a
+	// clusterScopedFilterPolicy section for per-kind filtering of cluster-scoped
+	// resources. The ConfigMap format is the same as for BackupSpec.ResourcePolicy.
+	// +optional
+	// +nullable
+	ResourcePolicy *corev1api.TypedLocalObjectReference `json:"resourcePolicy,omitempty"`
+
 	// UploaderConfig specifies the configuration for the restore.
 	// +optional
 	// +nullable

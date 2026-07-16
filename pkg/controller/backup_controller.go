@@ -24,8 +24,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -84,32 +84,33 @@ var autoExcludeClusterScopedResources = []string{
 }
 
 type backupReconciler struct {
-	ctx                         context.Context
-	logger                      logrus.FieldLogger
-	discoveryHelper             discovery.Helper
-	backupper                   pkgbackup.Backupper
-	kbClient                    kbclient.Client
-	clock                       clock.WithTickerAndDelayedExecution
-	backupLogLevel              logrus.Level
-	newPluginManager            func(logrus.FieldLogger) clientmgmt.Manager
-	backupTracker               BackupTracker
-	defaultBackupLocation       string
-	defaultVolumesToFsBackup    bool
-	defaultBackupTTL            time.Duration
-	defaultVGSLabelKey          string
-	defaultCSISnapshotTimeout   time.Duration
-	resourceTimeout             time.Duration
-	defaultItemOperationTimeout time.Duration
-	defaultSnapshotLocations    map[string]string
-	metrics                     *metrics.ServerMetrics
-	backupStoreGetter           persistence.ObjectBackupStoreGetter
-	formatFlag                  logging.Format
-	credentialFileStore         credentials.FileStore
-	maxConcurrentK8SConnections int
-	defaultSnapshotMoveData     bool
-	globalCRClient              kbclient.Client
-	itemBlockWorkerCount        int
-	concurrentBackups           int
+	ctx                           context.Context
+	logger                        logrus.FieldLogger
+	discoveryHelper               discovery.Helper
+	backupper                     pkgbackup.Backupper
+	kbClient                      kbclient.Client
+	clock                         clock.WithTickerAndDelayedExecution
+	backupLogLevel                logrus.Level
+	newPluginManager              func(logrus.FieldLogger) clientmgmt.Manager
+	backupTracker                 BackupTracker
+	defaultBackupLocation         string
+	defaultVolumesToFsBackup      bool
+	defaultBackupTTL              time.Duration
+	defaultVGSLabelKey            string
+	defaultCSISnapshotTimeout     time.Duration
+	resourceTimeout               time.Duration
+	defaultItemOperationTimeout   time.Duration
+	defaultSnapshotLocations      map[string]string
+	metrics                       *metrics.ServerMetrics
+	backupStoreGetter             persistence.ObjectBackupStoreGetter
+	formatFlag                    logging.Format
+	credentialFileStore           credentials.FileStore
+	maxConcurrentK8SConnections   int
+	defaultSnapshotMoveData       bool
+	globalCRClient                kbclient.Client
+	itemBlockWorkerCount          int
+	concurrentBackups             int
+	globalVolumePoliciesConfigMap string
 }
 
 func NewBackupReconciler(
@@ -138,34 +139,36 @@ func NewBackupReconciler(
 	itemBlockWorkerCount int,
 	concurrentBackups int,
 	globalCRClient kbclient.Client,
+	globalVolumePoliciesConfigMap string,
 ) *backupReconciler {
 	b := &backupReconciler{
-		ctx:                         ctx,
-		discoveryHelper:             discoveryHelper,
-		backupper:                   backupper,
-		clock:                       &clock.RealClock{},
-		logger:                      logger,
-		backupLogLevel:              backupLogLevel,
-		newPluginManager:            newPluginManager,
-		backupTracker:               backupTracker,
-		kbClient:                    kbClient,
-		defaultBackupLocation:       defaultBackupLocation,
-		defaultVolumesToFsBackup:    defaultVolumesToFsBackup,
-		defaultBackupTTL:            defaultBackupTTL,
-		defaultVGSLabelKey:          defaultVGSLabelKey,
-		defaultCSISnapshotTimeout:   defaultCSISnapshotTimeout,
-		resourceTimeout:             resourceTimeout,
-		defaultItemOperationTimeout: defaultItemOperationTimeout,
-		defaultSnapshotLocations:    defaultSnapshotLocations,
-		metrics:                     metrics,
-		backupStoreGetter:           backupStoreGetter,
-		formatFlag:                  formatFlag,
-		credentialFileStore:         credentialStore,
-		maxConcurrentK8SConnections: maxConcurrentK8SConnections,
-		defaultSnapshotMoveData:     defaultSnapshotMoveData,
-		itemBlockWorkerCount:        itemBlockWorkerCount,
-		concurrentBackups:           max(concurrentBackups, 1),
-		globalCRClient:              globalCRClient,
+		ctx:                           ctx,
+		discoveryHelper:               discoveryHelper,
+		backupper:                     backupper,
+		clock:                         &clock.RealClock{},
+		logger:                        logger,
+		backupLogLevel:                backupLogLevel,
+		newPluginManager:              newPluginManager,
+		backupTracker:                 backupTracker,
+		kbClient:                      kbClient,
+		defaultBackupLocation:         defaultBackupLocation,
+		defaultVolumesToFsBackup:      defaultVolumesToFsBackup,
+		defaultBackupTTL:              defaultBackupTTL,
+		defaultVGSLabelKey:            defaultVGSLabelKey,
+		defaultCSISnapshotTimeout:     defaultCSISnapshotTimeout,
+		resourceTimeout:               resourceTimeout,
+		defaultItemOperationTimeout:   defaultItemOperationTimeout,
+		defaultSnapshotLocations:      defaultSnapshotLocations,
+		metrics:                       metrics,
+		backupStoreGetter:             backupStoreGetter,
+		formatFlag:                    formatFlag,
+		credentialFileStore:           credentialStore,
+		maxConcurrentK8SConnections:   maxConcurrentK8SConnections,
+		defaultSnapshotMoveData:       defaultSnapshotMoveData,
+		itemBlockWorkerCount:          itemBlockWorkerCount,
+		concurrentBackups:             max(concurrentBackups, 1),
+		globalCRClient:                globalCRClient,
+		globalVolumePoliciesConfigMap: globalVolumePoliciesConfigMap,
 	}
 	b.updateTotalBackupMetric()
 	return b
@@ -407,6 +410,11 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Spec.ItemOperationTimeout.Duration = b.defaultItemOperationTimeout
 	}
 
+	if len(request.Spec.BackupType) == 0 {
+		// default backup type to incremental if not specified
+		request.Spec.BackupType = velerov1api.BackupTypeIncremental
+	}
+
 	// calculate expiration
 	request.Status.Expiration = &metav1.Time{Time: b.clock.Now().Add(request.Spec.TTL.Duration)}
 
@@ -587,9 +595,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "encountered labelSelector as well as orLabelSelectors in backup spec, only one can be specified")
 	}
 
-	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(*request.Backup, b.kbClient, logger)
+	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
+		*request.Backup, b.kbClient, b.globalVolumePoliciesConfigMap, request.Namespace, logger)
 	if err != nil {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, err.Error())
+	} else if b.globalVolumePoliciesConfigMap != "" {
+		// Record the contributing global volume policies ConfigMap so `velero backup describe` can surface it.
+		request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = b.globalVolumePoliciesConfigMap
 	}
 	if resourcePolicies != nil && resourcePolicies.GetIncludeExcludePolicy() != nil && collections.UseOldResourceFilters(request.Spec) {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "include-resources, exclude-resources and include-cluster-resources are old filter parameters.\n"+

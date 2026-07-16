@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   auto-request-review:
+    if: github.repository == 'velero-io/velero'
     name: Auto Request Review
     runs-on: ubuntu-latest
     steps:

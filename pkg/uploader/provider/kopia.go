@@ -22,8 +22,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/snapshot/upload"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/pkg/uploader"
@@ -120,7 +120,8 @@ func (kp *kopiaProvider) RunBackup(
 	_ CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
-	updater uploader.ProgressUpdater) (string, bool, int64, int64, error) {
+	updater uploader.ProgressUpdater,
+) (string, bool, int64, int64, error) {
 	if updater == nil {
 		return "", false, 0, 0, errors.New("Need to initial backup progress updater first")
 	}

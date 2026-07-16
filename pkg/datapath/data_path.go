@@ -20,12 +20,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
 	repoProvider "github.com/vmware-tanzu/velero/pkg/repository/provider"
@@ -53,6 +54,9 @@ type BackupStartParam struct {
 	ParentSnapshot string
 	ForceFull      bool
 	Tags           map[string]string
+	VolumeID       string
+	ChangeID       string
+	SnapshotID     string
 }
 
 type generalDataPath struct {
@@ -182,8 +186,24 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 			dp.wgDataPath.Done()
 		}()
 
-		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := dp.uploaderProv.RunBackup(dp.ctx, source.ByPath, backupParam.RealSource, backupParam.Tags, backupParam.ForceFull,
-			backupParam.ParentSnapshot, provider.CBTParam{}, source.VolMode, uploaderConfig, dp)
+		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := dp.uploaderProv.RunBackup(
+			dp.ctx,
+			source.ByPath,
+			backupParam.RealSource,
+			backupParam.Tags,
+			backupParam.ForceFull,
+			backupParam.ParentSnapshot,
+			provider.CBTParam{
+				Source: cbtservice.SourceInfo{
+					Snapshot: backupParam.SnapshotID,
+					VolumeID: backupParam.VolumeID,
+					ChangeID: backupParam.ChangeID,
+				},
+			},
+			source.VolMode,
+			uploaderConfig,
+			dp,
+		)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)

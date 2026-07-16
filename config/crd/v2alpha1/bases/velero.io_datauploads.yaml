@@ -133,6 +133,9 @@ spec:
                 description: SnapshotType is the type of the snapshot to be backed
                   up.
                 type: string
+              sourceFSType:
+                description: SourceFSType is the file system type of the source volume.
+                type: string
               sourceNamespace:
                 description: |-
                   SourceNamespace is the original namespace where the volume is backed up from.

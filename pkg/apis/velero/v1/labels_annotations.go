@@ -80,6 +80,11 @@ const (
 	// timeout value for backup to plugins.
 	ResourceTimeoutAnnotation = "velero.io/resource-timeout"
 
+	// GlobalBackupVolumePolicyConfigMapAnnotation is the annotation key used to record the
+	// name of the cluster-wide global backup volume policies ConfigMap that contributed to a
+	// backup, so that `velero backup describe` can surface it.
+	GlobalBackupVolumePolicyConfigMapAnnotation = "velero.io/global-backup-volume-policy-configmap"
+
 	// AsyncOperationIDLabel is the label key used to identify the async operation ID
 	AsyncOperationIDLabel = "velero.io/async-operation-id"
 

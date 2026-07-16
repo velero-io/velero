@@ -18,9 +18,10 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
@@ -28,7 +29,11 @@ import (
 	repokeys "github.com/vmware-tanzu/velero/pkg/repository/keys"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/vmware-tanzu/velero/pkg/uploader/block"
 )
+
+var blockBackupFunc = block.Backup
+var blockRestoreFunc = block.Restore
 
 type blockProvider struct {
 	requestorType string
@@ -88,7 +93,6 @@ func (bp *blockProvider) GetPassword(param any) (string, error) {
 	return strings.TrimSpace(rawPass), nil
 }
 
-// TODO: implement in the following PRs
 func (bp *blockProvider) RunBackup(
 	ctx context.Context,
 	path string,
@@ -100,10 +104,57 @@ func (bp *blockProvider) RunBackup(
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (string, bool, int64, int64, error) {
-	return "", false, 0, 0, errors.New("block backup not implemented")
+	if updater == nil {
+		return "", false, 0, 0, errors.New("backup progress updater is invalid")
+	}
+
+	if path == "" {
+		return "", false, 0, 0, errors.New("path is empty")
+	}
+
+	log := bp.log.WithFields(logrus.Fields{
+		"path":           path,
+		"realSource":     realSource,
+		"parentSnapshot": parentSnapshot,
+	})
+
+	log.Infof("Run block backup, CBT source info: %v", cbtParam.Source)
+
+	blkUploader := block.NewUploader(ctx, bp.bkRepo, updater, log)
+
+	if tags == nil {
+		tags = make(map[string]string)
+	}
+	tags[uploader.SnapshotRequesterTag] = bp.requestorType
+	tags[uploader.SnapshotUploaderTag] = uploader.BlockType
+
+	if realSource != "" {
+		realSource = fmt.Sprintf("%s/%s/%s", bp.requestorType, uploader.BlockType, realSource)
+	}
+
+	snapshotInfo, _, err := blockBackupFunc(ctx, blkUploader, bp.bkRepo, path, realSource, cbtParam.Source, forceFull, parentSnapshot, cbtParam.Service, uploaderCfg, tags, log)
+
+	if err == block.ErrCanceled {
+		log.Warn("Block backup is canceled")
+		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, ErrorCanceled
+	}
+
+	if err != nil {
+		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, errors.Wrapf(err, "Failed to run block backup")
+	}
+
+	updater.UpdateProgress(
+		&uploader.Progress{
+			TotalBytes: snapshotInfo.Size,
+			BytesDone:  snapshotInfo.Size,
+		},
+	)
+
+	log.Infof("Block backup finished, snapshot ID %s, backup size %d", snapshotInfo.ID, snapshotInfo.Size)
+
+	return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, nil
 }
 
-// TODO: implement in the following PRs
 func (bp *blockProvider) RunRestore(
 	ctx context.Context,
 	snapshotID string,
@@ -111,5 +162,35 @@ func (bp *blockProvider) RunRestore(
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (int64, error) {
-	return 0, errors.New("block restore not implemented")
+	if updater == nil {
+		return 0, errors.New("restore progress updater is invalid")
+	}
+
+	log := bp.log.WithFields(logrus.Fields{
+		"snapshotID": snapshotID,
+		"volumePath": volumePath,
+	})
+	log.Info("Starting restore")
+
+	blkUploader := block.NewUploader(ctx, bp.bkRepo, updater, log)
+
+	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, uploaderCfg, log)
+
+	if err == block.ErrCanceled {
+		log.Warn("Block restore is canceled")
+		return 0, ErrorCanceled
+	}
+
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to run block restore")
+	}
+
+	updater.UpdateProgress(&uploader.Progress{
+		TotalBytes: size,
+		BytesDone:  size,
+	})
+
+	log.Infof("Block restore finished, restore size %v", size)
+
+	return size, nil
 }

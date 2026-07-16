@@ -1,0 +1,1 @@
+Extract pkg/apis into its own Go module with a local replace directive in the root go.mod

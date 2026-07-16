@@ -15,6 +15,20 @@ updates:
     schedule:
       interval: "weekly"
     labels:
+      - "Dependencies"
+      - "go"
+      - "kind/changelog-not-required"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+  # Dependencies listed in pkg/apis/go.mod
+  - package-ecosystem: "gomod"
+    directory: "/pkg/apis" # Location of package manifests
+    schedule:
+      interval: "weekly"
+    labels:
+      - "Dependencies"
+      - "go"
       - "kind/changelog-not-required"
     ignore:
       - dependency-name: "*"

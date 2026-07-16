@@ -21,13 +21,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
@@ -54,7 +57,10 @@ func DescribeBackupInSF(
 
 		if backup.Spec.ResourcePolicy != nil {
 			DescribeResourcePoliciesInSF(d, backup.Spec.ResourcePolicy)
+			DescribeFineGrainedFilterPoliciesInSF(ctx, kbClient, d, backup)
 		}
+
+		DescribeGlobalVolumePolicyInSF(d, backup)
 
 		status := backup.Status
 		if len(status.ValidationErrors) > 0 {
@@ -220,6 +226,88 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 	}
 
 	d.Describe("spec", backupSpecInfo)
+}
+
+// DescribeFineGrainedFilterPoliciesInSF adds the clusterScopedFilterPolicy
+// and namespacedFilterPolicies sections to the structured describer output when present
+// in the ResourcePolicy ConfigMap referenced by the backup.
+func DescribeFineGrainedFilterPoliciesInSF(ctx context.Context, kbClient kbclient.Client, d *StructuredDescriber, backup *velerov1api.Backup) {
+	if backup.Spec.ResourcePolicy == nil {
+		return
+	}
+
+	discardLogger := logrus.New()
+	discardLogger.Out = io.Discard
+
+	resPolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(*backup, kbClient, discardLogger)
+	if err != nil || resPolicies == nil {
+		return
+	}
+
+	clusterScopedFilterPolicy := resPolicies.GetClusterScopedFilterPolicy()
+	if clusterScopedFilterPolicy != nil {
+		var clusterScopedFilters []map[string]any
+		for _, rf := range clusterScopedFilterPolicy.ResourceFilters {
+			entry := map[string]any{
+				"kinds": rf.Kinds,
+			}
+			if len(rf.LabelSelector) > 0 {
+				entry["labelSelector"] = rf.LabelSelector
+			}
+			if len(rf.OrLabelSelectors) > 0 {
+				entry["orLabelSelectors"] = rf.OrLabelSelectors
+			}
+			if len(rf.Names) > 0 {
+				entry["names"] = rf.Names
+			}
+			if len(rf.ExcludedNames) > 0 {
+				entry["excludedNames"] = rf.ExcludedNames
+			}
+			clusterScopedFilters = append(clusterScopedFilters, entry)
+		}
+		d.Describe("clusterScopedFilterPolicy", map[string]any{
+			"resourceFilters": clusterScopedFilters,
+		})
+	}
+
+	nfPolicies := resPolicies.GetNamespacedFilterPolicies()
+	if len(nfPolicies) == 0 {
+		return
+	}
+
+	var structuredPolicies []map[string]any
+	for _, policy := range nfPolicies {
+		for _, ns := range policy.Namespaces {
+			var rfEntries []map[string]any
+			for _, rf := range policy.ResourceFilters {
+				entry := map[string]any{}
+				if rf.IsCatchAll() {
+					entry["kinds"] = []string{}
+					entry["isCatchAll"] = true
+				} else {
+					entry["kinds"] = rf.Kinds
+				}
+				if len(rf.LabelSelector) > 0 {
+					entry["labelSelector"] = rf.LabelSelector
+				}
+				if len(rf.OrLabelSelectors) > 0 {
+					entry["orLabelSelectors"] = rf.OrLabelSelectors
+				}
+				if len(rf.Names) > 0 {
+					entry["names"] = rf.Names
+				}
+				if len(rf.ExcludedNames) > 0 {
+					entry["excludedNames"] = rf.ExcludedNames
+				}
+				rfEntries = append(rfEntries, entry)
+			}
+			structuredPolicies = append(structuredPolicies, map[string]any{
+				"namespace":       ns,
+				"resourceFilters": rfEntries,
+			})
+		}
+	}
+	d.Describe("namespacedFilterPolicies", structuredPolicies)
 }
 
 // DescribeBackupStatusInSF describes a backup status in structured format.
@@ -611,6 +699,19 @@ func DescribeResourcePoliciesInSF(d *StructuredDescriber, resPolicies *corev1api
 	policiesInfo["type"] = resPolicies.Kind
 	policiesInfo["name"] = resPolicies.Name
 	d.Describe("resourcePolicies", policiesInfo)
+}
+
+// DescribeGlobalVolumePolicyInSF describes the global backup volume policies ConfigMap that
+// contributed to the backup, if any, in structured format.
+func DescribeGlobalVolumePolicyInSF(d *StructuredDescriber, backup *velerov1api.Backup) {
+	name := backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	if name == "" {
+		return
+	}
+	d.Describe("globalVolumePolicies", map[string]any{
+		"type": resourcepolicies.ConfigmapRefType,
+		"name": name,
+	})
 }
 
 func describeResultInSF(m map[string]any, result results.Result) {

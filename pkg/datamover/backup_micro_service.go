@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -67,6 +67,10 @@ type BackupMicroService struct {
 	duInformer cache.Informer
 	duHandler  cachetool.ResourceEventHandlerRegistration
 	nodeName   string
+
+	changeID   string
+	volumeID   string
+	snapshotID string
 }
 
 type dataPathResult struct {
@@ -76,7 +80,7 @@ type dataPathResult struct {
 
 func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataUploadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	duInformer cache.Informer, log logrus.FieldLogger) *BackupMicroService {
+	duInformer cache.Informer, changeID string, volumeID string, snapshotID string, log logrus.FieldLogger) *BackupMicroService {
 	return &BackupMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -91,6 +95,9 @@ func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient
 		nodeName:         nodeName,
 		resultSignal:     make(chan dataPathResult),
 		duInformer:       duInformer,
+		changeID:         changeID,
+		volumeID:         volumeID,
+		snapshotID:       snapshotID,
 	}
 }
 
@@ -200,6 +207,9 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		ParentSnapshot: "",
 		ForceFull:      false,
 		Tags:           tags,
+		VolumeID:       r.volumeID,
+		ChangeID:       r.changeID,
+		SnapshotID:     r.snapshotID,
 	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path backup")
 	}

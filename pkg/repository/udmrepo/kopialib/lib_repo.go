@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/compression"
@@ -38,13 +39,12 @@ import (
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 	"github.com/kopia/kopia/snapshot/snapshotmaintenance"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/pkg/kopia"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/freelist"
+	"github.com/vmware-tanzu/velero/pkg/util/freelist"
 )
 
 type kopiaRepoService struct {
@@ -92,6 +92,7 @@ type kopiaObjectWriterEx struct {
 	description      string
 	compressor       compression.Name
 	splitter         string
+	zeroObject       object.ID
 	writeLock        sync.Mutex
 	asyncWritesSem   chan struct{}
 	asyncWritesGroup sync.WaitGroup
@@ -479,6 +480,7 @@ func (kr *kopiaRepository) NewObjectWriter(ctx context.Context, opt udmrepo.Obje
 			description:    opt.Description,
 			compressor:     getCompressorForObject(opt),
 			blockSize:      fixedBlockSize,
+			zeroObject:     object.EmptyID,
 			splitter:       fixedSplitter1M,
 			asyncWritesSem: asyncWritesSem,
 			asyncBuffer:    asyncBuffer,
@@ -985,9 +987,119 @@ func (kow *kopiaObjectWriterEx) writeObjectAsync(objName string, entryID int, p 
 	}
 }
 
-// TODO add implementation in following PRs
+func (kow *kopiaObjectWriterEx) writeZeroObject(objName string, entryID int) error {
+	if kow.zeroObject == object.EmptyID {
+		zeroBuffer := make([]byte, kow.blockSize)
+		objectID, err := kow.writeObject(objName, zeroBuffer)
+		if err != nil {
+			return err
+		}
+
+		kow.zeroObject = objectID
+	}
+
+	kow.entryLock.Lock()
+	kow.entries[entryID].Object = kow.zeroObject
+	kow.entryLock.Unlock()
+
+	return nil
+}
+
 func (kow *kopiaObjectWriterEx) WriteAt(p []byte, offset int64) (int, error) {
-	return 0, errors.New("not implemented")
+	kow.writeLock.Lock()
+	defer kow.writeLock.Unlock()
+
+	if kow.rawRepoWriter == nil {
+		return 0, errors.New("object writer is closed or not open")
+	}
+
+	if err := kow.getWriteError(); err != nil {
+		return 0, errors.Wrapf(err, "error happened during writing object")
+	}
+
+	if offset%kow.blockSize != 0 {
+		return 0, errors.Errorf("invalid offset %v", offset)
+	}
+
+	length := len(p)
+	if int64(length)%kow.blockSize != 0 {
+		return 0, errors.Errorf("invalid length %v", length)
+	}
+
+	kow.entryLock.Lock()
+	curPos := int64(len(kow.entries)) * kow.blockSize
+	kow.entryLock.Unlock()
+
+	if offset < curPos {
+		return 0, errors.Errorf("cannot write back, cur pos %v", curPos)
+	}
+
+	if offset > curPos && kow.parentEntries != nil {
+		startEntry := int(curPos / kow.blockSize)
+		endEntry := int(offset / kow.blockSize)
+		if startEntry < len(kow.parentEntries) {
+			if len(kow.parentEntries) < endEntry {
+				endEntry = len(kow.parentEntries)
+			}
+
+			for i := startEntry; i < endEntry; i++ {
+				e := kow.parentEntries[i]
+
+				if e.Start != int64(i)*kow.blockSize {
+					return 0, errors.Errorf("parent entry %v start %v does not match expected start %v", i, e.Start, int64(i)*kow.blockSize)
+				}
+
+				if e.Length != kow.blockSize {
+					return 0, errors.Errorf("parent entry %v length %v does not match child block size %v", i, e.Length, kow.blockSize)
+				}
+			}
+
+			kow.entryLock.Lock()
+			kow.entries = append(kow.entries, kow.parentEntries[startEntry:endEntry]...)
+			curPos = int64(len(kow.entries)) * kow.blockSize
+			kow.entryLock.Unlock()
+		}
+	}
+
+	entryID := 0
+	for curPos < offset {
+		kow.entryLock.Lock()
+		entryID = len(kow.entries)
+		kow.entries = append(kow.entries, object.IndirectObjectEntry{
+			Start:  curPos,
+			Length: kow.blockSize,
+		})
+		kow.entryLock.Unlock()
+
+		objName := fmt.Sprintf("%s-b%v", kow.description, entryID)
+		if err := kow.writeZeroObject(objName, entryID); err != nil {
+			return 0, errors.Wrapf(err, "error writing zero object for %s", objName)
+		}
+
+		curPos += kow.blockSize
+	}
+
+	if length == 0 {
+		return length, nil
+	}
+
+	for curPos < offset+int64(length) {
+		kow.entryLock.Lock()
+		entryID = len(kow.entries)
+		kow.entries = append(kow.entries, object.IndirectObjectEntry{
+			Start:  curPos,
+			Length: kow.blockSize,
+		})
+		kow.entryLock.Unlock()
+
+		buffOffset := curPos - offset
+		objName := fmt.Sprintf("%s-b%v", kow.description, entryID)
+		kow.writeObjectAsync(objName, entryID, p[buffOffset:buffOffset+kow.blockSize])
+
+		curPos += kow.blockSize
+	}
+
+	return length, nil
 }
 
 func (kow *kopiaObjectWriterEx) Checkpoint() (udmrepo.ID, error) {
