@@ -62,7 +62,7 @@ namespacedFilterPolicies:
 			},
 		},
 		{
-			name:    "namespaced filter policy with glob namespace match and first-match semantics",
+			name:    "namespaced filter policy with exact match priority over glob",
 			restore: defaultRestore().Result(),
 			backup:  defaultBackup().Result(),
 			policyYAML: `version: v1
@@ -94,7 +94,7 @@ namespacedFilterPolicies:
 				test.Pods(),
 			},
 			want: map[*test.APIResource][]string{
-				test.Pods(): {"ns-1/pod-1", "ns-2/pod-1"},
+				test.Pods(): {"ns-1/pod-2", "ns-2/pod-1"},
 			},
 		},
 		{
