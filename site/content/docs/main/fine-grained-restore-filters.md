@@ -325,32 +325,37 @@ namespacedFilterPolicies:
 
 **Goal:** Different restore breadth for `team-frontend-prod`, `team-frontend-dev`, and `team-backend-test` using glob patterns.
 
-**Policy (correct order — most specific first):**
+**Note on Precedence:** Exact namespace matches always take precedence regardless of where they are listed. However, if multiple glob patterns could match a namespace, they are evaluated in the order they appear. Always list specific globs before broad globs.
+
+**Policy:**
 
 ```yaml
 version: v1
 namespacedFilterPolicies:
+  # Globs must be ordered specific-to-broad
   - namespaces:
-      - team-frontend-prod          # exact match
-    resourceFilters:
-      - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
-  - namespaces:
-      - "team-frontend-*"           # pattern match
+      - "team-frontend-*"           # specific pattern match
     resourceFilters:
       - kinds: [Deployment, Service, ConfigMap]
   - namespaces:
       - "team-*"                    # broad pattern
     resourceFilters:
       - kinds: [Deployment, Service]
+
+  # Exact matches always win, even if placed at the bottom
+  - namespaces:
+      - team-frontend-prod          # exact match
+    resourceFilters:
+      - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
 ```
 
 **Expected outcome:**
 
 | Namespace | Matched policy | Kinds restored |
 |-----------|----------------|-----------------|
-| `team-frontend-prod` | First entry (exact) | 5 kinds |
-| `team-frontend-dev` | `team-frontend-*` | 3 kinds |
-| `team-backend-test` | `team-*` | 2 kinds |
+| `team-frontend-prod` | `team-frontend-prod` (Exact match priority) | 5 kinds |
+| `team-frontend-dev` | `team-frontend-*` (First matching glob) | 3 kinds |
+| `team-backend-test` | `team-*` (First matching glob) | 2 kinds |
 
 Velero uses **first-match** semantics: the first policy entry whose namespace pattern matches wins.
 
@@ -506,9 +511,9 @@ namespacedFilterPolicies:
 
 ---
 
-### Example 14 — Same ConfigMap for Backup and Restore
+### Example 14 — Separate ConfigMaps for Backup and Restore
 
-**Goal:** Use a single ConfigMap for both backup and restore operations.
+**Goal:** Understand why you cannot use a single ConfigMap for both backup and restore operations if it contains backup-specific policies.
 
 **Policy:**
 
@@ -527,7 +532,7 @@ namespacedFilterPolicies:
         names: ["app-*"]
 ```
 
-**Expected outcome:** The restore pipeline safely ignores `volumePolicies` and `includeExcludePolicy` (which are backup-specific) and only processes `namespacedFilterPolicies` and `clusterScopedFilterPolicy`.
+**Expected outcome:** The restore operation will **fail validation**. The Velero restore pipeline strictly rejects any ResourcePolicy ConfigMap containing `volumePolicies` or `includeExcludePolicy`. To avoid this, the restore-side ConfigMap should contain only the restore-supported sections (`namespacedFilterPolicies` and/or `clusterScopedFilterPolicy`).
 
 ---
 
@@ -633,8 +638,8 @@ Velero validates the ResourcePolicy when a restore starts. Common errors:
 |-----------------|--------|
 | `at least one namespace must be specified` | Empty `namespaces: []` |
 | `at least one resourceFilter must be specified` | Empty `resourceFilters: []` |
-| `names or excludedNames cannot be specified when kinds is empty` | Name patterns on catch-all entry |
-| `only one resource filter with empty kinds is allowed` | Multiple catch-alls in one policy entry |
+| `names or excludedNames cannot be specified for catch-all filters` | Name patterns on catch-all entry |
+| `only one catch-all resource filter is allowed` | Multiple catch-alls in one policy entry |
 | `kind "X" appears in both resourceFilters[...]` | Same kind in two entries |
 | `labelSelector and orLabelSelectors cannot co-exist` | Both set in one entry |
 | `duplicate namespace pattern` | Same namespace string in two policy entries |
