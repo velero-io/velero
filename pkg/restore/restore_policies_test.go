@@ -62,7 +62,7 @@ namespacedFilterPolicies:
 			},
 		},
 		{
-			name:    "namespaced filter policy with exact match priority over glob",
+			name:    "namespaced filter policy with exact match priority over glob (glob listed first)",
 			restore: defaultRestore().Result(),
 			backup:  defaultBackup().Result(),
 			policyYAML: `version: v1
@@ -81,6 +81,42 @@ namespacedFilterPolicies:
           - pods
         names:
           - pod-2
+`,
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-1", "pod-2").Result(),
+					builder.ForPod("ns-2", "pod-1").Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-2", "ns-2/pod-1"},
+			},
+		},
+		{
+			name:    "namespaced filter policy with exact match priority over glob (exact listed first)",
+			restore: defaultRestore().Result(),
+			backup:  defaultBackup().Result(),
+			policyYAML: `version: v1
+namespacedFilterPolicies:
+  - namespaces:
+      - ns-1
+    resourceFilters:
+      - kinds:
+          - pods
+        names:
+          - pod-2
+  - namespaces:
+      - ns-*
+    resourceFilters:
+      - kinds:
+          - pods
+        names:
+          - pod-1
 `,
 			tarball: test.NewTarWriter(t).
 				AddItems("pods",
