@@ -1,5 +1,5 @@
 /*
-Copyright 2018 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -181,7 +181,7 @@ func newBackupper(
 					// the PVB in the indexer is already in final status, no need to call WaitGroup.Done()
 					if ok && (existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseCompleted ||
 						existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed ||
-						pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled) {
+						existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled) {
 						statusChangedToFinal = false
 					}
 				}
