@@ -222,15 +222,15 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret]
         names: ["app-*"]
-        excludedNames: ["*-tmp", "*-debug"]
+        excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
 ```
 
 **Expected outcome:**
 
 - **Included:** `app-config`, `app-cache-config`, `app-secret`, `app-db-secret`
-- **Excluded:** `app-tmp-config`, `app-debug-config`, `monitoring-tmp-secret`
+- **Excluded:** `app-tmp-config`, `app-debug-config` (excluded by `excludedNames`), and `monitoring-tmp-secret` (excluded because it does not match the `names: ["app-*"]` allowlist)
 
-`excludedNames` takes precedence over `names` when both match (e.g. `app-config` would be excluded if it matched `*-debug`).
+`excludedNames` takes precedence over `names` when both match.
 
 **Verify:** Inspect backup item list.
 
@@ -350,10 +350,6 @@ namespacedFilterPolicies:
 version: v1
 namespacedFilterPolicies:
   - namespaces:
-      - team-frontend-prod          # exact match
-    resourceFilters:
-      - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
-  - namespaces:
       - "team-frontend-*"
     resourceFilters:
       - kinds: [Deployment, Service, ConfigMap]
@@ -361,6 +357,10 @@ namespacedFilterPolicies:
       - "team-*"
     resourceFilters:
       - kinds: [Deployment, Service]
+  - namespaces:
+      - team-frontend-prod          # exact match
+    resourceFilters:
+      - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
 ```
 
 **Expected outcome:**
@@ -371,9 +371,9 @@ namespacedFilterPolicies:
 | `team-frontend-dev` | `team-frontend-*` | 3 kinds |
 | `team-backend-test` | `team-*` | 2 kinds |
 
-**Wrong order (avoid):** If `team-*` is listed **before** `team-frontend-*`, then `team-frontend-prod` matches the broad rule first and only Deployments and Services are backed up — the more specific rules never apply.
+**Wrong order (avoid):** If `team-*` is listed **before** `team-frontend-*`, then `team-frontend-dev` matches the broader `team-*` rule first and only Deployments and Services are backed up — the more specific `team-frontend-*` rule is never reached.
 
-Velero uses **first-match** semantics: the first policy entry whose namespace pattern matches wins.
+Velero evaluates namespaces by looking for an **exact match** first, and then evaluates glob patterns in **definition order** (first-match wins). Because `team-frontend-prod` is an exact match in this policy, its evaluation is unaffected by glob ordering. However, for namespaces relying on glob patterns like `team-frontend-dev`, the order of the glob patterns is critical.
 
 **Backup:** Include all relevant namespaces in `includedNamespaces` (they must still pass the global namespace filter).
 
@@ -757,8 +757,8 @@ Velero validates the ResourcePolicy when a backup starts. Common errors:
 |-----------------|--------|
 | `at least one namespace must be specified` | Empty `namespaces: []` |
 | `at least one resourceFilter must be specified` | Empty `resourceFilters: []` |
-| `names or excludedNames cannot be specified when kinds is empty` | Name patterns on catch-all entry |
-| `only one resource filter with empty kinds is allowed` | Multiple catch-alls in one policy entry |
+| `names or excludedNames cannot be specified for catch-all filters` | Name patterns on catch-all entry |
+| `only one catch-all resource filter is allowed` | Multiple catch-alls in one policy entry |
 | `kind "X" appears in both resourceFilters[...]` | Same kind in two entries |
 | `labelSelector and orLabelSelectors cannot co-exist` | Both set in one entry |
 | `duplicate namespace pattern` | Same namespace string in two policy entries |
@@ -778,7 +778,7 @@ Velero validates the ResourcePolicy when a backup starts. Common errors:
 
 Restore is unchanged: it restores whatever is in the backup archive. Resources excluded by fine-grained filters are simply absent. Use `Restore.spec.includedNamespaces` (and existing restore filters) to limit what you restore from a partial backup.
 
-Namespace-scoped filters on the restore path are planned as a follow-up; they are not required for restore from filtered backups.
+Fine-grained resource filtering is also available on the restore path using `namespacedFilterPolicies` and `clusterScopedFilterPolicy`. For details on the restore-side policies, see the [Fine-grained restore filters design](https://github.com/vmware-tanzu/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md).
 
 ---
 
