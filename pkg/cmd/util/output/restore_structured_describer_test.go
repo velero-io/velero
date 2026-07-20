@@ -162,11 +162,11 @@ func TestDescribeRestoreSpecInSF(t *testing.T) {
 		{
 			name: "included namespaces wildcard treated as all",
 			spec: velerov1api.RestoreSpec{
-				BackupName:          "backup-2",
-				IncludedNamespaces:  []string{"*"},
-				ExcludedNamespaces:  []string{"kube-system"},
-				IncludedResources:   []string{"pods", "configmaps"},
-				ExcludedResources:   []string{"secrets"},
+				BackupName:             "backup-2",
+				IncludedNamespaces:     []string{"*"},
+				ExcludedNamespaces:     []string{"kube-system"},
+				IncludedResources:      []string{"pods", "configmaps"},
+				ExcludedResources:      []string{"secrets"},
 				ExistingResourcePolicy: velerov1api.PolicyTypeUpdate,
 			},
 			expect: map[string]any{
