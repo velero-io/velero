@@ -321,6 +321,11 @@ func (b *BackupBuilder) ParallelFilesUpload(parallel int) *BackupBuilder {
 	return b
 }
 
+func (b *BackupBuilder) BackupType(backupType velerov1api.BackupType) *BackupBuilder {
+	b.object.Spec.BackupType = backupType
+	return b
+}
+
 // WithStatus sets the Backup's status.
 func (b *BackupBuilder) WithStatus(status velerov1api.BackupStatus) *BackupBuilder {
 	b.object.Status = status

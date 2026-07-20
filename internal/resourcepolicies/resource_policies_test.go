@@ -2845,3 +2845,70 @@ namespacedFilterPolicies:
 	assert.Nil(t, p.GetIncludeExcludePolicy())
 	assert.Nil(t, p.GetClusterScopedFilterPolicy())
 }
+
+func TestActionGetDataMover(t *testing.T) {
+	testCases := []struct {
+		name         string
+		action       *Action
+		expectedMove string
+		expectErr    bool
+	}{
+		{
+			name:      "nil action",
+			action:    nil,
+			expectErr: true,
+		},
+		{
+			name:         "snapshot action without parameters returns default mover",
+			action:       &Action{Type: Snapshot},
+			expectedMove: "velero-fs",
+		},
+		{
+			name:         "snapshot action without dataMover parameter returns default mover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"other": "value"}},
+			expectedMove: "velero-fs",
+		},
+		{
+			name:         "snapshot action with velero dataMover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero"}},
+			expectedMove: "velero",
+		},
+		{
+			name:         "snapshot action with velero-fs dataMover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero-fs"}},
+			expectedMove: "velero-fs",
+		},
+		{
+			name:         "snapshot action with velero-block dataMover",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero-block"}},
+			expectedMove: "velero-block",
+		},
+		{
+			name:      "non-snapshot action returns error",
+			action:    &Action{Type: FSBackup, Parameters: map[string]any{"dataMover": "velero-fs"}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with non-string dataMover returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": 123}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with invalid dataMover returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "unknown"}},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataMover, err := tc.action.GetDataMover()
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedMove, dataMover)
+		})
+	}
+}

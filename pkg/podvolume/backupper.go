@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -181,7 +184,7 @@ func newBackupper(
 					// the PVB in the indexer is already in final status, no need to call WaitGroup.Done()
 					if ok && (existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseCompleted ||
 						existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed ||
-						pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled) {
+						existPVB.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled) {
 						statusChangedToFinal = false
 					}
 				}
@@ -411,22 +414,69 @@ func (b *backupper) WaitAllPodVolumesProcessed(log logrus.FieldLogger) []*velero
 	select {
 	case <-b.ctx.Done():
 		log.Error("timed out waiting for all PodVolumeBackups to complete")
-	case <-done:
+
 		for _, obj := range b.pvbIndexer.List() {
 			pvb, ok := obj.(*velerov1api.PodVolumeBackup)
 			if !ok {
-				log.Errorf("expected PodVolumeBackup, but got %T", obj)
+				log.Errorf("expected PVB, but got %T", obj)
 				continue
 			}
-			podVolumeBackups = append(podVolumeBackups, pvb)
-			if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed {
-				log.Errorf("pod volume backup failed: %s", pvb.Status.Message)
-			} else if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled {
-				log.Errorf("pod volume backup canceled: %s", pvb.Status.Message)
+
+			if pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseCompleted &&
+				pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseFailed &&
+				pvb.Status.Phase != velerov1api.PodVolumeBackupPhaseCanceled {
+				log.Infof("Setting cancel flag for ongoing PVB %s/%s", pvb.Namespace, pvb.Name)
+				if err := updatePVBWithRetry(context.Background(), b.crClient, pvb.Namespace, pvb.Name); err != nil {
+					log.WithError(err).Errorf("Failed to set cancel flag for PVB %s/%s", pvb.Namespace, pvb.Name)
+				}
 			}
+		}
+		<-done
+	case <-done:
+	}
+
+	// Collect tracked PVBs regardless of whether we timed out or completed normally.
+	// On timeout, already-completed PVBs must still be persisted so their data remains restorable.
+	for _, obj := range b.pvbIndexer.List() {
+		pvb, ok := obj.(*velerov1api.PodVolumeBackup)
+		if !ok {
+			log.Errorf("expected PodVolumeBackup, but got %T", obj)
+			continue
+		}
+		podVolumeBackups = append(podVolumeBackups, pvb)
+		if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed {
+			log.Errorf("pod volume backup failed: %s", pvb.Status.Message)
+		} else if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCanceled {
+			log.Errorf("pod volume backup canceled: %s", pvb.Status.Message)
 		}
 	}
 	return podVolumeBackups
+}
+
+func updatePVBWithRetry(ctx context.Context, client ctrlclient.Client, namespace, name string) error {
+	return wait.PollUntilContextCancel(ctx, 100*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+		pvb := &velerov1api.PodVolumeBackup{}
+		if err := client.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: name}, pvb); err != nil {
+			return false, errors.Wrap(err, "getting PVB")
+		}
+
+		if pvb.Spec.Cancel {
+			return true, nil
+		}
+
+		pvb.Spec.Cancel = true
+		pvb.Status.Message = "Cancel PVB on pod volume timeout"
+
+		err := client.Update(ctx, pvb)
+		if err != nil {
+			if apierrors.IsConflict(err) {
+				return false, nil
+			}
+			return false, errors.Wrapf(err, "error updating PVB %s/%s", pvb.Namespace, pvb.Name)
+		}
+
+		return true, nil
+	})
 }
 
 func (b *backupper) GetPodVolumeBackupByPodAndVolume(podNamespace, podName, volume string) (*velerov1api.PodVolumeBackup, error) {

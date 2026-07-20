@@ -11,6 +11,8 @@ spec:
     kind: DataDownload
     listKind: DataDownloadList
     plural: datadownloads
+    shortNames:
+    - dd
     singular: datadownload
   scope: Namespaced
   versions:

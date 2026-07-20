@@ -307,6 +307,9 @@ The `getNamespaceFilter()` method on `restoreContext` takes the original namespa
 **Plugin Additional Items (Restore-Side):**
 Like the backup side — which is permissive at Stage 2 to allow CSI plugin-injected resources through — the restore side is permissive for AdditionalItems in `restoreItem()`. If a restore plugin requests an additional item, it is allowed to bypass the fine-grained `namespacedFilterPolicies` and `clusterScopedFilterPolicy` kind, name, and label selector checks. This allows plugins to successfully restore dependencies (like a PV needed by a PVC, or a specific Secret) without the user having to explicitly authorize every single dependent resource type in their configuration. Note that these additional items must still pass global resource/namespace exclusions.
 
+**Exact Namespace Match Priority:**
+If a namespace matches both an exact name pattern and a glob pattern across different `namespacedFilterPolicies` entries, the exact match always takes precedence, regardless of list order. This aligns with the backup pipeline behavior and ensures specific overrides are always honored.
+
 **Multiple Glob Patterns Matching Same Namespace (Incorrect Order):**
 ```yaml
 namespacedFilterPolicies:
@@ -665,7 +668,7 @@ data:
 
 ### Restore with Glob Namespace Patterns
 
-Apply the same filter to all namespaces matching a pattern. **Critical: Order patterns from most specific to least specific:**
+Apply the same filter to all namespaces matching a pattern. **Note on Precedence:** Exact namespace matches always take precedence regardless of where they are listed. However, if multiple glob patterns could match a namespace, they are evaluated in the order they appear. Always list specific globs before broad globs.
 
 ```yaml
 apiVersion: v1
@@ -677,19 +680,21 @@ data:
   policy: |
     version: v1
     namespacedFilterPolicies:
-      # More specific patterns first
+      # Globs must be ordered specific-to-broad
       - namespaces:
-          - "team-frontend-prod"      # Most specific (exact match)
-        resourceFilters:
-          - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
-      - namespaces:
-          - "team-frontend-*"         # Less specific (pattern match)
+          - "team-frontend-*"         # specific pattern match
         resourceFilters:
           - kinds: [Deployment, Service, ConfigMap]
       - namespaces:
-          - "team-*"                  # Least specific (broad pattern)
+          - "team-*"                  # broad pattern
         resourceFilters:
           - kinds: [Deployment, Service]
+
+      # Exact matches always win, even if placed at the bottom
+      - namespaces:
+          - "team-frontend-prod"      # exact match
+        resourceFilters:
+          - kinds: [Deployment, Service, ConfigMap, Secret, PersistentVolumeClaim]
 ```
 
 **Pattern Matching Results:**

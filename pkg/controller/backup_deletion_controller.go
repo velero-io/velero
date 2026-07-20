@@ -295,7 +295,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			err = delete.InvokeDeleteActions(deleteCtx)
 			if err != nil {
 				log.WithError(err).Error("Error invoking delete item actions")
-				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.New("error invoking delete item actions"))
+				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.Wrap(err, "error invoking delete item actions"))
 				return ctrl.Result{}, err2
 			}
 		}

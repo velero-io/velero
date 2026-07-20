@@ -11,6 +11,8 @@ spec:
     kind: Schedule
     listKind: ScheduleList
     plural: schedules
+    shortNames:
+    - sched
     singular: schedule
   scope: Namespaced
   versions:
@@ -80,6 +82,13 @@ spec:
                   Template is the definition of the Backup to be run
                   on the provided schedule
                 properties:
+                  backupType:
+                    description: BackupType specifies how volume data is backed up,
+                      with possible values including Full and Incremental.
+                    enum:
+                    - Full
+                    - Incremental
+                    type: string
                   csiSnapshotTimeout:
                     description: |-
                       CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot status turns to

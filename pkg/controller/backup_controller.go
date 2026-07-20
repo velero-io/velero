@@ -410,6 +410,11 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Spec.ItemOperationTimeout.Duration = b.defaultItemOperationTimeout
 	}
 
+	if len(request.Spec.BackupType) == 0 {
+		// default backup type to incremental if not specified
+		request.Spec.BackupType = velerov1api.BackupTypeIncremental
+	}
+
 	// calculate expiration
 	request.Status.Expiration = &metav1.Time{Time: b.clock.Now().Add(request.Spec.TTL.Duration)}
 

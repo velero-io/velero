@@ -524,6 +524,63 @@ func TestDefaultBackupTTL(t *testing.T) {
 	}
 }
 
+func TestPrepareBackupRequest_SetBackupType(t *testing.T) {
+	now, err := time.Parse(time.RFC1123Z, time.RFC1123Z)
+	require.NoError(t, err)
+	now = now.Local()
+
+	tests := []struct {
+		name               string
+		backup             *velerov1api.Backup
+		expectedBackupType velerov1api.BackupType
+	}{
+		{
+			name:               "default backup type is Incremental",
+			backup:             defaultBackup().Result(),
+			expectedBackupType: velerov1api.BackupTypeIncremental,
+		},
+		{
+			name:               "backup type is set to Full",
+			backup:             defaultBackup().BackupType(velerov1api.BackupTypeFull).Result(),
+			expectedBackupType: velerov1api.BackupTypeFull,
+		},
+		{
+			name:               "backup type is set to Incremental",
+			backup:             defaultBackup().BackupType(velerov1api.BackupTypeIncremental).Result(),
+			expectedBackupType: velerov1api.BackupTypeIncremental,
+		},
+	}
+
+	for _, test := range tests {
+		formatFlag := logging.FormatText
+		var (
+			fakeClient kbclient.Client
+			logger     = logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+		)
+
+		t.Run(test.name, func(t *testing.T) {
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+			// add the test's backup storage location if it's different than the default
+			fakeClient = velerotest.NewFakeControllerRuntimeClient(t)
+			c := &backupReconciler{
+				logger:          logger,
+				discoveryHelper: discoveryHelper,
+				kbClient:        fakeClient,
+				formatFlag:      formatFlag,
+				clock:           testclocks.NewFakeClock(now),
+			}
+
+			res := c.prepareBackupRequest(ctx, test.backup, logger)
+			defer res.WorkerPool.Stop()
+			assert.NotNil(t, res)
+
+			assert.Equal(t, test.expectedBackupType, res.Spec.BackupType)
+		})
+	}
+}
+
 func TestPrepareBackupRequest_SetsVGSLabelKey(t *testing.T) {
 	now, err := time.Parse(time.RFC1123Z, time.RFC1123Z)
 	require.NoError(t, err)
@@ -746,6 +803,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -786,6 +844,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -830,6 +889,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -871,6 +931,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -912,6 +973,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -954,6 +1016,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -996,6 +1059,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -1038,6 +1102,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -1080,6 +1145,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:          velerov1api.BackupPhaseFinalizing,
@@ -1123,6 +1189,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
@@ -1166,6 +1233,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
@@ -1209,6 +1277,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.True(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1253,6 +1322,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1297,6 +1367,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1341,6 +1412,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.True(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1386,6 +1458,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1430,6 +1503,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					SnapshotMoveData:                 boolptr.True(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1480,6 +1554,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
 					ExcludedNamespaceScopedResources: append([]string{"secrets"}, autoExcludeNamespaceScopedResources...),
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,
@@ -1530,6 +1605,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
 					ExcludedNamespaceScopedResources: append([]string{"secrets"}, autoExcludeNamespaceScopedResources...),
+					BackupType:                       velerov1api.BackupTypeIncremental,
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:                       velerov1api.BackupPhaseFinalizing,

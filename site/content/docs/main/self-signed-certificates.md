@@ -154,4 +154,4 @@ Velero provides a way for you to skip TLS verification on the object store when 
 
 If true, the object store's TLS certificate will not be checked for validity before Velero or backup repository connects to the object storage. You can permanently skip TLS verification for an object store by setting `Spec.Config.InsecureSkipTLSVerify` to true in the [BackupStorageLocation](api-types/backupstoragelocation.md) CRD.
 
-Note that Velero's File System Backup uses Restic or Kopia to do data transfer between object store and Kubernetes cluster disks. This means that when you specify `--insecure-skip-tls-verify` in Velero operations that involve File System Backup, Velero will convey this information to Restic or Kopia. For example, for Restic, Velero will add the Restic global command parameter `--insecure-tls` to Restic commands.
+Note that Velero's File System Backup uses Kopia to do data transfer between object store and Kubernetes cluster disks. This means that when you specify `--insecure-skip-tls-verify` in Velero operations that involve File System Backup, Velero will convey this information to Kopia.

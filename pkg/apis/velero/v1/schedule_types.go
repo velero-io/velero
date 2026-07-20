@@ -104,6 +104,7 @@ type ScheduleStatus struct {
 // +kubebuilder:printcolumn:name="LastBackup",type="date",JSONPath=".status.lastBackup",description="The last time a Backup was run for this schedule"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Paused",type="boolean",JSONPath=".spec.paused"
+// +kubebuilder:resource:shortName=sched
 
 // Schedule is a Velero resource that represents a pre-scheduled or
 // periodic Backup that should be run.

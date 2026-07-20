@@ -67,6 +67,8 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 		return uploader.SnapshotInfo{}, false, errors.Wrapf(err, "error opening block device %s", source)
 	}
 
+	defer sourceInfo.dev.Close()
+
 	sourceInfo.size, err = sourceInfo.dev.Seek(0, io.SeekEnd)
 	if err != nil {
 		return uploader.SnapshotInfo{}, false, errors.Wrapf(err, "error getting length of block device %s", source)
@@ -217,6 +219,8 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 	if err != nil {
 		return 0, errors.Wrapf(err, "error opening block device '%s'", destPath)
 	}
+
+	defer destDev.Close()
 
 	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath}, bitmap.Iterator(), uploaderCfg)
 	if err != nil {

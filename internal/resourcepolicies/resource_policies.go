@@ -30,6 +30,7 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
 )
 
@@ -48,12 +49,55 @@ const (
 	Custom VolumeActionType = "custom"
 )
 
+const (
+	// DataMoverParameter is the key of the action parameter that selects the data
+	// mover to be used for the matched volumes when the action type is snapshot.
+	DataMoverParameter = "dataMover"
+)
+
+// validDataMovers is the set of data mover values accepted in the snapshot
+// action's dataMover parameter.
+var validDataMovers = map[string]struct{}{
+	datamover.DataMoverTypeVelero:      {},
+	datamover.DataMoverTypeVeleroFs:    {},
+	datamover.DataMoverTypeVeleroBlock: {},
+}
+
 // Action defined as one action for a specific way of backup
 type Action struct {
 	// Type defined specific type of action, currently only support 'skip'
 	Type VolumeActionType `yaml:"type"`
 	// Parameters defined map of parameters when executing a specific action
 	Parameters map[string]any `yaml:"parameters,omitempty"`
+}
+
+// GetDataMover returns the data mover configured in the snapshot action's
+// dataMover parameter. The dataMover parameter is only meaningful for the
+// snapshot action, so it returns an error when the action is nil or its type is
+// not snapshot. When the parameter is absent, it returns the default built-in
+// data mover. The empty string and "velero" both denote the default built-in
+// data mover and are returned unchanged; normalizing them to the concrete
+// default mover is the consuming workflow's responsibility (issue #9830).
+func (a *Action) GetDataMover() (string, error) {
+	if a == nil || a.Type != Snapshot {
+		return "", fmt.Errorf("the %q parameter is only supported for the %q action", DataMoverParameter, Snapshot)
+	}
+	if len(a.Parameters) == 0 {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+	raw, ok := a.Parameters[DataMoverParameter]
+	if !ok {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+	dataMover, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string, got %T", DataMoverParameter, raw)
+	}
+	if _, ok := validDataMovers[dataMover]; !ok {
+		return "", fmt.Errorf("invalid %q value %q, valid values are %q, %q, %q",
+			DataMoverParameter, dataMover, datamover.DataMoverTypeVelero, datamover.DataMoverTypeVeleroFs, datamover.DataMoverTypeVeleroBlock)
+	}
+	return dataMover, nil
 }
 
 // ResourceFilter defines a filter for specific resource kinds.

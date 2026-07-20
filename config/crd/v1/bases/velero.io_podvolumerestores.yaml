@@ -11,6 +11,8 @@ spec:
     kind: PodVolumeRestore
     listKind: PodVolumeRestoreList
     plural: podvolumerestores
+    shortNames:
+    - pvr
     singular: podvolumerestore
   scope: Namespaced
   versions:

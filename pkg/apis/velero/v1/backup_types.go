@@ -184,6 +184,10 @@ type BackupSpec struct {
 	// +optional
 	// +nullable
 	UploaderConfig *UploaderConfigForBackup `json:"uploaderConfig,omitempty"`
+
+	// BackupType specifies how volume data is backed up, with possible values including Full and Incremental.
+	// +optional
+	BackupType BackupType `json:"backupType,omitempty"`
 }
 
 // UploaderConfigForBackup defines the configuration for the uploader when doing backup.
@@ -357,6 +361,15 @@ const (
 	BackupPhaseDeleting BackupPhase = "Deleting"
 )
 
+// BackupType specifies how volume data is backed up, with possible values including Full and Incremental.
+// +kubebuilder:validation:Enum=Full;Incremental
+type BackupType string
+
+const (
+	BackupTypeFull        BackupType = "Full"
+	BackupTypeIncremental BackupType = "Incremental"
+)
+
 // BackupStatus captures the current status of a Velero backup.
 type BackupStatus struct {
 	// Version is the backup format major version.
@@ -503,6 +516,7 @@ type HookStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:rbac:groups=velero.io,resources=backups,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups=velero.io,resources=backups/status,verbs=get;update;patch
+// +kubebuilder:resource:shortName=bak
 
 // Backup is a Velero resource that represents the capture of Kubernetes
 // cluster state at a point in time (API objects and associated volume state).

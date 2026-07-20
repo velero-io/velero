@@ -11,6 +11,8 @@ spec:
     kind: DownloadRequest
     listKind: DownloadRequestList
     plural: downloadrequests
+    shortNames:
+    - dreq
     singular: downloadrequest
   scope: Namespaced
   versions:
