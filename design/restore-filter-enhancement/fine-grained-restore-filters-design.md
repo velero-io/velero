@@ -578,7 +578,7 @@ data:
         resourceFilters:
           - kinds: [ConfigMap, Secret]
             names: ["app-*"]
-            excludedNames: ["*-tmp", "*-debug"]
+            excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
 ```
 
 ### Catch-All with No Label Selector (Override-Only)
