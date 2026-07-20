@@ -23,6 +23,9 @@ import (
 
 type Metadata struct {
 	Labels map[string]string `json:"labels,omitempty"`
+	// +optional
+	// +nullable
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // BackupSpec defines the specification for a Velero backup.
