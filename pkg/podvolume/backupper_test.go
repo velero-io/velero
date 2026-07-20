@@ -1,5 +1,5 @@
 /*
-Copyright 2018 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -877,6 +877,60 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 			assert.Equal(t, c.expectedPVBPhase, pvbs[0].Status.Phase)
 		}
 	}
+}
+
+func TestCanceledPodVolumeBackupCompletesWaitOnlyOnce(t *testing.T) {
+	const backupUID = "backup-uid"
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	informer := &fakeInformer{}
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup").
+		ObjectMeta(builder.WithUID(backupUID)).
+		Result()
+	backupper := newBackupper(ctx, logrus.New(), nil, nil, informer, nil, "", backup)
+	pvb := builder.ForPodVolumeBackup(velerov1api.DefaultNamespace, "pvb").
+		PodNamespace("pod-namespace").
+		PodName("pod-name").
+		Volume("volume").
+		Labels(map[string]string{velerov1api.BackupUIDLabel: backupUID}).
+		Phase(velerov1api.PodVolumeBackupPhaseInProgress).
+		Result()
+	require.NoError(t, backupper.pvbIndexer.Add(pvb))
+	backupper.wg.Add(1)
+
+	waitResult := make(chan []*velerov1api.PodVolumeBackup, 1)
+	go func() {
+		waitResult <- backupper.WaitAllPodVolumesProcessed(logrus.New())
+	}()
+
+	canceledPVB := pvb.DeepCopy()
+	canceledPVB.Status.Phase = velerov1api.PodVolumeBackupPhaseCanceled
+	require.NotNil(t, informer.handler)
+	require.NotPanics(t, func() {
+		informer.handler.OnUpdate(pvb, canceledPVB)
+	})
+
+	select {
+	case pvbs := <-waitResult:
+		require.NoError(t, ctx.Err(), "wait returned because its context timed out")
+		require.Len(t, pvbs, 1)
+		assert.Equal(t, velerov1api.PodVolumeBackupPhaseCanceled, pvbs[0].Status.Phase)
+	case <-time.After(time.Second):
+		t.Fatal("wait did not complete after the PodVolumeBackup was canceled")
+	}
+
+	duplicateCanceledPVB := canceledPVB.DeepCopy()
+	require.NotPanics(t, func() {
+		informer.handler.OnUpdate(canceledPVB, duplicateCanceledPVB)
+	}, "duplicate Canceled updates must not decrement the wait group")
+
+	completedPVB := canceledPVB.DeepCopy()
+	completedPVB.Status.Phase = velerov1api.PodVolumeBackupPhaseCompleted
+	require.NotPanics(t, func() {
+		informer.handler.OnUpdate(canceledPVB, completedPVB)
+	}, "cross-final updates must not decrement the wait group")
 }
 
 func TestPVCBackupSummary(t *testing.T) {
