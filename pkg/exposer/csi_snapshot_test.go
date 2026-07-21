@@ -2366,10 +2366,10 @@ func TestCleanUp_SecretsAndConfigMaps(t *testing.T) {
 	exposer.CleanUp(t.Context(), ownerObject, "", "app-ns")
 
 	_, err := fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "kms-token", metav1.GetOptions{})
-	assert.Error(t, err, "owned secret should be deleted")
+	require.Error(t, err, "owned secret should be deleted")
 
 	_, err = fakeKubeClient.CoreV1().ConfigMaps("velero").Get(t.Context(), "kms-config", metav1.GetOptions{})
-	assert.Error(t, err, "owned configmap should be deleted")
+	require.Error(t, err, "owned configmap should be deleted")
 
 	_, err = fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "other-secret", metav1.GetOptions{})
 	assert.NoError(t, err, "unrelated secret should not be deleted")

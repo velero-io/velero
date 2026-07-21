@@ -89,11 +89,11 @@ func TestCopySecret(t *testing.T) {
 			},
 		},
 		{
-			name:        "returns collision when same data but different owner",
-			secretName:  "ceph-csi-kms-token",
-			sourceNS:    "app-ns",
-			targetNS:    "velero",
-			ownerName:   "du-456",
+			name:       "returns collision when same data but different owner",
+			secretName: "ceph-csi-kms-token",
+			sourceNS:   "app-ns",
+			targetNS:   "velero",
+			ownerName:  "du-456",
 			objects: []k8sruntime.Object{
 				&corev1api.Secret{
 					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-token", Namespace: "app-ns"},
@@ -269,11 +269,11 @@ func TestCopyConfigMap(t *testing.T) {
 			},
 		},
 		{
-			name:        "returns collision when same data but different owner",
-			cmName:      "ceph-csi-kms-config",
-			sourceNS:    "app-ns",
-			targetNS:    "velero",
-			ownerName:   "du-456",
+			name:      "returns collision when same data but different owner",
+			cmName:    "ceph-csi-kms-config",
+			sourceNS:  "app-ns",
+			targetNS:  "velero",
+			ownerName: "du-456",
 			objects: []k8sruntime.Object{
 				&corev1api.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
