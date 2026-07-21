@@ -67,7 +67,7 @@ func TestCopySecret(t *testing.T) {
 			errContains: "error getting secret",
 		},
 		{
-			name:       "no-op when target already has secret with same data",
+			name:       "no-op when target already has secret with same data and same owner",
 			secretName: "ceph-csi-kms-token",
 			sourceNS:   "app-ns",
 			targetNS:   "velero",
@@ -79,11 +79,38 @@ func TestCopySecret(t *testing.T) {
 					Type:       corev1api.SecretTypeOpaque,
 				},
 				&corev1api.Secret{
-					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-token", Namespace: "velero"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ceph-csi-kms-token", Namespace: "velero",
+						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+					},
+					Data: map[string][]byte{"token": []byte("same-token")},
+					Type: corev1api.SecretTypeOpaque,
+				},
+			},
+		},
+		{
+			name:        "returns collision when same data but different owner",
+			secretName:  "ceph-csi-kms-token",
+			sourceNS:    "app-ns",
+			targetNS:    "velero",
+			ownerName:   "du-456",
+			objects: []k8sruntime.Object{
+				&corev1api.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-token", Namespace: "app-ns"},
 					Data:       map[string][]byte{"token": []byte("same-token")},
 					Type:       corev1api.SecretTypeOpaque,
 				},
+				&corev1api.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ceph-csi-kms-token", Namespace: "velero",
+						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+					},
+					Data: map[string][]byte{"token": []byte("same-token")},
+					Type: corev1api.SecretTypeOpaque,
+				},
 			},
+			expectErr:   true,
+			errContains: "collision",
 		},
 		{
 			name:       "returns collision error when target has secret with different data",
@@ -222,7 +249,7 @@ func TestCopyConfigMap(t *testing.T) {
 			errContains: "error getting configmap",
 		},
 		{
-			name:      "no-op when target already has configmap with same data",
+			name:      "no-op when target already has configmap with same data and same owner",
 			cmName:    "ceph-csi-kms-config",
 			sourceNS:  "app-ns",
 			targetNS:  "velero",
@@ -233,8 +260,46 @@ func TestCopyConfigMap(t *testing.T) {
 					Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
 				},
 				&corev1api.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "velero"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ceph-csi-kms-config", Namespace: "velero",
+						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+					},
+					Data: map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+			},
+		},
+		{
+			name:        "returns collision when same data but different owner",
+			cmName:      "ceph-csi-kms-config",
+			sourceNS:    "app-ns",
+			targetNS:    "velero",
+			ownerName:   "du-456",
+			objects: []k8sruntime.Object{
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
 					Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ceph-csi-kms-config", Namespace: "velero",
+						Labels: map[string]string{BackupPVCSecretLabel: "du-123"},
+					},
+					Data: map[string]string{"vaultAddress": "https://vault.example.com"},
+				},
+			},
+			expectErr:   true,
+			errContains: "collision",
+		},
+		{
+			name:      "copies configmap with BinaryData",
+			cmName:    "ceph-csi-kms-config",
+			sourceNS:  "app-ns",
+			targetNS:  "velero",
+			ownerName: "du-123",
+			objects: []k8sruntime.Object{
+				&corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "ceph-csi-kms-config", Namespace: "app-ns"},
+					BinaryData: map[string][]byte{"ca.crt": []byte("binary-ca-bundle")},
 				},
 			},
 		},

@@ -66,9 +66,9 @@ const (
 var ErrSecretCollision = errors.New("secret collision: same name exists with different data")
 
 // CopySecret copies a secret from sourceNamespace to targetNamespace.
-// If a secret with the same name already exists in the target with identical data, it is a no-op.
-// If a secret with the same name exists with different data (collision from another DataUpload),
-// it returns ErrSecretCollision so the caller can requeue.
+// If a secret with the same name already exists in the target with identical data
+// and the same owner, it is a no-op. If the data matches but a different owner holds
+// it, or the data differs, it returns ErrSecretCollision.
 func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secretName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
 	srcSecret, err := client.Secrets(sourceNamespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
@@ -102,12 +102,12 @@ func CopySecret(ctx context.Context, client corev1client.CoreV1Interface, secret
 		return errors.Wrapf(err, "error getting existing secret %s/%s", targetNamespace, secretName)
 	}
 
-	if reflect.DeepEqual(existing.Data, srcSecret.Data) {
-		log.Infof("Secret %s already exists in %s with same data, skipping copy", secretName, targetNamespace)
+	if reflect.DeepEqual(existing.Data, srcSecret.Data) && existing.Labels[BackupPVCSecretLabel] == ownerName {
+		log.Infof("Secret %s already exists in %s with same data and owner, skipping copy", secretName, targetNamespace)
 		return nil
 	}
 
-	log.Infof("Secret %s already exists in %s with different data, collision detected", secretName, targetNamespace)
+	log.Infof("Secret %s already exists in %s owned by a different DataUpload, collision detected", secretName, targetNamespace)
 	return ErrSecretCollision
 }
 
@@ -124,6 +124,7 @@ func DeleteSecretIfAny(ctx context.Context, client corev1client.CoreV1Interface,
 }
 
 // DeleteSecretsWithLabel deletes all secrets in a namespace matching a label key=value pair.
+// Uses UID preconditions to avoid deleting a recreated object with the same name.
 func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Interface, namespace, labelKey, labelValue string, log logrus.FieldLogger) {
 	secrets, err := client.Secrets(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelKey + "=" + labelValue,
@@ -134,14 +135,20 @@ func DeleteSecretsWithLabel(ctx context.Context, client corev1client.CoreV1Inter
 	}
 
 	for i := range secrets.Items {
-		DeleteSecretIfAny(ctx, client, secrets.Items[i].Name, namespace, log)
+		uid := secrets.Items[i].UID
+		err := client.Secrets(namespace).Delete(ctx, secrets.Items[i].Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid},
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			log.WithError(err).Errorf("Failed to delete secret %s/%s", namespace, secrets.Items[i].Name)
+		}
 	}
 }
 
 // CopyConfigMap copies a configmap from sourceNamespace to targetNamespace.
-// If a configmap with the same name already exists in the target with identical data, it is a no-op.
-// If a configmap with the same name exists with different data (collision from another DataUpload),
-// it returns ErrSecretCollision so the caller can requeue.
+// If a configmap with the same name already exists in the target with identical data
+// and the same owner, it is a no-op. If the data matches but a different owner holds
+// it, or the data differs, it returns ErrSecretCollision.
 func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmName, sourceNamespace, targetNamespace string, ownerName string, log logrus.FieldLogger) error {
 	srcCM, err := client.ConfigMaps(sourceNamespace).Get(ctx, cmName, metav1.GetOptions{})
 	if err != nil {
@@ -156,7 +163,8 @@ func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmN
 				BackupPVCSecretLabel: ownerName,
 			},
 		},
-		Data: srcCM.Data,
+		Data:       srcCM.Data,
+		BinaryData: srcCM.BinaryData,
 	}
 
 	_, err = client.ConfigMaps(targetNamespace).Create(ctx, newCM, metav1.CreateOptions{})
@@ -174,12 +182,14 @@ func CopyConfigMap(ctx context.Context, client corev1client.CoreV1Interface, cmN
 		return errors.Wrapf(err, "error getting existing configmap %s/%s", targetNamespace, cmName)
 	}
 
-	if reflect.DeepEqual(existing.Data, srcCM.Data) {
-		log.Infof("ConfigMap %s already exists in %s with same data, skipping copy", cmName, targetNamespace)
+	if reflect.DeepEqual(existing.Data, srcCM.Data) &&
+		reflect.DeepEqual(existing.BinaryData, srcCM.BinaryData) &&
+		existing.Labels[BackupPVCSecretLabel] == ownerName {
+		log.Infof("ConfigMap %s already exists in %s with same data and owner, skipping copy", cmName, targetNamespace)
 		return nil
 	}
 
-	log.Infof("ConfigMap %s already exists in %s with different data, collision detected", cmName, targetNamespace)
+	log.Infof("ConfigMap %s already exists in %s owned by a different DataUpload, collision detected", cmName, targetNamespace)
 	return ErrSecretCollision
 }
 
@@ -196,6 +206,7 @@ func DeleteConfigMapIfAny(ctx context.Context, client corev1client.CoreV1Interfa
 }
 
 // DeleteConfigMapsWithLabel deletes all configmaps in a namespace matching a label key=value pair.
+// Uses UID preconditions to avoid deleting a recreated object with the same name.
 func DeleteConfigMapsWithLabel(ctx context.Context, client corev1client.CoreV1Interface, namespace, labelKey, labelValue string, log logrus.FieldLogger) {
 	cms, err := client.ConfigMaps(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelKey + "=" + labelValue,
@@ -206,6 +217,12 @@ func DeleteConfigMapsWithLabel(ctx context.Context, client corev1client.CoreV1In
 	}
 
 	for i := range cms.Items {
-		DeleteConfigMapIfAny(ctx, client, cms.Items[i].Name, namespace, log)
+		uid := cms.Items[i].UID
+		err := client.ConfigMaps(namespace).Delete(ctx, cms.Items[i].Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid},
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			log.WithError(err).Errorf("Failed to delete configmap %s/%s", namespace, cms.Items[i].Name)
+		}
 	}
 }
