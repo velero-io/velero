@@ -595,7 +595,7 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap]
         names: ["app-*"]
-        excludedNames: ["*-tmp", "*-debug"]
+        excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
       - kinds: [Secret]
         labelSelector:
           workload: application
