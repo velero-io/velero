@@ -768,7 +768,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 			Operator: metav1.LabelSelectorOpIn,
 		})
 
-		toleration = append(toleration, []corev1api.Toleration{
+		toleration = deduplicateTolerations(append(toleration, []corev1api.Toleration{
 			{
 				Key:      "os",
 				Operator: "Equal",
@@ -781,7 +781,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 				Effect:   "NoExecute",
 				Value:    "windows",
 			},
-		}...)
+		}...))
 	} else {
 		userID := int64(0)
 		securityCtx = &corev1api.PodSecurityContext{

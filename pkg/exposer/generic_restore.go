@@ -709,7 +709,7 @@ func (e *genericRestoreExposer) createRestorePod(
 			Operator: metav1.LabelSelectorOpIn,
 		})
 
-		toleration = append(toleration, []corev1api.Toleration{
+		toleration = deduplicateTolerations(append(toleration, []corev1api.Toleration{
 			{
 				Key:      "os",
 				Operator: "Equal",
@@ -722,7 +722,7 @@ func (e *genericRestoreExposer) createRestorePod(
 				Effect:   "NoExecute",
 				Value:    "windows",
 			},
-		}...)
+		}...))
 	} else {
 		userID := int64(0)
 		securityCtx = &corev1api.PodSecurityContext{
