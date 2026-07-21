@@ -2,9 +2,9 @@
 
 ## Glossary & Abbreviation
 
-**Backup Filter**: The mechanism in Velero that determines which Kubernetes resources are collected from the cluster and written into the backup archive. Backup filters currently operate on four dimensions: namespace, resource type, label, and cluster scope.
-**Global Filter**: A filter that applies uniformly across all namespaces in a backup. All existing Velero backup filters are global filters.
-**Namespace Label Selector Filter**: A filter that dynamically includes or excludes entire namespaces from a backup based on Kubernetes label selectors applied to namespace objects. This is the capability introduced by this design.
+**Backup Filter**: The mechanism in Velero that determines which Kubernetes resources are collected from the cluster and written into the backup archive. Backup filters currently operate on four dimensions: namespace, resource type, label, and cluster scope.  
+**Global Filter**: A filter that applies uniformly across all namespaces in a backup. All existing Velero backup filters are global filters.  
+**Namespace Label Selector Filter**: A filter that dynamically includes or excludes entire namespaces from a backup based on Kubernetes label selectors applied to namespace objects. This is the capability introduced by this design.  
 **Resource Policy**: An existing Velero mechanism where backup behavior rules are defined in a ConfigMap and referenced from `BackupSpec.ResourcePolicy`. Currently used for volume policies and global include/exclude policies.
 
 ## Abstract
@@ -92,6 +92,21 @@ includeExcludePolicy:
     - "env=dev"
 ```
 
+### Require multiple labels together (AND)
+
+Only back up namespaces that are labeled both `tier=critical` and `compliance=pci`, using `labelSelectorLogic: "AND"` instead of the default OR:
+
+```yaml
+version: v1
+includeExcludePolicy:
+  labelSelectorLogic: "AND"
+  includedNamespacesByLabel:
+    - "tier=critical"
+    - "compliance=pci"
+```
+
+Without `labelSelectorLogic: "AND"`, the two entries above would be OR'd (namespaces matching either label), which is a materially different — and in this case incorrect — selection. Note `"tier=critical,compliance=pci"` as a single comma-separated selector string already expresses AND today (comma-separated requirements within one selector string are always AND'd by `labels.Parse`); `labelSelectorLogic: "AND"` is for AND'ing across separate list *entries*, useful when entries are generated/templated independently rather than authored as one string.
+
 ## High-Level Design
 
 Two new fields, `includedNamespacesByLabel` and `excludedNamespacesByLabel`, are added to `IncludeExcludePolicy` in the ResourcePolicy ConfigMap.
@@ -105,7 +120,7 @@ This design coexists with the existing `includeExcludePolicy` fields (`includedC
 
 ### Data Structure
 
-`IncludeExcludePolicy` in `internal/resourcepolicies/resource_policies.go` gains two new fields:
+`IncludeExcludePolicy` in `internal/resourcepolicies/resource_policies.go` gains three new fields:
 
 ```go
 type IncludeExcludePolicy struct {
@@ -116,12 +131,18 @@ type IncludeExcludePolicy struct {
     // New fields
     IncludedNamespacesByLabel []string `yaml:"includedNamespacesByLabel"`
     ExcludedNamespacesByLabel []string `yaml:"excludedNamespacesByLabel"`
+    // LabelSelectorLogic controls how multiple entries within
+    // IncludedNamespacesByLabel are combined with each other, and
+    // independently how multiple entries within ExcludedNamespacesByLabel
+    // are combined with each other. "OR" (default) or "AND". Empty string
+    // is treated as "OR".
+    LabelSelectorLogic string `yaml:"labelSelectorLogic,omitempty"`
 }
 ```
 
 Each entry in `includedNamespacesByLabel` / `excludedNamespacesByLabel` is a label selector string parseable by `k8s.io/apimachinery/pkg/labels.Parse`.
-Multiple entries within the same list are combined with OR (union): a namespace matching any selector in the list is included/excluded.
-Within a single selector string, comma-separated requirements are AND.
+By default (`labelSelectorLogic` unset or `"OR"`), multiple entries within the same list are combined with OR (union): a namespace matching any selector in the list is included/excluded. Setting `labelSelectorLogic: "AND"` combines entries within each list with AND (intersection) instead: a namespace must match every selector in `includedNamespacesByLabel` to be included, and every selector in `excludedNamespacesByLabel` to be excluded. `includedNamespacesByLabel` and `excludedNamespacesByLabel` are still resolved independently of each other regardless of `labelSelectorLogic` — see [Namespace Resolution](#namespace-resolution).
+Within a single selector string, comma-separated requirements are always AND (this is `labels.Parse` syntax, unrelated to `labelSelectorLogic`).
 
 Example YAML in ResourcePolicy ConfigMap:
 
@@ -151,6 +172,15 @@ func validateLabelSelectors(selectors []string) error {
     }
     return nil
 }
+
+func validateLabelSelectorLogic(logic string) error {
+    switch logic {
+    case "", "OR", "AND":
+        return nil
+    default:
+        return fmt.Errorf("labelSelectorLogic must be \"OR\" or \"AND\", got %q", logic)
+    }
+}
 ```
 
 An empty string is syntactically valid input to `labels.Parse` — it parses as a no-op selector that matches every namespace (equivalent to `labels.Everything()`). Left unchecked, an accidental empty entry in `includedNamespacesByLabel` would silently include all namespaces, and in `excludedNamespacesByLabel` would silently exclude all namespaces. Validation rejects empty (or whitespace-only) selector strings explicitly rather than relying on `labels.Parse` to catch it.
@@ -161,12 +191,13 @@ Note: this validates a Kubernetes label selector string via `labels.Parse`, a di
 
 ### Namespace Resolution
 
-A new helper `resolveNamespacesByLabel` is called in `prepareBackupRequest` (or `kubernetesBackupper`) after the existing namespace filter is constructed. It resolves the included and excluded selector lists **independently** — it must not net one against the other, since the caller (not this helper) is responsible for combining them with `BackupSpec.IncludedNamespaces`/`ExcludedNamespaces` (see [Precedence and Interaction](#precedence-and-interaction)). An earlier draft of this helper subtracted excluded matches from included matches internally and returned only the included list; that silently dropped the excluded set for exclude-only policies (no `includedNamespacesByLabel` configured), where the caller still needs it to subtract from an "all namespaces" baseline:
+A new helper `resolveNamespacesByLabel` is called in `prepareBackupRequest` (or `kubernetesBackupper`) after the existing namespace filter is constructed. It resolves the included and excluded selector lists **independently** — it must not net one against the other, since the caller (not this helper) is responsible for combining them with `BackupSpec.IncludedNamespaces`/`ExcludedNamespaces` (see [Precedence and Interaction](#precedence-and-interaction)). An earlier draft of this helper subtracted excluded matches from included matches internally and returned only the included list; that silently dropped the excluded set for exclude-only policies (no `includedNamespacesByLabel` configured), where the caller still needs it to subtract from an "all namespaces" baseline. It also takes `logic` ("OR" or "AND", empty treated as "OR") to control how entries within each list are combined — see [Require multiple labels together (AND)](#require-multiple-labels-together-and):
 
 ```go
 // resolveNamespacesByLabel lists all cluster namespaces and returns two
-// independently resolved name sets: those matching any selector in
-// includedSelectors, and those matching any selector in excludedSelectors.
+// independently resolved name sets: those matching includedSelectors, and
+// those matching excludedSelectors, combined per logic ("OR": any selector
+// matches; "AND": every selector in the list matches; "" defaults to "OR").
 // It performs no cross-suppression between the two — the caller decides
 // how to combine them with BackupSpec.IncludedNamespaces/ExcludedNamespaces.
 func resolveNamespacesByLabel(
@@ -174,33 +205,49 @@ func resolveNamespacesByLabel(
     client crclient.Client,
     includedSelectors []string,
     excludedSelectors []string,
+    logic string,
 ) (included []string, excluded []string, err error) {
     nsList := &corev1.NamespaceList{}
     if err := client.List(ctx, nsList); err != nil {
         return nil, nil, errors.Wrap(err, "listing namespaces")
     }
 
-    includedSet := sets.NewString()
-    for _, sel := range includedSelectors {
-        parsed, _ := labels.Parse(sel) // already validated
+    matchSet := func(selectors []string) sets.String {
+        result := sets.NewString()
+        if len(selectors) == 0 {
+            return result
+        }
+        parsedSelectors := make([]labels.Selector, 0, len(selectors))
+        for _, sel := range selectors {
+            parsed, _ := labels.Parse(sel) // already validated
+            parsedSelectors = append(parsedSelectors, parsed)
+        }
         for _, ns := range nsList.Items {
-            if parsed.Matches(labels.Set(ns.Labels)) {
-                includedSet.Insert(ns.Name)
+            nsLabels := labels.Set(ns.Labels)
+            if logic == "AND" {
+                allMatch := true
+                for _, parsed := range parsedSelectors {
+                    if !parsed.Matches(nsLabels) {
+                        allMatch = false
+                        break
+                    }
+                }
+                if allMatch {
+                    result.Insert(ns.Name)
+                }
+            } else { // "OR" (default, including "")
+                for _, parsed := range parsedSelectors {
+                    if parsed.Matches(nsLabels) {
+                        result.Insert(ns.Name)
+                        break
+                    }
+                }
             }
         }
+        return result
     }
 
-    excludedSet := sets.NewString()
-    for _, sel := range excludedSelectors {
-        parsed, _ := labels.Parse(sel)
-        for _, ns := range nsList.Items {
-            if parsed.Matches(labels.Set(ns.Labels)) {
-                excludedSet.Insert(ns.Name)
-            }
-        }
-    }
-
-    return includedSet.List(), excludedSet.List(), nil
+    return matchSet(includedSelectors).List(), matchSet(excludedSelectors).List(), nil
 }
 ```
 
@@ -213,7 +260,7 @@ The baseline must therefore branch on whether an include-by-label selector is *c
 ```
 labelIncludeActive = len(policy.IncludedNamespacesByLabel) > 0   # config presence, NOT len(resolvedIncludedByLabel)
 resolvedIncludedByLabel, resolvedExcludedByLabel, err = resolveNamespacesByLabel(ctx, client,
-    policy.IncludedNamespacesByLabel, policy.ExcludedNamespacesByLabel)
+    policy.IncludedNamespacesByLabel, policy.ExcludedNamespacesByLabel, policy.LabelSelectorLogic)
 
 if labelIncludeActive:
     baseline = resolvedIncludedByLabel ∪ BackupSpec.IncludedNamespaces   # explicit names still additive when both are set
@@ -239,7 +286,7 @@ Worked examples from the [Use Cases](#use-cases) above:
 
 ### Observability
 
-`backup.status.includedNamespaces` does not exist on `BackupStatus` today. Adding it is out of scope for the initial implementation — it would require a new `BackupStatus` field, CRD schema/deepcopy regeneration, and its own compatibility review, none of which this design specifies. Instead, the initial implementation logs the resolved namespace set (info level) during `prepareBackupRequest` so operators can see which namespaces were actually selected via `kubectl logs`/backup logs. Populating a status field is deferred as a follow-on (see [Open Issues](#open-issues)); if picked up later, it needs its own design pass covering the schema addition and back-compat impact.
+`backup.status.includedNamespaces` does not exist on `BackupStatus` today. Adding it is out of scope for the initial implementation — it would require a new `BackupStatus` field, CRD schema/deepcopy regeneration, and its own compatibility review, none of which this design specifies. Instead, the initial implementation logs during `prepareBackupRequest` so operators can see which namespaces were actually selected: the *count* of resolved namespaces at info level (`len(resolvedIncludedByLabel)`, `len(resolvedExcludedByLabel)`), and the full resolved name list at debug level. A cluster with thousands of namespaces where a selector matches a large fraction of them would otherwise spam Velero's backup logs at info level on every run; count-at-info/list-at-debug avoids that while still making the resolved names available (`--log-level debug` at install, or per-backup via `backup logs`) without changing default log volume. Populating a status field is deferred as a follow-on (see [Open Issues](#open-issues)); if picked up later, it needs its own design pass covering the schema addition and back-compat impact.
 
 ### Limitations
 
@@ -297,16 +344,15 @@ Maintain full backward compatibility — existing backups with no `includedNames
 
 ## Implementation
 
-1. Add `IncludedNamespacesByLabel` / `ExcludedNamespacesByLabel` fields to `IncludeExcludePolicy`.
-2. Extend `Validate()` to parse and validate selector strings using `k8s.io/apimachinery/pkg/labels.Parse`.
-3. Implement `resolveNamespacesByLabel` helper.
+1. Add `IncludedNamespacesByLabel` / `ExcludedNamespacesByLabel` / `LabelSelectorLogic` fields to `IncludeExcludePolicy`.
+2. Extend `Validate()` to parse and validate selector strings using `k8s.io/apimachinery/pkg/labels.Parse`, and to validate `LabelSelectorLogic` is `""`, `"OR"`, or `"AND"`.
+3. Implement `resolveNamespacesByLabel` helper, taking `LabelSelectorLogic` to combine entries within each list via union (OR) or intersection (AND).
 4. Call resolution in `prepareBackupRequest` and merge results into the effective namespace filter.
 5. No new controller-level incompatibility check is needed. `prepareBackupRequest` in `pkg/controller/backup_controller.go` already rejects any non-nil `IncludeExcludePolicy` combined with old-style filters (`collections.UseOldResourceFilters(request.Spec)`) regardless of which `IncludeExcludePolicy` fields are populated. Since the new fields live on the existing `IncludeExcludePolicy` struct, this check covers them automatically.
-6. Log the resolved namespace set at info level in `prepareBackupRequest`.
-7. Add unit tests for selector parsing (including the empty-string rejection), independent resolution of `resolvedIncludedByLabel`/`resolvedExcludedByLabel` (including a configured include selector that matches zero namespaces, and an exclude-only policy), and precedence rules (`labelIncludeActive` baseline branch and hard-exclusion ordering).
+6. Log the count of resolved namespaces at info level, and the full resolved name list at debug level, in `prepareBackupRequest`.
+7. Add unit tests for selector parsing (including the empty-string rejection), `LabelSelectorLogic` validation and OR/AND resolution behavior, independent resolution of `resolvedIncludedByLabel`/`resolvedExcludedByLabel` (including a configured include selector that matches zero namespaces, and an exclude-only policy), and precedence rules (`labelIncludeActive` baseline branch and hard-exclusion ordering).
 8. Add E2E test: schedule with no `includedNamespaces`, label selector in resource policy, verify only labeled namespaces are backed up.
 
 ## Open Issues
 
-- **AND vs OR between list entries**: This design uses OR (union). Should we support AND by allowing nested lists? Deferring to a future enhancement.
 - **Status field**: populating `backup.status.includedNamespaces` is deferred as a follow-on; it requires its own design covering the `BackupStatus` schema addition, deepcopy/CRD regeneration, and compatibility impact.
