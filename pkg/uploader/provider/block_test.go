@@ -454,6 +454,7 @@ func TestBlockProviderRunRestore(t *testing.T) {
 				t.Context(),
 				tc.snapshotID,
 				tc.volumePath,
+				false,
 				uploader.PersistentVolumeBlock,
 				map[string]string{},
 				tc.updater,
