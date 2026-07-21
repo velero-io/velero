@@ -166,6 +166,14 @@ const (
 
 	// Velero checks this annotation to determine whether to skip resource excluding check.
 	MustIncludeAdditionalItemAnnotation = "backup.velero.io/must-include-additional-items"
+	// MustIncludeAdditionalItemRestoreAnnotation is set by RestoreItemActions on the UpdatedItem
+	// to tell Velero to bypass global resource/namespace exclusion checks (and IncludeClusterResources=false)
+	// for that action's AdditionalItems. Value must be "true" to enable the bypass. The annotation is
+	// always stripped before the item is applied to the cluster when present, including non-"true" values.
+	//
+	// Notice: SkipRestore on the Execute output takes precedence. If SkipRestore is true, the
+	// annotation is never inspected and AdditionalItems are not processed.
+	MustIncludeAdditionalItemRestoreAnnotation = "restore.velero.io/must-include-additional-items"
 	// SkippedNoCSIPVAnnotation - Velero checks this annotation on processed PVC to
 	// find out if the snapshot was skipped b/c the PV is not provisioned via CSI
 	SkippedNoCSIPVAnnotation = "backup.velero.io/skipped-no-csi-pv"
