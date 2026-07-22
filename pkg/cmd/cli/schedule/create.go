@@ -30,6 +30,7 @@ import (
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/backup"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 )
@@ -76,6 +77,9 @@ example: "@every 2h30m".`,
 	o.BindFlags(c.Flags())
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
+
+	_ = c.RegisterFlagCompletionFunc("storage-location", cli.CompleteBackupStorageLocationNames(f))
+	_ = c.RegisterFlagCompletionFunc("volume-snapshot-locations", cli.CompleteVolumeSnapshotLocationNames(f))
 
 	return c
 }

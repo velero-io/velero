@@ -356,7 +356,7 @@ Run `velero install --help` or see the [Helm chart documentation](https://vmware
 
 ### Enabling shell autocompletion
 
-**Velero CLI** provides autocompletion support for `Bash` and `Zsh`, which can save you a lot of typing.
+**Velero CLI** provides autocompletion support for `Bash`, `Zsh`, and `Fish`, which can save you a lot of typing. In addition to command and flag names, the CLI dynamically completes resource names (backups, restores, schedules, etc.) by querying the cluster.
 
 Below are the procedures to set up autocompletion for `Bash` (including the difference between `Linux` and `macOS`) and `Zsh`.
 

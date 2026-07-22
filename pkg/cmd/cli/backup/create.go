@@ -32,6 +32,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
@@ -74,6 +75,10 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	o.BindFromSchedule(c.Flags())
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
+
+	_ = c.RegisterFlagCompletionFunc("from-schedule", cli.CompleteScheduleNames(f))
+	_ = c.RegisterFlagCompletionFunc("storage-location", cli.CompleteBackupStorageLocationNames(f))
+	_ = c.RegisterFlagCompletionFunc("volume-snapshot-locations", cli.CompleteVolumeSnapshotLocationNames(f))
 
 	return c
 }
