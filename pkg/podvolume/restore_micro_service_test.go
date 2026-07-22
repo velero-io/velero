@@ -436,12 +436,12 @@ func TestRunCancelableDataPathRestore(t *testing.T) {
 
 				if test.startErr != nil {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(nil)
-					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.startErr)
+					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.startErr)
 				}
 
 				if test.dataPathStarted {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(nil)
-					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				}
 
 				return fsBR

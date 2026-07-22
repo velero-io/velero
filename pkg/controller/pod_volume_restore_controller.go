@@ -528,7 +528,7 @@ func (r *PodVolumeRestoreReconciler) startCancelableDataPath(asyncBR datapath.As
 
 	if err := asyncBR.StartRestore(pvr.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, pvr.Spec.UploaderSettings); err != nil {
+	}, pvr.Spec.UploaderSettings, nil); err != nil {
 		return errors.Wrapf(err, "error starting async restore for pod %s, volume %s", res.ByPod.HostingPod.Name, res.ByPod.VolumeName)
 	}
 
@@ -1146,7 +1146,7 @@ func (r *PodVolumeRestoreReconciler) resumeCancellableDataPath(ctx context.Conte
 
 	if err := asyncBR.StartRestore(pvr.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, pvr.Spec.UploaderSettings); err != nil {
+	}, pvr.Spec.UploaderSettings, nil); err != nil {
 		return errors.Wrapf(err, "error to resume asyncBR watcher for PVR %s", pvr.Name)
 	}
 

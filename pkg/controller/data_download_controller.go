@@ -454,7 +454,7 @@ func (r *DataDownloadReconciler) startCancelableDataPath(asyncBR datapath.AsyncB
 
 	if err := asyncBR.StartRestore(dd.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, dd.Spec.DataMoverConfig); err != nil {
+	}, dd.Spec.DataMoverConfig, nil); err != nil {
 		return errors.Wrapf(err, "error starting async restore for pod %s, volume %s", res.ByPod.HostingPod.Name, res.ByPod.VolumeName)
 	}
 
@@ -1096,7 +1096,7 @@ func (r *DataDownloadReconciler) resumeCancellableDataPath(ctx context.Context, 
 
 	if err := asyncBR.StartRestore(dd.Spec.SnapshotID, datapath.AccessPoint{
 		ByPath: res.ByPod.VolumeName,
-	}, nil); err != nil {
+	}, nil, nil); err != nil {
 		return errors.Wrapf(err, "error to resume asyncBR watcher for dd %s", dd.Name)
 	}
 

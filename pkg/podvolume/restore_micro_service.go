@@ -184,7 +184,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 
 	log.Info("Async fs br init")
 
-	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings); err != nil {
+	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings, &datapath.RestoreStartParam{}); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 

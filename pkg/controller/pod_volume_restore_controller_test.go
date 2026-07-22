@@ -1099,7 +1099,7 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 				}
 
 				if test.mockStart {
-					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
+					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
 				}
 
 				if test.mockCancel {
@@ -1901,7 +1901,7 @@ func TestResumeCancellablePodVolumeRestore(t *testing.T) {
 			}
 
 			if test.mockStart {
-				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
+				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
 			}
 
 			if test.mockClose {

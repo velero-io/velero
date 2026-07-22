@@ -60,17 +60,17 @@ func (_m *AsyncBR) StartBackup(source datapath.AccessPoint, dataMoverConfig map[
 	return r0
 }
 
-// StartRestore provides a mock function with given fields: snapshotID, target, dataMoverConfig
-func (_m *AsyncBR) StartRestore(snapshotID string, target datapath.AccessPoint, dataMoverConfig map[string]string) error {
-	ret := _m.Called(snapshotID, target, dataMoverConfig)
+// StartRestore provides a mock function with given fields: snapshotID, target, dataMoverConfig, param
+func (_m *AsyncBR) StartRestore(snapshotID string, target datapath.AccessPoint, dataMoverConfig map[string]string, param interface{}) error {
+	ret := _m.Called(snapshotID, target, dataMoverConfig, param)
 
 	if len(ret) == 0 {
 		panic("no return value specified for StartRestore")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, datapath.AccessPoint, map[string]string) error); ok {
-		r0 = rf(snapshotID, target, dataMoverConfig)
+	if rf, ok := ret.Get(0).(func(string, datapath.AccessPoint, map[string]string, interface{}) error); ok {
+		r0 = rf(snapshotID, target, dataMoverConfig, param)
 	} else {
 		r0 = ret.Error(0)
 	}
