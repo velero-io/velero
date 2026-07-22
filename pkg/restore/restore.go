@@ -478,7 +478,15 @@ func (ctx *restoreContext) getNamespaceFilter(namespace string) *resolvedNamespa
 		return filter
 	}
 
-	// 2. Walk patterns in definition order (first-match semantics)
+	// 2. Check for exact match first (O(1) map lookup)
+	// This ensures exact namespace matches take precedence over globs,
+	// regardless of where they are listed in the configuration.
+	if filter, ok := ctx.namespacedFilterMap[namespace]; ok {
+		ctx.namespaceFilterCache[namespace] = filter
+		return filter
+	}
+
+	// 3. Walk patterns in definition order using pre-compiled globs
 	// Note: namespaceFilterCache is mutated below without synchronization. This is safe
 	// today because resource collection runs sequentially. If the restore loop is
 	// parallelized in the future, these map writes will need a lock to prevent data races.
@@ -489,14 +497,10 @@ func (ctx *restoreContext) getNamespaceFilter(namespace string) *resolvedNamespa
 				ctx.namespaceFilterCache[namespace] = filter
 				return filter
 			}
-		} else if p.pattern == namespace {
-			filter := ctx.namespacedFilterMap[p.pattern]
-			ctx.namespaceFilterCache[namespace] = filter
-			return filter
 		}
 	}
 
-	// 3. Cache the miss so we don't re-evaluate failed matches
+	// 4. Cache the miss so we don't re-evaluate failed matches
 	ctx.namespaceFilterCache[namespace] = nil
 	return nil
 }
