@@ -2894,9 +2894,14 @@ func TestActionGetDataMover(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			name:      "snapshot action with invalid dataMover returns error",
-			action:    &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "unknown"}},
-			expectErr: true,
+			name:         "snapshot action with custom dataMover returns the custom value",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "unknown"}},
+			expectedMove: "unknown",
+		},
+		{
+			name:         "snapshot action with a realistic custom dataMover returns the custom value",
+			action:       &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "my-custom-mover"}},
+			expectedMove: "my-custom-mover",
 		},
 	}
 

@@ -113,6 +113,50 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
 			expectedErr:         false,
 		},
 		{
+			name:          "VolumePolicy match snapshot action with custom dataMover, skip built-in snapshot and no error",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type:       resourcepolicies.Snapshot,
+							Parameters: map[string]any{"dataMover": "custom-mover"},
+						},
+					},
+				},
+			},
+			snapshotVolumesFlag: ptr.To(true),
+			shouldSnapshot:      false,
+			expectedErr:         false,
+		},
+		{
+			name:          "VolumePolicy match snapshot action with explicit built-in dataMover, still performs snapshot",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type:       resourcepolicies.Snapshot,
+							Parameters: map[string]any{"dataMover": "velero-block"},
+						},
+					},
+				},
+			},
+			snapshotVolumesFlag: ptr.To(true),
+			shouldSnapshot:      true,
+			expectedErr:         false,
+		},
+		{
 			name:          "VolumePolicy not match, not selected by fs-backup as opt-out way, snapshotVolumes is true, returns true and no error",
 			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp3-csi").ClaimRef("ns", "pvc-1").Result(),
 			groupResource: kuberesource.PersistentVolumes,

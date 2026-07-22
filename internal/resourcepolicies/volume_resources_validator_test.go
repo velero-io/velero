@@ -598,7 +598,7 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "snapshot action with invalid dataMover value",
+			name: "snapshot action with custom dataMover value is valid",
 			res: &ResourcePolicies{
 				Version: "v1",
 				VolumePolicies: []VolumePolicy{
@@ -611,7 +611,7 @@ func TestValidate(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "snapshot action with non-string dataMover value",

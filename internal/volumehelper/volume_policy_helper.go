@@ -16,6 +16,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
 	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
@@ -166,6 +167,15 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 		// If there is no match action, go on to the next check.
 		if action != nil {
 			if action.Type == resourcepolicies.Snapshot {
+				dataMover, err := action.GetDataMover()
+				if err != nil {
+					v.logger.WithError(err).Errorf("fail to get dataMover for %+v", vfd)
+					return false, err
+				}
+				if !datamover.IsKnownDataMover(dataMover) {
+					v.logger.Warnf("Skip built-in snapshot action for %+v: dataMover %q is a custom data mover, expected to be handled by an external plugin", vfd, dataMover)
+					return false, nil
+				}
 				v.logger.Infof("performing snapshot action for %+v", vfd)
 				return true, nil
 			} else {
