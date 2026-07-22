@@ -1,0 +1,1 @@
+Skip the restore informer cache for resources whose API doesn't support the list and watch verbs (e.g. authorization.openshift.io on OpenShift), avoiding endless reflector watch-error logs during restore

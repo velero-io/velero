@@ -358,6 +358,7 @@ func (kr *kubernetesRestorer) RestoreWithResolvers(
 		resourceTerminatingTimeout:     kr.resourceTerminatingTimeout,
 		resourceTimeout:                kr.resourceTimeout,
 		resourceClients:                make(map[resourceClientKey]client.Dynamic),
+		informerCacheableResources:     make(map[schema.GroupVersionResource]bool),
 		restoredItems:                  req.RestoredItems,
 		renamedPVs:                     make(map[string]string),
 		pvRenamer:                      kr.pvRenamer,
@@ -411,6 +412,7 @@ type restoreContext struct {
 	resourceTimeout                time.Duration
 	resourceClients                map[resourceClientKey]client.Dynamic
 	dynamicInformerFactory         *informerFactoryWithContext
+	informerCacheableResources     map[schema.GroupVersionResource]bool
 	restoredItems                  map[itemKey]restoredItemStatus
 	renamedPVs                     map[string]string
 	pvRenamer                      func(string) (string, error)
@@ -896,6 +898,11 @@ func (ctx *restoreContext) execute() (results.Result, results.Result) {
 				ctx.log.Infof("failed to create informer for %s: %v", gvr, err)
 				continue
 			}
+			// skip resources whose API doesn't serve the list and watch verbs informers
+			// require, so their reflectors don't endlessly retry and log watch errors
+			if !ctx.informerCacheSupported(gvr) {
+				continue
+			}
 			ctx.dynamicInformerFactory.factory.ForResource(gvr)
 		}
 		ctx.dynamicInformerFactory.factory.Start(ctx.dynamicInformerFactory.context.Done())
@@ -1341,6 +1348,31 @@ func (ctx *restoreContext) getResourceClient(groupResource schema.GroupResource,
 
 	ctx.resourceClients[key] = client
 	return client, nil
+}
+
+// informerCacheSupported reports whether the resource's API serves the list and
+// watch verbs the dynamic informer cache requires. Some API groups (e.g.
+// authorization.openshift.io on OpenShift) reject watch requests, which leaves
+// their informers permanently unable to watch and their reflectors endlessly
+// logging watch errors, so such resources are read via direct API calls instead.
+// Results are memoized per GroupVersionResource. Resources unknown to discovery
+// are reported as supported without memoizing, so the informer path can surface
+// the lookup error and a later discovery refresh (e.g. after restoring CRDs) can
+// change the answer. A resource reporting no verbs at all is treated as supported.
+func (ctx *restoreContext) informerCacheSupported(gvr schema.GroupVersionResource) bool {
+	if supported, ok := ctx.informerCacheableResources[gvr]; ok {
+		return supported
+	}
+	_, apiResource, err := ctx.discoveryHelper.ResourceFor(gvr)
+	if err != nil {
+		return true
+	}
+	supported := len(apiResource.Verbs) == 0 || sets.New(apiResource.Verbs...).HasAll("list", "watch")
+	if !supported {
+		ctx.log.Infof("API server does not support list and watch for %s, using direct API calls instead of the informer cache for this resource", gvr)
+	}
+	ctx.informerCacheableResources[gvr] = supported
+	return supported
 }
 
 func (ctx *restoreContext) getResourceLister(groupResource schema.GroupResource, obj *unstructured.Unstructured, namespace string) (cache.GenericNamespaceLister, error) {
@@ -1804,7 +1836,8 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 
 	// only attempt Get before Create if using informer cache, otherwise this will slow down restore into
 	// new namespace
-	if !ctx.disableInformerCache {
+	useInformerCache := !ctx.disableInformerCache && ctx.informerCacheSupported(newGR.WithVersion(obj.GroupVersionKind().Version))
+	if useInformerCache {
 		restoreLogger.Debugf("Checking for existence %s", obj.GetName())
 		fromCluster, err = ctx.getResource(newGR, obj, namespace)
 	}
@@ -1832,7 +1865,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		// check for the existence of the object that failed creation due to alreadyExist in cluster, if no error then it implies that object exists.
 		// and if err then itemExists remains false as we were not able to confirm the existence of the object via Get call or creation call.
 		// We return the get error as a warning to notify the user that the object could exist in cluster and we were not able to confirm it.
-		if !ctx.disableInformerCache {
+		if useInformerCache {
 			fromCluster, err = ctx.getResource(newGR, obj, namespace)
 		} else {
 			fromCluster, err = resourceClient.Get(obj.GetName(), metav1.GetOptions{})
