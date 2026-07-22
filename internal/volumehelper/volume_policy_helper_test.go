@@ -135,6 +135,27 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
 			expectedErr:         false,
 		},
 		{
+			name:          "VolumePolicy match snapshot action with non-string dataMover, returns error",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type:       resourcepolicies.Snapshot,
+							Parameters: map[string]any{"dataMover": 123},
+						},
+					},
+				},
+			},
+			snapshotVolumesFlag: ptr.To(true),
+			expectedErr:         true,
+		},
+		{
 			name:          "VolumePolicy match snapshot action with explicit built-in dataMover, still performs snapshot",
 			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
 			groupResource: kuberesource.PersistentVolumes,
