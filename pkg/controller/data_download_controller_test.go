@@ -178,6 +178,8 @@ func TestDataDownloadReconcile(t *testing.T) {
 
 	node := builder.ForNode("fake-node").Labels(map[string]string{kube.NodeOSLabel: kube.NodeOSLinux}).Result()
 
+	pv := builder.ForPersistentVolume("test-pv").Result()
+
 	tests := []struct {
 		name                     string
 		dd                       *velerov2alpha1api.DataDownload
@@ -481,7 +483,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			objects := []any{daemonSet, node, sc}
+			objects := []any{daemonSet, node, sc, pv}
 
 			if test.targetPVC != nil {
 				objects = append(objects, test.targetPVC)
@@ -1319,6 +1321,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 	baseDataDownload := dataDownloadBuilder().Result()
 	baseDataDownload.Namespace = velerov1api.DefaultNamespace
+	baseDataDownload.Spec.TargetVolume.PV = "pv-1"
 	baseDataDownload.Spec.OperationTimeout = metav1.Duration{Duration: time.Minute * 10}
 	baseDataDownload.Spec.SnapshotSize = 5368709120 // 5Gi
 
@@ -1428,6 +1431,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 			// Core fields
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PVC, got.TargetPVCName)
+			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PV, got.TargetPVName)
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.Namespace, got.TargetNamespace)
 			assert.Equal(t, baseDataDownload.Spec.DataMover, got.DataMover)
 

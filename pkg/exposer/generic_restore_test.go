@@ -61,6 +61,11 @@ func TestRestoreExpose(t *testing.T) {
 			StorageClassName: &scName,
 		},
 	}
+	targetPVObj := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-target-pv",
+		},
+	}
 
 	modeFilesystem := corev1api.PersistentVolumeFilesystem
 	targetPVCObjWithVolumeMode := &corev1api.PersistentVolumeClaim{
@@ -118,6 +123,7 @@ func TestRestoreExpose(t *testing.T) {
 		ownerRestore    *velerov1.Restore
 		targetPVCName   string
 		targetNamespace string
+		targetPVName    string
 		kubeReactors    []reactor
 		cacheVolume     *CacheConfigs
 		dataMover       string
@@ -193,6 +199,21 @@ func TestRestoreExpose(t *testing.T) {
 			ownerRestore:    restore,
 			kubeClientObj: []runtime.Object{
 				targetPVCObj,
+				daemonSet,
+				storageClass,
+			},
+			expectBackupPod: true,
+			expectBackupPVC: true,
+		},
+		{
+			name:            "succeed with target PV set",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			targetPVName:    "fake-target-pv",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				targetPVObj,
 				daemonSet,
 				storageClass,
 			},
@@ -310,6 +331,7 @@ func TestRestoreExpose(t *testing.T) {
 				GenericRestoreExposeParam{
 					TargetPVCName:    test.targetPVCName,
 					TargetNamespace:  test.targetNamespace,
+					TargetPVName:     test.targetPVName,
 					HostingPodLabels: map[string]string{},
 					Resources:        corev1api.ResourceRequirements{},
 					ExposeTimeout:    time.Millisecond,
