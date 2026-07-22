@@ -340,10 +340,9 @@ func TestBlockUploaderBackup(t *testing.T) {
 
 						objWriter.On("Result").Return(udmrepo.ID(""), errors.New("write failed")).Maybe()
 					} else {
-						// Setup backupData sequence: next returns false immediately
+						// No allocated or changed blocks; backupData should not advance the iterator.
 						iterMock.On("BlockSize").Return(uint(1048576))
 						iterMock.On("Count").Return(uint64(0))
-						iterMock.On("Next").Return(uint64(0), false)
 
 						if tc.writeObjErr != nil {
 							objWriter.On("WriteAt", mock.Anything, mock.Anything).Return(0, tc.writeObjErr)

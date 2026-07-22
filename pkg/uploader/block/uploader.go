@@ -172,53 +172,68 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 	totalCount := bitmap.Count()
 	aligned := (totalLength + int64(blockSize) - 1) / int64(blockSize) * int64(blockSize)
 
-	quit := make(chan struct{})
-	defer close(quit)
+	var quit chan struct{}
+	var readerDone chan struct{}
+	if totalCount > 0 {
+		quit = make(chan struct{})
+		readerDone = make(chan struct{})
 
-	go func() {
-		defer close(resultChan)
+		go func() {
+			defer func() {
+				close(resultChan)
+				close(readerDone)
+			}()
 
-		offset, valid := bitmap.Next()
-		var buffer []byte
-		for valid {
-			select {
-			case <-blkup.ctx.Done():
-				return
-			case <-quit:
-				return
-			case buffer = <-list.Chunks():
+			offset, valid := bitmap.Next()
+			var buffer []byte
+			for valid {
+				select {
+				case <-blkup.ctx.Done():
+					return
+				case <-quit:
+					return
+				case buffer = <-list.Chunks():
+				}
+
+				length := blockSize
+				if offset+uint64(length) > uint64(totalLength) {
+					length = uint(uint64(totalLength) - offset)
+					clear(buffer)
+				}
+
+				readBytes, err := reader.ReadAt(buffer[:length], int64(offset))
+				if err == nil && readBytes <= 0 {
+					err = io.ErrUnexpectedEOF
+				}
+
+				r := readResult{
+					buffer: buffer,
+					offset: int64(offset),
+					err:    err,
+				}
+
+				if r.err != nil {
+					r.resetBuffer(list)
+				}
+
+				select {
+				case resultChan <- r:
+				case <-blkup.ctx.Done():
+					r.resetBuffer(list)
+					return
+				case <-quit:
+					r.resetBuffer(list)
+					return
+				}
+
+				if r.err != nil {
+					return
+				}
+
+				offset, valid = bitmap.Next()
 			}
-
-			length := blockSize
-			if offset+uint64(length) > uint64(totalLength) {
-				length = uint(uint64(totalLength) - offset)
-				clear(buffer)
-			}
-
-			readBytes, err := reader.ReadAt(buffer[:length], int64(offset))
-			if err == nil && readBytes <= 0 {
-				err = io.ErrUnexpectedEOF
-			}
-
-			r := readResult{
-				buffer: buffer,
-				offset: int64(offset),
-				err:    err,
-			}
-
-			if r.err != nil {
-				r.resetBuffer(list)
-			}
-
-			resultChan <- r
-
-			if r.err != nil {
-				return
-			}
-
-			offset, valid = bitmap.Next()
-		}
-	}()
+		}()
+	}
 
 	var lastPos int64
 	var result readResult
@@ -267,6 +282,11 @@ func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.Object
 		curCount++
 
 		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: lastPos, TotalBytes: aligned})
+	}
+
+	if readerDone != nil {
+		close(quit)
+		<-readerDone
 	}
 
 	result.resetBuffer(list)
