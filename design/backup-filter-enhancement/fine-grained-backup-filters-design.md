@@ -512,7 +512,7 @@ data:
         resourceFilters:
           - kinds: [ConfigMap, Secret]
             names: ["app-*"]
-            excludedNames: ["*-tmp", "*-debug"]
+            excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
 ```
 
 ### Catch-All with No Label Selector (Override-Only)
@@ -669,7 +669,7 @@ data:
               app: my-app
           - kinds: [ConfigMap, Secret]
             names: ["app-*"]
-            excludedNames: ["*-tmp", "*-debug"]
+            excludedNames: ["*-tmp-*", "*-debug-*", "*-tmp", "*-debug"]
 ```
 
 ### Backup CR — No ResourcePolicy (backward compatible)
