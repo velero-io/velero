@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
@@ -211,6 +212,7 @@ func (p *pvcBackupItemAction) validatePVCAndPV(
 func (p *pvcBackupItemAction) createVolumeSnapshot(
 	pvc corev1api.PersistentVolumeClaim,
 	backup *velerov1api.Backup,
+	policySnapshotClass string,
 ) (
 	vs *snapshotv1api.VolumeSnapshot,
 	err error,
@@ -231,6 +233,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 		&pvc,
 		p.log,
 		p.crClient,
+		policySnapshotClass,
 	)
 	if err != nil {
 		return nil, errors.Wrapf(
@@ -337,7 +340,20 @@ func (p *pvcBackupItemAction) Execute(
 		return nil, nil, "", nil, err
 	}
 
-	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup)
+	policySnapshotClass := ""
+	matched, actionType, params, paramsErr := vh.GetActionParameters(item, kuberesource.PersistentVolumeClaims)
+	if paramsErr != nil {
+		p.log.WithError(paramsErr).Warn("failed to get action parameters from volume policy, proceeding without policy snapshotClass")
+	} else if matched && actionType == string(resourcepolicies.Snapshot) && params != nil {
+		if sc, ok := params[resourcepolicies.SnapshotClassParameter]; ok {
+			if scStr, ok := sc.(string); ok && scStr != "" {
+				policySnapshotClass = scStr
+				p.log.Infof("Volume policy specifies snapshotClass=%s for PVC %s/%s", scStr, pvc.Namespace, pvc.Name)
+			}
+		}
+	}
+
+	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup, policySnapshotClass)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -670,6 +686,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 	ctx context.Context,
 	pvc corev1api.PersistentVolumeClaim,
 	backup *velerov1api.Backup,
+	policySnapshotClass string,
 ) (*snapshotv1api.VolumeSnapshot, error) {
 	vgsLabelKey := backup.Spec.VolumeGroupSnapshotLabelKey
 	group, hasLabel := pvc.Labels[vgsLabelKey]
@@ -800,7 +817,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 	}
 
 	// Legacy fallback: create individual VS
-	return p.createVolumeSnapshot(pvc, backup)
+	return p.createVolumeSnapshot(pvc, backup, policySnapshotClass)
 }
 
 func (p *pvcBackupItemAction) findExistingVSForBackup(
