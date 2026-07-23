@@ -46,6 +46,9 @@ type PodVolumeRestoreSpec struct {
 	// SnapshotID is the ID of the volume snapshot to be restored.
 	SnapshotID string `json:"snapshotID"`
 
+	// RestoreType indicates the type of the restore.
+	RestoreType string `json:"restoreType"`
+
 	// SourceNamespace is the original namespace for namaspace mapping.
 	SourceNamespace string `json:"sourceNamespace"`
 

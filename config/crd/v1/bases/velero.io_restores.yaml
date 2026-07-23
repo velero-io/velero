@@ -69,6 +69,11 @@ spec:
                   for the Kubernetes resource to be restored
                 nullable: true
                 type: string
+              existingVolumeDataPolicy:
+                description: ExistingVolumeDataPolicy specifies the restore behavior
+                  for the volume data to be restored
+                nullable: true
+                type: string
               hooks:
                 description: Hooks represent custom behaviors that should be executed
                   during or post restore.
@@ -471,6 +476,12 @@ spec:
                 description: UploaderConfig specifies the configuration for the restore.
                 nullable: true
                 properties:
+                  deleteExtraFiles:
+                    description: |-
+                      DeleteExtraFiles specifies whether to delete the extra files in the target volume that do not exist in the backup.
+                      This setting is only applicable to File System restores (PodVolumeBackup or CSI File System Data Move) and has no effect on Block Data Move restores.
+                    nullable: true
+                    type: boolean
                   parallelFilesDownload:
                     description: ParallelFilesDownload is the concurrency number setting
                       for restore.

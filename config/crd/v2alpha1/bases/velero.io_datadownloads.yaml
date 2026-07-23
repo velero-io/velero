@@ -83,6 +83,30 @@ spec:
                   Cancel indicates request to cancel the ongoing DataDownload. It can be set
                   when the DataDownload is in InProgress phase
                 type: boolean
+              csiSnapshot:
+                description: CSISnapshot provides the information of the CSI snapshot
+                  used to do the incremental restore.
+                nullable: true
+                properties:
+                  driver:
+                    description: Driver is the driver used by the VolumeSnapshotContent
+                    type: string
+                  snapshotClass:
+                    description: SnapshotClass is the name of the snapshot class that
+                      the volume snapshot is created with
+                    type: string
+                  storageClass:
+                    description: StorageClass is the name of the storage class of
+                      the PVC that the volume snapshot is created from
+                    type: string
+                  volumeSnapshot:
+                    description: VolumeSnapshot is the name of the volume snapshot
+                      to be backed up
+                    type: string
+                required:
+                - storageClass
+                - volumeSnapshot
+                type: object
               dataMoverConfig:
                 additionalProperties:
                   type: string
@@ -105,6 +129,9 @@ spec:
                 description: |-
                   OperationTimeout specifies the time used to wait internal operations,
                   before returning error as timeout.
+                type: string
+              restoreType:
+                description: RestoreType indicates the type of the restore.
                 type: string
               snapshotID:
                 description: SnapshotID is the ID of the Velero backup snapshot to
@@ -145,6 +172,7 @@ spec:
             required:
             - backupStorageLocation
             - operationTimeout
+            - restoreType
             - snapshotID
             - sourceNamespace
             - targetVolume

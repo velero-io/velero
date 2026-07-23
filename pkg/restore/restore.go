@@ -1890,7 +1890,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 				if err != nil {
 					warnings.Add(namespace, err)
 					// check if there is existingResourcePolicy and if it is set to update policy
-					if len(ctx.restore.Spec.ExistingResourcePolicy) > 0 && ctx.restore.Spec.ExistingResourcePolicy == velerov1api.PolicyTypeUpdate {
+					if len(ctx.restore.Spec.ExistingResourcePolicy) > 0 && ctx.restore.Spec.ExistingResourcePolicy == velerov1api.ResourcePolicyTypeUpdate {
 						// remove restore labels so that we apply the latest backup/restore names on the object via patch
 						removeRestoreLabels(fromCluster)
 						//try patching just the backup/restore labels
@@ -1910,12 +1910,12 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 					restoreLogger.Infof("restore API has resource policy defined %s, executing restore workflow accordingly for changed resource %s %s", resourcePolicy, fromCluster.GroupVersionKind().Kind, kube.NamespaceAndName(fromCluster))
 
 					// existingResourcePolicy is set as none, add warning
-					if resourcePolicy == velerov1api.PolicyTypeNone {
+					if resourcePolicy == velerov1api.ResourcePolicyTypeNone {
 						e := errors.Errorf("could not restore, %s %q already exists. Warning: the in-cluster version is different than the backed-up version",
 							obj.GetKind(), obj.GetName())
 						warnings.Add(namespace, e)
 						// existingResourcePolicy is set as update, attempt patch on the resource and add warning if it fails
-					} else if resourcePolicy == velerov1api.PolicyTypeUpdate {
+					} else if resourcePolicy == velerov1api.ResourcePolicyTypeUpdate {
 						// processing update as existingResourcePolicy
 						warningsFromUpdateRP, errsFromUpdateRP := ctx.processUpdateResourcePolicy(fromCluster, fromClusterWithLabels, obj, namespace, resourceClient)
 						if warningsFromUpdateRP.IsEmpty() && errsFromUpdateRP.IsEmpty() {
@@ -1936,7 +1936,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		}
 
 		//update backup/restore labels on the unchanged resources if existingResourcePolicy is set as update
-		if ctx.restore.Spec.ExistingResourcePolicy == velerov1api.PolicyTypeUpdate {
+		if ctx.restore.Spec.ExistingResourcePolicy == velerov1api.ResourcePolicyTypeUpdate {
 			resourcePolicy := ctx.restore.Spec.ExistingResourcePolicy
 			restoreLogger.Infof("restore API has resource policy defined %s, executing restore workflow accordingly for unchanged resource %s %s ", resourcePolicy, obj.GroupVersionKind().Kind, kube.NamespaceAndName(fromCluster))
 			// remove restore labels so that we apply the latest backup/restore names on the object via patch
