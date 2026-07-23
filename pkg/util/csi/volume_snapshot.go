@@ -314,6 +314,7 @@ func GetVolumeSnapshotClass(
 	pvc *corev1api.PersistentVolumeClaim,
 	log logrus.FieldLogger,
 	crClient crclient.Client,
+	policySnapshotClass string,
 ) (*snapshotv1api.VolumeSnapshotClass, error) {
 	snapshotClasses := new(snapshotv1api.VolumeSnapshotClassList)
 	err := crClient.List(context.TODO(), snapshotClasses)
@@ -326,6 +327,16 @@ func GetVolumeSnapshotClass(
 	)
 	if err != nil {
 		log.Debugf("Didn't find VolumeSnapshotClass from PVC annotations: %v", err)
+	}
+	if snapshotClass != nil {
+		return snapshotClass, nil
+	}
+
+	// If a snapshot class is specified by volume policy, use that
+	snapshotClass, err = GetVolumeSnapshotClassFromVolumePolicy(
+		policySnapshotClass, provisioner, snapshotClasses)
+	if err != nil {
+		log.Debugf("Didn't find VolumeSnapshotClass from volume policy: %v", err)
 	}
 	if snapshotClass != nil {
 		return snapshotClass, nil
@@ -409,6 +420,34 @@ func GetVolumeSnapshotClassFromBackupAnnotationsForDriver(
 	return nil, errors.Errorf(
 		"No CSI VolumeSnapshotClass found with name %s for driver %s for backup %s",
 		snapshotClassName, provisioner, backup.Name,
+	)
+}
+
+// GetVolumeSnapshotClassFromVolumePolicy returns a VolumeSnapshotClass
+// specified by a volume policy's snapshotClass parameter. If
+// policySnapshotClass is empty, it returns nil (no match).
+func GetVolumeSnapshotClassFromVolumePolicy(
+	policySnapshotClass string,
+	provisioner string,
+	snapshotClasses *snapshotv1api.VolumeSnapshotClassList,
+) (*snapshotv1api.VolumeSnapshotClass, error) {
+	if policySnapshotClass == "" {
+		return nil, nil
+	}
+	for _, sc := range snapshotClasses.Items {
+		if strings.EqualFold(policySnapshotClass, sc.ObjectMeta.Name) {
+			if !strings.EqualFold(sc.Driver, provisioner) {
+				return nil, errors.Errorf(
+					"VolumeSnapshotClass %s specified by volume policy is not for driver %s",
+					sc.ObjectMeta.Name, provisioner,
+				)
+			}
+			return &sc, nil
+		}
+	}
+	return nil, errors.Errorf(
+		"No CSI VolumeSnapshotClass found with name %s specified by volume policy for driver %s",
+		policySnapshotClass, provisioner,
 	)
 }
 
