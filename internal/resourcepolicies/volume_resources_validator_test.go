@@ -658,6 +658,86 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "snapshot action with valid snapshotClass",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"snapshotClass": "my-vsc"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with both snapshotClass and dataMover",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"snapshotClass": "my-vsc", "dataMover": "velero-fs"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshotClass parameter on non-snapshot action is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       FSBackup,
+							Parameters: map[string]any{"snapshotClass": "my-vsc"},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "snapshot action with non-string snapshotClass is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"snapshotClass": 123},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "snapshot action with empty snapshotClass is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       Snapshot,
+							Parameters: map[string]any{"snapshotClass": ""},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
