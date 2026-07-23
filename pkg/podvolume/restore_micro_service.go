@@ -184,7 +184,9 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 
 	log.Info("Async fs br init")
 
-	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings, &datapath.RestoreStartParam{}); err != nil {
+	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings, &datapath.RestoreStartParam{
+		Incremental: pvr.Spec.RestoreType == string(velerov1api.VolumeDataPolicyTypeIncremental),
+	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 

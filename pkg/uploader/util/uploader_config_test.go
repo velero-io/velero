@@ -58,6 +58,7 @@ func TestStoreRestoreConfig(t *testing.T) {
 			},
 			expectedData: map[string]string{
 				WriteSparseFiles: "true",
+				DeleteExtraFiles: "false",
 			},
 		},
 		{
@@ -67,6 +68,7 @@ func TestStoreRestoreConfig(t *testing.T) {
 			},
 			expectedData: map[string]string{
 				WriteSparseFiles: "false",
+				DeleteExtraFiles: "false",
 			},
 		},
 		{
@@ -76,6 +78,7 @@ func TestStoreRestoreConfig(t *testing.T) {
 			},
 			expectedData: map[string]string{
 				WriteSparseFiles: "false", // Assuming default value is false for nil case
+				DeleteExtraFiles: "false",
 			},
 		},
 		{
@@ -86,6 +89,37 @@ func TestStoreRestoreConfig(t *testing.T) {
 			expectedData: map[string]string{
 				RestoreConcurrency: "5",
 				WriteSparseFiles:   "false",
+				DeleteExtraFiles:   "false",
+			},
+		},
+		{
+			name: "DeleteExtraFiles is true",
+			config: &velerov1api.UploaderConfigForRestore{
+				DeleteExtraFiles: &boolTrue,
+			},
+			expectedData: map[string]string{
+				WriteSparseFiles: "false",
+				DeleteExtraFiles: "true",
+			},
+		},
+		{
+			name: "DeleteExtraFiles is false",
+			config: &velerov1api.UploaderConfigForRestore{
+				DeleteExtraFiles: &boolFalse,
+			},
+			expectedData: map[string]string{
+				WriteSparseFiles: "false",
+				DeleteExtraFiles: "false",
+			},
+		},
+		{
+			name: "DeleteExtraFiles is nil",
+			config: &velerov1api.UploaderConfigForRestore{
+				DeleteExtraFiles: nil,
+			},
+			expectedData: map[string]string{
+				WriteSparseFiles: "false",
+				DeleteExtraFiles: "false", // Assuming default value is false for nil case
 			},
 		},
 	}
@@ -236,6 +270,54 @@ func TestGetRestoreConcurrency(t *testing.T) {
 
 			if result != tc.ExpectedResult {
 				t.Errorf("Expected result %d, but got %d", tc.ExpectedResult, result)
+			}
+		})
+	}
+}
+
+func TestGetDeleteExtraFiles(t *testing.T) {
+	tests := []struct {
+		name           string
+		uploaderCfg    map[string]string
+		expectedResult bool
+		expectedError  error
+	}{
+		{
+			name:           "Valid DeleteExtraFiles (true)",
+			uploaderCfg:    map[string]string{DeleteExtraFiles: "true"},
+			expectedResult: true,
+			expectedError:  nil,
+		},
+		{
+			name:           "Valid DeleteExtraFiles (false)",
+			uploaderCfg:    map[string]string{DeleteExtraFiles: "false"},
+			expectedResult: false,
+			expectedError:  nil,
+		},
+		{
+			name:           "Invalid DeleteExtraFiles (not a boolean)",
+			uploaderCfg:    map[string]string{DeleteExtraFiles: "invalid"},
+			expectedResult: false,
+			expectedError:  errors.Wrap(errors.New("strconv.ParseBool: parsing \"invalid\": invalid syntax"), "failed to parse DeleteExtraFiles config"),
+		},
+		{
+			name:           "Missing DeleteExtraFiles",
+			uploaderCfg:    map[string]string{},
+			expectedResult: false,
+			expectedError:  nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := GetDeleteExtraFiles(test.uploaderCfg)
+
+			if result != test.expectedResult {
+				t.Errorf("Expected result %t, but got %t", test.expectedResult, result)
+			}
+
+			if (err == nil && test.expectedError != nil) || (err != nil && test.expectedError == nil) || (err != nil && test.expectedError != nil && err.Error() != test.expectedError.Error()) {
+				t.Errorf("Expected error '%v', but got '%v'", test.expectedError, err)
 			}
 		})
 	}

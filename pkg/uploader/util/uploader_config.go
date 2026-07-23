@@ -28,6 +28,7 @@ const (
 	ParallelFilesUpload = "ParallelFilesUpload"
 	WriteSparseFiles    = "WriteSparseFiles"
 	RestoreConcurrency  = "ParallelFilesDownload"
+	DeleteExtraFiles    = "DeleteExtraFiles"
 )
 
 func StoreBackupConfig(config *velerov1api.UploaderConfigForBackup) map[string]string {
@@ -47,6 +48,13 @@ func StoreRestoreConfig(config *velerov1api.UploaderConfigForRestore) map[string
 	if config.ParallelFilesDownload > 0 {
 		data[RestoreConcurrency] = strconv.Itoa(config.ParallelFilesDownload)
 	}
+
+	if config.DeleteExtraFiles != nil {
+		data[DeleteExtraFiles] = strconv.FormatBool(*config.DeleteExtraFiles)
+	} else {
+		data[DeleteExtraFiles] = strconv.FormatBool(false)
+	}
+
 	return data
 }
 
@@ -84,4 +92,16 @@ func GetRestoreConcurrency(uploaderCfg map[string]string) (int, error) {
 		return restoreConcurrencyInt, nil
 	}
 	return 0, nil
+}
+
+func GetDeleteExtraFiles(uploaderCfg map[string]string) (bool, error) {
+	deleteExtraFiles, ok := uploaderCfg[DeleteExtraFiles]
+	if ok {
+		deleteExtraFilesBool, err := strconv.ParseBool(deleteExtraFiles)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to parse DeleteExtraFiles config")
+		}
+		return deleteExtraFilesBool, nil
+	}
+	return false, nil
 }
