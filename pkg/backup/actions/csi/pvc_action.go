@@ -42,6 +42,7 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
@@ -54,6 +55,7 @@ import (
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/csi"
+	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
 	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
@@ -335,6 +337,16 @@ func (p *pvcBackupItemAction) Execute(
 		p.log.Debugf("CSI plugin skip snapshot for PVC %s according to the VolumeHelper setting.",
 			pvc.Namespace+"/"+pvc.Name)
 		return nil, nil, "", nil, err
+	}
+
+	skipForCustomDataMover, err := shouldSkipForCustomDataMover(vh, item, kuberesource.PersistentVolumeClaims)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	if skipForCustomDataMover {
+		p.log.Debugf("CSI plugin skip snapshot for PVC %s: dataMover is a custom data mover, expected to be handled by an external plugin.",
+			pvc.Namespace+"/"+pvc.Name)
+		return nil, nil, "", nil, nil
 	}
 
 	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup)
@@ -869,13 +881,51 @@ func (p *pvcBackupItemAction) filterPVCsByVolumePolicy(
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to check volume policy for PVC %s/%s", pvc.Namespace, pvc.Name)
 		}
-
-		if shouldSnapshot {
-			filteredPVCs = append(filteredPVCs, pvc)
+		if !shouldSnapshot {
+			continue
 		}
+
+		skipForCustomDataMover, err := shouldSkipForCustomDataMover(vh, unstructuredPVC, kuberesource.PersistentVolumeClaims)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to check dataMover for PVC %s/%s", pvc.Namespace, pvc.Name)
+		}
+		if skipForCustomDataMover {
+			continue
+		}
+
+		filteredPVCs = append(filteredPVCs, pvc)
 	}
 
 	return filteredPVCs, nil
+}
+
+// shouldSkipForCustomDataMover reports whether the built-in CSI snapshot
+// processing should skip a PVC matched by a VolumePolicy snapshot action
+// configured with a custom (non-built-in) dataMover value, leaving it for an
+// external plugin to handle instead.
+func shouldSkipForCustomDataMover(
+	vh vhutil.VolumeHelper,
+	obj runtime.Unstructured,
+	groupResource schema.GroupResource,
+) (bool, error) {
+	matched, actionType, params, err := vh.GetActionParameters(obj, groupResource)
+	if err != nil {
+		return false, err
+	}
+	if !matched || actionType != string(resourcepolicies.Snapshot) {
+		return false, nil
+	}
+
+	action := &resourcepolicies.Action{
+		Type:       resourcepolicies.VolumeActionType(actionType),
+		Parameters: params,
+	}
+	dataMover, err := action.GetDataMover()
+	if err != nil {
+		return false, err
+	}
+
+	return !datamover.IsKnownDataMover(dataMover), nil
 }
 
 func (p *pvcBackupItemAction) determineCSIDriver(

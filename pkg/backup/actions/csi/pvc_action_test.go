@@ -1038,6 +1038,145 @@ volumePolicies:
 	require.Equal(t, "pvc-csi", result[0].Name)
 }
 
+// TestShouldSkipForCustomDataMover verifies that a PVC matched by a VolumePolicy
+// snapshot action is only skipped by the CSI plugin when the dataMover parameter
+// is a custom (non-built-in) value, and that built-in/default values and
+// non-snapshot actions are left alone (ShouldPerformSnapshot's own true/false
+// signal is shared with other data movers and must not encode this decision).
+func TestShouldSkipForCustomDataMover(t *testing.T) {
+	pvc := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "ns-1"},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			VolumeName:       "pv-1",
+			StorageClassName: ptr.To("sc-1"),
+		},
+		Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
+	}
+	pv := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pv-1"},
+		Spec: corev1api.PersistentVolumeSpec{
+			StorageClassName: "sc-1",
+			PersistentVolumeSource: corev1api.PersistentVolumeSource{
+				CSI: &corev1api.CSIPersistentVolumeSource{Driver: "csi-driver"},
+			},
+		},
+	}
+	pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvc)
+	require.NoError(t, err)
+	unstructuredPVC := &unstructured.Unstructured{Object: pvcMap}
+
+	testCases := []struct {
+		name         string
+		volumePolicy string
+		expectSkip   bool
+		expectErr    bool
+	}{
+		{
+			name: "snapshot action with custom dataMover is skipped",
+			volumePolicy: `
+version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["sc-1"]
+  action:
+    type: snapshot
+    parameters:
+      dataMover: my-custom-mover
+`,
+			expectSkip: true,
+		},
+		{
+			name: "snapshot action with built-in velero-block dataMover is not skipped",
+			volumePolicy: `
+version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["sc-1"]
+  action:
+    type: snapshot
+    parameters:
+      dataMover: velero-block
+`,
+			expectSkip: false,
+		},
+		{
+			name: "snapshot action with no dataMover parameter is not skipped",
+			volumePolicy: `
+version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["sc-1"]
+  action:
+    type: snapshot
+`,
+			expectSkip: false,
+		},
+		{
+			name: "fs-backup action is not skipped by this check",
+			volumePolicy: `
+version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["sc-1"]
+  action:
+    type: fs-backup
+`,
+			expectSkip: false,
+		},
+		{
+			name: "no matching policy is not skipped",
+			volumePolicy: `
+version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["sc-unrelated"]
+  action:
+    type: snapshot
+    parameters:
+      dataMover: my-custom-mover
+`,
+			expectSkip: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := velerotest.NewFakeControllerRuntimeClient(t, pv)
+
+			cm := &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-policy", Namespace: "velero"},
+				Data:       map[string]string{"volume-policy": tc.volumePolicy},
+			}
+			require.NoError(t, client.Create(t.Context(), cm))
+
+			backup := &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "velero"},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: "ConfigMap",
+						Name: "volume-policy",
+					},
+				},
+			}
+
+			action := &pvcBackupItemAction{
+				log:      velerotest.NewLogger(),
+				crClient: client,
+			}
+			vh, err := action.getOrCreateVolumeHelper(backup)
+			require.NoError(t, err)
+
+			skip, err := shouldSkipForCustomDataMover(vh, unstructuredPVC, kuberesource.PersistentVolumeClaims)
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectSkip, skip)
+		})
+	}
+}
+
 func TestDetermineCSIDriver(t *testing.T) {
 	tests := []struct {
 		name           string
