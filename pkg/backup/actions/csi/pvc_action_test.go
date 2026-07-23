@@ -96,6 +96,7 @@ func TestExecute(t *testing.T) {
 		resourcePolicy     *corev1api.ConfigMap
 		failVSCreate       bool
 		skipVSReadyUpdate  bool // New flag to control VS readiness
+		expectedVSClassName string
 	}{
 		{
 			name:   "Skip PVC BIA when backup is in finalizing phase",
@@ -187,6 +188,16 @@ func TestExecute(t *testing.T) {
 			pv:             builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
 			sc:             builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
 			vsClass:        builder.ForVolumeSnapshotClass("tescVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+		},
+		{
+			name:           "Volume policy with snapshotClass selects correct VolumeSnapshotClass",
+			backup:         builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").CSISnapshotTimeout(time.Duration(3600) * time.Second).Result(),
+			resourcePolicy: builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"snapshotClass":"policy-selected-vsclass"}}}]}`).Result(),
+			pvc:            builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:             builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:             builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:            builder.ForVolumeSnapshotClass("policy-selected-vsclass").Driver("hostpath").Result(),
+			expectedVSClassName: "policy-selected-vsclass",
 		},
 	}
 
@@ -300,6 +311,15 @@ func TestExecute(t *testing.T) {
 				resultPVC := new(corev1api.PersistentVolumeClaim)
 				runtime.DefaultUnstructuredConverter.FromUnstructured(resultUnstructed.UnstructuredContent(), resultPVC)
 				require.True(t, cmp.Equal(tc.expectedPVC, resultPVC, cmpopts.IgnoreFields(corev1api.PersistentVolumeClaim{}, "ResourceVersion", "Annotations", "Labels")))
+			}
+
+			if tc.expectedVSClassName != "" {
+				vsList := new(snapshotv1api.VolumeSnapshotList)
+				require.NoError(t, crClient.List(t.Context(), vsList, &crclient.ListOptions{Namespace: tc.pvc.Namespace}))
+				require.NotEmpty(t, vsList.Items, "expected VolumeSnapshot to be created")
+				require.NotNil(t, vsList.Items[0].Spec.VolumeSnapshotClassName)
+				assert.Equal(t, tc.expectedVSClassName, *vsList.Items[0].Spec.VolumeSnapshotClassName,
+					"VolumeSnapshot should use the VolumeSnapshotClass specified by volume policy")
 			}
 		})
 	}
