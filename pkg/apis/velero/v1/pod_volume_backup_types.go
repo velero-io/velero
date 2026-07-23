@@ -145,6 +145,7 @@ type PodVolumeBackupStatus struct {
 // +kubebuilder:printcolumn:name="Uploader",type="string",JSONPath=".spec.uploaderType",description="The type of the uploader to handle data transfer"
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
+// +kubebuilder:resource:shortName=pvb
 
 type PodVolumeBackup struct {
 	metav1.TypeMeta `json:",inline"`

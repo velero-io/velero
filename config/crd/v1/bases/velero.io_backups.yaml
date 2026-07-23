@@ -11,6 +11,8 @@ spec:
     kind: Backup
     listKind: BackupList
     plural: backups
+    shortNames:
+    - bak
     singular: backup
   scope: Namespaced
   versions:

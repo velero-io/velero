@@ -62,8 +62,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DOCKERFILE_SHA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2026/debian-12/Dockerfile\&per_page=1 | jq -r '.[0].sha')
-          echo "dockerfile_sha=${DOCKERFILE_SHA}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          url="https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2026/debian-12/Dockerfile&per_page=1"
+
+          response="$(curl --fail-with-body -sS \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url")"
+
+          DOCKERFILE_SHA="$(echo "$response" | jq -r '.[0].sha // empty')"
+
+          if [ -z "$DOCKERFILE_SHA" ]; then
+            echo "Failed to resolve Bitnami MinIO Dockerfile SHA from GitHub API response"
+            echo "$response"
+            exit 1
+          fi
+
+          echo "dockerfile_sha=${DOCKERFILE_SHA}" >> "$GITHUB_OUTPUT"
       - name: Cache MinIO Image
         uses: actions/cache@v4
         id: minio-cache

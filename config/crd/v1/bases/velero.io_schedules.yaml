@@ -11,6 +11,8 @@ spec:
     kind: Schedule
     listKind: ScheduleList
     plural: schedules
+    shortNames:
+    - sched
     singular: schedule
   scope: Namespaced
   versions:

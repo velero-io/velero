@@ -221,7 +221,7 @@ func (ms *microServiceBRWatcher) StartBackup(source AccessPoint, uploaderConfig 
 	return nil
 }
 
-func (ms *microServiceBRWatcher) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (ms *microServiceBRWatcher) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string, param any) error {
 	ms.log.Infof("Start watching restore ms to target %s, from snapshot %s", target.ByPath, snapshotID)
 
 	ms.startWatch()

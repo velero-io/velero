@@ -516,6 +516,7 @@ type HookStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:rbac:groups=velero.io,resources=backups,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups=velero.io,resources=backups/status,verbs=get;update;patch
+// +kubebuilder:resource:shortName=bak
 
 // Backup is a Velero resource that represents the capture of Kubernetes
 // cluster state at a point in time (API objects and associated volume state).

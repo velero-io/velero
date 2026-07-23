@@ -2,6 +2,7 @@ package repomantenance
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
@@ -57,7 +58,10 @@ func NewCommand(f velerocli.Factory) *cobra.Command {
 		Hidden: true,
 		Short:  "VELERO INTERNAL COMMAND ONLY - not intended to be run directly by users",
 		Run: func(c *cobra.Command, args []string) {
-			o.Run(f)
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				o.Run(f)
+			})
 		},
 	}
 

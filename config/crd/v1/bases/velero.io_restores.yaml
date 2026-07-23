@@ -11,6 +11,8 @@ spec:
     kind: Restore
     listKind: RestoreList
     plural: restores
+    shortNames:
+    - rst
     singular: restore
   scope: Namespaced
   versions:

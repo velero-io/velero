@@ -11,6 +11,8 @@ spec:
     kind: DataUpload
     listKind: DataUploadList
     plural: datauploads
+    shortNames:
+    - du
     singular: dataupload
   scope: Namespaced
   versions:

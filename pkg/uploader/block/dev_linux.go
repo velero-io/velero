@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 )
@@ -75,4 +76,30 @@ func resolveSymlink(path string) (string, error) {
 	}
 
 	return filepath.EvalSymlinks(path)
+}
+
+func blkZeroOut(dest *os.File, start int64, length int64) error {
+	const BLKZEROOUT = 0x127b
+
+	zeroRange := [2]uint64{uint64(start), uint64(length)}
+
+	rawConn, err := dest.SyscallConn()
+	if err != nil {
+		return errors.Wrap(err, "error getting raw connection")
+	}
+
+	ioctlErr := syscall.Errno(0)
+	if err := rawConn.Control(func(fd uintptr) {
+		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, BLKZEROOUT, uintptr(unsafe.Pointer(&zeroRange[0]))); errno != 0 {
+			ioctlErr = errno
+		}
+	}); err != nil {
+		return errors.Wrap(err, "error controlling block dev")
+	}
+
+	if ioctlErr != 0 {
+		return errors.Wrapf(ioctlErr, "error calling ioctl on block dev")
+	}
+
+	return nil
 }

@@ -5,7 +5,7 @@ Velero is an open source tool with a growing community devoted to safe backup an
 
 ## Supported Versions
 
-The Velero project maintains the following [governance document](https://github.com/vmware-tanzu/velero/blob/main/GOVERNANCE.md), [release document](https://github.com/vmware-tanzu/velero/blob/f42c63af1b9af445e38f78a7256b1c48ef79c10e/site/docs/main/release-instructions.md), and [support document](https://velero.io/docs/main/support-process/). Please refer to these for release and related details. Only the most recent version of Velero is supported. Each [release](https://github.com/vmware-tanzu/velero/releases) includes information about upgrading to the latest version.
+The Velero project maintains the following [governance document](https://github.com/velero-io/velero/blob/main/GOVERNANCE.md), [release document](https://github.com/velero-io/velero/blob/f42c63af1b9af445e38f78a7256b1c48ef79c10e/site/docs/main/release-instructions.md), and [support document](https://velero.io/docs/main/support-process/). Please refer to these for release and related details. Only the most recent version of Velero is supported. Each [release](https://github.com/velero-io/velero/releases) includes information about upgrading to the latest version.
 
 
 ## Reporting a Vulnerability - Private Disclosure Process
@@ -18,7 +18,7 @@ If you know of a publicly disclosed security vulnerability for Velero, please **
 
 **IMPORTANT: Do not file public issues on GitHub for security vulnerabilities**
 
-To report a vulnerability or a security-related issue, please contact the email address with the details of the vulnerability. The email will be fielded by the Security Team and then shared with the Velero maintainers who have committer and release permissions. Emails will be addressed within 3 business days, including a detailed plan to investigate the issue and any potential workarounds to perform in the meantime. Do not report non-security-impacting bugs through this channel. Use [GitHub issues](https://github.com/vmware-tanzu/velero/issues/new/choose) instead.
+To report a vulnerability or a security-related issue, please contact the email address with the details of the vulnerability. The email will be fielded by the Security Team and then shared with the Velero maintainers who have committer and release permissions. Emails will be addressed within 3 business days, including a detailed plan to investigate the issue and any potential workarounds to perform in the meantime. Do not report non-security-impacting bugs through this channel. Use [GitHub issues](https://github.com/velero-io/velero/issues/new/choose) instead.
 
 
 ## Proposed Email Content
@@ -68,7 +68,7 @@ The Security Team will respond to vulnerability reports as follows:
 
 ## Public Disclosure Process
 
-The Security Team publishes a [public advisory](https://github.com/vmware-tanzu/velero/security/advisories) to the Velero community via GitHub. In most cases, additional communication via Slack, Twitter, mailing lists, blog and other channels will assist in educating Velero users and rolling out the patched release to affected users. 
+The Security Team publishes a [public advisory](https://github.com/velero-io/velero/security/advisories) to the Velero community via GitHub. In most cases, additional communication via Slack, Twitter, mailing lists, blog and other channels will assist in educating Velero users and rolling out the patched release to affected users. 
 
 The Security Team will also publish any mitigating steps users can take until the fix can be applied to their Velero instances. Velero distributors will handle creating and publishing their own security advisories.
 

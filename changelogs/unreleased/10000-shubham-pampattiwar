@@ -1,0 +1,1 @@
+Fix stale backupLastSuccessfulTimestamp metric after schedule deletion

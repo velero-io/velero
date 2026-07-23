@@ -733,14 +733,14 @@ func TestListPodVolumeBackupsByPodp(t *testing.T) {
 }
 
 type logHook struct {
-	entry *logrus.Entry
+	entries []*logrus.Entry
 }
 
 func (l *logHook) Levels() []logrus.Level {
 	return []logrus.Level{logrus.ErrorLevel}
 }
 func (l *logHook) Fire(entry *logrus.Entry) error {
-	l.entry = entry
+	l.entries = append(l.entries, entry)
 	return nil
 }
 
@@ -808,10 +808,33 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 		logHook := &logHook{}
 		logger.Hooks.Add(logHook)
 
-		backuper := newBackupper(c.ctx, log, nil, nil, informer, nil, "", &velerov1api.Backup{})
+		backuper := newBackupper(c.ctx, log, nil, nil, informer, client, "", &velerov1api.Backup{})
 		if c.pvb != nil {
 			require.NoError(t, backuper.pvbIndexer.Add(c.pvb))
 			backuper.wg.Add(1)
+		}
+
+		if c.ctx == timeoutCtx && c.pvb != nil {
+			// Start a goroutine to simulate the controller's cancellation behavior
+			go func() {
+				// Wait a short time for the cancel flag to be set
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+				for range ticker.C {
+					pvb := &velerov1api.PodVolumeBackup{}
+					err := client.Get(t.Context(), ctrlclient.ObjectKey{Namespace: c.pvb.Namespace, Name: c.pvb.Name}, pvb)
+					if err == nil && pvb.Spec.Cancel {
+						oldPVB := pvb.DeepCopy()
+						pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseCanceled
+						pvb.Status.Message = "canceled"
+						_ = client.Update(t.Context(), pvb)
+						if informer.handler != nil {
+							informer.handler.OnUpdate(oldPVB, pvb)
+						}
+						return
+					}
+				}
+			}()
 		}
 
 		if c.statusToBeUpdated != nil {
@@ -831,9 +854,18 @@ func TestWaitAllPodVolumesProcessed(t *testing.T) {
 		pvbs := backuper.WaitAllPodVolumesProcessed(logger)
 
 		if c.expectedErr != "" {
-			assert.Equal(t, c.expectedErr, logHook.entry.Message)
+			found := false
+			var loggedMsgs []string
+			for _, entry := range logHook.entries {
+				loggedMsgs = append(loggedMsgs, entry.Message)
+				if entry.Message == c.expectedErr {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "Expected error %q to be logged, but got %v", c.expectedErr, loggedMsgs)
 		} else {
-			assert.Nil(t, logHook.entry)
+			assert.Empty(t, logHook.entries)
 		}
 
 		if c.expectedPVBCount > 0 {

@@ -89,6 +89,14 @@ func (p *pvcRestoreItemAction) Execute(
 	})
 	logger.Info("Starting PVCRestoreItemAction for PVC")
 
+	vsName, nameOK := pvcFromBackup.Annotations[velerov1api.VolumeSnapshotLabel]
+	if !nameOK {
+		logger.Info("Skipping PVCRestoreItemAction for PVC, PVC does not have a CSI VolumeSnapshot.")
+		return &velero.RestoreItemActionExecuteOutput{
+			UpdatedItem: input.Item,
+		}, nil
+	}
+
 	// If PVC already exists, returns early.
 	if p.isResourceExist(pvc, *input.Restore) {
 		logger.Warnf("PVC already exists. Skip restore this PVC.")
@@ -155,15 +163,6 @@ func (p *pvcRestoreItemAction) Execute(
 			logger.Infof("DataDownload %s/%s is created successfully.",
 				dataDownload.Namespace, dataDownload.Name)
 		} else {
-			//CSI restore
-			vsName, nameOK := pvcFromBackup.Annotations[velerov1api.VolumeSnapshotLabel]
-			if !nameOK {
-				logger.Info("Skipping PVCRestoreItemAction for PVC, PVC does not have a CSI VolumeSnapshot.")
-				return &velero.RestoreItemActionExecuteOutput{
-					UpdatedItem: input.Item,
-				}, nil
-			}
-
 			//To avoid confilcs, vs and vsc get a new uniq name based in restore UID
 			// and vs name old name
 			newVSName := util.GenerateSha256FromRestoreUIDAndVsName(string(input.Restore.UID), vsName)
