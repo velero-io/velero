@@ -49,6 +49,7 @@ func NewUnpauseCommand(f client.Factory, use string) *cobra.Command {
 		},
 	}
 
+	c.ValidArgsFunction = cli.CompleteScheduleNames(f)
 	o.BindFlags(c.Flags())
 	pauseOpts.BindFlags(c.Flags())
 

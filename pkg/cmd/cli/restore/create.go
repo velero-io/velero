@@ -36,6 +36,7 @@ import (
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
@@ -80,6 +81,9 @@ Notes:
 	o.BindFlags(c.Flags())
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
+
+	_ = c.RegisterFlagCompletionFunc("from-backup", cli.CompleteBackupNames(f))
+	_ = c.RegisterFlagCompletionFunc("from-schedule", cli.CompleteScheduleNames(f))
 
 	return c
 }

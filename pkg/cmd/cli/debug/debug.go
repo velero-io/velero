@@ -38,6 +38,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 )
 
 //go:embed cshd-scripts/velero.cshd
@@ -171,6 +172,10 @@ specs of resources created by velero server, and optionally the logs of backup a
 		},
 	}
 	o.bindFlags(c.Flags())
+
+	_ = c.RegisterFlagCompletionFunc("backup", cli.CompleteBackupNames(f))
+	_ = c.RegisterFlagCompletionFunc("restore", cli.CompleteRestoreNames(f))
+
 	return c
 }
 
