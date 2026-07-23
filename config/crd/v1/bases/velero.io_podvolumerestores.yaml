@@ -132,6 +132,9 @@ spec:
               repoIdentifier:
                 description: RepoIdentifier is the backup repository identifier.
                 type: string
+              restoreType:
+                description: RestoreType indicates the type of the restore.
+                type: string
               snapshotID:
                 description: SnapshotID is the ID of the volume snapshot to be restored.
                 type: string
@@ -167,6 +170,7 @@ spec:
             - backupStorageLocation
             - pod
             - repoIdentifier
+            - restoreType
             - snapshotID
             - sourceNamespace
             - volume
