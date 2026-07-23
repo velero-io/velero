@@ -102,10 +102,5 @@ RUN ARCH=$(go env GOARCH) && \
 # release API/CDN, which has been returning intermittent/persistent HTTP 504s.
 RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
-# install kubectl
-RUN curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/$(go env GOARCH)/kubectl
-RUN chmod +x ./kubectl
-RUN mv ./kubectl /usr/local/bin
-
 # Fix the "dubious ownership" issue from git when running goreleaser.sh
 RUN echo "[safe] \n\t directory = *" > /.gitconfig
