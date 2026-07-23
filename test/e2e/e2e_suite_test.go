@@ -39,6 +39,7 @@ import (
 	. "github.com/vmware-tanzu/velero/test/e2e/basic/resources-check"
 	. "github.com/vmware-tanzu/velero/test/e2e/bsl-mgmt"
 	. "github.com/vmware-tanzu/velero/test/e2e/migration"
+	. "github.com/vmware-tanzu/velero/test/e2e/nfs-ownership"
 	. "github.com/vmware-tanzu/velero/test/e2e/nodeagentconfig"
 	. "github.com/vmware-tanzu/velero/test/e2e/parallelfilesdownload"
 	. "github.com/vmware-tanzu/velero/test/e2e/parallelfilesupload"
@@ -652,6 +653,12 @@ var _ = Describe(
 	"Backup resources should follow the specific order in schedule",
 	Label("PVBackup", "OptOut", "FSB"),
 	OptOutPVBackupTest,
+)
+
+var _ = Describe(
+	"Restore of fs-backup preserves file ownership on root-squashing NFS",
+	Label("NFSOwnership", "FSB"),
+	NFSOwnershipTest,
 )
 
 var _ = Describe(
