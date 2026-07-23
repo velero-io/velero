@@ -41,7 +41,7 @@ This creates three critical gaps for common backup scenarios:
 - Maintain full backward compatibility — existing backups with no `namespacedFilterPolicies` behave exactly as they do today
 - Define clear precedence rules for how per-namespace filters interact with global filters
 - Add corresponding validation within the Resource Policies validation pipeline using existing Velero wildcard validation functions
-- Update `velero backup describe` output to display per-namespace filter information when present
+- Update `velero backup describe` output to display the referenced ResourcePolicy ConfigMap name when configured
 - Ensure the restore process works correctly with backups produced by namespace-scoped filters, without requiring restore-side code changes in the initial phase
 
 ## Non-Goals
@@ -753,7 +753,7 @@ spec:
 
 ### `velero backup describe`
 
-The output is extended to display namespace-scoped filter policies when present in the ResourcePolicy ConfigMap:
+The output displays the referenced ResourcePolicy ConfigMap name when configured on the backup. It intentionally avoids resolving and displaying the live ConfigMap contents, because the ConfigMap content in the cluster may be modified or deleted after the backup execution, which could lead to displaying out-of-sync or inaccurate information:
 
 ```
 Name:         selective-backup
@@ -777,46 +777,9 @@ Resources:
 
 Label selector:  <none>
 
-Resource Policy:  backup-filter-policy
-
-Namespace-Scoped Filter Policies:
-  ns-a:
-    Resource Filters:
-      ConfigMap, Secret, Deployment:
-        Label selector:     app=my-app
-        Included names:     <none>
-        Excluded names:     <none>
-  target-namespace:
-    Resource Filters:
-      Deployment:
-        Label selector:     app=production-workload-1
-        Included names:     <none>
-        Excluded names:     <none>
-      StatefulSet:
-        Label selector:     app=production-workload-2
-        Included names:     <none>
-        Excluded names:     <none>
-  production:
-    Resource Filters:
-      Deployment:
-        Label selector:     <none>
-        Included names:     [api-server, worker]
-        Excluded names:     <none>
-      <catch-all> (all other kinds):
-        Label selector:     backup=true
-        Included names:     <none>
-        Excluded names:     <none>
-
-Fine-Grained Global Filter Policy:
-  Resource Filters:
-    ClusterRole, ClusterRoleBinding:
-      Label selector:     <none>
-      Included names:     [my-app-*]
-      Excluded names:     <none>
-    CustomResourceDefinition:
-      Label selector:     app=my-app
-      Included names:     <none>
-      Excluded names:     <none>
+Resource policies:
+  Type:  configmap
+  Name:  backup-filter-policy
 
 Storage Location:  default
 
@@ -851,7 +814,7 @@ Notes:
 - Global filters (--include-resources, --selector, etc.) apply to all included namespaces
 - Namespace-scoped filters defined in --resource-policies-configmap override global filters for matching namespaces
 - Fine-grained global filter policies defined in --resource-policies-configmap override global filters for cluster-scoped resources
-- Use 'velero backup describe' to view resolved filter policies after backup creation
+- Use 'velero backup describe' to view the referenced ResourcePolicy ConfigMap name after backup creation
 ```
 
 ### CLI Integration Points
@@ -864,12 +827,12 @@ Notes:
 
 **Help and Discovery:**
 - `velero backup create --help` includes updated filtering documentation
-- `velero backup describe` shows resolved filter policies for troubleshooting
+- `velero backup describe` shows the referenced ResourcePolicy ConfigMap name
 - Validation errors include ConfigMap field references for easy debugging
 
 **Configuration Discovery:**
 - `velero backup create --help` includes namespace-scoped filtering documentation
-- `velero backup describe` shows resolved filter policies for verification
+- `velero backup describe` shows the referenced ResourcePolicy ConfigMap name for verification
 
 ## User Perspective
 
@@ -879,7 +842,7 @@ This design provides fine-grained, per-namespace, per-kind control over backup f
 - **For users adopting namespace-scoped filter policies**: Create a ConfigMap with the `namespacedFilterPolicies` section and reference it via `BackupSpec.ResourcePolicy` (or the existing `--resource-policies-configmap` flag). The backup will selectively include/exclude resources per namespace based on the filter rules.
 - **For users already using ResourcePolicy for volume policies**: Add the `namespacedFilterPolicies` section to the same ConfigMap. Both volume policies and namespace-scoped filters coexist.
 - **For restore from a namespace-filtered backup**: No changes to restore workflow. Restore processes whatever is in the archive. Users can use existing `RestoreSpec.IncludedNamespaces` for additional filtering at restore time.
-- **`velero backup describe` output**: Extended to show per-namespace, per-kind filter details when the ResourcePolicy ConfigMap contains `namespacedFilterPolicies`.
+- **`velero backup describe` output**: Displays the referenced ResourcePolicy ConfigMap name when configured on the backup.
 - **Validation errors**: Reported at backup start when the ResourcePolicy ConfigMap contains invalid `namespacedFilterPolicies` configurations. Consistent with how volume policy validation errors are reported today.
 
 ## Alternatives Considered

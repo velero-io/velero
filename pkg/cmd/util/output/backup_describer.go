@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/sirupsen/logrus"
 
 	"github.com/fatih/color"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -94,9 +92,6 @@ func DescribeBackup(
 		if backup.Spec.ResourcePolicy != nil {
 			d.Println()
 			DescribeResourcePolicies(d, backup.Spec.ResourcePolicy)
-
-			// Display fine-grained filter policies if they exist
-			DescribeFineGrainedFilterPolicies(ctx, kbClient, d, backup)
 		}
 
 		DescribeGlobalVolumePolicy(d, backup)
@@ -149,159 +144,6 @@ func DescribeGlobalVolumePolicy(d *Describer, backup *velerov1api.Backup) {
 	d.Printf("Global volume policies:\n")
 	d.Printf("\tType:\t%s\n", resourcepolicies.ConfigmapRefType)
 	d.Printf("\tName:\t%s\n", name)
-}
-
-// DescribeFineGrainedFilterPolicies describes cluster-scoped and namespace-scoped filter policies if present
-func DescribeFineGrainedFilterPolicies(ctx context.Context, kbClient kbclient.Client, d *Describer, backup *velerov1api.Backup) {
-	if backup.Spec.ResourcePolicy == nil {
-		return
-	}
-
-	// Create a discard logger for the resource policies function since this is CLI output context
-	discardLogger := logrus.New()
-	discardLogger.Out = io.Discard
-
-	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(*backup, kbClient, discardLogger)
-	if err != nil {
-		// Don't fail the describe if we can't read policies, just skip
-		return
-	}
-
-	if resourcePolicies == nil {
-		return
-	}
-
-	clusterScopedFilterPolicy := resourcePolicies.GetClusterScopedFilterPolicy()
-	if clusterScopedFilterPolicy != nil {
-		d.Printf("\nCluster Scoped Filter Policy:\n")
-		d.Printf("  Resource Filters:\n")
-		for _, rf := range clusterScopedFilterPolicy.ResourceFilters {
-			kindsStr := strings.Join(rf.Kinds, ", ")
-			d.Printf("    %s:\n", kindsStr)
-
-			// Label selector
-			if resourcepolicies.IsPresentLabelSelector(rf.LabelSelector) {
-				selectorStr := formatPolicyLabelSelector(rf.LabelSelector)
-				d.Printf("      Label selector:     %s\n", selectorStr)
-			} else if len(rf.OrLabelSelectors) > 0 {
-				var orStrs []string
-				for _, ols := range rf.OrLabelSelectors {
-					if !resourcepolicies.IsPresentLabelSelector(ols) {
-						continue
-					}
-					orStrs = append(orStrs, formatPolicyLabelSelector(ols))
-				}
-				if len(orStrs) > 0 {
-					d.Printf("      OR label selectors: [%s]\n", strings.Join(orStrs, ", "))
-				} else {
-					d.Printf("      Label selector:     <none>\n")
-				}
-			} else {
-				d.Printf("      Label selector:     <none>\n")
-			}
-
-			// Name patterns
-			if len(rf.Names) > 0 {
-				d.Printf("      Included names:     [%s]\n", strings.Join(rf.Names, ", "))
-			} else {
-				d.Printf("      Included names:     <none>\n")
-			}
-
-			if len(rf.ExcludedNames) > 0 {
-				d.Printf("      Excluded names:     [%s]\n", strings.Join(rf.ExcludedNames, ", "))
-			} else {
-				d.Printf("      Excluded names:     <none>\n")
-			}
-		}
-	}
-
-	nfPolicies := resourcePolicies.GetNamespacedFilterPolicies()
-	if len(nfPolicies) > 0 {
-		d.Printf("\nNamespace-Scoped Filter Policies:\n")
-		for _, policy := range nfPolicies {
-			for _, ns := range policy.Namespaces {
-				d.Printf("  %s:\n", ns)
-				d.Printf("    Resource Filters:\n")
-				for _, rf := range policy.ResourceFilters {
-					var kindsStr string
-					if rf.IsCatchAll() {
-						kindsStr = "<catch-all> (all other kinds)"
-					} else {
-						kindsStr = strings.Join(rf.Kinds, ", ")
-					}
-					d.Printf("      %s:\n", kindsStr)
-
-					// Label selector
-					if resourcepolicies.IsPresentLabelSelector(rf.LabelSelector) {
-						selectorStr := formatPolicyLabelSelector(rf.LabelSelector)
-						d.Printf("        Label selector:     %s\n", selectorStr)
-					} else if len(rf.OrLabelSelectors) > 0 {
-						var orStrs []string
-						for _, ols := range rf.OrLabelSelectors {
-							if !resourcepolicies.IsPresentLabelSelector(ols) {
-								continue
-							}
-							orStrs = append(orStrs, formatPolicyLabelSelector(ols))
-						}
-						if len(orStrs) > 0 {
-							d.Printf("        OR label selectors: [%s]\n", strings.Join(orStrs, ", "))
-						} else {
-							d.Printf("        Label selector:     <none>\n")
-						}
-					} else {
-						d.Printf("        Label selector:     <none>\n")
-					}
-
-					// Name patterns
-					if len(rf.Names) > 0 {
-						d.Printf("        Included names:     [%s]\n", strings.Join(rf.Names, ", "))
-					} else {
-						d.Printf("        Included names:     <none>\n")
-					}
-
-					if len(rf.ExcludedNames) > 0 {
-						d.Printf("        Excluded names:     [%s]\n", strings.Join(rf.ExcludedNames, ", "))
-					} else {
-						d.Printf("        Excluded names:     <none>\n")
-					}
-				}
-			}
-		}
-	}
-}
-
-func formatPolicyLabelSelector(s *resourcepolicies.PolicyLabelSelector) string {
-	if !resourcepolicies.IsPresentLabelSelector(s) {
-		return ""
-	}
-	return metav1.FormatLabelSelector(resourcepolicies.ToMetaV1LabelSelector(s))
-}
-
-// policyLabelSelectorToMap converts a PolicyLabelSelector to a map suitable for
-// structured describer output (matchLabels / matchExpressions).
-func policyLabelSelectorToMap(s *resourcepolicies.PolicyLabelSelector) map[string]any {
-	if s == nil {
-		return nil
-	}
-	out := map[string]any{}
-	if len(s.MatchLabels) > 0 {
-		out["matchLabels"] = s.MatchLabels
-	}
-	if len(s.MatchExpressions) > 0 {
-		var exprs []map[string]any
-		for _, expr := range s.MatchExpressions {
-			e := map[string]any{
-				"key":      expr.Key,
-				"operator": expr.Operator,
-			}
-			if len(expr.Values) > 0 {
-				e["values"] = expr.Values
-			}
-			exprs = append(exprs, e)
-		}
-		out["matchExpressions"] = exprs
-	}
-	return out
 }
 
 // DescribeUploaderConfigForBackup describes uploader config in human-readable format
