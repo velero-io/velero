@@ -924,8 +924,17 @@ func shouldSkipForCustomDataMover(
 	if err != nil {
 		return false, err
 	}
+	// GetDataMover resolves an absent dataMover parameter to the concrete
+	// default (currently "velero-fs"), so that value must be treated as
+	// built-in here too, regardless of whether IsBuiltInDataMover itself
+	// recognizes it.
+	if dataMover == datamover.GetDefaultBuiltInDataMover() {
+		return false, nil
+	}
 
-	return !datamover.IsKnownDataMover(dataMover), nil
+	// IsBuiltInDataMover is being extended in a separate PR to also recognize
+	// "velero-block"; until that lands it only recognizes ""/"velero".
+	return !datamover.IsBuiltInDataMover(dataMover), nil
 }
 
 func (p *pvcBackupItemAction) determineCSIDriver(

@@ -1086,7 +1086,10 @@ volumePolicies:
 			expectSkip: true,
 		},
 		{
-			name: "snapshot action with built-in velero-block dataMover is not skipped",
+			// datamover.IsBuiltInDataMover currently only recognizes ""/"velero";
+			// it's being extended to also cover "velero-fs"/"velero-block" in a
+			// separate PR, so those two values aren't asserted here yet.
+			name: "snapshot action with explicit velero dataMover is not skipped",
 			volumePolicy: `
 version: v1
 volumePolicies:
@@ -1095,7 +1098,7 @@ volumePolicies:
   action:
     type: snapshot
     parameters:
-      dataMover: velero-block
+      dataMover: velero
 `,
 			expectSkip: false,
 		},

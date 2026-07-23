@@ -41,16 +41,3 @@ func IsBuiltInDataMover(dataMover string) bool {
 func GetDefaultBuiltInDataMover() string {
 	return DataMoverTypeVeleroFs
 }
-
-// IsKnownDataMover reports whether dataMover refers to one of Velero's
-// built-in data movers, including the empty/"velero" aliases for the
-// default. Any other non-empty value is a custom data mover intended for an
-// external plugin to handle instead of Velero's built-in data movers.
-func IsKnownDataMover(dataMover string) bool {
-	switch dataMover {
-	case "", DataMoverTypeVelero, DataMoverTypeVeleroFs, DataMoverTypeVeleroBlock:
-		return true
-	default:
-		return false
-	}
-}
