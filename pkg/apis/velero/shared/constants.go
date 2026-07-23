@@ -14,25 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package datamover
+package shared
 
-import (
-	"fmt"
-
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	datamoverutil "github.com/vmware-tanzu/velero/pkg/util/datamover"
+const (
+	DataUploadParentSnapshotNone = "none"
+	DataUploadParentSnapshotAuto = "auto"
 )
-
-func GetUploaderType(dataMover string) string {
-	if datamoverutil.IsVeleroFSDataMover(dataMover) {
-		return uploader.KopiaType
-	} else if datamoverutil.IsVeleroBlockDataMover(dataMover) {
-		return uploader.BlockType
-	} else {
-		return dataMover
-	}
-}
-
-func GetRealSource(sourceNamespace string, pvcName string) string {
-	return fmt.Sprintf("%s/%s", sourceNamespace, pvcName)
-}
