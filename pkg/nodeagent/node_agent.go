@@ -108,18 +108,27 @@ func isRunningInNode(ctx context.Context, namespace string, nodeName string, crC
 	if err != nil {
 		return errors.Wrap(err, "failed to list node-agent pods")
 	}
-
+	var podsOnNode []*corev1api.Pod
 	for i := range pods.Items {
-		if kube.IsPodRunning(&pods.Items[i]) != nil {
-			continue
-		}
-
 		if pods.Items[i].Spec.NodeName == nodeName {
-			return nil
+			podsOnNode = append(podsOnNode, &pods.Items[i])
 		}
 	}
 
-	return errors.Errorf("daemonset pod not found in running state in node %s", nodeName)
+	if len(podsOnNode) == 0 {
+		return errors.Errorf("daemonset pod not found in node %s", nodeName)
+	}
+
+	var lastError error
+	for _, pod := range podsOnNode {
+		if err := kube.IsPodRunning(pod); err == nil {
+			return nil
+		} else {
+			lastError = err
+		}
+	}
+
+	return errors.Wrapf(lastError, "daemonset pod not found in running state in node %s", nodeName)
 }
 
 func GetPodSpec(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string) (*corev1api.PodSpec, error) {
