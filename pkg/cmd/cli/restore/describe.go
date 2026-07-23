@@ -38,6 +38,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 		listOptions           metav1.ListOptions
 		details               bool
 		insecureSkipTLSVerify bool
+		outputFormat          = "plaintext"
 	)
 
 	config, err := client.LoadConfig()
@@ -52,6 +53,10 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 		Run: func(c *cobra.Command, args []string) {
 			kbClient, err := f.KubebuilderClient()
 			cmd.CheckError(err)
+
+			if outputFormat != "plaintext" && outputFormat != "json" {
+				cmd.CheckError(fmt.Errorf("invalid output format '%s'. valid values are 'plaintext, json'", outputFormat))
+			}
 
 			restoreList := new(velerov1api.RestoreList)
 			if len(args) > 0 {
@@ -80,12 +85,19 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 					fmt.Fprintf(os.Stderr, "error getting PodVolumeRestores for restore %s: %v\n", restore.Name, err)
 				}
 
-				s := output.DescribeRestore(context.Background(), kbClient, &restoreList.Items[i], podVolumeRestoreList.Items, details, insecureSkipTLSVerify, caCertFile)
-				if first {
-					first = false
+				// structured output only applies to a single restore in case of OOM
+				// To describe a list of restores in structured format, iterate and describe one at a time.
+				if len(restoreList.Items) == 1 && outputFormat != "plaintext" {
+					s := output.DescribeRestoreInSF(context.Background(), kbClient, &restoreList.Items[i], podVolumeRestoreList.Items, details, insecureSkipTLSVerify, caCertFile, outputFormat)
 					fmt.Print(s)
 				} else {
-					fmt.Printf("\n\n%s", s)
+					s := output.DescribeRestore(context.Background(), kbClient, &restoreList.Items[i], podVolumeRestoreList.Items, details, insecureSkipTLSVerify, caCertFile)
+					if first {
+						first = false
+						fmt.Print(s)
+					} else {
+						fmt.Printf("\n\n%s", s)
+					}
 				}
 			}
 			cmd.CheckError(err)
@@ -96,6 +108,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 	c.Flags().BoolVar(&details, "details", details, "Display additional detail in the command output.")
 	c.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", insecureSkipTLSVerify, "If true, the object store's TLS certificate will not be checked for validity. This is insecure and susceptible to man-in-the-middle attacks. Not recommended for production.")
 	c.Flags().StringVar(&caCertFile, "cacert", caCertFile, "Path to a certificate bundle to use when verifying TLS connections.")
+	c.Flags().StringVarP(&outputFormat, "output", "o", outputFormat, "Output display format. Valid formats are 'plaintext, json'. 'json' only applies to a single restore")
 
 	return c
 }
