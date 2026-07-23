@@ -86,8 +86,23 @@ This section documents some of the choices made during implementing the CSI snap
         ```
         Note: Please ensure all your annotations are in lowercase. And follow the following format: `velero.io/csi-volumesnapshot-class_<driver name> = <VolumeSnapshotClass Name>`
 
-    3. **Choosing VolumeSnapshotClass for a particular PVC:**
-    If you want to use a particular VolumeSnapshotClass for a particular PVC, you can add a annotation to the PVC to indicate which VolumeSnapshotClass to use. This overrides any annotation added to backup or schedule. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular PVC, you can create a PVC like this:
+    3. **Choosing VolumeSnapshotClass via Volume Policy:**
+    If you want to use a particular VolumeSnapshotClass based on conditions like StorageClass, you can specify the `snapshotClass` parameter in a volume policy's `snapshot` action. This is useful when multiple storage arrays share the same CSI driver but require different VolumeSnapshotClasses. For example:
+        ```yaml
+        version: v1
+        volumePolicies:
+        - conditions:
+            storageClass:
+            - nutanix-files
+          action:
+            type: snapshot
+            parameters:
+              snapshotClass: nutanix-files-snapclass
+        ```
+        This overrides backup/schedule annotations and VolumeSnapshotClass labels, but is overridden by PVC-level annotations. See the [resource filtering documentation](resource-filtering.md) for more volume policy examples.
+
+    4. **Choosing VolumeSnapshotClass for a particular PVC:**
+    If you want to use a particular VolumeSnapshotClass for a particular PVC, you can add a annotation to the PVC to indicate which VolumeSnapshotClass to use. This overrides any other method of selecting a VolumeSnapshotClass. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular PVC, you can create a PVC like this:
         ```yaml
         apiVersion: v1
         kind: PersistentVolumeClaim
