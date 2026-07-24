@@ -64,6 +64,12 @@ type DataUploadSpec struct {
 	// SourceFSType is the file system type of the source volume.
 	// +optional
 	SourceFSType string `json:"sourceFSType,omitempty"`
+
+	// ParentSnapshot specifies the parent snapshot that current backup is based on.
+	// If its value is "" or "auto", the data mover finds the recent backup of the same volume as parent.
+	// If its value is "none", the data mover will do a full backup
+	// If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
+	ParentSnapshot string `json:"parentSnapshot,omitempty"`
 }
 
 type SnapshotType string
