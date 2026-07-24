@@ -27,4 +27,5 @@ type VolumeHelper interface {
 	ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod) (bool, error)
 	ShouldPerformCustomAction(obj runtime.Unstructured, groupResource schema.GroupResource, matchParams map[string]any) (bool, error)
 	GetActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, string, map[string]any, error)
+	GetSnapshotClass(obj runtime.Unstructured, groupResource schema.GroupResource) (string, error)
 }

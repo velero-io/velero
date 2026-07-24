@@ -42,7 +42,6 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
@@ -340,17 +339,11 @@ func (p *pvcBackupItemAction) Execute(
 		return nil, nil, "", nil, err
 	}
 
-	policySnapshotClass := ""
-	matched, actionType, params, paramsErr := vh.GetActionParameters(item, kuberesource.PersistentVolumeClaims)
-	if paramsErr != nil {
-		p.log.WithError(paramsErr).Warn("failed to get action parameters from volume policy, proceeding without policy snapshotClass")
-	} else if matched && actionType == string(resourcepolicies.Snapshot) && params != nil {
-		if sc, ok := params[resourcepolicies.SnapshotClassParameter]; ok {
-			if scStr, ok := sc.(string); ok && scStr != "" {
-				policySnapshotClass = scStr
-				p.log.Infof("Volume policy specifies snapshotClass=%s for PVC %s/%s", scStr, pvc.Namespace, pvc.Name)
-			}
-		}
+	policySnapshotClass, scErr := vh.GetSnapshotClass(item, kuberesource.PersistentVolumeClaims)
+	if scErr != nil {
+		p.log.WithError(scErr).Warn("failed to get snapshotClass from volume policy, proceeding without it")
+	} else if policySnapshotClass != "" {
+		p.log.Infof("Volume policy specifies snapshotClass=%s for PVC %s/%s", policySnapshotClass, pvc.Namespace, pvc.Name)
 	}
 
 	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup, policySnapshotClass)
