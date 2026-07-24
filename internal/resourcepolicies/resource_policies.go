@@ -53,6 +53,10 @@ const (
 	// DataMoverParameter is the key of the action parameter that selects the data
 	// mover to be used for the matched volumes when the action type is snapshot.
 	DataMoverParameter = "dataMover"
+
+	// SnapshotClassParameter is the key of the action parameter that selects the
+	// VolumeSnapshotClass to use for CSI snapshots when the action type is snapshot.
+	SnapshotClassParameter = "snapshotClass"
 )
 
 // validDataMovers is the set of data mover values accepted in the snapshot
@@ -98,6 +102,30 @@ func (a *Action) GetDataMover() (string, error) {
 			DataMoverParameter, dataMover, datamover.DataMoverTypeVelero, datamover.DataMoverTypeVeleroFs, datamover.DataMoverTypeVeleroBlock)
 	}
 	return dataMover, nil
+}
+
+// GetSnapshotClass returns the VolumeSnapshotClass name configured in the
+// snapshot action's snapshotClass parameter. The snapshotClass parameter is
+// only meaningful for the snapshot action, so it returns an error when the
+// action is nil or its type is not snapshot. When the parameter is absent,
+// it returns an empty string, meaning the caller should fall back to the
+// existing VolumeSnapshotClass selection logic.
+func (a *Action) GetSnapshotClass() (string, error) {
+	if a == nil || a.Type != Snapshot {
+		return "", fmt.Errorf("the %q parameter is only supported for the %q action", SnapshotClassParameter, Snapshot)
+	}
+	if len(a.Parameters) == 0 {
+		return "", nil
+	}
+	raw, ok := a.Parameters[SnapshotClassParameter]
+	if !ok {
+		return "", nil
+	}
+	snapshotClass, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string, got %T", SnapshotClassParameter, raw)
+	}
+	return snapshotClass, nil
 }
 
 // ResourceFilter defines a filter for specific resource kinds.

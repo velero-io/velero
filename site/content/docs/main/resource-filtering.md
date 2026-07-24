@@ -617,6 +617,7 @@ a volume policy but for a particular volume included in the backup there are no 
 in such a scenario the legacy approach will be used for backing up the particular volume. Considering everything, the recommendation would be to use only one
 of the approaches to backup volumes - volume policy approach or the opt-in/opt-out legacy approach, and not mix them for clarity.
 - Snapshot action can either be a native snapshot or a csi snapshot or csi snapshot datamover, as is the case with the current flow where velero itself makes the decision based on the backup CR's existing options.
+- The `snapshot` action supports an optional `snapshotClass` parameter that specifies which VolumeSnapshotClass to use for CSI snapshots. This is useful when multiple storage arrays share the same CSI driver but require different VolumeSnapshotClasses. When specified, this takes priority over backup annotations and VolumeSnapshotClass labels, but is overridden by PVC-level annotations. See the [CSI documentation](csi.md) for the full VolumeSnapshotClass selection priority order.
 - The `snapshot` action via Volume Policy has higher priority if there is a `snapshot` action matching for a particular volume, this volume would be backed up via snapshot irrespective of the value of `backup.Spec.SnapshotVolumes`.
 - If for a particular volume there is no `snapshot` matching action then the volume will be backed up via snapshot given that `backup.Spec.SnapshotVolumes` is not explicitly set to false.
 - Let's see some examples on how to use the volume policy feature for `fs-backup` and `snapshot` action purposes:
@@ -704,6 +705,29 @@ volumePolicies:
 3. The outcome would be that velero would perform `fs-backup` operation on both the volumes
    - `fs-backup` on `Volume 1` because `Volume 1` satisfies the criteria for `fs-backup` action. 
    - Also, for Volume 2 as no matching action was found so legacy approach will be used as a fallback option for this volume (`fs-backup` operation will be done as `defaultVolumesToFSBackup: true` is specified by the user).
+
+***Example 6: User has two storage arrays using the same CSI driver and needs different VolumeSnapshotClasses for each***
+1. User specifies the volume policy as follows:
+```yaml
+version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - array-1-sc
+  action:
+    type: snapshot
+    parameters:
+      snapshotClass: vsc-array-1
+- conditions:
+    storageClass:
+    - array-2-sc
+  action:
+    type: snapshot
+    parameters:
+      snapshotClass: vsc-array-2
+```
+2. User creates a backup using this volume policy
+3. The outcome would be that velero would use `vsc-array-1` VolumeSnapshotClass for volumes on storage class `array-1-sc` and `vsc-array-2` VolumeSnapshotClass for volumes on storage class `array-2-sc`, even though both storage classes use the same CSI driver.
 
 ### Global backup volume policies
 

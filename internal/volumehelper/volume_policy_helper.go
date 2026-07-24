@@ -430,6 +430,21 @@ func (v *volumeHelperImpl) GetActionParameters(obj runtime.Unstructured, groupRe
 	return false, "", nil, nil
 }
 
+func (v *volumeHelperImpl) GetSnapshotClass(obj runtime.Unstructured, groupResource schema.GroupResource) (string, error) {
+	matched, actionType, params, err := v.GetActionParameters(obj, groupResource)
+	if err != nil {
+		return "", err
+	}
+	if !matched {
+		return "", nil
+	}
+	action := &resourcepolicies.Action{
+		Type:       resourcepolicies.VolumeActionType(actionType),
+		Parameters: params,
+	}
+	return action.GetSnapshotClass()
+}
+
 func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume) bool {
 	includeVolumeInBackup := true
 	// cannot backup hostpath volumes as they are not mounted into /var/lib/kubelet/pods

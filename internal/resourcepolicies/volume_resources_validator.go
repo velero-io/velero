@@ -118,5 +118,19 @@ func (a *Action) validate() error {
 		}
 	}
 
+	if raw, ok := a.Parameters[SnapshotClassParameter]; ok {
+		if a.Type != Snapshot {
+			return fmt.Errorf("parameter %q is only supported for the %q action, but the action type is %q",
+				SnapshotClassParameter, Snapshot, a.Type)
+		}
+		snapshotClass, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("parameter %q must be a string, got %T", SnapshotClassParameter, raw)
+		}
+		if snapshotClass == "" {
+			return fmt.Errorf("parameter %q must not be empty", SnapshotClassParameter)
+		}
+	}
+
 	return nil
 }

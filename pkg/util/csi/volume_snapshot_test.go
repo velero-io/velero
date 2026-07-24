@@ -1032,13 +1032,100 @@ func TestGetVolumeSnapshotClass(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actualSnapshotClass, actualError := GetVolumeSnapshotClass(
-				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient)
+				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient, "")
 			if tc.expectError {
 				require.Error(t, actualError)
 				assert.Nil(t, actualSnapshotClass)
 				return
 			}
 			assert.Equal(t, tc.expectedVSC, actualSnapshotClass)
+		})
+	}
+}
+
+func TestGetVolumeSnapshotClassFromVolumePolicy(t *testing.T) {
+	vscArray1 := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-array-1"},
+		Driver:     "infinibox-csi-driver",
+	}
+	vscArray2 := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-array-2"},
+		Driver:     "infinibox-csi-driver",
+	}
+	vscOther := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-other"},
+		Driver:     "other-csi-driver",
+	}
+
+	snapshotClasses := &snapshotv1api.VolumeSnapshotClassList{
+		Items: []snapshotv1api.VolumeSnapshotClass{*vscArray1, *vscArray2, *vscOther},
+	}
+
+	testCases := []struct {
+		name                string
+		policySnapshotClass string
+		provisioner         string
+		expectedVSC         *snapshotv1api.VolumeSnapshotClass
+		expectError         bool
+	}{
+		{
+			name:                "empty policy returns nil",
+			policySnapshotClass: "",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         nil,
+			expectError:         false,
+		},
+		{
+			name:                "matching VSC with correct driver",
+			policySnapshotClass: "vsc-array-1",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray1,
+			expectError:         false,
+		},
+		{
+			name:                "matching VSC with correct driver second array",
+			policySnapshotClass: "vsc-array-2",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray2,
+			expectError:         false,
+		},
+		{
+			name:                "VSC exists but wrong driver",
+			policySnapshotClass: "vsc-other",
+			provisioner:         "infinibox-csi-driver",
+			expectError:         true,
+		},
+		{
+			name:                "VSC does not exist",
+			policySnapshotClass: "non-existent",
+			provisioner:         "infinibox-csi-driver",
+			expectError:         true,
+		},
+		{
+			name:                "case-insensitive name matching",
+			policySnapshotClass: "VSC-ARRAY-1",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray1,
+			expectError:         false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actualVSC, actualError := GetVolumeSnapshotClassFromVolumePolicy(
+				tc.policySnapshotClass, tc.provisioner, snapshotClasses)
+			if tc.expectError {
+				require.Error(t, actualError)
+				assert.Nil(t, actualVSC)
+				return
+			}
+			if tc.expectedVSC == nil {
+				assert.Nil(t, actualVSC)
+			} else {
+				require.NotNil(t, actualVSC)
+				assert.Equal(t, tc.expectedVSC.Name, actualVSC.Name)
+				assert.Equal(t, tc.expectedVSC.Driver, actualVSC.Driver)
+			}
 		})
 	}
 }

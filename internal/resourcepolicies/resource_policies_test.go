@@ -2912,3 +2912,60 @@ func TestActionGetDataMover(t *testing.T) {
 		})
 	}
 }
+
+func TestActionGetSnapshotClass(t *testing.T) {
+	testCases := []struct {
+		name          string
+		action        *Action
+		expectedClass string
+		expectErr     bool
+	}{
+		{
+			name:      "nil action",
+			action:    nil,
+			expectErr: true,
+		},
+		{
+			name:          "snapshot action without parameters",
+			action:        &Action{Type: Snapshot},
+			expectedClass: "",
+		},
+		{
+			name:          "snapshot action without snapshotClass parameter",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"other": "value"}},
+			expectedClass: "",
+		},
+		{
+			name:          "snapshot action with snapshotClass",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": "my-vsc"}},
+			expectedClass: "my-vsc",
+		},
+		{
+			name:      "non-snapshot action returns error",
+			action:    &Action{Type: FSBackup, Parameters: map[string]any{"snapshotClass": "my-vsc"}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with non-string snapshotClass returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": 123}},
+			expectErr: true,
+		},
+		{
+			name:          "snapshot action with both snapshotClass and dataMover",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": "my-vsc", "dataMover": "velero-fs"}},
+			expectedClass: "my-vsc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshotClass, err := tc.action.GetSnapshotClass()
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedClass, snapshotClass)
+		})
+	}
+}
