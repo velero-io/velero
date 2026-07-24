@@ -5749,7 +5749,7 @@ func TestResolveResourceFilter(t *testing.T) {
 		{
 			name: "valid label selector",
 			rf: resourcepolicies.ResourceFilter{
-				LabelSelector: map[string]string{"app": "foo"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"app": "foo"}},
 			},
 			expectErr: false,
 			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
@@ -5762,16 +5762,16 @@ func TestResolveResourceFilter(t *testing.T) {
 		{
 			name: "invalid label selector",
 			rf: resourcepolicies.ResourceFilter{
-				LabelSelector: map[string]string{"invalid/label/key": "value"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 			},
 			expectErr: true,
 		},
 		{
 			name: "valid or label selectors",
 			rf: resourcepolicies.ResourceFilter{
-				OrLabelSelectors: []map[string]string{
-					{"app": "foo"},
-					{"app": "bar"},
+				OrLabelSelectors: []*resourcepolicies.PolicyLabelSelector{
+					{MatchLabels: map[string]string{"app": "foo"}},
+					{MatchLabels: map[string]string{"app": "bar"}},
 				},
 			},
 			expectErr: false,
@@ -5784,8 +5784,8 @@ func TestResolveResourceFilter(t *testing.T) {
 		{
 			name: "invalid or label selectors",
 			rf: resourcepolicies.ResourceFilter{
-				OrLabelSelectors: []map[string]string{
-					{"invalid/label/key": "value"},
+				OrLabelSelectors: []*resourcepolicies.PolicyLabelSelector{
+					{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 				},
 			},
 			expectErr: true,
@@ -5804,6 +5804,68 @@ func TestResolveResourceFilter(t *testing.T) {
 				assert.True(t, r.NameIE.ShouldInclude("inc1"))
 				assert.False(t, r.NameIE.ShouldInclude("exc1"))
 			},
+		},
+		{
+			name: "empty labelSelector is no filter",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r)
+				assert.Nil(t, r.LabelSelector)
+			},
+		},
+		{
+			name: "set-based In and DoesNotExist",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{
+					MatchExpressions: []resourcepolicies.PolicyLabelSelectorRequirement{
+						{Key: "environment", Operator: "In", Values: []string{"prod", "staging"}},
+						{Key: "do-not-backup", Operator: "DoesNotExist"},
+					},
+				},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r.LabelSelector)
+				assert.True(t, r.LabelSelector.Matches(labels.Set{"environment": "prod"}))
+				assert.True(t, r.LabelSelector.Matches(labels.Set{"environment": "staging"}))
+				assert.False(t, r.LabelSelector.Matches(labels.Set{"environment": "dev"}))
+				assert.False(t, r.LabelSelector.Matches(labels.Set{"environment": "prod", "do-not-backup": "true"}))
+			},
+		},
+		{
+			name: "set-based NotIn and Exists",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{
+					MatchExpressions: []resourcepolicies.PolicyLabelSelectorRequirement{
+						{Key: "tier", Operator: "NotIn", Values: []string{"debug"}},
+						{Key: "app", Operator: "Exists"},
+					},
+				},
+			},
+			expectErr: false,
+			checkResult: func(t *testing.T, r *ResolvedResourceFilter) {
+				t.Helper()
+				require.NotNil(t, r.LabelSelector)
+				assert.True(t, r.LabelSelector.Matches(labels.Set{"app": "web", "tier": "frontend"}))
+				assert.False(t, r.LabelSelector.Matches(labels.Set{"app": "web", "tier": "debug"}))
+				assert.False(t, r.LabelSelector.Matches(labels.Set{"tier": "frontend"}))
+			},
+		},
+		{
+			name: "invalid operator",
+			rf: resourcepolicies.ResourceFilter{
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{
+					MatchExpressions: []resourcepolicies.PolicyLabelSelectorRequirement{
+						{Key: "env", Operator: "Equals", Values: []string{"prod"}},
+					},
+				},
+			},
+			expectErr: true,
 		},
 	}
 
@@ -5842,11 +5904,11 @@ func TestResolveClusterScopedFilterPolicy(t *testing.T) {
 		ResourceFilters: []resourcepolicies.ResourceFilter{
 			{
 				Kinds:         []string{"pods", "secrets"},
-				LabelSelector: map[string]string{"app": "foo"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"app": "foo"}},
 			},
 			{
 				Kinds:         []string{"invalid-kind"},
-				LabelSelector: map[string]string{"invalid/label/key": "value"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 			},
 		},
 	}
@@ -5860,7 +5922,7 @@ func TestResolveClusterScopedFilterPolicy(t *testing.T) {
 		ResourceFilters: []resourcepolicies.ResourceFilter{
 			{
 				Kinds:         []string{"pods", "secrets"},
-				LabelSelector: map[string]string{"app": "foo"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"app": "foo"}},
 			},
 		},
 	}
@@ -5908,11 +5970,11 @@ func TestResolveNamespacedFilterPolicies(t *testing.T) {
 			ResourceFilters: []resourcepolicies.ResourceFilter{
 				{
 					Kinds:         []string{"pods"},
-					LabelSelector: map[string]string{"app": "foo"},
+					LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"app": "foo"}},
 				},
 				{
 					Kinds:         []string{"*"},
-					LabelSelector: map[string]string{"catch": "all"},
+					LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"catch": "all"}},
 				},
 			},
 		},
@@ -5940,7 +6002,7 @@ func TestResolveNamespacedFilterPolicies(t *testing.T) {
 			ResourceFilters: []resourcepolicies.ResourceFilter{
 				{
 					Kinds:         []string{"pods"},
-					LabelSelector: map[string]string{"invalid/label/key": "value"},
+					LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 				},
 			},
 		},
@@ -6024,7 +6086,7 @@ func TestBackupWithResPoliciesLogs(t *testing.T) {
 		ResourceFilters: []resourcepolicies.ResourceFilter{
 			{
 				Kinds:         []string{"pods"},
-				LabelSelector: map[string]string{"invalid/label/key": "value"},
+				LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 			},
 		},
 	}
@@ -6043,7 +6105,7 @@ func TestBackupWithResPoliciesLogs(t *testing.T) {
 			ResourceFilters: []resourcepolicies.ResourceFilter{
 				{
 					Kinds:         []string{"pods"},
-					LabelSelector: map[string]string{"invalid/label/key": "value"},
+					LabelSelector: &resourcepolicies.PolicyLabelSelector{MatchLabels: map[string]string{"invalid/label/key": "value"}},
 				},
 			},
 		},

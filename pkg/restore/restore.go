@@ -638,21 +638,19 @@ func resolveRestoreNamespacedFilterPolicies(
 func resolveResourceFilter(
 	rf resourcepolicies.ResourceFilter,
 ) (*resolvedResourceFilter, error) {
-	var selector labels.Selector
-	if len(rf.LabelSelector) > 0 {
-		var err error
-		selector, err = labels.ValidatedSelectorFromSet(labels.Set(rf.LabelSelector))
-		if err != nil {
-			return nil, fmt.Errorf("invalid label selector in resource filter: %w", err)
-		}
+	selector, err := resourcepolicies.SelectorFromPolicyLabelSelector(rf.LabelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid label selector in resource filter: %w", err)
 	}
 	var orSelectors []labels.Selector
 	for _, ols := range rf.OrLabelSelectors {
-		s, err := labels.ValidatedSelectorFromSet(labels.Set(ols))
+		s, err := resourcepolicies.SelectorFromPolicyLabelSelector(ols)
 		if err != nil {
 			return nil, fmt.Errorf("invalid OR label selector in resource filter: %w", err)
 		}
-		orSelectors = append(orSelectors, s)
+		if s != nil {
+			orSelectors = append(orSelectors, s)
+		}
 	}
 	var nameIE *collections.IncludesExcludes
 	if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {

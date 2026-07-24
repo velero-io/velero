@@ -170,7 +170,8 @@ namespacedFilterPolicies:
       - kinds:
           - '*'
         labelSelector:
-          app: test
+          matchLabels:
+            app: test
 `,
 			tarball: test.NewTarWriter(t).
 				AddItems("pods",
