@@ -334,15 +334,30 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.Info("Cancellable data path is already started")
 			return ctrl.Result{}, nil
 		}
+
+		// Reserve a slot atomically BEFORE doing expensive GetExposed operation
+		// This prevents race condition where multiple tasks waste time on GetExposed
+		// when the concurrent limit is already reached
+		if err := r.dataPathMgr.ReserveSlot(du.Name); err != nil {
+			if err == datapath.ConcurrentLimitExceed {
+				log.Debug("Data path concurrent limit reached, requeue later")
+				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			}
+			return r.errorOut(ctx, du, err, "error reserving data path slot", log)
+		}
+
 		waitExposePara := r.setupWaitExposePara(du)
 		res, err := ep.GetExposed(ctx, getOwnerObject(du), du.Spec.OperationTimeout.Duration, waitExposePara)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(du.Name)
 			return r.errorOut(ctx, du, err, "exposed snapshot is not ready", log)
 		} else if res == nil {
+			r.dataPathMgr.ReleaseReservation(du.Name)
 			return r.errorOut(ctx, du, errors.New("no expose result is available for the current node"), "exposed snapshot is not ready", log)
 		}
 
 		if res.ByPod.NodeOS == nil {
+			r.dataPathMgr.ReleaseReservation(du.Name)
 			return r.errorOut(ctx, du, errors.New("unsupported ambiguous node OS"), "invalid expose result", log)
 		}
 
@@ -359,6 +374,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		asyncBR, err = r.dataPathMgr.CreateMicroServiceBRWatcher(ctx, r.client, r.kubeClient, r.mgr, datapath.TaskTypeBackup,
 			du.Name, du.Namespace, res.ByPod.HostingPod.Name, res.ByPod.HostingContainer, du.Name, callbacks, false, log)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(du.Name)
 			if err == datapath.ConcurrentLimitExceed {
 				log.Debug("Data path instance is concurrent limited requeue later")
 				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
@@ -366,6 +382,8 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				return r.errorOut(ctx, du, err, "error to create data path", log)
 			}
 		}
+
+		// Reservation is automatically completed in CreateMicroServiceBRWatcher
 
 		if err := r.initCancelableDataPath(ctx, asyncBR, res, log); err != nil {
 			log.WithError(err).Errorf("Failed to init cancelable data path for %s", du.Name)

@@ -327,10 +327,23 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 
+		// Reserve a slot atomically BEFORE doing expensive GetExposed operation
+		// This prevents race condition where multiple tasks waste time on GetExposed
+		// when the concurrent limit is already reached
+		if err := r.dataPathMgr.ReserveSlot(dd.Name); err != nil {
+			if err == datapath.ConcurrentLimitExceed {
+				log.Debug("Data path concurrent limit reached, requeue later")
+				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			}
+			return r.errorOut(ctx, dd, err, "error reserving data path slot", log)
+		}
+
 		result, err := r.restoreExposer.GetExposed(ctx, getDataDownloadOwnerObject(dd), r.client, r.nodeName, dd.Spec.OperationTimeout.Duration)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(dd.Name)
 			return r.errorOut(ctx, dd, err, "restore exposer is not ready", log)
 		} else if result == nil {
+			r.dataPathMgr.ReleaseReservation(dd.Name)
 			return r.errorOut(ctx, dd, errors.New("no expose result is available for the current node"), "exposed snapshot is not ready", log)
 		}
 
@@ -347,6 +360,7 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		asyncBR, err = r.dataPathMgr.CreateMicroServiceBRWatcher(ctx, r.client, r.kubeClient, r.mgr, datapath.TaskTypeRestore,
 			dd.Name, dd.Namespace, result.ByPod.HostingPod.Name, result.ByPod.HostingContainer, dd.Name, callbacks, false, log)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(dd.Name)
 			if err == datapath.ConcurrentLimitExceed {
 				log.Debug("Data path instance is concurrent limited requeue later")
 				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
@@ -354,6 +368,8 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				return r.errorOut(ctx, dd, err, "error to create data path", log)
 			}
 		}
+
+		// Reservation is automatically completed in CreateMicroServiceBRWatcher
 
 		if err := r.initCancelableDataPath(ctx, asyncBR, result, log); err != nil {
 			log.WithError(err).Errorf("Failed to init cancelable data path for %s", dd.Name)
