@@ -17,10 +17,12 @@ limitations under the License.
 package block
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -35,8 +37,9 @@ import (
 var ErrCanceled = errors.New("uploader is canceled")
 
 const (
-	blockSize  = (1 << 20)
-	bufferSize = 100 << 20
+	blockSize         = (1 << 20)
+	bufferSize        = 100 << 20
+	bdevSourceSizeTag = "bdev-source-size"
 )
 
 type sourceInfo struct {
@@ -48,6 +51,7 @@ type sourceInfo struct {
 type destInfo struct {
 	dev  *os.File
 	path string
+	size int64
 }
 
 type Uploader interface {
@@ -134,12 +138,52 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 			Type:        udmrepo.ObjectDataTypeMetadata,
 			Permissions: 0o777,
 		},
+		Tags: map[string]string{
+			bdevSourceSizeTag: strconv.FormatInt(source.size, 10),
+		},
 	}, backupSize, nil
 }
 
-// TODO implement in following PRs
 func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, error) {
-	return 0, errors.New("not implemented")
+	if bitmap == nil {
+		return 0, errors.New("bitmap is not available")
+	}
+
+	meta, err := blkup.repoWriter.ReadMetadata(blkup.ctx, snapshot.RootObject.ID)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error reading snapshot metadata for %s", snapshot.Description)
+	}
+
+	if len(meta.SubObjects) != 1 {
+		return 0, errors.Wrapf(err, "unexpected number of bdev object (%d) for snapshot %s", len(meta.SubObjects), snapshot.Description)
+	}
+
+	sourceSize, err := getSourceSize(snapshot)
+	if err != nil {
+		sourceSize = meta.SubObjects[0].Size
+		blkup.log.Warnf("Failed to get source size from snapshot %s, use backup size %v", snapshot.Description, sourceSize)
+	}
+
+	if sourceSize > meta.SubObjects[0].Size {
+		return 0, errors.Wrapf(err, "unexpected size (%v vs. %v) for bdev object %s", meta.SubObjects[0].Size, sourceSize, meta.SubObjects[0].Name)
+	}
+
+	if sourceSize > dest.size {
+		return 0, errors.Wrapf(err, "dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
+	}
+
+	reader, err := blkup.repoWriter.OpenObject(blkup.ctx, meta.SubObjects[0].ID)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error opening bdev object %v", meta.SubObjects[0].Name)
+	}
+	defer reader.Close()
+
+	size, err := blkup.restoreData(reader, dest.dev, bitmap, sourceSize, dest.path)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error restoring bdev object %s to volume %s", meta.SubObjects[0].Name, dest.path)
+	}
+
+	return size, nil
 }
 
 func (blkup *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (udmrepo.ID, int64, int64, error) {
@@ -316,6 +360,202 @@ func getObjectName(source string) string {
 	s := strings.ReplaceAll(source, "/", "-")
 	s = strings.ReplaceAll(s, "\\", "-")
 	return strings.Trim(s, "-")
+}
+
+func (blkup *blockUploader) restoreData(reader io.ReadSeeker, dest *os.File, bitmap cbt.Iterator, totalLength int64, destPath string) (int64, error) {
+	list := freelist.New(bufferSize, blockSize)
+	resultChan := make(chan readResult, list.Capacity())
+	zeroBlock := make([]byte, blockSize)
+	totalCount := bitmap.Count()
+
+	quit := make(chan struct{})
+	defer close(quit)
+
+	go func() {
+		defer close(resultChan)
+
+		offset, valid := bitmap.Next()
+		var buffer []byte
+		var nextPos = uint64(0)
+		for valid {
+			select {
+			case <-blkup.ctx.Done():
+				return
+			case <-quit:
+				return
+			case buffer = <-list.Chunks():
+			}
+
+			var err error
+
+			if nextPos != offset {
+				_, err = reader.Seek(int64(offset), io.SeekStart)
+			}
+
+			if err == nil {
+				var length int
+				length, err = io.ReadFull(reader, buffer)
+				if err == nil && length <= 0 {
+					err = io.ErrUnexpectedEOF
+				}
+			}
+
+			r := readResult{
+				buffer: buffer,
+				offset: int64(offset),
+				err:    err,
+			}
+
+			if r.err != nil {
+				r.resetBuffer(list)
+			}
+
+			resultChan <- r
+
+			if r.err != nil {
+				return
+			}
+
+			nextPos = offset + uint64(blockSize)
+			offset, valid = bitmap.Next()
+		}
+	}()
+
+	var written int64
+	var result readResult
+	var writeErr error
+	var readerRunning bool
+	var zeroStart int64 = -1
+	var zeroLength int64
+	var curCount int64
+
+	for curCount < int64(totalCount) {
+		select {
+		case <-blkup.ctx.Done():
+			writeErr = ErrCanceled
+		case result, readerRunning = <-resultChan:
+			if !readerRunning {
+				if blkup.ctx.Err() != nil {
+					writeErr = ErrCanceled
+				} else {
+					writeErr = io.ErrUnexpectedEOF
+				}
+			}
+		}
+
+		if writeErr != nil {
+			break
+		}
+
+		if result.err != nil {
+			writeErr = result.err
+			break
+		}
+
+		length := min(int64(blockSize), totalLength-result.offset)
+		if bytes.Equal(result.buffer, zeroBlock) {
+			if zeroStart == -1 {
+				zeroStart = result.offset
+				zeroLength = length
+			} else if result.offset == zeroStart+zeroLength {
+				zeroLength += length
+			} else {
+				if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+					writeErr = errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
+					break
+				}
+				zeroStart = result.offset
+				zeroLength = length
+			}
+		} else {
+			if zeroStart != -1 {
+				if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+					writeErr = errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
+					break
+				}
+
+				zeroStart = -1
+				zeroLength = 0
+			}
+
+			n, err := dest.WriteAt(result.buffer[:length], result.offset)
+			if err != nil {
+				writeErr = err
+				break
+			}
+
+			if length != int64(n) {
+				writeErr = io.ErrShortWrite
+				break
+			}
+		}
+
+		written += length
+		curCount++
+
+		result.resetBuffer(list)
+
+		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: written, TotalBytes: totalLength})
+	}
+
+	result.resetBuffer(list)
+
+	if writeErr != nil {
+		return written, writeErr
+	}
+
+	if zeroStart != -1 {
+		if err := blkup.flushZeroBlocks(dest, zeroStart, zeroLength, zeroBlock, destPath); err != nil {
+			return written, errors.Wrapf(err, "error flushing zero blocks from %v, length %v", zeroStart, zeroLength)
+		}
+	}
+
+	return written, nil
+}
+
+func (blkup *blockUploader) flushZeroBlocks(dest *os.File, start int64, length int64, zeroBlock []byte, destPath string) error {
+	err := blkZeroOut(dest, start, length)
+	if err == nil {
+		return nil
+	}
+
+	blkup.log.WithError(err).Warnf("Failed to call zero out from dev %s, start %v, length %v. Fallback to conservative way", destPath, start, length)
+
+	var written int64
+	for written < length {
+		writeSize := min(len(zeroBlock), int(length-written))
+
+		n, err := dest.WriteAt(zeroBlock[:writeSize], start+written)
+		if err != nil {
+			return errors.Wrapf(err, "error writing zero buffer at %v, length %v", start+written, writeSize)
+		}
+
+		if writeSize != n {
+			return errors.Wrapf(err, "short write zero buffer at %v, length %v", start+written, writeSize)
+		}
+
+		written += int64(writeSize)
+	}
+
+	return nil
+}
+
+func getSourceSize(snapshot udmrepo.Snapshot) (int64, error) {
+	if snapshot.Tags == nil {
+		return 0, errors.New("source size tag is empty")
+	}
+
+	s, found := snapshot.Tags[bdevSourceSizeTag]
+	if !found {
+		return 0, errors.New("source size tag is missing")
+	}
+
+	size, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error parsing size from %s", s)
+	}
+
+	return size, nil
 }
 
 func loadObjectFromSnapshot(ctx context.Context, rep udmrepo.BackupRepo, snapshot *udmrepo.Snapshot) (udmrepo.ID, error) {

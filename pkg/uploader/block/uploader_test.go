@@ -459,3 +459,231 @@ func TestLoadObjectFromSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestGetSourceSize(t *testing.T) {
+	testCases := []struct {
+		name      string
+		snapshot  udmrepo.Snapshot
+		expectErr bool
+		expected  int64
+	}{
+		{
+			name:      "nil tags",
+			snapshot:  udmrepo.Snapshot{},
+			expectErr: true,
+		},
+		{
+			name: "missing tag",
+			snapshot: udmrepo.Snapshot{
+				Tags: map[string]string{},
+			},
+			expectErr: true,
+		},
+		{
+			name: "invalid tag value",
+			snapshot: udmrepo.Snapshot{
+				Tags: map[string]string{
+					"bdev-source-size": "abc",
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "valid tag value",
+			snapshot: udmrepo.Snapshot{
+				Tags: map[string]string{
+					"bdev-source-size": "1048576",
+				},
+			},
+			expectErr: false,
+			expected:  1048576,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			size, err := getSourceSize(tc.snapshot)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expected, size)
+			}
+		})
+	}
+}
+
+func TestFlushZeroBlocks(t *testing.T) {
+	t.Run("success via write fallback", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "zerotest-*")
+		require.NoError(t, err)
+		defer os.Remove(f.Name())
+		defer f.Close()
+
+		require.NoError(t, f.Truncate(2048))
+
+		blkup := &blockUploader{
+			log: logrus.New(),
+		}
+		blkup.log.(*logrus.Logger).Out = io.Discard
+
+		zeroBlock := make([]byte, 1024)
+		err = blkup.flushZeroBlocks(f, 0, 2048, zeroBlock, f.Name())
+
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		assert.Equal(t, make([]byte, 2048), data)
+	})
+}
+
+type errReader struct {
+	err error
+}
+
+func (r *errReader) Read(p []byte) (n int, err error) {
+	return 0, r.err
+}
+
+func (r *errReader) Seek(offset int64, whence int) (int64, error) {
+	return 0, nil
+}
+
+func TestRestoreData(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		progress := &mockProgressUpdater{}
+		progress.On("UpdateProgress", mock.Anything).Return()
+		blkup := &blockUploader{
+			ctx:      ctx,
+			progress: progress,
+			log:      logrus.New(),
+		}
+
+		f, err := os.CreateTemp(t.TempDir(), "restoretest-*")
+		require.NoError(t, err)
+		defer os.Remove(f.Name())
+		defer f.Close()
+
+		data := make([]byte, 1048576)
+		for i := range data {
+			data[i] = 1
+		}
+		reader := bytes.NewReader(data)
+
+		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Count").Return(uint64(1))
+		iterMock.On("Next").Return(uint64(0), true).Once()
+		iterMock.On("Next").Return(uint64(0), false)
+
+		written, err := blkup.restoreData(reader, f, iterMock, 1048576, f.Name())
+		require.NoError(t, err)
+		assert.Equal(t, int64(1048576), written)
+
+		f.Seek(0, 0)
+		writtenData, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, data, writtenData)
+	})
+
+	t.Run("read err", func(t *testing.T) {
+		ctx := context.Background()
+		blkup := &blockUploader{
+			ctx: ctx,
+			log: logrus.New(),
+		}
+
+		f, err := os.CreateTemp(t.TempDir(), "restoretest-*")
+		require.NoError(t, err)
+		defer os.Remove(f.Name())
+		defer f.Close()
+
+		reader := &errReader{err: errors.New("read error")}
+
+		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Count").Return(uint64(1))
+		iterMock.On("Next").Return(uint64(0), true).Once()
+		iterMock.On("Next").Return(uint64(0), false)
+
+		_, err = blkup.restoreData(reader, f, iterMock, 1048576, f.Name())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read error")
+	})
+}
+
+func TestBlockUploaderRestore(t *testing.T) {
+	t.Run("missing metadata", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		blkup := NewUploader(ctx, repoWriter, nil, logrus.New())
+
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(nil, errors.New("meta not found"))
+
+		iterMock := cbtmocks.NewIterator(t)
+		_, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "meta not found")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		progress := &mockProgressUpdater{}
+		progress.On("UpdateProgress", mock.Anything).Return()
+
+		blkup := NewUploader(ctx, repoWriter, progress, logrus.New())
+
+		f, err := os.CreateTemp(t.TempDir(), "restoretest-*")
+		require.NoError(t, err)
+		defer os.Remove(f.Name())
+		defer f.Close()
+
+		meta := &udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{
+				{
+					ID:   "data-id",
+					Name: "bdev",
+					Size: 1048576,
+				},
+			},
+		}
+
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(meta, nil)
+
+		objReader := udmrepomocks.NewObjectReader(t)
+		objReader.On("Read", mock.Anything).Run(func(args mock.Arguments) {
+			p := args.Get(0).([]byte)
+			for i := range p {
+				p[i] = 1
+			}
+		}).Return(1048576, io.EOF).Once()
+		objReader.On("Read", mock.Anything).Return(0, io.EOF)
+		objReader.On("Close").Return(nil)
+
+		repoWriter.On("OpenObject", mock.Anything, udmrepo.ID("data-id")).Return(objReader, nil)
+
+		snap := udmrepo.Snapshot{
+			Description: "test snapshot",
+			RootObject:  udmrepo.ObjectMetadata{ID: "root-id"},
+			Tags: map[string]string{
+				"bdev-source-size": "1048576",
+			},
+		}
+
+		dest := destInfo{
+			dev:  f,
+			size: 2048576,
+			path: f.Name(),
+		}
+
+		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Count").Return(uint64(1))
+		iterMock.On("Next").Return(uint64(0), true).Once()
+		iterMock.On("Next").Return(uint64(0), false)
+
+		written, err := blkup.Restore(snap, dest, iterMock, nil)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1048576), written)
+	})
+}

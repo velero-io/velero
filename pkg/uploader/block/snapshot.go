@@ -222,7 +222,17 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 
 	defer destDev.Close()
 
-	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath}, bitmap.Iterator(), uploaderCfg)
+	destSize, err := destDev.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error getting length of block device %s", dest)
+	}
+
+	_, err = destDev.Seek(0, io.SeekStart)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error reset pos of block device %s", dest)
+	}
+
+	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath, size: destSize}, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
 		return 0, errors.Wrapf(err, "error restoring to block dev %s", destPath)
 	}
