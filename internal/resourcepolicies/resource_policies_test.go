@@ -25,6 +25,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -2027,7 +2028,8 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["Pod", "ConfigMap"]
     labelSelector:
-      app: web
+      matchLabels:
+        app: web
     names: ["app-*"]
   - kinds: ["Secret"]
     excludedNames: ["temp-*"]`,
@@ -2041,8 +2043,10 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["Pod"]
     orLabelSelectors:
-    - env: prod
-    - env: staging`,
+    - matchLabels:
+        env: prod
+    - matchLabels:
+        env: staging`,
 			wantErr: false,
 		},
 		{
@@ -2084,7 +2088,8 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["*"]
     labelSelector:
-      app: web`,
+      matchLabels:
+        app: web`,
 			wantErr: false,
 		},
 		{
@@ -2095,10 +2100,12 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["*"]
     labelSelector:
-      app: web
+      matchLabels:
+        app: web
   - kinds: ["*"]
     labelSelector:
-      app: db`,
+      matchLabels:
+        app: db`,
 			wantErr: true,
 			errMsg:  "only one catch-all resource filter is allowed",
 		},
@@ -2110,10 +2117,12 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: []
     labelSelector:
-      app: web
+      matchLabels:
+        app: web
   - kinds: ["*"]
     labelSelector:
-      app: db`,
+      matchLabels:
+        app: db`,
 			wantErr: true,
 			errMsg:  "only one catch-all resource filter is allowed",
 		},
@@ -2125,10 +2134,12 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: []
     labelSelector:
-      app: web
+      matchLabels:
+        app: web
   - kinds: []
     labelSelector:
-      app: db`,
+      matchLabels:
+        app: db`,
 			wantErr: true,
 			errMsg:  "only one catch-all resource filter is allowed",
 		},
@@ -2141,7 +2152,8 @@ namespacedFilterPolicies:
   - kinds: []
     names: ["app-*"]
     labelSelector:
-      app: web`,
+      matchLabels:
+        app: web`,
 			wantErr: true,
 			errMsg:  "names or excludedNames cannot be specified for catch-all filters",
 		},
@@ -2154,7 +2166,8 @@ namespacedFilterPolicies:
   - kinds: []
     excludedNames: ["app-*"]
     labelSelector:
-      app: web`,
+      matchLabels:
+        app: web`,
 			wantErr: true,
 			errMsg:  "names or excludedNames cannot be specified for catch-all filters",
 		},
@@ -2186,9 +2199,11 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["Pod"]
     labelSelector:
-      app: web
+      matchLabels:
+        app: web
     orLabelSelectors:
-    - env: prod`,
+    - matchLabels:
+        env: prod`,
 			wantErr: true,
 			errMsg:  "labelSelector and orLabelSelectors cannot co-exist",
 		},
@@ -2272,7 +2287,8 @@ namespacedFilterPolicies:
   resourceFilters:
   - kinds: ["Pod"]
     labelSelector:
-      app: web`
+      matchLabels:
+        app: web`
 
 	resPolicies, err := unmarshalResourcePolicies(&yamlData)
 	require.NoError(t, err)
@@ -2290,7 +2306,135 @@ namespacedFilterPolicies:
 
 	rf := policy.ResourceFilters[0]
 	assert.Equal(t, []string{"Pod"}, rf.Kinds)
-	assert.Equal(t, map[string]string{"app": "web"}, rf.LabelSelector)
+	assert.Equal(t, &PolicyLabelSelector{MatchLabels: map[string]string{"app": "web"}}, rf.LabelSelector)
+}
+
+func TestPolicyLabelSelectorSetBased(t *testing.T) {
+	t.Run("yaml decode matchLabels and matchExpressions", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchLabels:
+        app: web
+      matchExpressions:
+      - key: environment
+        operator: In
+        values: [prod, staging]
+      - key: do-not-backup
+        operator: DoesNotExist`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+
+		rf := policies.GetNamespacedFilterPolicies()[0].ResourceFilters[0]
+		require.NotNil(t, rf.LabelSelector)
+		assert.Equal(t, map[string]string{"app": "web"}, rf.LabelSelector.MatchLabels)
+		require.Len(t, rf.LabelSelector.MatchExpressions, 2)
+		assert.Equal(t, "environment", rf.LabelSelector.MatchExpressions[0].Key)
+		assert.Equal(t, "In", rf.LabelSelector.MatchExpressions[0].Operator)
+		assert.Equal(t, []string{"prod", "staging"}, rf.LabelSelector.MatchExpressions[0].Values)
+		assert.Equal(t, "do-not-backup", rf.LabelSelector.MatchExpressions[1].Key)
+		assert.Equal(t, "DoesNotExist", rf.LabelSelector.MatchExpressions[1].Operator)
+	})
+
+	t.Run("empty labelSelector is no filter", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector: {}`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+
+		rf := policies.GetNamespacedFilterPolicies()[0].ResourceFilters[0]
+		assert.False(t, IsPresentLabelSelector(rf.LabelSelector))
+	})
+
+	t.Run("invalid operator rejected", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchExpressions:
+      - key: environment
+        operator: Equals
+        values: [prod]`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		err = policies.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid label selector")
+	})
+
+	t.Run("NotIn Exists operators validate", func(t *testing.T) {
+		yamlData := `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    labelSelector:
+      matchExpressions:
+      - key: tier
+        operator: NotIn
+        values: [debug]
+      - key: managed-by
+        operator: Exists`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+	})
+
+	t.Run("ToMetaV1LabelSelector and IsPresentLabelSelector", func(t *testing.T) {
+		assert.False(t, IsPresentLabelSelector(nil))
+		assert.False(t, IsPresentLabelSelector(&PolicyLabelSelector{}))
+		assert.True(t, IsPresentLabelSelector(&PolicyLabelSelector{MatchLabels: map[string]string{"a": "b"}}))
+
+		ls := ToMetaV1LabelSelector(&PolicyLabelSelector{
+			MatchLabels: map[string]string{"app": "web"},
+			MatchExpressions: []PolicyLabelSelectorRequirement{
+				{Key: "env", Operator: "In", Values: []string{"prod"}},
+			},
+		})
+		require.NotNil(t, ls)
+		assert.Equal(t, map[string]string{"app": "web"}, ls.MatchLabels)
+		require.Len(t, ls.MatchExpressions, 1)
+		assert.Equal(t, metav1.LabelSelectorOpIn, ls.MatchExpressions[0].Operator)
+
+		assert.Nil(t, ToMetaV1LabelSelector(nil))
+
+		sel, err := SelectorFromPolicyLabelSelector(&PolicyLabelSelector{
+			MatchLabels: map[string]string{"app": "web"},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, sel)
+		assert.True(t, sel.Matches(labels.Set{"app": "web"}))
+
+		emptySel, err := SelectorFromPolicyLabelSelector(&PolicyLabelSelector{})
+		require.NoError(t, err)
+		assert.Nil(t, emptySel)
+	})
 }
 
 func TestClusterScopedFilterPoliciesAccessor(t *testing.T) {
@@ -2394,7 +2538,8 @@ clusterScopedFilterPolicy:
   resourceFilters:
   - kinds: ["ClusterRole", "ClusterRoleBinding"]
     labelSelector:
-      app: my-app`,
+      matchLabels:
+        app: my-app`,
 			wantErr: false,
 		},
 		{
@@ -2404,8 +2549,10 @@ clusterScopedFilterPolicy:
   resourceFilters:
   - kinds: ["CustomResourceDefinition"]
     orLabelSelectors:
-    - app: my-app
-    - app: other-app`,
+    - matchLabels:
+        app: my-app
+    - matchLabels:
+        app: other-app`,
 			wantErr: false,
 		},
 		{
@@ -2443,7 +2590,8 @@ clusterScopedFilterPolicy:
   resourceFilters:
   - kinds: ["*"]
     labelSelector:
-      app: my-app`,
+      matchLabels:
+        app: my-app`,
 			wantErr: true,
 			errMsg:  "kinds must be specified",
 		},
@@ -2456,7 +2604,8 @@ clusterScopedFilterPolicy:
     names: ["my-app-*"]
   - kinds: ["ClusterRole"]
     labelSelector:
-      app: other`,
+      matchLabels:
+        app: other`,
 			wantErr: true,
 			errMsg:  `kind "ClusterRole" appears in both`,
 		},
@@ -2467,9 +2616,11 @@ clusterScopedFilterPolicy:
   resourceFilters:
   - kinds: ["ClusterRole"]
     labelSelector:
-      app: my-app
+      matchLabels:
+        app: my-app
     orLabelSelectors:
-    - app: other`,
+    - matchLabels:
+        app: other`,
 			wantErr: true,
 			errMsg:  "labelSelector and orLabelSelectors cannot co-exist",
 		},

@@ -108,14 +108,16 @@ clusterScopedFilterPolicy:
       names: ["my-app-*"]
     - kinds: [CustomResourceDefinition]
       labelSelector:
-        app: my-app
+        matchLabels:
+          app: my-app
 namespacedFilterPolicies:
   - namespaces:
       - ns-a
     resourceFilters:
       - kinds: [ConfigMap, Secret, Deployment]
         labelSelector:
-          app: my-app
+          matchLabels:
+            app: my-app
   - namespaces:
       - ns-b
     resourceFilters:
@@ -123,7 +125,8 @@ namespacedFilterPolicies:
         names: [app-1, app-2]
       - kinds: [ConfigMap]
         labelSelector:
-          app: my-service
+          matchLabels:
+            app: my-service
 ```
 
 The restore-side ConfigMap does **not** require `volumePolicies` or `includeExcludePolicy` sections. Those are backup-specific. The YAML parser will ignore unknown fields gracefully, so a user can technically point to the same ConfigMap used for backup — the restore pipeline will only read `namespacedFilterPolicies` and `clusterScopedFilterPolicy`.
@@ -137,7 +140,9 @@ namespacedFilterPolicies:
   - namespaces: [ns-a]
     resourceFilters:
       - kinds: [ConfigMap, Secret]        # these kinds share a selector
-        labelSelector: {app: my-app}
+        labelSelector:
+          matchLabels:
+            app: my-app
         names: ["app-*"]
       - kinds: [Deployment]               # this kind has its own selector
         names: [workload-1, workload-2]
@@ -145,6 +150,36 @@ namespacedFilterPolicies:
 ```
 
 Only resource kinds listed in `resourceFilters` entries are restored for the matched namespaces; unlisted kinds are implicitly excluded (globally excluded kinds cannot be re-included — see precedence model).
+
+#### Label selectors (`matchLabels` / `matchExpressions`)
+
+`labelSelector` and each entry of `orLabelSelectors` use the standard Kubernetes selector shape (same as `RestoreSpec.labelSelector`):
+
+```yaml
+labelSelector:
+  matchLabels:
+    app: my-app
+  matchExpressions:
+    - key: environment
+      operator: In
+      values: [prod, staging]
+    - key: do-not-restore
+      operator: DoesNotExist
+```
+
+Supported `matchExpressions` operators: `In`, `NotIn`, `Exists`, `DoesNotExist`. Prefer `In` for value-OR on one key; use `orLabelSelectors` for OR across independent multi-key groups. `labelSelector` and `orLabelSelectors` cannot co-exist in the same `resourceFilters` entry.
+
+```yaml
+orLabelSelectors:
+  - matchLabels:
+      tier: frontend
+    matchExpressions:
+      - key: track
+        operator: In
+        values: [canary]
+  - matchLabels:
+      tier: backend
+```
 
 #### Peek-and-Map Fallback for Unresolved Kinds
 
@@ -382,9 +417,10 @@ resourceFilters:
 resourceFilters:
   - kinds: ["Deployment"]
     labelSelector:
-      "invalid label key!": "value"  # invalid key syntax
+      matchLabels:
+        "invalid label key!": "value"  # invalid key syntax
 ```
-**Behavior:** Validation error during restore creation when `labels.ValidatedSelectorFromSet()` fails:
+**Behavior:** Validation error during restore creation when `metav1.LabelSelectorAsSelector()` fails:
 ```
 namespacedFilterPolicies[0].resourceFilters[0]: invalid label selector: "invalid label key!" is not a valid label key
 ```
@@ -420,7 +456,8 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret]    # Secret listed here is ineffective — globally excluded
         labelSelector:
-          app: my-app
+          matchLabels:
+            app: my-app
       - kinds: [Deployment]
 ```
 
@@ -461,8 +498,8 @@ After existing filter setup, the filter policies are resolved into the runtime m
 The `resolveRestoreNamespacedFilterPolicies` function:
 - For each `NamespacedFilterPolicy`, iterates its `ResourceFilters` entries
 - Resolves kind names to fully-qualified group-resource strings using the discovery helper
-- Converts `labelSelector` maps into `labels.Selector` objects using `labels.ValidatedSelectorFromSet()`
-- Converts `orLabelSelectors` maps into `[]labels.Selector`
+- Converts `labelSelector` into a `labels.Selector` via `ToMetaV1LabelSelector` + `metav1.LabelSelectorAsSelector()`
+- Converts `orLabelSelectors` into `[]labels.Selector` the same way
 - Creates `IncludesExcludes` instances for `names`/`excludedNames` patterns
 - Identifies catch-all entries (empty or `["*"]` kinds) and stores them in `catchAllFilter`
 - Builds a `resourceFilterMap` keyed by the resolved group-resource string
@@ -537,7 +574,8 @@ data:
         resourceFilters:
           - kinds: [Deployment, ConfigMap]
             labelSelector:
-              app: my-app
+              matchLabels:
+                app: my-app
       # ns-b has no filter policy entry, so global filters apply (restore everything)
 ```
 
@@ -631,7 +669,8 @@ data:
             names: [db-credentials, tls-cert]  # these exact Secrets by name
           - kinds: ["*"]                        # catch-all for all other kinds
             labelSelector:
-              backup: "true"                   # restore by label
+              matchLabels:
+                backup: "true"                   # restore by label
 ```
 
 **Result:**
@@ -658,7 +697,8 @@ data:
           names: ["my-app-*"]
         - kinds: [CustomResourceDefinition]
           labelSelector:
-            app: my-app
+            matchLabels:
+              app: my-app
     namespacedFilterPolicies:
       - namespaces:
           - production
