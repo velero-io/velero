@@ -393,6 +393,11 @@ spec:
                 x-kubernetes-map-type: atomic
               metadata:
                 properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
                   labels:
                     additionalProperties:
                       type: string
