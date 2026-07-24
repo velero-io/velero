@@ -847,7 +847,7 @@ Velero validates the ResourcePolicy when a backup starts. Common errors:
 
 Restore is unchanged: it restores whatever is in the backup archive. Resources excluded by fine-grained filters are simply absent. Use `Restore.spec.includedNamespaces` (and existing restore filters) to limit what you restore from a partial backup.
 
-Fine-grained resource filtering is also available on the restore path using `namespacedFilterPolicies` and `clusterScopedFilterPolicy`. For details on the restore-side policies, see the [Fine-grained restore filters design](https://github.com/vmware-tanzu/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md).
+Fine-grained resource filtering is also available on the restore path using `namespacedFilterPolicies` and `clusterScopedFilterPolicy`. For details on the restore-side policies, see the [Fine-grained restore filters design](https://github.com/velero-io/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md).
 
 ---
 

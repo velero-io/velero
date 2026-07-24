@@ -31,6 +31,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -2039,6 +2040,48 @@ func Test_getLastSuccessBySchedule(t *testing.T) {
 			assert.Equal(t, tc.want, getLastSuccessBySchedule(tc.backups))
 		})
 	}
+}
+
+// Test_resyncBackupMetrics_prunesStaleTimestamps verifies that resyncBackupMetrics
+// removes backupLastSuccessfulTimestamp entries for schedules that no longer have
+// any completed backups (e.g. after the schedule and its backups are deleted).
+func Test_resyncBackupMetrics_prunesStaleTimestamps(t *testing.T) {
+	baseTime, err := time.Parse(time.RFC1123, time.RFC1123)
+	require.NoError(t, err)
+
+	m := metrics.NewServerMetrics()
+	gauge := m.Metrics()["backup_last_successful_timestamp"]
+
+	activeBackup := builder.ForBackup("velero", "b1").
+		ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "active-schedule")).
+		Phase(velerov1api.BackupPhaseCompleted).
+		CompletionTimestamp(baseTime).
+		Result()
+
+	deletedBackup := builder.ForBackup("velero", "b2").
+		ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "deleted-schedule")).
+		Phase(velerov1api.BackupPhaseCompleted).
+		CompletionTimestamp(baseTime).
+		Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, activeBackup, deletedBackup)
+
+	c := &backupReconciler{
+		kbClient: fakeClient,
+		logger:   logrus.StandardLogger(),
+		metrics:  m,
+	}
+
+	// First resync: sets metrics for both schedules
+	c.resyncBackupMetrics()
+	assert.Equal(t, 2, testutil.CollectAndCount(gauge))
+
+	// Simulate schedule deletion: remove the backup for "deleted-schedule"
+	require.NoError(t, fakeClient.Delete(t.Context(), deletedBackup))
+
+	// Second resync: prunes "deleted-schedule" metric, keeps "active-schedule"
+	c.resyncBackupMetrics()
+	assert.Equal(t, 1, testutil.CollectAndCount(gauge))
 }
 
 // Unit tests to make sure that the backup's status is updated correctly during reconcile.

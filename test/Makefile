@@ -48,6 +48,7 @@ GOBIN := $(REPO_ROOT)/.go/bin
 TOOLS_BIN_DIR := $(TOOLS_DIR)/$(BIN_DIR)
 
 GINKGO := $(GOBIN)/ginkgo
+GINKGO_VERSION := $(shell go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2 2>/dev/null)
 
 KUSTOMIZE := $(TOOLS_BIN_DIR)/kustomize
 
@@ -186,7 +187,7 @@ ginkgo: ${GOBIN}/ginkgo
 
 # This target does not run if ginkgo is already in $GOBIN
 ${GOBIN}/ginkgo:
-	GOBIN=${GOBIN} go install github.com/onsi/ginkgo/v2/ginkgo@v2.22.0
+	GOBIN=${GOBIN} go install github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}
 
 .PHONY: run-e2e
 run-e2e: ginkgo

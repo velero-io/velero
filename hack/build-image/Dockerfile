@@ -15,6 +15,8 @@
 FROM --platform=$TARGETPLATFORM golang:1.26-trixie
 
 ARG GOPROXY
+ARG PROTOC_GEN_GO_VERSION
+ARG GOIMPORTS_VERSION
 
 ENV GO111MODULE=on
 # Use a proxy for go modules to reduce the likelihood of various hosts being down and breaking the build
@@ -34,9 +36,9 @@ RUN wget --quiet https://github.com/kubernetes-sigs/kubebuilder/releases/downloa
 # get controller-tools
 RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5
 
-# get goimports (the revision is pinned so we don't indiscriminately update, but the particular commit
-# is not important)
-RUN go install golang.org/x/tools/cmd/goimports@v0.33.0
+# get goimports, version derived from go.mod's golang.org/x/tools requirement
+# (see https://github.com/velero-io/velero/issues/10023)
+RUN go install golang.org/x/tools/cmd/goimports@${GOIMPORTS_VERSION}
 
 # get protoc compiler and golang plugin
 WORKDIR /root
@@ -71,7 +73,7 @@ RUN ARCH=$(go env GOARCH) && \
     chmod a+x /usr/include/google/protobuf && \
     chmod a+r -R /usr/include/google && \
     chmod +x /usr/bin/protoc
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0 \
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
     && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
 
 # get goreleaser
