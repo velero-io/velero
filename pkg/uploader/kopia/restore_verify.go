@@ -176,7 +176,7 @@ func verifyEntryAttrs(entry fs.Entry, relPath, targetPath string, result *attrVe
 	}
 
 	if len(result.samples) < maxAttrMismatchSamples {
-		result.samples = append(result.samples, fmt.Sprintf("%s: expected %d:%d %04o, actual %d:%d %04o",
+		result.samples = append(result.samples, fmt.Sprintf("%s: expected %d:%d %04o, observed %d:%d %04o",
 			relPath, owner.UserID, owner.GroupID, modeOctal(expectedMode), sys.Uid, sys.Gid, modeOctal(actualMode)))
 	}
 }
@@ -187,6 +187,10 @@ func verifyEntryAttrs(entry fs.Entry, relPath, targetPath string, result *attrVe
 // volume acknowledging the change without applying it.
 func classifyAttrMismatch(m *attrMismatch) string {
 	if m.ownerMismatch {
+		maxInt := uint64(^uint(0) >> 1)
+		if uint64(m.uid) > maxInt || uint64(m.gid) > maxInt {
+			return fmt.Sprintf("chown cannot be retried on this platform (uid/gid out of int range): %d:%d", m.uid, m.gid)
+		}
 		if err := os.Chown(m.localPath, int(m.uid), int(m.gid)); err != nil {
 			return fmt.Sprintf("chown is rejected by the volume: %v", err)
 		}

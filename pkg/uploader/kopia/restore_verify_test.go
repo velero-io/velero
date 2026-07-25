@@ -131,7 +131,7 @@ func TestVerifyRestoredAttrs(t *testing.T) {
 			expectedWarns: []string{
 				"doesn't match the owner/permissions recorded in the snapshot",
 				"1 of 1 checked entries with unexpected owner",
-				fmt.Sprintf("file1: expected %d:%d 0640, actual %d:%d 0640", otherOwner.UserID, otherOwner.GroupID, owner.UserID, owner.GroupID),
+				fmt.Sprintf("file1: expected %d:%d 0640, observed %d:%d 0640", otherOwner.UserID, otherOwner.GroupID, owner.UserID, owner.GroupID),
 				"chown",
 			},
 		},
@@ -150,7 +150,7 @@ func TestVerifyRestoredAttrs(t *testing.T) {
 			},
 			expectedWarns: []string{
 				"1 with unexpected permissions",
-				fmt.Sprintf("file1: expected %d:%d 0600, actual %d:%d 0644", owner.UserID, owner.GroupID, owner.UserID, owner.GroupID),
+				fmt.Sprintf("file1: expected %d:%d 0600, observed %d:%d 0644", owner.UserID, owner.GroupID, owner.UserID, owner.GroupID),
 				"chmod succeeded when retried",
 			},
 		},
