@@ -719,6 +719,17 @@ func TestRestore(t *testing.T) {
 			expectedError: nil,
 		},
 		{
+			name: "Expect successful with attributes verification for directory root entry",
+			filesystemEntryFunc: func(ctx context.Context, rep repo.Repository, rootID string, consistentAttributes bool) (fs.Entry, error) {
+				return virtualfs.NewStaticDirectory("fake-dir", nil), nil
+			},
+			restoreEntryFunc: func(ctx context.Context, rep repo.Repository, output restore.Output, rootEntry fs.Entry, options restore.Options) (restore.Stats, error) {
+				return restore.Stats{}, nil
+			},
+			snapshotID:    "snapshot-123",
+			expectedError: nil,
+		},
+		{
 			name: "Expect block volume successful",
 			filesystemEntryFunc: func(ctx context.Context, rep repo.Repository, rootID string, consistentAttributes bool) (fs.Entry, error) {
 				return snapshotfs.EntryFromDirEntry(rep, &snapshot.DirEntry{Type: snapshot.EntryTypeFile}), nil

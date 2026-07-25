@@ -487,5 +487,9 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 		log.Infof("Flush done for volume dir %v", path)
 	}
 
+	if volMode == uploader.PersistentVolumeFilesystem {
+		verifyRestoredAttrs(kopiaCtx, rootEntry, path, log)
+	}
+
 	return stat.RestoredTotalFileSize, stat.RestoredFileCount, nil
 }
