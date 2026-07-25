@@ -109,6 +109,7 @@ func validatePolicyLabelSelector(s *PolicyLabelSelector) error {
 	_, err := SelectorFromPolicyLabelSelector(s)
 	return err
 }
+
 // ResourceFilter defines a filter for specific resource kinds.
 type ResourceFilter struct {
 	Kinds            []string               `yaml:"kinds"`
