@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
@@ -208,6 +209,146 @@ func TestIsRunningInNode(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.EqualError(t, err, test.expectErr)
+			}
+		})
+	}
+}
+
+func TestIsReady(t *testing.T) {
+	scheme := runtime.NewScheme()
+	appsv1api.AddToScheme(scheme)
+	corev1api.AddToScheme(scheme)
+
+	log := logrus.New()
+
+	linuxNode := &corev1api.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "linux-node",
+			Labels: map[string]string{kube.NodeOSLabel: kube.NodeOSLinux},
+		},
+	}
+	windowsNode := &corev1api.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "windows-node",
+			Labels: map[string]string{kube.NodeOSLabel: kube.NodeOSWindows},
+		},
+	}
+
+	dsLinuxNotReady := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "node-agent"},
+		Status:     appsv1api.DaemonSetStatus{NumberReady: 0},
+	}
+	dsLinuxReady := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "node-agent"},
+		Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+	}
+	dsWindowsNotReady := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "node-agent-windows"},
+		Status:     appsv1api.DaemonSetStatus{NumberReady: 0},
+	}
+	dsWindowsReady := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "node-agent-windows"},
+		Status:     appsv1api.DaemonSetStatus{NumberReady: 2},
+	}
+
+	tests := []struct {
+		name          string
+		kubeClientObj []runtime.Object
+		namespace     string
+		expectErr     string
+	}{
+		{
+			name:      "no nodes in cluster",
+			namespace: "fake-ns",
+			expectErr: "node-agent is not ready: no ready pods found",
+		},
+		{
+			name:      "linux node exists but daemonset not found",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+			},
+			expectErr: "failed to get linux node-agent daemonset",
+		},
+		{
+			name:      "linux node and daemonset exist but no ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+				dsLinuxNotReady,
+			},
+			expectErr: "node-agent is not ready: no ready pods found",
+		},
+		{
+			name:      "linux node and daemonset with ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+				dsLinuxReady,
+			},
+		},
+		{
+			name:      "windows node and daemonset with ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				windowsNode,
+				dsWindowsReady,
+			},
+		},
+		{
+			name:      "windows node and daemonset with no ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				windowsNode,
+				dsWindowsNotReady,
+			},
+			expectErr: "node-agent is not ready: no ready pods found",
+		},
+		{
+			name:      "both node types with both daemonsets ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+				windowsNode,
+				dsLinuxReady,
+				dsWindowsReady,
+			},
+		},
+		{
+			name:      "both node types but neither daemonset has ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+				windowsNode,
+				dsLinuxNotReady,
+				dsWindowsNotReady,
+			},
+			expectErr: "node-agent is not ready: no ready pods found",
+		},
+		{
+			name:      "linux not ready but windows ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				linuxNode,
+				windowsNode,
+				dsLinuxNotReady,
+				dsWindowsReady,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeClient := clientFake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(test.kubeClientObj...).
+				Build()
+
+			err := IsReady(t.Context(), test.namespace, fakeClient, log)
+			if test.expectErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, test.expectErr)
 			}
 		})
 	}
