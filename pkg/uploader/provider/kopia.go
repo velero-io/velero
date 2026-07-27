@@ -211,6 +211,7 @@ func (kp *kopiaProvider) RunRestore(
 	ctx context.Context,
 	snapshotID string,
 	volumePath string,
+	incremental bool,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (int64, error) {
@@ -234,7 +235,7 @@ func (kp *kopiaProvider) RunRestore(
 	// We use the cancel channel to control the restore cancel, so don't pass a context with cancel to Kopia restore.
 	// Otherwise, Kopia restore will not response to the cancel control but return an arbitrary error.
 	// Kopia restore cancel is not designed as well as Kopia backup which uses the context to control backup cancel all the way.
-	size, fileCount, err := kopiaRestoreFunc(context.Background(), repoWriter, progress, snapshotID, volumePath, volMode, uploaderCfg, log, restoreCancel)
+	size, fileCount, err := kopiaRestoreFunc(context.Background(), repoWriter, progress, snapshotID, volumePath, incremental, volMode, uploaderCfg, log, restoreCancel)
 
 	if err != nil {
 		return 0, errors.Wrapf(err, "Failed to run kopia restore")

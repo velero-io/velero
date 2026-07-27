@@ -681,6 +681,7 @@ func TestRestore(t *testing.T) {
 		expectedCount       int32
 		expectedError       error
 		volMode             uploader.PersistentVolumeMode
+		incremental         bool
 	}
 
 	// Define test cases
@@ -818,7 +819,7 @@ func TestRestore(t *testing.T) {
 			repoWriterMock.On("OpenObject", mock.Anything, mock.Anything).Return(em, nil)
 
 			progress := new(Progress)
-			bytesRestored, fileCount, err := Restore(t.Context(), repoWriterMock, progress, tc.snapshotID, tc.dest, tc.volMode, map[string]string{}, logrus.New(), nil)
+			bytesRestored, fileCount, err := Restore(t.Context(), repoWriterMock, progress, tc.snapshotID, tc.dest, tc.incremental, tc.volMode, map[string]string{}, logrus.New(), nil)
 
 			// Check if the returned error matches the expected error
 			if tc.expectedError != nil {
