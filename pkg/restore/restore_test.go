@@ -964,6 +964,7 @@ func TestInvalidTarballContents(t *testing.T) {
 		backup       *velerov1api.Backup
 		apiResources []*test.APIResource
 		tarball      io.Reader
+		actions      []riav2.RestoreItemAction
 		want         map[*test.APIResource][]string
 		wantErrs     Result
 		wantWarnings Result
@@ -1000,6 +1001,39 @@ func TestInvalidTarballContents(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "invalid JSON for additional item is reported as an error and restore continues",
+			restore: defaultRestore().IncludedNamespaces("ns-1").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				Add("resources/persistentvolumes/cluster/pv-1.json", []byte("invalid JSON")).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.PVs(),
+			},
+			actions: []riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: input.Item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-1"},
+			},
+			wantErrs: Result{
+				Namespaces: map[string][]string{
+					"ns-1": {"Could not unmarshal additional item: persistentvolumes/pv-1"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1021,8 +1055,8 @@ func TestInvalidTarballContents(t *testing.T) {
 			}
 			warnings, errs := h.restorer.Restore(
 				data,
-				nil, // restoreItemActions
-				nil, // volume snapshotter getter
+				tc.actions, // restoreItemActions
+				nil,        // volume snapshotter getter
 			)
 			assertWantErrsOrWarnings(t, tc.wantWarnings, warnings)
 			assertWantErrsOrWarnings(t, tc.wantErrs, errs)
