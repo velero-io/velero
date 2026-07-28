@@ -65,6 +65,32 @@ order in which item action plugins are invoked. However, if a single binary impl
 they may be invoked in the order in which they are registered but it is best to not depend on this
 implementation. This is not guaranteed officially and the implementation can change at any time.
 
+### Must-include additional items (Restore Item Actions)
+
+Restore Item Actions may return `AdditionalItems` that Velero restores as dependencies of the current item.
+By default those additional items must still pass the restore's global resource and namespace include/exclude
+filters (and `IncludeClusterResources=false` for cluster-scoped resources).
+
+To force-restore hard dependencies despite those filters, set the following annotation on the `UpdatedItem`
+returned from `Execute()`:
+
+```
+restore.velero.io/must-include-additional-items: "true"
+```
+
+Behavior:
+- Only the string value `"true"` enables the bypass.
+- The annotation applies blanket to all `AdditionalItems` from that RIA invocation (not per-item).
+- Velero strips the annotation before applying the item to the cluster.
+- `SkipRestore: true` takes precedence: if set, the annotation is never inspected and `AdditionalItems` are not processed.
+- Must-include only bypasses filters; the additional item must still exist in the backup tarball.
+- When an additional item targets an excluded namespace, Velero may still create that target namespace so the item can be restored.
+- Cluster-scoped additional items are restored even when `IncludeClusterResources=false`.
+- Transitive force-include requires each RIA level to re-set the annotation on its own `UpdatedItem`.
+
+This mirrors the backup-side annotation `backup.velero.io/must-include-additional-items` used by Backup Item Actions.
+Installing an RIA that sets this annotation is a trust decision: the plugin can restore resources outside the operator's restore filters.
+
 ## Plugin Logging
 
 Velero provides a [logger][2] that can be used by plugins to log structured information to the main Velero server log or

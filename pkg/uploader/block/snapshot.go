@@ -121,7 +121,10 @@ func snapshotSource(
 		return "", 0, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
 	}
 
-	snap.Tags = make(map[string]string)
+	if snap.Tags == nil {
+		snap.Tags = make(map[string]string)
+	}
+
 	snap.Tags[uploader.CBTChangeIDTag] = cbtSource.ChangeID
 	snap.Tags[uploader.CBTVolumeIDTag] = cbtSource.VolumeID
 	if snapshotTags != nil {
@@ -222,7 +225,17 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 
 	defer destDev.Close()
 
-	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath}, bitmap.Iterator(), uploaderCfg)
+	destSize, err := destDev.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error getting length of block device %s", dest)
+	}
+
+	_, err = destDev.Seek(0, io.SeekStart)
+	if err != nil {
+		return 0, errors.Wrapf(err, "error reset pos of block device %s", dest)
+	}
+
+	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath, size: destSize}, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
 		return 0, errors.Wrapf(err, "error restoring to block dev %s", destPath)
 	}

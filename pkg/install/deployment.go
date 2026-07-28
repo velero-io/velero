@@ -139,7 +139,10 @@ func WithPodVolumeOperationTimeout(val time.Duration) podTemplateOption {
 
 func WithPlugins(plugins []string) podTemplateOption {
 	return func(c *podTemplateConfig) {
-		c.plugins = plugins
+		c.plugins = make([]string, 0, len(plugins))
+		for _, plugin := range plugins {
+			c.plugins = append(c.plugins, strings.TrimSpace(plugin))
+		}
 	}
 }
 

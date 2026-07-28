@@ -67,7 +67,7 @@ On source cluster, Velero needs to manipulate CSI snapshots through the CSI volu
 
 To integrate Velero with the CSI volume snapshot APIs, you must enable the `EnableCSI` feature flag.
 
-From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/velero-io/velero` repository.
+From release-1.14, the `github.com/velero-io/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/velero-io/velero` repository.
 The reasons to merge the CSI plugin are:
 * The VolumeSnapshot data mover depends on the CSI plugin, it's reasonabe to integrate them.
 * This change reduces the Velero deploying complexity.

@@ -204,7 +204,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 
 	if err := dp.StartBackup(r.sourceTargetPath, du.Spec.DataMoverConfig, &datapath.BackupStartParam{
 		RealSource:     GetRealSource(du.Spec.SourceNamespace, du.Spec.SourcePVC),
-		ParentSnapshot: "",
+		ParentSnapshot: du.Spec.ParentSnapshot,
 		ForceFull:      false,
 		Tags:           tags,
 		VolumeID:       r.volumeID,

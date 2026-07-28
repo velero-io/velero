@@ -155,6 +155,11 @@ GOARCH = $(word 2, $(platform_temp))
 GOPROXY ?= https://proxy.golang.org
 GOBIN=$$(pwd)/.go/bin
 
+# Keep these build-image tool versions in sync with go.mod so the CLI/library
+# pair doesn't drift (see https://github.com/velero-io/velero/issues/10023).
+PROTOC_GEN_GO_VERSION := $(shell go list -m -f '{{.Version}}' google.golang.org/protobuf)
+GOIMPORTS_VERSION := $(shell go list -m -f '{{.Version}}' golang.org/x/tools)
+
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-containers' rule.
 all:
@@ -395,9 +400,9 @@ ifeq ($(BUILDX_ENABLED), true)
 ifneq ($(CONTAINER_TOOL),docker)
 	$(error $(DOCKER_ONLY_ERROR))
 endif
-	@cd hack/build-image && $(CONTAINER_TOOL) buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(CONTAINER_TOOL) buildx build --build-arg=GOPROXY=$(GOPROXY) --build-arg=PROTOC_GEN_GO_VERSION=$(PROTOC_GEN_GO_VERSION) --build-arg=GOIMPORTS_VERSION=$(GOIMPORTS_VERSION) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 else
-	@cd hack/build-image && $(CONTAINER_TOOL) build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+	@cd hack/build-image && $(CONTAINER_TOOL) build --build-arg=GOPROXY=$(GOPROXY) --build-arg=PROTOC_GEN_GO_VERSION=$(PROTOC_GEN_GO_VERSION) --build-arg=GOIMPORTS_VERSION=$(GOIMPORTS_VERSION) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
 endif
 	$(eval new_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 	@if [ "$(old_id)" != "" ] && [ "$(old_id)" != "$(new_id)" ]; then \

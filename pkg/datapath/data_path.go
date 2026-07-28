@@ -59,6 +59,10 @@ type BackupStartParam struct {
 	SnapshotID     string
 }
 
+// RestoreStartParam define the input param for restore start
+type RestoreStartParam struct {
+}
+
 type generalDataPath struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -221,7 +225,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 	return nil
 }
 
-func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string, param any) error {
 	if !dp.initialized {
 		return errors.New("data path is not initialized")
 	}

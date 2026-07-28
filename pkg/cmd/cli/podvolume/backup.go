@@ -15,6 +15,7 @@ package podvolume
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
@@ -80,7 +81,10 @@ func NewBackupCommand(f client.Factory) *cobra.Command {
 				kube.ExitPodWithMessage(logger, false, "Failed to create pod volume backup, %v", err)
 			}
 
-			s.run()
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				s.run()
+			})
 		},
 	}
 

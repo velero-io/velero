@@ -39,6 +39,16 @@ func TestIsBuiltInDataMover(t *testing.T) {
 			want:      true,
 		},
 		{
+			name:      "velero-fs dataMover is builtin",
+			dataMover: "velero-fs",
+			want:      true,
+		},
+		{
+			name:      "velero-block dataMover is builtin",
+			dataMover: "velero-block",
+			want:      true,
+		},
+		{
 			name:      "kopia dataMover is not builtin",
 			dataMover: "kopia",
 			want:      false,
@@ -53,4 +63,62 @@ func TestIsBuiltInDataMover(t *testing.T) {
 
 func TestGetDefaultBuiltInDataMover(t *testing.T) {
 	assert.Equal(t, DataMoverTypeVeleroFs, GetDefaultBuiltInDataMover())
+}
+
+func TestIsFSDataMover(t *testing.T) {
+	testcases := []struct {
+		name      string
+		dataMover string
+		want      bool
+	}{
+		{
+			name:      "empty dataMover is fs",
+			dataMover: "",
+			want:      true,
+		},
+		{
+			name:      "velero dataMover is fs",
+			dataMover: "velero",
+			want:      true,
+		},
+		{
+			name:      "velero-fs dataMover is fs",
+			dataMover: "velero-fs",
+			want:      true,
+		},
+		{
+			name:      "velero-block dataMover is not fs",
+			dataMover: "velero-block",
+			want:      false,
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(tt *testing.T) {
+			assert.Equal(tt, tc.want, IsVeleroFSDataMover(tc.dataMover))
+		})
+	}
+}
+
+func TestIsBlockDataMover(t *testing.T) {
+	testcases := []struct {
+		name      string
+		dataMover string
+		want      bool
+	}{
+		{
+			name:      "velero-block dataMover is block",
+			dataMover: "velero-block",
+			want:      true,
+		},
+		{
+			name:      "velero-fs dataMover is not block",
+			dataMover: "velero-fs",
+			want:      false,
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(tt *testing.T) {
+			assert.Equal(tt, tc.want, IsVeleroBlockDataMover(tc.dataMover))
+		})
+	}
 }

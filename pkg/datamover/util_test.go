@@ -23,6 +23,16 @@ func TestGetUploaderType(t *testing.T) {
 			want:  "kopia",
 		},
 		{
+			name:  "velero-fs dataMover is kopia",
+			input: "velero-fs",
+			want:  "kopia",
+		},
+		{
+			name:  "velero-block dataMover is velero-block",
+			input: "velero-block",
+			want:  "velero-block",
+		},
+		{
 			name:  "kopia dataMover is kopia",
 			input: "kopia",
 			want:  "kopia",

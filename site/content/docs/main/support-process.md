@@ -40,4 +40,4 @@ Generally speaking, new GitHub issues will fall into one of several categories. 
     - If the issue ends up being a feature request or a bug, update the title and follow the appropriate process for it
     - If the reporter becomes unresponsive after multiple pings, close out the issue due to inactivity and comment that the user can always reach out again as needed
 
-[0]: https://github.com/vmware-tanzu?q=velero&type=&language=
+[0]: https://github.com/velero-io?q=velero&type=&language=

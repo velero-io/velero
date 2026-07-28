@@ -84,33 +84,34 @@ var autoExcludeClusterScopedResources = []string{
 }
 
 type backupReconciler struct {
-	ctx                           context.Context
-	logger                        logrus.FieldLogger
-	discoveryHelper               discovery.Helper
-	backupper                     pkgbackup.Backupper
-	kbClient                      kbclient.Client
-	clock                         clock.WithTickerAndDelayedExecution
-	backupLogLevel                logrus.Level
-	newPluginManager              func(logrus.FieldLogger) clientmgmt.Manager
-	backupTracker                 BackupTracker
-	defaultBackupLocation         string
-	defaultVolumesToFsBackup      bool
-	defaultBackupTTL              time.Duration
-	defaultVGSLabelKey            string
-	defaultCSISnapshotTimeout     time.Duration
-	resourceTimeout               time.Duration
-	defaultItemOperationTimeout   time.Duration
-	defaultSnapshotLocations      map[string]string
-	metrics                       *metrics.ServerMetrics
-	backupStoreGetter             persistence.ObjectBackupStoreGetter
-	formatFlag                    logging.Format
-	credentialFileStore           credentials.FileStore
-	maxConcurrentK8SConnections   int
-	defaultSnapshotMoveData       bool
-	globalCRClient                kbclient.Client
-	itemBlockWorkerCount          int
-	concurrentBackups             int
-	globalVolumePoliciesConfigMap string
+	ctx                                context.Context
+	logger                             logrus.FieldLogger
+	discoveryHelper                    discovery.Helper
+	backupper                          pkgbackup.Backupper
+	kbClient                           kbclient.Client
+	clock                              clock.WithTickerAndDelayedExecution
+	backupLogLevel                     logrus.Level
+	newPluginManager                   func(logrus.FieldLogger) clientmgmt.Manager
+	backupTracker                      BackupTracker
+	defaultBackupLocation              string
+	defaultVolumesToFsBackup           bool
+	defaultBackupTTL                   time.Duration
+	defaultVGSLabelKey                 string
+	defaultCSISnapshotTimeout          time.Duration
+	resourceTimeout                    time.Duration
+	defaultItemOperationTimeout        time.Duration
+	defaultSnapshotLocations           map[string]string
+	metrics                            *metrics.ServerMetrics
+	backupStoreGetter                  persistence.ObjectBackupStoreGetter
+	formatFlag                         logging.Format
+	credentialFileStore                credentials.FileStore
+	maxConcurrentK8SConnections        int
+	defaultSnapshotMoveData            bool
+	globalCRClient                     kbclient.Client
+	itemBlockWorkerCount               int
+	concurrentBackups                  int
+	globalVolumePoliciesConfigMap      string
+	knownSchedulesWithSuccessfulBackup sets.Set[string]
 }
 
 func NewBackupReconciler(
@@ -204,26 +205,41 @@ func (b *backupReconciler) updateTotalBackupMetric() {
 		time.Sleep(5 * time.Second)
 
 		wait.Until(
-			func() {
-				// recompute backup_total metric
-				backups := &velerov1api.BackupList{}
-				err := b.kbClient.List(context.Background(), backups, &kbclient.ListOptions{LabelSelector: labels.Everything()})
-				if err != nil {
-					b.logger.Error(err, "Error computing backup_total metric")
-				} else {
-					b.metrics.SetBackupTotal(int64(len(backups.Items)))
-				}
-
-				// recompute backup_last_successful_timestamp metric for each
-				// schedule (including the empty schedule, i.e. ad-hoc backups)
-				for schedule, timestamp := range getLastSuccessBySchedule(backups.Items) {
-					b.metrics.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
-				}
-			},
+			b.resyncBackupMetrics,
 			backupResyncPeriod,
 			b.ctx.Done(),
 		)
 	}()
+}
+
+func (b *backupReconciler) resyncBackupMetrics() {
+	backups := &velerov1api.BackupList{}
+	err := b.kbClient.List(context.Background(), backups, &kbclient.ListOptions{LabelSelector: labels.Everything()})
+	if err != nil {
+		b.logger.Error(err, "Error computing backup_total metric")
+		return
+	}
+
+	b.metrics.SetBackupTotal(int64(len(backups.Items)))
+
+	currentSchedules := getLastSuccessBySchedule(backups.Items)
+	for schedule, timestamp := range currentSchedules {
+		b.metrics.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
+	}
+
+	// Remove metrics for schedules that no longer have successful backups
+	if b.knownSchedulesWithSuccessfulBackup != nil {
+		for schedule := range b.knownSchedulesWithSuccessfulBackup {
+			if _, exists := currentSchedules[schedule]; !exists {
+				b.metrics.DeleteBackupLastSuccessfulTimestamp(schedule)
+			}
+		}
+	}
+
+	b.knownSchedulesWithSuccessfulBackup = sets.New[string]()
+	for schedule := range currentSchedules {
+		b.knownSchedulesWithSuccessfulBackup.Insert(schedule)
+	}
 }
 
 // getLastSuccessBySchedule finds the most recent completed backup for each schedule
