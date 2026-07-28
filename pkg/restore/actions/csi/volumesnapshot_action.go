@@ -66,6 +66,9 @@ func resetVolumeSnapshotSpecForRestore(vs *snapshotv1api.VolumeSnapshot, vscName
 }
 
 func resetVolumeSnapshotAnnotation(vs *snapshotv1api.VolumeSnapshot) {
+	if vs.ObjectMeta.Annotations == nil {
+		vs.ObjectMeta.Annotations = make(map[string]string)
+	}
 	vs.ObjectMeta.Annotations[velerov1api.VSCDeletionPolicyAnnotation] =
 		string(snapshotv1api.VolumeSnapshotContentRetain)
 }

@@ -103,6 +103,26 @@ func TestResetVolumeSnapshotSpecForRestore(t *testing.T) {
 	}
 }
 
+func TestResetVolumeSnapshotAnnotation(t *testing.T) {
+	t.Run("should set deletion policy annotation when annotations is nil", func(t *testing.T) {
+		vs := snapshotv1api.VolumeSnapshot{}
+		resetVolumeSnapshotAnnotation(&vs)
+		assert.NotNil(t, vs.ObjectMeta.Annotations)
+		assert.Equal(t, string(snapshotv1api.VolumeSnapshotContentRetain), vs.ObjectMeta.Annotations[velerov1api.VSCDeletionPolicyAnnotation])
+	})
+
+	t.Run("should preserve existing annotations and set deletion policy annotation", func(t *testing.T) {
+		vs := snapshotv1api.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{"foo": "bar"},
+			},
+		}
+		resetVolumeSnapshotAnnotation(&vs)
+		assert.Equal(t, "bar", vs.ObjectMeta.Annotations["foo"])
+		assert.Equal(t, string(snapshotv1api.VolumeSnapshotContentRetain), vs.ObjectMeta.Annotations[velerov1api.VSCDeletionPolicyAnnotation])
+	})
+}
+
 func TestVSExecute(t *testing.T) {
 	newVscName := util.GenerateSha256FromRestoreUIDAndVsName("restoreUID", "vsName")
 	tests := []struct {
@@ -136,6 +156,18 @@ func TestVSExecute(t *testing.T) {
 						},
 					),
 				).
+				SourceVolumeSnapshotContentName(newVscName).
+				VolumeSnapshotClass("vscClass").
+				Status().
+				BoundVolumeSnapshotContentName("vscName").
+				Result(),
+			restore:    builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restoreUID")).Result(),
+			expectErr:  false,
+			expectedVS: builder.ForVolumeSnapshot("ns", "test").SourceVolumeSnapshotContentName(newVscName).Result(),
+		},
+		{
+			name: "Normal case with nil VS annotations, VSC should be created",
+			vs: builder.ForVolumeSnapshot("ns", "vsName").
 				SourceVolumeSnapshotContentName(newVscName).
 				VolumeSnapshotClass("vscClass").
 				Status().
