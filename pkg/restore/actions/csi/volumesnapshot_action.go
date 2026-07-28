@@ -282,12 +282,6 @@ func (p *volumeSnapshotRestoreItemAction) Execute(
 			vs.Namespace, vs.Name)
 	}
 
-	vsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&vs)
-	if err != nil {
-		p.log.Errorf("Fail to convert VS %s to unstructured", vs.Namespace+"/"+vs.Name)
-		return nil, errors.WithStack(err)
-	}
-
 	if vsFromBackup.Status == nil ||
 		vsFromBackup.Status.BoundVolumeSnapshotContentName == nil {
 		p.log.Errorf("VS %s doesn't have bound VSC", vsFromBackup.Name)
@@ -297,6 +291,21 @@ func (p *volumeSnapshotRestoreItemAction) Execute(
 	vsc := velero.ResourceIdentifier{
 		GroupResource: kuberesource.VolumeSnapshotContents,
 		Name:          *vsFromBackup.Status.BoundVolumeSnapshotContentName,
+	}
+
+	// Force-restore the bound VSC even when restore resource filters would
+	// otherwise exclude it (mirrors backup-side must-include for CSI deps).
+	annotations := vs.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+	vs.SetAnnotations(annotations)
+
+	vsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&vs)
+	if err != nil {
+		p.log.Errorf("Fail to convert VS %s to unstructured", vs.Namespace+"/"+vs.Name)
+		return nil, errors.WithStack(err)
 	}
 
 	p.log.Infof(`Returning from VolumeSnapshotRestoreItemAction with 

@@ -176,6 +176,15 @@ func (p *pvcRestoreItemAction) Execute(
 				Name:          vsName,
 				Namespace:     pvc.Namespace,
 			})
+
+			// Force-restore the VolumeSnapshot even when restore resource filters
+			// would otherwise exclude it (mirrors backup-side must-include).
+			annotations := pvc.GetAnnotations()
+			if annotations == nil {
+				annotations = map[string]string{}
+			}
+			annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+			pvc.SetAnnotations(annotations)
 		}
 	}
 

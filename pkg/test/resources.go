@@ -220,3 +220,37 @@ func DataUploads(items ...metav1.Object) *APIResource {
 		Items:      items,
 	}
 }
+
+func StorageClasses(items ...metav1.Object) *APIResource {
+	return &APIResource{
+		Group:      "storage.k8s.io",
+		Version:    "v1",
+		Name:       "storageclasses",
+		ShortName:  "sc",
+		Kind:       "StorageClass",
+		Namespaced: false,
+		Items:      items,
+	}
+}
+
+func VolumeSnapshotContents(items ...metav1.Object) *APIResource {
+	return &APIResource{
+		Group:      "snapshot.storage.k8s.io",
+		Version:    "v1",
+		Name:       "volumesnapshotcontents",
+		Kind:       "VolumeSnapshotContent",
+		Namespaced: false,
+		Items:      items,
+	}
+}
+
+func VolumeSnapshots(items ...metav1.Object) *APIResource {
+	return &APIResource{
+		Group:      "snapshot.storage.k8s.io",
+		Version:    "v1",
+		Name:       "volumesnapshots",
+		Kind:       "VolumeSnapshot",
+		Namespaced: true,
+		Items:      items,
+	}
+}

@@ -87,7 +87,6 @@ const ObjectStatusRestoreAnnotationKey = "velero.io/restore-status"
 
 var resourceMustHave = []string{
 	"datauploads.velero.io",
-	"volumesnapshotcontents.snapshot.storage.k8s.io",
 }
 
 type VolumeSnapshotterGetter interface {

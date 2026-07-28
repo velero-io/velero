@@ -184,6 +184,10 @@ func TestVSExecute(t *testing.T) {
 				require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(
 					result.UpdatedItem.UnstructuredContent(), &vs))
 				require.Equal(t, test.expectedVS.Spec, vs.Spec)
+				require.Equal(t, "true", vs.GetAnnotations()[velerov1api.MustIncludeAdditionalItemRestoreAnnotation])
+				require.Len(t, result.AdditionalItems, 1)
+				require.Equal(t, "volumesnapshotcontents.snapshot.storage.k8s.io", result.AdditionalItems[0].GroupResource.String())
+				require.Equal(t, "vscName", result.AdditionalItems[0].Name)
 			}
 		})
 	}

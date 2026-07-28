@@ -754,6 +754,29 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			apiResources: []*test.APIResource{test.ServiceAccounts()},
 			want:         map[*test.APIResource][]string{test.ServiceAccounts(): {"ns-1/sa-1"}},
 		},
+		{
+			// Regression for #9957: VSC must not be force-included via resourceMustHave
+			// when the restore only selects unrelated resource types.
+			name:    "volumesnapshotcontents are not force-included for selective resource restores",
+			restore: defaultRestore().IncludedResources("storageclasses").IncludeClusterResources(true).Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("storageclasses.storage.k8s.io",
+					builder.ForStorageClass("sc-1").Result(),
+				).
+				AddItems("volumesnapshotcontents.snapshot.storage.k8s.io",
+					builder.ForVolumeSnapshotContent("vsc-1").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.StorageClasses(),
+				test.VolumeSnapshotContents(),
+			},
+			want: map[*test.APIResource][]string{
+				test.StorageClasses():         {"/sc-1"},
+				test.VolumeSnapshotContents(): nil,
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -2590,6 +2613,52 @@ func TestRestoreMustIncludeAdditionalItems(t *testing.T) {
 			test.Pods(): {"ns-1/pod-1"},
 			test.PVs():  {"/pv-1"},
 			test.PVCs(): nil,
+		})
+	})
+
+	t.Run("VS must-include restores excluded VolumeSnapshotContent additional item", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.VolumeSnapshots())
+		h.AddItems(t, test.VolumeSnapshotContents())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("volumesnapshots.snapshot.storage.k8s.io").IncludeClusterResources(true).Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("volumesnapshots.snapshot.storage.k8s.io", builder.ForVolumeSnapshot("ns-1", "vs-1").Result()).
+				AddItems("volumesnapshotcontents.snapshot.storage.k8s.io", builder.ForVolumeSnapshotContent("vsc-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"volumesnapshots.snapshot.storage.k8s.io"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.VolumeSnapshotContents, Name: "vsc-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.VolumeSnapshots():        {"ns-1/vs-1"},
+			test.VolumeSnapshotContents(): {"/vsc-1"},
 		})
 	})
 }
