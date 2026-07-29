@@ -32,7 +32,7 @@ secondary_ctas:
     url: /blog/Velero-is-an-Open-Source-Tool-to-Back-up-and-Migrate-Kubernetes-Clusters/ # Velero.io word list : ignore
     content: Learn about Velero and how to protect your Kubernetes resources and volumes.
   cta2:
-    title: How Do You Use Velero?
-    url: https://github.com/velero-io/velero/issues/1327
-    content: See how Velero is helping others and tell the world how you use Velero.
+    title: Join the Velero Community
+    url: /community/
+    content: Connect with other Velero users on Slack, attend community meetings, and contribute to the project.
 ---
