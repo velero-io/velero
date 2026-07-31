@@ -30,6 +30,7 @@ func NewCommand() *cobra.Command {
 
 	c.AddCommand(
 		config.NewCommand(),
+		NewSetContextAsVeleroNamespaceCommand(),
 	)
 
 	return c

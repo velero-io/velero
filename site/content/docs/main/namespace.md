@@ -17,6 +17,14 @@ To have namespace consistency, specify the namespace for all Velero operational 
 velero client config set namespace=<NAMESPACE_VALUE>
 ```
 
+If Velero was installed in the namespace of your current kubeconfig context, you can set that as the default namespace without having to type it out:
+
+```bash
+velero client set-context-as-velero-namespace
+```
+
+This reads the namespace from the current kubeconfig context (or the context specified with `--kubecontext`) and saves it to the Velero client configuration file.
+
 Alternatively, you may use the global `--namespace` flag with any operational command to tell Velero where to run.
 
 [0]: basic-install.md#install-the-cli
