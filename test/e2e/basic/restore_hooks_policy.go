@@ -146,12 +146,12 @@ func (r *RestoreHooksPolicy) Restore() error {
 		"create", "--namespace", r.VeleroCfg.VeleroNamespace, "restore", restoreContinueName,
 		"--from-backup", r.BackupName, "--include-namespaces", r.nsContinue, "--wait",
 	}
-	By(fmt.Sprintf("Start to restore %s (OnError: Continue) and expect PartiallyFailed status", restoreContinueName), func() {
+	By(fmt.Sprintf("Start to restore %s (OnError: Continue) and expect Completed status", restoreContinueName), func() {
 		Expect(VeleroRestoreExec(r.Ctx, r.VeleroCfg.VeleroCLI,
 			r.VeleroCfg.VeleroNamespace, restoreContinueName,
-			restoreContinueArgs, velerov1api.RestorePhasePartiallyFailed)).To(Succeed(), func() string {
+			restoreContinueArgs, velerov1api.RestorePhaseCompleted)).To(Succeed(), func() string {
 			RunDebug(context.Background(), r.VeleroCfg.VeleroCLI, r.VeleroCfg.VeleroNamespace, "", restoreContinueName)
-			return "Failed to restore Continue namespace with PartiallyFailed status"
+			return "Failed to restore Continue namespace with Completed status"
 		})
 	})
 
