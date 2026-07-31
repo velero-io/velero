@@ -1,5 +1,5 @@
 /*
-Copyright the Velero contributors.
+Copyright The Velero Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,19 +36,8 @@ func NewSetContextAsVeleroNamespaceCommand() *cobra.Command {
 			"specified by --kubecontext) and saves it to the Velero client configuration file, so " +
 			"subsequent commands use it as the default namespace without needing --namespace.",
 		Run: func(c *cobra.Command, args []string) {
-			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-			loadingRules.ExplicitPath = kubeconfig
-			overrides := &clientcmd.ConfigOverrides{CurrentContext: kubecontext}
-			kubeClientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
-
-			namespace, _, err := kubeClientConfig.Namespace()
+			namespace, err := setContextAsVeleroNamespace(kubeconfig, kubecontext)
 			cmd.CheckError(err)
-
-			config, err := client.LoadConfig()
-			cmd.CheckError(err)
-
-			config[client.ConfigKeyNamespace] = namespace
-			cmd.CheckError(client.SaveConfig(config))
 
 			fmt.Printf("Velero client namespace set to %q\n", namespace)
 		},
@@ -58,4 +47,31 @@ func NewSetContextAsVeleroNamespaceCommand() *cobra.Command {
 	c.Flags().StringVar(&kubecontext, "kubecontext", "", "The kubeconfig context to read the namespace from. If unset defaults to whatever your current-context is (kubectl config current-context)")
 
 	return c
+}
+
+// setContextAsVeleroNamespace reads the namespace from the given kubeconfig/kubecontext (falling
+// back to the default kubeconfig loading rules and current-context when empty), saves it to the
+// Velero client configuration file, and returns the namespace that was set.
+func setContextAsVeleroNamespace(kubeconfig, kubecontext string) (string, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	loadingRules.ExplicitPath = kubeconfig
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubecontext}
+	kubeClientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
+
+	namespace, _, err := kubeClientConfig.Namespace()
+	if err != nil {
+		return "", err
+	}
+
+	config, err := client.LoadConfig()
+	if err != nil {
+		return "", err
+	}
+
+	config[client.ConfigKeyNamespace] = namespace
+	if err := client.SaveConfig(config); err != nil {
+		return "", err
+	}
+
+	return namespace, nil
 }
