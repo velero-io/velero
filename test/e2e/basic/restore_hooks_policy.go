@@ -24,7 +24,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/test/e2e/test"
 	. "github.com/vmware-tanzu/velero/test/e2e/test"
 	. "github.com/vmware-tanzu/velero/test/util/k8s"
 	. "github.com/vmware-tanzu/velero/test/util/velero"
@@ -37,7 +36,7 @@ type RestoreHooksPolicy struct {
 	podName    string
 }
 
-var RestoreHooksPolicyTest func() = test.TestFunc(&RestoreHooksPolicy{})
+var RestoreHooksPolicyTest func() = TestFunc(&RestoreHooksPolicy{})
 
 func (r *RestoreHooksPolicy) Init() error {
 	Expect(r.TestCase.Init()).To(Succeed())
@@ -56,7 +55,7 @@ func (r *RestoreHooksPolicy) Init() error {
 		"--snapshot-volumes=false", "--wait",
 	}
 
-	r.TestMsg = &test.TestMSG{
+	r.TestMsg = &TestMSG{
 		Desc:      "Restore hook error policy E2E test",
 		Text:      "OnError: Continue should result in Completed, OnError: Fail should result in PartiallyFailed",
 		FailedMSG: "Failed to validate restore hook error policies",

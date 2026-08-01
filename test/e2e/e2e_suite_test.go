@@ -451,7 +451,6 @@ var _ = Describe(
 	RestoreHooksPolicyTest,
 )
 
-
 var _ = Describe(
 	"Backup/restore of 2500 namespaces",
 	Label("Scale", "LongTime"),
