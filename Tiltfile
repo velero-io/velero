@@ -92,7 +92,7 @@ def get_debug_flag():
 # Set up a local_resource build of the Velero binary. The binary is written to _tiltbuild/velero.
 local_resource(
     "velero_server_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOOS=linux GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOOS=linux GOARCH=amd64 GOBIN=$(pwd)/.go/bin GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
     deps = ["cmd", "internal", "pkg"],
     ignore = ["pkg/cmd"],
 )
