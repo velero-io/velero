@@ -363,7 +363,7 @@ func (b *backupSyncReconciler) deleteOrphanedBackups(ctx context.Context, locati
 }
 
 // hasPendingDeleteBackupRequest returns true if a DeleteBackupRequest for the
-// backup exists in the New or InProgress phase.
+// backup exists in the New, InProgress, or empty (not-yet-set) phase.
 func (b *backupSyncReconciler) hasPendingDeleteBackupRequest(ctx context.Context, backup *velerov1api.Backup) (bool, error) {
 	dbrs := &velerov1api.DeleteBackupRequestList{}
 	selector := client.MatchingLabels{
