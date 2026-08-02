@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,6 +37,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/label"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
@@ -710,15 +710,110 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			}
 			r.deleteOrphanedBackups(ctx, bslName, test.cloudBackups, velerotest.NewLogger())
 
+			// Orphaned backups are no longer deleted directly. Instead, a
+			// DeleteBackupRequest is created for each one so the deletion
+			// controller can clean up provider snapshots before removing the
+			// Backup object itself.
 			numBackups, err := numBackups(client)
 			Expect(err).ShouldNot(HaveOccurred())
+			Expect(len(test.k8sBackups)).To(BeEquivalentTo(numBackups))
 
-			fmt.Println("")
+			dbrList := &velerov1api.DeleteBackupRequestList{}
+			err = client.List(context.TODO(), dbrList, &ctrlClient.ListOptions{})
+			Expect(err).ShouldNot(HaveOccurred())
 
-			expected := len(test.k8sBackups) - len(test.expectedDeletes)
-			Expect(expected).To(BeEquivalentTo(numBackups))
+			dbrs := make(map[string]bool)
+			for _, dbr := range dbrList.Items {
+				dbrs[dbr.Spec.BackupName] = true
+			}
+
+			for _, backup := range test.k8sBackups {
+				if test.expectedDeletes.Has(backup.Name) {
+					Expect(dbrs[backup.Name]).To(BeTrue(), "expected a DeleteBackupRequest for orphaned backup %s", backup.Name)
+				} else {
+					Expect(dbrs[backup.Name]).To(BeFalse(), "unexpected DeleteBackupRequest for backup %s", backup.Name)
+				}
+			}
 		}
 	})
+
+	DescribeTable("Test deleting orphaned backups does not create a duplicate DeleteBackupRequest when an existing request is not finalized.",
+		func(existingDBRPhase velerov1api.DeleteBackupRequestPhase) {
+			backup := builder.ForBackup("ns-1", "orphan-backup").
+				ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "default")).
+				Phase(velerov1api.BackupPhaseCompleted).
+				Result()
+
+			existingDBR := pkgbackup.NewDeleteBackupRequest(backup.Name, string(backup.UID))
+			existingDBR.SetNamespace(backup.Namespace)
+			existingDBR.Name = "orphan-backup-request"
+			existingDBR.Status.Phase = existingDBRPhase
+
+			var (
+				client        = ctrlfake.NewClientBuilder().WithRuntimeObjects(backup, existingDBR).Build()
+				pluginManager = &pluginmocks.Manager{}
+				backupStores  = make(map[string]*persistencemocks.BackupStore)
+			)
+
+			r := backupSyncReconciler{
+				client:                  client,
+				namespace:               backup.Namespace,
+				defaultBackupSyncPeriod: time.Second * 10,
+				newPluginManager:        func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+				backupStoreGetter:       NewFakeObjectBackupStoreGetter(backupStores),
+				logger:                  velerotest.NewLogger(),
+			}
+
+			r.deleteOrphanedBackups(ctx, "default", sets.New[string](), velerotest.NewLogger())
+
+			dbrList := &velerov1api.DeleteBackupRequestList{}
+			err := client.List(context.TODO(), dbrList, &ctrlClient.ListOptions{})
+			Expect(err).ShouldNot(HaveOccurred())
+			// A pending (non-finalized) request means no duplicate is created.
+			Expect(len(dbrList.Items)).To(BeEquivalentTo(1))
+		},
+		Entry("existing request with empty phase", ""),
+		Entry("existing request in New phase", velerov1api.DeleteBackupRequestPhaseNew),
+		Entry("existing request in InProgress phase", velerov1api.DeleteBackupRequestPhaseInProgress),
+	)
+
+	DescribeTable("Test deleting orphaned backups creates a new DeleteBackupRequest when an existing one is finalized.",
+		func(existingDBRPhase velerov1api.DeleteBackupRequestPhase) {
+			backup := builder.ForBackup("ns-1", "orphan-backup").
+				ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "default")).
+				Phase(velerov1api.BackupPhaseCompleted).
+				Result()
+
+			existingDBR := pkgbackup.NewDeleteBackupRequest(backup.Name, string(backup.UID))
+			existingDBR.SetNamespace(backup.Namespace)
+			existingDBR.Name = "orphan-backup-request"
+			existingDBR.Status.Phase = existingDBRPhase
+
+			var (
+				client        = ctrlfake.NewClientBuilder().WithRuntimeObjects(backup, existingDBR).Build()
+				pluginManager = &pluginmocks.Manager{}
+				backupStores  = make(map[string]*persistencemocks.BackupStore)
+			)
+
+			r := backupSyncReconciler{
+				client:                  client,
+				namespace:               backup.Namespace,
+				defaultBackupSyncPeriod: time.Second * 10,
+				newPluginManager:        func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+				backupStoreGetter:       NewFakeObjectBackupStoreGetter(backupStores),
+				logger:                  velerotest.NewLogger(),
+			}
+
+			r.deleteOrphanedBackups(ctx, "default", sets.New[string](), velerotest.NewLogger())
+
+			dbrList := &velerov1api.DeleteBackupRequestList{}
+			err := client.List(context.TODO(), dbrList, &ctrlClient.ListOptions{})
+			Expect(err).ShouldNot(HaveOccurred())
+			// A finalized request no longer counts as pending, so a new one is created.
+			Expect(len(dbrList.Items)).To(BeEquivalentTo(2))
+		},
+		Entry("existing request in Processed phase", velerov1api.DeleteBackupRequestPhaseProcessed),
+	)
 
 	It("Test moving default BSL at the head of BSL array.", func() {
 		locationList := &velerov1api.BackupStorageLocationList{}
