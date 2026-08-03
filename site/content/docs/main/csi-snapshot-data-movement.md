@@ -170,6 +170,7 @@ kubectl -n velero get datadownloads -l velero.io/restore-name=YOUR_RESTORE_NAME 
 that anyone who has access to your backup storage can decrypt your backup data**. Make sure that you limit access 
 to the backup storage appropriately. 
 - [Velero built-in data mover] Even though the backup data could be incrementally preserved, for a single file data, Velero built-in data mover leverages on deduplication to find the difference to be saved. This means that large files (such as ones storing a database) will take a long time to scan for data  deduplication, even if the actual difference is small.  
+- [Velero built-in data mover] On volumes where the underlying filesystem enforces mount-constant identity (Azure Files SMB/CIFS, Azure Blob via blobfuse, GCP Cloud Storage FUSE, and similar), data download's `chown`/`chmod` can report success while changing nothing, silently losing file ownership (and on FUSE mounts, permission bits) with no error surfaced anywhere. See [File Ownership and Permission Preservation](file-system-backup.md#file-ownership-and-permission-preservation) for details and remediation.
 
 ## Troubleshooting
 
