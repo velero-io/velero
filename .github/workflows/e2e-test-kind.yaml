@@ -1,4 +1,13 @@
 name: "Run the E2E test on kind"
+permissions:
+  contents: read
+env:
+  # Reviewed commit pins for third-party sources this workflow clones and executes.
+  # Bump them deliberately after reviewing the upstream changes.
+  # bitnami/containers: [bitnami/minio] Release 2026.7.17-debian-12-r0
+  BITNAMI_CONTAINERS_COMMIT: 19fb570e551f15ab0c8264aafa93774266761b8d
+  # vmware-tanzu-experiments/distributed-data-generator: main as of 2025-07-15
+  KIBISHII_COMMIT: bce0469e5f9dd33f31432fab22ff90ad6f2b45ca
 on:
   push:
   pull_request:
@@ -11,8 +20,6 @@ jobs:
   # Build the Velero CLI and image once for all Kubernetes versions, and cache it so the fan-out workers can get it.
   build:
     runs-on: ubuntu-latest
-    outputs:
-      minio-dockerfile-sha: ${{ steps.minio-version.outputs.dockerfile_sha }}
     steps:
       - name: Check out the code
         uses: actions/checkout@v5
@@ -46,24 +53,23 @@ jobs:
         run: |
           IMAGE=velero VERSION=pr-test BUILD_OUTPUT_TYPE=docker make container
           docker save velero:pr-test-linux-amd64 -o ./velero.tar
-      # Check and build MinIO image once for all e2e tests
-      - name: Check Bitnami MinIO Dockerfile version
-        id: minio-version
-        run: |
-          DOCKERFILE_SHA=$(curl -s https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2025/debian-12/Dockerfile\&per_page=1 | jq -r '.[0].sha')
-          echo "dockerfile_sha=${DOCKERFILE_SHA}" >> $GITHUB_OUTPUT
+      # Build the MinIO image once for all e2e tests, from the reviewed bitnami/containers commit.
       - name: Cache MinIO Image
         uses: actions/cache@v4
         id: minio-cache
         with:
           path: ./minio-image.tar
-          key: minio-bitnami-${{ steps.minio-version.outputs.dockerfile_sha }}
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
       - name: Build MinIO Image from Bitnami Dockerfile
         if: steps.minio-cache.outputs.cache-hit != 'true'
         run: |
-          echo "Building MinIO image from Bitnami Dockerfile..."
-          git clone --depth 1 https://github.com/bitnami/containers.git /tmp/bitnami-containers
-          cd /tmp/bitnami-containers/bitnami/minio/2025/debian-12
+          set -euo pipefail
+          echo "Building MinIO image from Bitnami Dockerfile at ${BITNAMI_CONTAINERS_COMMIT}..."
+          git init -q /tmp/bitnami-containers
+          git -C /tmp/bitnami-containers remote add origin https://github.com/bitnami/containers.git
+          git -C /tmp/bitnami-containers fetch --depth 1 origin "${BITNAMI_CONTAINERS_COMMIT}"
+          git -C /tmp/bitnami-containers checkout -q "${BITNAMI_CONTAINERS_COMMIT}"
+          cd /tmp/bitnami-containers/bitnami/minio/2026/debian-12
           docker build -t bitnami/minio:local .
           docker save bitnami/minio:local > ${{ github.workspace }}/minio-image.tar
   # Create json of k8s versions to test
@@ -114,7 +120,7 @@ jobs:
         id: minio-cache
         with:
           path: ./minio-image.tar
-          key: minio-bitnami-${{ needs.build.outputs.minio-dockerfile-sha }}
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
       - name: Load MinIO Image
         run: |
           echo "Loading MinIO image..."
@@ -154,7 +160,10 @@ jobs:
           curl -LO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
-          git clone https://github.com/vmware-tanzu-experiments/distributed-data-generator.git -b main /tmp/kibishii
+          git init -q /tmp/kibishii
+          git -C /tmp/kibishii remote add origin https://github.com/vmware-tanzu-experiments/distributed-data-generator.git
+          git -C /tmp/kibishii fetch --depth 1 origin "${KIBISHII_COMMIT}"
+          git -C /tmp/kibishii checkout -q "${KIBISHII_COMMIT}"
 
           GOPATH=~/go \
               CLOUD_PROVIDER=kind \
