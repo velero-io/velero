@@ -1,0 +1,1 @@
+Implemented per-BackupStorageLocation (BSL) encryption keys to replace the shared hardcoded password. Each BSL now receives a unique, cryptographically random encryption key stored in its own Kubernetes Secret, while maintaining backward compatibility with the legacy shared key.
