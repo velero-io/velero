@@ -57,6 +57,7 @@ type BackupStartParam struct {
 	VolumeID       string
 	ChangeID       string
 	SnapshotID     string
+	CBTService     cbtservice.Service
 }
 
 // RestoreStartParam define the input param for restore start
@@ -203,6 +204,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 					VolumeID: backupParam.VolumeID,
 					ChangeID: backupParam.ChangeID,
 				},
+				Service: backupParam.CBTService,
 			},
 			source.VolMode,
 			uploaderConfig,
