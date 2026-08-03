@@ -1262,3 +1262,49 @@ func TestGetVolumeSnapshotClasses(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []snapshotv1api.VolumeSnapshotClass{*class}, result)
 }
+
+func TestGenerateVolumeInfoForCSIVolumeSnapshotNilVSCStatus(t *testing.T) {
+	// VolumeSnapshotContent.Status is optional and is not written until the
+	// snapshot controller reconciles the content. Velero labels and collects
+	// the VSC before that happens, so generateVolumeInfoForCSIVolumeSnapshot
+	// must tolerate a nil Status.
+	now := metav1.Now()
+	restoreSize := resource.MustParse("100Gi")
+	vscName := "testContent"
+	pvcName := "testPVC"
+	className := "testClass"
+
+	volumesInfo := BackupVolumesInformation{}
+	volumesInfo.Init()
+	volumesInfo.logger = logging.DefaultLogger(logrus.DebugLevel, logging.FormatJSON)
+
+	volumesInfo.volumeSnapshots = []snapshotv1api.VolumeSnapshot{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "testVS", Namespace: "velero"},
+			Spec: snapshotv1api.VolumeSnapshotSpec{
+				Source:                  snapshotv1api.VolumeSnapshotSource{PersistentVolumeClaimName: &pvcName},
+				VolumeSnapshotClassName: &className,
+			},
+			Status: &snapshotv1api.VolumeSnapshotStatus{
+				BoundVolumeSnapshotContentName: &vscName,
+				CreationTime:                   &now,
+				RestoreSize:                    &restoreSize,
+			},
+		},
+	}
+	volumesInfo.volumeSnapshotContents = []snapshotv1api.VolumeSnapshotContent{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: vscName},
+			Spec:       snapshotv1api.VolumeSnapshotContentSpec{Driver: "pd.csi.storage.gke.io"},
+			// Status intentionally nil.
+		},
+	}
+	volumesInfo.volumeSnapshotClasses = []snapshotv1api.VolumeSnapshotClass{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: className},
+			Driver:     "pd.csi.storage.gke.io",
+		},
+	}
+
+	require.NotPanics(t, volumesInfo.generateVolumeInfoForCSIVolumeSnapshot)
+}
