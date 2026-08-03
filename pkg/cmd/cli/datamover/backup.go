@@ -331,6 +331,7 @@ func (s *dataMoverBackup) createDataPathService() (dataPathService, error) {
 		s.config.changeID,
 		s.config.volumeID,
 		s.config.snapshotID,
+		s.cbtService,
 		s.logger,
 	), nil
 }

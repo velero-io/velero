@@ -34,6 +34,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
@@ -71,6 +72,7 @@ type BackupMicroService struct {
 	changeID   string
 	volumeID   string
 	snapshotID string
+	cbtService cbtservice.Service
 }
 
 type dataPathResult struct {
@@ -80,7 +82,7 @@ type dataPathResult struct {
 
 func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataUploadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	duInformer cache.Informer, changeID string, volumeID string, snapshotID string, log logrus.FieldLogger) *BackupMicroService {
+	duInformer cache.Informer, changeID string, volumeID string, snapshotID string, cbtService cbtservice.Service, log logrus.FieldLogger) *BackupMicroService {
 	return &BackupMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -98,6 +100,7 @@ func NewBackupMicroService(ctx context.Context, client client.Client, kubeClient
 		changeID:         changeID,
 		volumeID:         volumeID,
 		snapshotID:       snapshotID,
+		cbtService:       cbtService,
 	}
 }
 
@@ -210,6 +213,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		VolumeID:       r.volumeID,
 		ChangeID:       r.changeID,
 		SnapshotID:     r.snapshotID,
+		CBTService:     r.cbtService,
 	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path backup")
 	}
