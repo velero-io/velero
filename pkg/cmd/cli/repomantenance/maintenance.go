@@ -143,6 +143,7 @@ func initRepoManager(namespace string, cli client.Client, kubeClient kubernetes.
 		repoLocker,
 		credentialFileStore,
 		credentialSecretStore,
+		kubeClient.CoreV1(),
 		logger,
 	), nil
 }

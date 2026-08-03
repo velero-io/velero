@@ -536,6 +536,7 @@ func (s *server) initRepoManager() error {
 		s.repoLocker,
 		s.credentialFileStore,
 		s.credentialSecretStore,
+		s.kubeClient.CoreV1(),
 		s.logger,
 	)
 

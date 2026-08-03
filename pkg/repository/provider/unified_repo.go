@@ -29,6 +29,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	corev1api "k8s.io/api/core/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -40,6 +42,8 @@ import (
 
 type unifiedRepoProvider struct {
 	credentialGetter credentials.CredentialGetter
+	secretClient     corev1client.SecretsGetter
+	namespace        string
 	workPath         string
 	repoService      udmrepo.BackupRepoService
 	repoBackend      string
@@ -75,14 +79,19 @@ const (
 	repoConnectDesc = "unified repo"
 )
 
-// NewUnifiedRepoProvider creates the service provider for Unified Repo
+// NewUnifiedRepoProvider creates the service provider for Unified Repo.
+// secretClient and namespace are used to look up per-BSL encryption key secrets.
 func NewUnifiedRepoProvider(
 	credentialGetter credentials.CredentialGetter,
+	secretClient corev1client.SecretsGetter,
+	namespace string,
 	repoBackend string,
 	log logrus.FieldLogger,
 ) Provider {
 	repo := unifiedRepoProvider{
 		credentialGetter: credentialGetter,
+		secretClient:     secretClient,
+		namespace:        namespace,
 		repoBackend:      repoBackend,
 		log:              log,
 	}
@@ -117,6 +126,11 @@ func (urp *unifiedRepoProvider) InitRepo(ctx context.Context, param RepoParam) e
 
 	if param.BackupLocation.Spec.AccessMode == velerov1api.BackupStorageLocationAccessModeReadOnly {
 		return errors.Errorf("cannot create new backup repo for read-only backup storage location %s/%s", param.BackupLocation.Namespace, param.BackupLocation.Name)
+	}
+
+	// Ensure a per-BSL encryption key exists before initializing the repo
+	if err := urp.ensureBSLKey(param); err != nil {
+		log.WithError(err).Warn("Failed to ensure per-BSL encryption key, falling back to shared key")
 	}
 
 	repoOption, err := udmrepo.NewRepoOptions(
@@ -190,6 +204,11 @@ func (urp *unifiedRepoProvider) PrepareRepo(ctx context.Context, param RepoParam
 	})
 
 	log.Info("Start to prepare repo")
+
+	// Ensure a per-BSL encryption key exists before preparing the repo
+	if err := urp.ensureBSLKey(param); err != nil {
+		log.WithError(err).Warn("Failed to ensure per-BSL encryption key, falling back to shared key")
+	}
 
 	repoOption, err := udmrepo.NewRepoOptions(
 		udmrepo.WithPassword(urp, param),
@@ -400,13 +419,26 @@ func (urp *unifiedRepoProvider) ClientSideCacheLimit(repoOption map[string]strin
 	return urp.repoService.ClientSideCacheLimit(repoOption)
 }
 
+// ensureBSLKey ensures a per-BSL encryption key secret exists for the given BSL.
+func (urp *unifiedRepoProvider) ensureBSLKey(param RepoParam) error {
+	if urp.secretClient == nil || param.BackupLocation == nil {
+		return nil
+	}
+	return repokey.EnsureBSLRepositoryKey(urp.secretClient, urp.namespace, param.BackupLocation.Name)
+}
+
 func (urp *unifiedRepoProvider) GetPassword(param any) (string, error) {
-	_, ok := param.(RepoParam)
+	repoParam, ok := param.(RepoParam)
 	if !ok {
 		return "", errors.Errorf("invalid parameter, expect %T, actual %T", RepoParam{}, param)
 	}
 
-	repoPassword, err := getRepoPassword(urp.credentialGetter.FromSecret)
+	bslName := ""
+	if repoParam.BackupLocation != nil {
+		bslName = repoParam.BackupLocation.Name
+	}
+
+	repoPassword, err := getRepoPassword(urp.credentialGetter.FromSecret, urp.secretClient, urp.namespace, bslName)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get repo password")
 	}
@@ -458,12 +490,21 @@ func (urcp *unifiedRepoConfigProvider) ClientSideCacheLimit(repoOption map[strin
 	return urcp.repoService.ClientSideCacheLimit(repoOption)
 }
 
-func getRepoPassword(secretStore credentials.SecretStore) (string, error) {
+func getRepoPassword(secretStore credentials.SecretStore, secretClient corev1client.SecretsGetter, namespace, bslName string) (string, error) {
 	if secretStore == nil {
 		return "", errors.New("invalid credentials interface")
 	}
 
-	rawPass, err := secretStore.Get(repokey.RepoKeySelector())
+	// Use per-BSL key selector if BSL name and secret client are available;
+	// otherwise fall back to the legacy shared key.
+	var selector *corev1api.SecretKeySelector
+	if secretClient != nil && bslName != "" {
+		selector = repokey.BSLRepoKeySelector(secretClient, namespace, bslName)
+	} else {
+		selector = repokey.RepoKeySelector()
+	}
+
+	rawPass, err := secretStore.Get(selector)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

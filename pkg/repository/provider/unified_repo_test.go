@@ -520,7 +520,7 @@ func TestGetRepoPassword(t *testing.T) {
 				},
 			}
 
-			password, err := getRepoPassword(urp.credentialGetter.FromSecret)
+			password, err := getRepoPassword(urp.credentialGetter.FromSecret, nil, "", "")
 
 			require.Equal(t, tc.expected, password)
 

@@ -381,7 +381,7 @@ func TestNewKopiaUploaderProvider(t *testing.T) {
 				return tc.mockBackupRepoService
 			}
 			// Call the function being tested.
-			_, err := NewKopiaUploaderProvider(requestorType, ctx, credGetter, backupRepo, mockLog)
+			_, err := NewKopiaUploaderProvider(requestorType, ctx, credGetter, backupRepo, nil, mockLog)
 
 			// Assertions
 			if tc.expectedError != "" {

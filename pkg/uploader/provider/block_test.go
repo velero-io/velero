@@ -103,7 +103,7 @@ func TestNewBlockUploaderProvider(t *testing.T) {
 			BackupRepoServiceCreateFunc = func(string, logrus.FieldLogger) udmrepo.BackupRepoService {
 				return tc.mockBackupRepoService
 			}
-			_, err := NewBlockUploaderProvider(requestorType, ctx, credGetter, backupRepo, mockLog)
+			_, err := NewBlockUploaderProvider(requestorType, ctx, credGetter, backupRepo, nil, mockLog)
 
 			if tc.expectedError != "" {
 				require.ErrorContains(t, err, tc.expectedError)

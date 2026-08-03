@@ -272,7 +272,7 @@ func (dp *generalDataPath) Cancel() {
 
 func (dp *generalDataPath) boostRepoConnect(ctx context.Context, repositoryType string, credentialGetter *credentials.CredentialGetter, cacheDir string) error {
 	if repositoryType == velerov1api.BackupRepositoryTypeKopia {
-		if err := repoProvider.NewUnifiedRepoProvider(*credentialGetter, repositoryType, dp.log).BoostRepoConnect(ctx, repoProvider.RepoParam{BackupLocation: dp.backupLocation, BackupRepo: dp.backupRepo, CacheDir: cacheDir}); err != nil {
+		if err := repoProvider.NewUnifiedRepoProvider(*credentialGetter, nil, dp.namespace, repositoryType, dp.log).BoostRepoConnect(ctx, repoProvider.RepoParam{BackupLocation: dp.backupLocation, BackupRepo: dp.backupRepo, CacheDir: cacheDir}); err != nil {
 			return err
 		}
 

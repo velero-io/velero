@@ -94,9 +94,9 @@ func NewUploaderProvider(
 
 	switch uploaderType {
 	case uploader.KopiaType:
-		return NewKopiaUploaderProvider(requesterType, ctx, credGetter, backupRepo, log)
+		return NewKopiaUploaderProvider(requesterType, ctx, credGetter, backupRepo, repoKeySelector, log)
 	case uploader.BlockType:
-		return NewBlockUploaderProvider(requesterType, ctx, credGetter, backupRepo, log)
+		return NewBlockUploaderProvider(requesterType, ctx, credGetter, backupRepo, repoKeySelector, log)
 	default:
 		return nil, errors.Errorf("unsupported uploader type %v", uploaderType)
 	}

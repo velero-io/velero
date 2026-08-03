@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	corev1api "k8s.io/api/core/v1"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -36,10 +37,11 @@ var blockBackupFunc = block.Backup
 var blockRestoreFunc = block.Restore
 
 type blockProvider struct {
-	requestorType string
-	bkRepo        udmrepo.BackupRepo
-	credGetter    *credentials.CredentialGetter
-	log           logrus.FieldLogger
+	requestorType   string
+	bkRepo          udmrepo.BackupRepo
+	credGetter      *credentials.CredentialGetter
+	repoKeySelector *corev1api.SecretKeySelector
+	log             logrus.FieldLogger
 }
 
 // NewBlockUploaderProvider initialized with open or create a repository
@@ -48,12 +50,14 @@ func NewBlockUploaderProvider(
 	ctx context.Context,
 	credGetter *credentials.CredentialGetter,
 	backupRepo *velerov1api.BackupRepository,
+	repoKeySelector *corev1api.SecretKeySelector,
 	log logrus.FieldLogger,
 ) (Provider, error) {
 	bp := &blockProvider{
-		requestorType: requestorType,
-		log:           log,
-		credGetter:    credGetter,
+		requestorType:   requestorType,
+		log:             log,
+		credGetter:      credGetter,
+		repoKeySelector: repoKeySelector,
 	}
 
 	repoUID := string(backupRepo.GetUID())
@@ -85,7 +89,14 @@ func (bp *blockProvider) GetPassword(param any) (string, error) {
 	if bp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
-	rawPass, err := bp.credGetter.FromSecret.Get(repokeys.RepoKeySelector())
+
+	// Use the BSL-specific key selector if available, otherwise fall back to legacy shared key
+	selector := bp.repoKeySelector
+	if selector == nil {
+		selector = repokeys.RepoKeySelector()
+	}
+
+	rawPass, err := bp.credGetter.FromSecret.Get(selector)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

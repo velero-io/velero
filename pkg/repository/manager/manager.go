@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
@@ -99,6 +100,7 @@ func NewManager(
 	repoLocker *repository.RepoLocker,
 	credentialFileStore credentials.FileStore,
 	credentialSecretStore credentials.SecretStore,
+	secretClient corev1client.SecretsGetter,
 	log logrus.FieldLogger,
 ) Manager {
 	mgr := &manager{
@@ -113,7 +115,7 @@ func NewManager(
 	mgr.providers[velerov1api.BackupRepositoryTypeKopia] = provider.NewUnifiedRepoProvider(credentials.CredentialGetter{
 		FromFile:   credentialFileStore,
 		FromSecret: credentialSecretStore,
-	}, velerov1api.BackupRepositoryTypeKopia, mgr.log)
+	}, secretClient, namespace, velerov1api.BackupRepositoryTypeKopia, mgr.log)
 
 	return mgr
 }

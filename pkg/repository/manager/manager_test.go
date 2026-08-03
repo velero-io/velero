@@ -28,7 +28,7 @@ import (
 
 func TestGetRepositoryProvider(t *testing.T) {
 	var fakeClient kbclient.Client
-	mgr := NewManager("", fakeClient, nil, nil, nil, nil).(*manager)
+	mgr := NewManager("", fakeClient, nil, nil, nil, nil, nil).(*manager)
 	repo := &velerov1.BackupRepository{}
 
 	// empty repository type

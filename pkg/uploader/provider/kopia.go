@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/snapshot/upload"
 	"github.com/sirupsen/logrus"
+	corev1api "k8s.io/api/core/v1"
 
 	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/uploader/kopia"
@@ -42,11 +43,12 @@ var BackupRepoServiceCreateFunc = service.Create
 
 // kopiaProvider recorded info related with kopiaProvider
 type kopiaProvider struct {
-	requestorType string
-	bkRepo        udmrepo.BackupRepo
-	credGetter    *credentials.CredentialGetter
-	log           logrus.FieldLogger
-	canceling     int32
+	requestorType   string
+	bkRepo          udmrepo.BackupRepo
+	credGetter      *credentials.CredentialGetter
+	repoKeySelector *corev1api.SecretKeySelector
+	log             logrus.FieldLogger
+	canceling       int32
 }
 
 // NewKopiaUploaderProvider initialized with open or create a repository
@@ -55,12 +57,14 @@ func NewKopiaUploaderProvider(
 	ctx context.Context,
 	credGetter *credentials.CredentialGetter,
 	backupRepo *velerov1api.BackupRepository,
+	repoKeySelector *corev1api.SecretKeySelector,
 	log logrus.FieldLogger,
 ) (Provider, error) {
 	kp := &kopiaProvider{
-		requestorType: requestorType,
-		log:           log,
-		credGetter:    credGetter,
+		requestorType:   requestorType,
+		log:             log,
+		credGetter:      credGetter,
+		repoKeySelector: repoKeySelector,
 	}
 	//repoUID which is used to generate kopia repository config with unique directory path
 	repoUID := string(backupRepo.GetUID())
@@ -198,7 +202,14 @@ func (kp *kopiaProvider) GetPassword(param any) (string, error) {
 	if kp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
-	rawPass, err := kp.credGetter.FromSecret.Get(repokeys.RepoKeySelector())
+
+	// Use the BSL-specific key selector if available, otherwise fall back to legacy shared key
+	selector := kp.repoKeySelector
+	if selector == nil {
+		selector = repokeys.RepoKeySelector()
+	}
+
+	rawPass, err := kp.credGetter.FromSecret.Get(selector)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

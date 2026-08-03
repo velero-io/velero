@@ -1502,7 +1502,7 @@ func TestDeleteOldMaintenanceJobWithConfigMap(t *testing.T) {
 			}
 
 			repoLocker := repository.NewRepoLocker()
-			mgr := repomanager.NewManager("", crClient, repoLocker, nil, nil, nil)
+			mgr := repomanager.NewManager("", crClient, repoLocker, nil, nil, nil, nil)
 
 			repoMaintenanceConfigName := ""
 			if test.repoMaintenanceJob != nil {
