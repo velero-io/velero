@@ -126,6 +126,11 @@ func TestDeployment(t *testing.T) {
 			},
 		},
 	}, deploy.Spec.Template.Spec.Affinity)
+
+	deploy = Deployment("velero", WithServerArgs([]string{"--log-level", "debug"}))
+	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 3)
+	assert.Equal(t, "--log-level", deploy.Spec.Template.Spec.Containers[0].Args[1])
+	assert.Equal(t, "debug", deploy.Spec.Template.Spec.Containers[0].Args[2])
 }
 
 func TestDeploymentWithPriorityClassName(t *testing.T) {

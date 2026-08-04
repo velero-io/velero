@@ -96,6 +96,7 @@ type Options struct {
 	Apply                           bool
 	ServerPriorityClassName         string
 	NodeAgentPriorityClassName      string
+	ServerArgs                      flag.StringArray
 }
 
 // BindFlags adds command line values to the options struct.
@@ -219,6 +220,11 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 		o.NodeAgentPriorityClassName,
 		"Priority class name for the node agent daemonset. Optional.",
 	)
+	flags.Var(
+		&o.ServerArgs,
+		"server-args",
+		"Additional arguments to pass to the Velero server pod. Optional.",
+	)
 }
 
 // NewInstallOptions instantiates a new, default InstallOptions struct.
@@ -341,6 +347,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		NodeAgentDisableHostPath:        o.NodeAgentDisableHostPath,
 		ServerPriorityClassName:         o.ServerPriorityClassName,
 		NodeAgentPriorityClassName:      o.NodeAgentPriorityClassName,
+		ServerArgs:                      o.ServerArgs,
 	}, nil
 }
 

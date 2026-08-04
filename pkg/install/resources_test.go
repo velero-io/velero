@@ -246,3 +246,41 @@ func TestAllResourcesWithPriorityClassName(t *testing.T) {
 		})
 	}
 }
+
+func TestAllResourcesWithServerArgs(t *testing.T) {
+	options := &VeleroOptions{
+		Namespace:  "velero",
+		ServerArgs: []string{"--log-level", "debug", "--profile", "true"},
+	}
+
+	resources := AllResources(options)
+
+	deploymentFound := false
+
+	for i := range resources.Items {
+		item := resources.Items[i]
+
+		if item.GetKind() == "Deployment" && item.GetName() == "velero" {
+			deploymentFound = true
+
+			containers, found, err := unstructured.NestedSlice(
+				item.Object,
+				"spec", "template", "spec", "containers",
+			)
+			require.NoError(t, err)
+			assert.True(t, found)
+
+			container := containers[0].(map[string]interface{})
+			argsSlice, ok := container["args"].([]interface{})
+			assert.True(t, ok)
+
+			// args should be ["server", "--log-level", "debug", "--profile", "true"]
+			assert.Len(t, argsSlice, 5)
+			assert.Equal(t, "server", argsSlice[0])
+			assert.Equal(t, "--log-level", argsSlice[1])
+			assert.Equal(t, "debug", argsSlice[2])
+		}
+	}
+
+	assert.True(t, deploymentFound, "Deployment should be present in resources")
+}

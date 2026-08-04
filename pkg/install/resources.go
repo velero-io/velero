@@ -277,6 +277,7 @@ type VeleroOptions struct {
 	NodeAgentDisableHostPath        bool
 	ServerPriorityClassName         string
 	NodeAgentPriorityClassName      string
+	ServerArgs                      []string
 }
 
 func AllCRDs() *unstructured.UnstructuredList {
@@ -365,6 +366,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		WithKeepLatestMaintenanceJobs(o.KeepLatestMaintenanceJobs),
 		WithItemBlockWorkerCount(o.ItemBlockWorkerCount),
 		WithConcurrentBackups(o.ConcurrentBackups),
+		WithServerArgs(o.ServerArgs),
 	}
 
 	if o.ServerPriorityClassName != "" {

@@ -65,11 +65,18 @@ type podTemplateConfig struct {
 	kubeletRootDir                  string
 	nodeAgentDisableHostPath        bool
 	priorityClassName               string
+	serverArgs                      []string
 }
 
 func WithImage(image string) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.image = image
+	}
+}
+
+func WithServerArgs(args []string) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.serverArgs = args
 	}
 }
 
@@ -266,7 +273,6 @@ func WithNodeAgentDisableHostPath(disable bool) podTemplateOption {
 }
 
 func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployment {
-	// TODO: Add support for server args
 	c := &podTemplateConfig{
 		image: velero.DefaultVeleroImage(),
 	}
@@ -282,6 +288,10 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 	}
 
 	args := []string{"server"}
+	if len(c.serverArgs) > 0 {
+		args = append(args, c.serverArgs...)
+	}
+
 	if len(c.features) > 0 {
 		args = append(args, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
 	}
