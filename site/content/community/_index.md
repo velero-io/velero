@@ -9,7 +9,7 @@ If you’re a newcomer, check out the “[Good first issue](https://github.com/v
 
 If you are ready to jump in and test, add code, or help with documentation, follow the instructions on our [Start contributing](https://velero.io/docs/main/start-contributing/) documentation for guidance on how to setup Velero for development.
 
-You can follow the work we do, see our milestones, and our backlog on our [GitHub project boards](https://github.com/velero-io/velero/projects).
+You can follow the work we do via our [GitHub milestones](https://github.com/velero-io/velero/milestones) and the project [Roadmap](https://github.com/velero-io/velero/wiki/Roadmap).
 
 * Follow us on Twitter at [@projectvelero](https://twitter.com/projectvelero)
 * Join our Kubernetes Slack channel and talk to over 800 other community members: [#velero-users](https://kubernetes.slack.com/messages/velero-users)
