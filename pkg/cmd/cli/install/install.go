@@ -383,7 +383,7 @@ This is useful as a starting point for more customized installations.
 
   # velero install --provider gcp --plugins velero/velero-plugin-for-gcp:v1.0.0 --bucket gcp-backups --secret-file ./gcp-creds.json --node-agent-pod-cpu-request=1000m --node-agent-pod-cpu-limit=5000m --node-agent-pod-mem-request=512Mi --node-agent-pod-mem-limit=1024Mi
 
-  # velero install --provider azure --plugins velero/velero-plugin-for-microsoft-azure:v1.0.0 --bucket $BLOB_CONTAINER --secret-file ./credentials-velero --backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_ID[,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID] --snapshot-location-config apiTimeout=<YOUR_TIMEOUT>[,resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID]`,
+  # velero install --provider azure --plugins velero/velero-plugin-for-microsoft-azure:v1.0.0 --bucket $BLOB_CONTAINER --secret-file ./credentials-velero --backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_NAME[,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID] --snapshot-location-config apiTimeout=<YOUR_TIMEOUT>[,resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID]`,
 		Run: func(c *cobra.Command, args []string) {
 			cmd.CheckError(o.Complete(args, f))
 			cmd.CheckError(o.Validate(c, args, f))
