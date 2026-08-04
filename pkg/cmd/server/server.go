@@ -361,6 +361,10 @@ func (s *server) run() error {
 		return err
 	}
 
+	if err := s.validateCRDSchemas(); err != nil {
+		return err
+	}
+
 	s.checkNodeAgent()
 
 	if err := s.initRepoManager(); err != nil {
