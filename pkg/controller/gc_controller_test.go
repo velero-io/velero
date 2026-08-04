@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -152,7 +153,7 @@ func TestGCReconcile(t *testing.T) {
 
 			if test.expectedGCFailureLabel != "" {
 				updatedBackup := &velerov1api.Backup{}
-				assert.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}, updatedBackup))
+				require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}, updatedBackup))
 				assert.Equal(t, test.expectedGCFailureLabel, updatedBackup.Labels[garbageCollectionFailure])
 			}
 		})
