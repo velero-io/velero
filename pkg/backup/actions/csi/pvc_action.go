@@ -42,6 +42,7 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
@@ -535,6 +536,12 @@ func newDataUpload(
 	vsc *snapshotv1api.VolumeSnapshotContent,
 	fsType string,
 ) *velerov2alpha1.DataUpload {
+	parentSnapshot := ""
+
+	if backup.Spec.BackupType == velerov1api.BackupTypeFull {
+		parentSnapshot = veleroshared.DataUploadParentSnapshotNone
+	}
+
 	dataUpload := &velerov2alpha1.DataUpload{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: velerov2alpha1.SchemeGroupVersion.String(),
@@ -572,6 +579,7 @@ func newDataUpload(
 			SourceNamespace:       pvc.Namespace,
 			OperationTimeout:      backup.Spec.CSISnapshotTimeout,
 			SourceFSType:          fsType,
+			ParentSnapshot:        parentSnapshot,
 		},
 	}
 

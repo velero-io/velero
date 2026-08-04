@@ -16,23 +16,21 @@ limitations under the License.
 
 package datamover
 
-import "fmt"
+import (
+	"fmt"
 
-const (
-	DataMoverTypeVeleroFs    string = "velero-fs"
-	DataMoverTypeVeleroBlock string = "velero-block"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
+	datamoverutil "github.com/vmware-tanzu/velero/pkg/util/datamover"
 )
 
 func GetUploaderType(dataMover string) string {
-	if dataMover == "" || dataMover == "velero" {
-		return "kopia"
+	if datamoverutil.IsVeleroFSDataMover(dataMover) {
+		return uploader.KopiaType
+	} else if datamoverutil.IsVeleroBlockDataMover(dataMover) {
+		return uploader.BlockType
 	} else {
 		return dataMover
 	}
-}
-
-func IsBuiltInDataMover(dataMover string) bool {
-	return dataMover == "" || dataMover == "velero"
 }
 
 func GetRealSource(sourceNamespace string, pvcName string) string {

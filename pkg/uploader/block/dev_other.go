@@ -27,3 +27,7 @@ import (
 func openBlockDevice(_ string, _ bool) (*os.File, error) {
 	return nil, fmt.Errorf("block mode is not supported for non-linux platforms")
 }
+
+func blkZeroOut(_ *os.File, _ int64, _ int64) error {
+	return fmt.Errorf("block mode is not supported for non-linux platforms")
+}

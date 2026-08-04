@@ -33,8 +33,8 @@ import (
 	clientTesting "k8s.io/client-go/testing"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/datamover"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 

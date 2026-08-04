@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 
@@ -753,6 +754,29 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			apiResources: []*test.APIResource{test.ServiceAccounts()},
 			want:         map[*test.APIResource][]string{test.ServiceAccounts(): {"ns-1/sa-1"}},
 		},
+		{
+			// Regression for #9957: VSC must not be force-included via resourceMustHave
+			// when the restore only selects unrelated resource types.
+			name:    "volumesnapshotcontents are not force-included for selective resource restores",
+			restore: defaultRestore().IncludedResources("storageclasses").IncludeClusterResources(true).Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("storageclasses.storage.k8s.io",
+					builder.ForStorageClass("sc-1").Result(),
+				).
+				AddItems("volumesnapshotcontents.snapshot.storage.k8s.io",
+					builder.ForVolumeSnapshotContent("vsc-1").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.StorageClasses(),
+				test.VolumeSnapshotContents(),
+			},
+			want: map[*test.APIResource][]string{
+				test.StorageClasses():         {"/sc-1"},
+				test.VolumeSnapshotContents(): nil,
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -764,6 +788,10 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			}
 			require.NoError(t, h.restorer.discoveryHelper.Refresh())
 
+			// We need to fetch the policies using the actual function
+			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
+			require.NoError(t, err)
+
 			data := &Request{
 				Log:              h.log,
 				Restore:          tc.restore,
@@ -771,6 +799,7 @@ func TestRestoreResourceFiltering(t *testing.T) {
 				PodVolumeBackups: nil,
 				VolumeSnapshots:  nil,
 				BackupReader:     tc.tarball,
+				ResPolicies:      resPolicies,
 			}
 			warnings, errs := h.restorer.Restore(
 				data,
@@ -2144,6 +2173,102 @@ func TestRestoreActionAdditionalItems(t *testing.T) {
 				test.PVs():  nil,
 			},
 		},
+		{
+			name:    "must-include annotation bypasses resource exclusion for additional items",
+			restore: defaultRestore().IncludedResources("pods").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				Done(),
+			apiResources: []*test.APIResource{test.Pods(), test.PVs()},
+			actions: []riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-1"},
+				test.PVs():  {"/pv-1"},
+			},
+		},
+		{
+			name:         "must-include annotation bypasses namespace exclusion for additional items",
+			restore:      defaultRestore().IncludedNamespaces("ns-1").Result(),
+			backup:       defaultBackup().Result(),
+			tarball:      test.NewTarWriter(t).AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).Done(),
+			apiResources: []*test.APIResource{test.Pods()},
+			actions: []riav2.RestoreItemAction{
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedNamespaces: []string{"ns-1"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.Pods, Namespace: "ns-2", Name: "pod-2"},
+							},
+						}, nil
+					},
+				},
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-1", "ns-2/pod-2"},
+			},
+		},
+		{
+			name:    "must-include annotation bypasses IncludeClusterResources=false for additional items",
+			restore: defaultRestore().IncludeClusterResources(false).Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				Done(),
+			apiResources: []*test.APIResource{test.Pods(), test.PVs()},
+			actions: []riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-1"},
+				test.PVs():  {"/pv-1"},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -2172,6 +2297,370 @@ func TestRestoreActionAdditionalItems(t *testing.T) {
 			assertAPIContents(t, h, tc.want)
 		})
 	}
+}
+
+// TestRestoreMustIncludeAdditionalItems covers restore must-include edge cases beyond the
+// basic filter-bypass cases in TestRestoreActionAdditionalItems.
+func TestRestoreMustIncludeAdditionalItems(t *testing.T) {
+	t.Run("must-include annotation is stripped from the restored item", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						annotations["keep-me"] = "yes"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{UpdatedItem: item}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+
+		got, err := h.DynamicClient.Resource(test.Pods().GVR()).Namespace("ns-1").Get(t.Context(), "pod-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		annotations := got.GetAnnotations()
+		assert.NotContains(t, annotations, velerov1api.MustIncludeAdditionalItemRestoreAnnotation)
+		assert.Equal(t, "yes", annotations["keep-me"])
+	})
+
+	t.Run("non-true must-include annotation is stripped without bypassing filters", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+		h.AddItems(t, test.PVs())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("pods").Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "True"
+						annotations["keep-me"] = "yes"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.Pods(): {"ns-1/pod-1"},
+			test.PVs():  nil,
+		})
+
+		got, err := h.DynamicClient.Resource(test.Pods().GVR()).Namespace("ns-1").Get(t.Context(), "pod-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		annotations := got.GetAnnotations()
+		assert.NotContains(t, annotations, velerov1api.MustIncludeAdditionalItemRestoreAnnotation)
+		assert.Equal(t, "yes", annotations["keep-me"])
+	})
+
+	t.Run("SkipRestore supersedes must-include annotation and skips additional items", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+		h.AddItems(t, test.PVs())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("pods").Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							SkipRestore: true,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.Pods(): nil,
+			test.PVs():  nil,
+		})
+	})
+
+	t.Run("must-include does not restore additional items missing from the backup tarball", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+		h.AddItems(t, test.PVs())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("pods").Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-missing"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, errs)
+		assertNonEmptyResults(t, "warning", warnings)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.Pods(): {"ns-1/pod-1"},
+			test.PVs():  nil,
+		})
+	})
+
+	t.Run("transitive must-include requires each RIA level to re-set the annotation", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+		h.AddItems(t, test.PVs())
+		h.AddItems(t, test.PVCs())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("pods").Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-2", "pvc-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				// Parent pod RIA force-includes the excluded PV.
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"pods"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+				// Child PV RIA also re-sets the annotation to force-include an excluded PVC.
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"persistentvolumes"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumeClaims, Namespace: "ns-2", Name: "pvc-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.Pods(): {"ns-1/pod-1"},
+			test.PVs():  {"/pv-1"},
+			test.PVCs(): {"ns-2/pvc-1"},
+		})
+	})
+
+	t.Run("without re-annotating, transitive additional items still respect filters", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.Pods())
+		h.AddItems(t, test.PVs())
+		h.AddItems(t, test.PVCs())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("pods").Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+				AddItems("persistentvolumes", builder.ForPersistentVolume("pv-1").Result()).
+				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-2", "pvc-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"pods"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumes, Name: "pv-1"},
+							},
+						}, nil
+					},
+				},
+				// Child PV RIA returns an additional PVC but does NOT set must-include.
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"persistentvolumes"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: input.Item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.PersistentVolumeClaims, Namespace: "ns-2", Name: "pvc-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.Pods(): {"ns-1/pod-1"},
+			test.PVs():  {"/pv-1"},
+			test.PVCs(): nil,
+		})
+	})
+
+	t.Run("VS must-include restores excluded VolumeSnapshotContent additional item", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.VolumeSnapshots())
+		h.AddItems(t, test.VolumeSnapshotContents())
+
+		data := &Request{
+			Log:     h.log,
+			Restore: defaultRestore().IncludedResources("volumesnapshots.snapshot.storage.k8s.io").IncludeClusterResources(true).Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("volumesnapshots.snapshot.storage.k8s.io", builder.ForVolumeSnapshot("ns-1", "vs-1").Result()).
+				AddItems("volumesnapshotcontents.snapshot.storage.k8s.io", builder.ForVolumeSnapshotContent("vsc-1").Result()).
+				Done(),
+		}
+		warnings, errs := h.restorer.Restore(
+			data,
+			[]riav2.RestoreItemAction{
+				&pluggableAction{
+					selector: velero.ResourceSelector{IncludedResources: []string{"volumesnapshots.snapshot.storage.k8s.io"}},
+					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+						item := input.Item.(*unstructured.Unstructured)
+						annotations := item.GetAnnotations()
+						if annotations == nil {
+							annotations = map[string]string{}
+						}
+						annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+						item.SetAnnotations(annotations)
+						return &velero.RestoreItemActionExecuteOutput{
+							UpdatedItem: item,
+							AdditionalItems: []velero.ResourceIdentifier{
+								{GroupResource: kuberesource.VolumeSnapshotContents, Name: "vsc-1"},
+							},
+						}, nil
+					},
+				},
+			},
+			nil,
+		)
+
+		assertEmptyResults(t, warnings, errs)
+		assertAPIContents(t, h, map[*test.APIResource][]string{
+			test.VolumeSnapshots():        {"ns-1/vs-1"},
+			test.VolumeSnapshotContents(): {"/vsc-1"},
+		})
+	})
 }
 
 // TestShouldRestore runs the ShouldRestore function for various permutations of
@@ -4237,6 +4726,87 @@ func TestDetermineRestoreStatus(t *testing.T) {
 			result := determineRestoreStatus(obj, includesExcludes, "testGroupResource", log)
 
 			assert.Equal(t, test.expectedDecision, result)
+		})
+	}
+}
+
+func TestHasPodVolumeBackup(t *testing.T) {
+	pvUnstructured := func() *unstructured.Unstructured {
+		pv := &corev1api.PersistentVolume{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolume"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pv",
+			},
+			Spec: corev1api.PersistentVolumeSpec{
+				ClaimRef: &corev1api.ObjectReference{
+					Namespace: "test-ns",
+					Name:      "test-pvc",
+				},
+			},
+		}
+		obj, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(pv)
+		return &unstructured.Unstructured{Object: obj}
+	}
+
+	makePVB := func(phase velerov1api.PodVolumeBackupPhase, snapshotID string) *velerov1api.PodVolumeBackup {
+		return &velerov1api.PodVolumeBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"velero.io/pvc-name": "test-pvc",
+				},
+			},
+			Spec: velerov1api.PodVolumeBackupSpec{
+				Pod: corev1api.ObjectReference{
+					Namespace: "test-ns",
+				},
+			},
+			Status: velerov1api.PodVolumeBackupStatus{
+				Phase:      phase,
+				SnapshotID: snapshotID,
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		pvbs     []*velerov1api.PodVolumeBackup
+		expected bool
+	}{
+		{
+			name:     "no pvbs",
+			pvbs:     nil,
+			expected: false,
+		},
+		{
+			name:     "completed pvb with snapshot ID",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseCompleted, "snap-123")},
+			expected: true,
+		},
+		{
+			name:     "in-progress pvb should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseInProgress, "")},
+			expected: false,
+		},
+		{
+			name:     "completed pvb with empty snapshot ID should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseCompleted, "")},
+			expected: false,
+		},
+		{
+			name:     "failed pvb should not match",
+			pvbs:     []*velerov1api.PodVolumeBackup{makePVB(velerov1api.PodVolumeBackupPhaseFailed, "")},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := &restoreContext{
+				podVolumeBackups: tc.pvbs,
+				log:              logrus.New(),
+			}
+			result := hasPodVolumeBackup(pvUnstructured(), ctx)
+			assert.Equal(t, tc.expected, result)
 		})
 	}
 }

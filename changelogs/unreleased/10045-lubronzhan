@@ -1,0 +1,1 @@
+Fix issue #5836, respect schedule.spec.template.metadata.annotations to override annotations copied from the Schedule to Backup objects, matching the existing behavior for labels

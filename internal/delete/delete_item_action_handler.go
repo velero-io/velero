@@ -25,6 +25,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -80,6 +81,15 @@ func InvokeDeleteActions(ctx *Context) error {
 	}
 	processdResources := sets.NewString()
 
+	// deleteErrs collects errors returned by DeleteItemAction plugins. We keep
+	// looping over the remaining items even when a plugin fails, but we must not
+	// swallow these errors: a DIA failure means the private artifacts it manages
+	// (e.g. data mover repository snapshots) may not have been deleted. If we
+	// returned nil here, the caller would proceed to delete the backup and its
+	// metadata, orphaning those artifacts forever. Returning the aggregated error
+	// makes the caller fail the deletion so it can be retried.
+	var deleteErrs []error
+
 	for resource := range backupResources {
 		groupResource := schema.ParseGroupResource(resource)
 
@@ -124,15 +134,19 @@ func InvokeDeleteActions(ctx *Context) error {
 						Item:   obj,
 						Backup: ctx.Backup,
 					})
-					// Since we want to keep looping even on errors, log them instead of just returning.
+					// Keep looping even on errors so a single failing plugin
+					// doesn't prevent the remaining items from being cleaned up,
+					// but record the error so it can be surfaced to the caller.
 					if err != nil {
 						itemLog.WithError(err).Error("plugin error")
+						deleteErrs = append(deleteErrs, errors.Wrapf(err,
+							"error executing DeleteItemAction for %s %s", groupResource.String(), obj.GetName()))
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return kubeerrs.NewAggregate(deleteErrs)
 }
 
 // getApplicableActions takes resolved DeleteItemActions and filters them for a given group/resource and namespace.

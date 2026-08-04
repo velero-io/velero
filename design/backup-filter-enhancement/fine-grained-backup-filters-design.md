@@ -41,7 +41,7 @@ This creates three critical gaps for common backup scenarios:
 - Maintain full backward compatibility — existing backups with no `namespacedFilterPolicies` behave exactly as they do today
 - Define clear precedence rules for how per-namespace filters interact with global filters
 - Add corresponding validation within the Resource Policies validation pipeline using existing Velero wildcard validation functions
-- Update `velero backup describe` output to display per-namespace filter information when present
+- Update `velero backup describe` output to display the referenced ResourcePolicy ConfigMap name when configured
 - Ensure the restore process works correctly with backups produced by namespace-scoped filters, without requiring restore-side code changes in the initial phase
 
 ## Non-Goals
@@ -77,7 +77,8 @@ clusterScopedFilterPolicy:
       names: ["my-app-*"]
     - kinds: [CustomResourceDefinition]
       labelSelector:
-        app: my-app
+        matchLabels:
+          app: my-app
 namespacedFilterPolicies:
   # NEW: per-namespace filter overrides
   - namespaces:
@@ -85,7 +86,8 @@ namespacedFilterPolicies:
     resourceFilters:
       - kinds: [ConfigMap, Secret, Deployment]
         labelSelector:
-          app: my-app
+          matchLabels:
+            app: my-app
   - namespaces:
       - ns-b
     resourceFilters:
@@ -93,7 +95,8 @@ namespacedFilterPolicies:
         names: [app-1, app-2]
       - kinds: [ConfigMap]
         labelSelector:
-          app: my-service
+          matchLabels:
+            app: my-service
 ```
 
 All four sections coexist in the same ConfigMap. They are independent — `volumePolicies` handles volume backup strategy, `includeExcludePolicy` handles global resource type filtering, `clusterScopedFilterPolicy` handles cluster-scoped resource filtering by kind/name/label, and `namespacedFilterPolicies` handles per-namespace, per-kind overrides.
@@ -107,7 +110,9 @@ namespacedFilterPolicies:
   - namespaces: [ns-a]
     resourceFilters:
       - kinds: [ConfigMap, Secret]        # these kinds share a selector
-        labelSelector: {app: my-app}
+        labelSelector:
+          matchLabels:
+            app: my-app
         names: ["app-*"]
       - kinds: [Deployment]           # this kind has its own selector
         names: [workload-1, workload-2]
@@ -115,6 +120,24 @@ namespacedFilterPolicies:
 ```
 
 This model has one way to express filters — there is no ambiguity about how to structure the configuration. Only resource kinds listed in `resourceFilters` entries are included in the backup for the matched namespaces; unlisted kinds are implicitly excluded.
+
+#### Label selectors (`matchLabels` / `matchExpressions`)
+
+`labelSelector` and each entry of `orLabelSelectors` use the standard Kubernetes selector shape (same as `BackupSpec.labelSelector`):
+
+```yaml
+labelSelector:
+  matchLabels:
+    app: my-app
+  matchExpressions:
+    - key: environment
+      operator: In
+      values: [prod, staging]
+    - key: do-not-backup
+      operator: DoesNotExist
+```
+
+Supported `matchExpressions` operators: `In`, `NotIn`, `Exists`, `DoesNotExist`. Prefer `In` for value-OR on one key; use `orLabelSelectors` for OR across independent multi-key groups. `labelSelector` and `orLabelSelectors` cannot co-exist in the same `resourceFilters` entry.
 
 #### Catch-All Resource Filter (Empty `kinds` or `["*"]`)
 
@@ -319,9 +342,10 @@ resourceFilters:
 resourceFilters:
   - kinds: ["Pod"]
     labelSelector:
-      "invalid label key!": "value"  # invalid key syntax
+      matchLabels:
+        "invalid label key!": "value"  # invalid key syntax
 ```
-**Behavior:** Validation error during backup creation when `labels.SelectorFromSet()` fails:
+**Behavior:** Validation error during backup creation when `metav1.LabelSelectorAsSelector()` fails:
 ```
 namespacedFilterPolicies[0].resourceFilters[0]: invalid label selector: "invalid label key!" is not a valid label key
 ```
@@ -340,7 +364,33 @@ This is consistent with how other discovery-dependent features handle this error
 
 ## ResourceFilter Field Notes
 
-**`labelSelector`** supports equality-based selectors only (`key=value`). Set-based requirements (e.g., `environment in (prod, staging)`) are not supported. To match resources with any of several label combinations, use `orLabelSelectors` with multiple maps — each map is AND-evaluated internally, and the maps are OR-evaluated across the list. `labelSelector` and `orLabelSelectors` cannot co-exist in the same entry.
+**`labelSelector`** uses the standard Kubernetes shape: `matchLabels` (equality) and `matchExpressions` (set-based: `In`, `NotIn`, `Exists`, `DoesNotExist`). All requirements within one selector are AND-ed. Example:
+
+```yaml
+labelSelector:
+  matchLabels:
+    app: my-app
+  matchExpressions:
+    - key: environment
+      operator: In
+      values: [prod, staging]
+    - key: do-not-backup
+      operator: DoesNotExist
+```
+
+**`orLabelSelectors`** is a list of the same selector shape. Match if **any** entry matches (AND within each entry, OR across the list). Prefer `In` for value-OR on one key; use `orLabelSelectors` for OR of independent multi-key groups. `labelSelector` and `orLabelSelectors` cannot co-exist in the same entry.
+
+```yaml
+orLabelSelectors:
+  - matchLabels:
+      tier: frontend
+    matchExpressions:
+      - key: track
+        operator: In
+        values: [canary]
+  - matchLabels:
+      tier: backend
+```
 
 **`names` / `excludedNames`** accept exact resource names or glob patterns. If `names` is empty, all resource names are included (subject to label filters). `excludedNames` takes precedence over `names` when a name matches both.
 
@@ -420,7 +470,8 @@ data:
         resourceFilters:
           - kinds: [ConfigMap, Secret, Deployment]
             labelSelector:
-              app: my-app
+              matchLabels:
+                app: my-app
       # ns-b has no filter policy entry, so global filters apply (include everything)
 ```
 
@@ -462,10 +513,12 @@ data:
         resourceFilters:
           - kinds: [Deployment]
             labelSelector:
-              app: production-workload-1
+              matchLabels:
+                app: production-workload-1
           - kinds: [StatefulSet]
             labelSelector:
-              app: production-workload-2
+              matchLabels:
+                app: production-workload-2
 ```
 
 ### Per-Kind Exact Names
@@ -561,7 +614,8 @@ data:
         resourceFilters:
           - kinds: ["*"]          # catch-all: applies to every kind not listed below
             labelSelector:
-              backup: "true"     # back up any resource carrying this label
+              matchLabels:
+                backup: "true"     # back up any resource carrying this label
 ```
 
 **Result:** Every resource type in `production` that has the label `backup=true` is backed up. Resources without that label are excluded. No kind enumeration is required.
@@ -589,7 +643,8 @@ data:
             names: [db-credentials, tls-cert]  # these exact Secrets by name
           - kinds: ["*"]                        # catch-all for all other kinds
             labelSelector:
-              backup: "true"                   # back up by label
+              matchLabels:
+                backup: "true"                   # back up by label
 ```
 
 **Result:**
@@ -666,7 +721,8 @@ data:
             names: [workload-1, workload-2]
           - kinds: [StatefulSet]
             labelSelector:
-              app: my-app
+              matchLabels:
+                app: my-app
           - kinds: [ConfigMap, Secret]
             names: ["app-*"]
             excludedNames: ["*-tmp", "*-debug"]
@@ -697,7 +753,7 @@ spec:
 
 ### `velero backup describe`
 
-The output is extended to display namespace-scoped filter policies when present in the ResourcePolicy ConfigMap:
+The output displays the referenced ResourcePolicy ConfigMap name when configured on the backup. It intentionally avoids resolving and displaying the live ConfigMap contents, because the ConfigMap content in the cluster may be modified or deleted after the backup execution, which could lead to displaying out-of-sync or inaccurate information:
 
 ```
 Name:         selective-backup
@@ -721,46 +777,9 @@ Resources:
 
 Label selector:  <none>
 
-Resource Policy:  backup-filter-policy
-
-Namespace-Scoped Filter Policies:
-  ns-a:
-    Resource Filters:
-      ConfigMap, Secret, Deployment:
-        Label selector:     app=my-app
-        Included names:     <none>
-        Excluded names:     <none>
-  target-namespace:
-    Resource Filters:
-      Deployment:
-        Label selector:     app=production-workload-1
-        Included names:     <none>
-        Excluded names:     <none>
-      StatefulSet:
-        Label selector:     app=production-workload-2
-        Included names:     <none>
-        Excluded names:     <none>
-  production:
-    Resource Filters:
-      Deployment:
-        Label selector:     <none>
-        Included names:     [api-server, worker]
-        Excluded names:     <none>
-      <catch-all> (all other kinds):
-        Label selector:     backup=true
-        Included names:     <none>
-        Excluded names:     <none>
-
-Fine-Grained Global Filter Policy:
-  Resource Filters:
-    ClusterRole, ClusterRoleBinding:
-      Label selector:     <none>
-      Included names:     [my-app-*]
-      Excluded names:     <none>
-    CustomResourceDefinition:
-      Label selector:     app=my-app
-      Included names:     <none>
-      Excluded names:     <none>
+Resource policies:
+  Type:  configmap
+  Name:  backup-filter-policy
 
 Storage Location:  default
 
@@ -795,7 +814,7 @@ Notes:
 - Global filters (--include-resources, --selector, etc.) apply to all included namespaces
 - Namespace-scoped filters defined in --resource-policies-configmap override global filters for matching namespaces
 - Fine-grained global filter policies defined in --resource-policies-configmap override global filters for cluster-scoped resources
-- Use 'velero backup describe' to view resolved filter policies after backup creation
+- Use 'velero backup describe' to view the referenced ResourcePolicy ConfigMap name after backup creation
 ```
 
 ### CLI Integration Points
@@ -808,12 +827,12 @@ Notes:
 
 **Help and Discovery:**
 - `velero backup create --help` includes updated filtering documentation
-- `velero backup describe` shows resolved filter policies for troubleshooting
+- `velero backup describe` shows the referenced ResourcePolicy ConfigMap name
 - Validation errors include ConfigMap field references for easy debugging
 
 **Configuration Discovery:**
 - `velero backup create --help` includes namespace-scoped filtering documentation
-- `velero backup describe` shows resolved filter policies for verification
+- `velero backup describe` shows the referenced ResourcePolicy ConfigMap name for verification
 
 ## User Perspective
 
@@ -823,7 +842,7 @@ This design provides fine-grained, per-namespace, per-kind control over backup f
 - **For users adopting namespace-scoped filter policies**: Create a ConfigMap with the `namespacedFilterPolicies` section and reference it via `BackupSpec.ResourcePolicy` (or the existing `--resource-policies-configmap` flag). The backup will selectively include/exclude resources per namespace based on the filter rules.
 - **For users already using ResourcePolicy for volume policies**: Add the `namespacedFilterPolicies` section to the same ConfigMap. Both volume policies and namespace-scoped filters coexist.
 - **For restore from a namespace-filtered backup**: No changes to restore workflow. Restore processes whatever is in the archive. Users can use existing `RestoreSpec.IncludedNamespaces` for additional filtering at restore time.
-- **`velero backup describe` output**: Extended to show per-namespace, per-kind filter details when the ResourcePolicy ConfigMap contains `namespacedFilterPolicies`.
+- **`velero backup describe` output**: Displays the referenced ResourcePolicy ConfigMap name when configured on the backup.
 - **Validation errors**: Reported at backup start when the ResourcePolicy ConfigMap contains invalid `namespacedFilterPolicies` configurations. Consistent with how volume policy validation errors are reported today.
 
 ## Alternatives Considered

@@ -501,6 +501,7 @@ By far, `velero install` supports the following parameters to specify the extern
 * --backup-repository-configmap: [backup repository configuration document][15]
 * --node-agent-configmap: [node-agent concurrency configuration document][16], and there are some other documents specify other parts of node-agent-config.
 * --repo-maintenance-job-configmap: [repository maintenance configuration document][17]
+* --default-resource-modifier-configmap: [default restore resource modifier document][18]. When set, the referenced ConfigMap's resource modifier rules apply automatically to all restores that don't specify a per-restore modifier.
 
 From v1.17, Velero adds verification for the ConfigMaps in CLI and server side, which means `velero install` CLI will fail and velero server and node-agent pod will exit if the specified ConfigMaps don't exist or are invalid.
 
@@ -539,3 +540,4 @@ The new workflow is:
 [15]: backup-repository-configuration.md
 [16]: node-agent-concurrency.md
 [17]: repository-maintenance.md
+[18]: restore-resource-modifiers.md#default-resource-modifiers

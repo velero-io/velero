@@ -881,6 +881,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.config.DisableInformerCache,
 			s.crClient,
 			s.config.ResourceTimeout,
+			s.config.DefaultResourceModifierConfigMap,
 		)
 
 		if err = r.SetupWithManager(s.mgr); err != nil {

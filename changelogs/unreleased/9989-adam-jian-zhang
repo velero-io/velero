@@ -1,0 +1,1 @@
+Fix globalExcludes lookup, it should be lookup against lower case

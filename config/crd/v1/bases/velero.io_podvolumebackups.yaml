@@ -11,6 +11,8 @@ spec:
     kind: PodVolumeBackup
     listKind: PodVolumeBackupList
     plural: podvolumebackups
+    shortNames:
+    - pvb
     singular: podvolumebackup
   scope: Namespaced
   versions:

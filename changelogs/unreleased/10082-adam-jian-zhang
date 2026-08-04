@@ -1,0 +1,1 @@
+Add restore.velero.io/must-include-additional-items so RestoreItemActions can opt in to bypassing global restore filters for AdditionalItems (mirrors the backup-side must-include annotation; no default behavior change for existing restores/plugins)

@@ -15,8 +15,9 @@ permissions:
 jobs:
   # Automatically labels PRs based on file globs in the change.
   triage:
+    if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/labeler@v5
+      - uses: actions/labeler@v7
         with:
           configuration-path: .github/labeler.yml

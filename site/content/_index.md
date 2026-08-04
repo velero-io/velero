@@ -10,7 +10,7 @@ hero:
   content: Velero is an open source tool to safely backup and restore, perform disaster recovery, and migrate Kubernetes cluster resources and persistent volumes.
   cta_link1:
     text: Latest Release Information
-    url: /blog/Velero-1.11/
+    url: https://github.com/velero-io/velero/releases/latest
   cta_link2:
     text:  Download Velero
     url: https://github.com/velero-io/velero/releases/latest
@@ -32,7 +32,7 @@ secondary_ctas:
     url: /blog/Velero-is-an-Open-Source-Tool-to-Back-up-and-Migrate-Kubernetes-Clusters/ # Velero.io word list : ignore
     content: Learn about Velero and how to protect your Kubernetes resources and volumes.
   cta2:
-    title: How Do You Use Velero?
-    url: https://github.com/velero-io/velero/issues/1327
-    content: See how Velero is helping others and tell the world how you use Velero.
+    title: Join the Velero Community
+    url: /community/
+    content: Connect with other Velero users on Slack, attend community meetings, and contribute to the project.
 ---

@@ -58,6 +58,7 @@ type DeleteBackupRequestStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="BackupName",type="string",JSONPath=".spec.backupName",description="The name of the backup to be deleted"
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="The status of the deletion request"
+// +kubebuilder:resource:shortName=dbr
 
 // DeleteBackupRequest is a request to delete one or more backups.
 type DeleteBackupRequest struct {

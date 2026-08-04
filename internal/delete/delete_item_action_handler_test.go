@@ -17,6 +17,7 @@ limitations under the License.
 package delete
 
 import (
+	"errors"
 	"io"
 	"sort"
 	"testing"
@@ -275,4 +276,55 @@ func TestInvokeDeleteItemActionsWithNoPlugins(t *testing.T) {
 	}
 	err := InvokeDeleteActions(c)
 	require.NoError(t, err)
+}
+
+// failingAction is a DeleteItemAction that always returns an error from Execute.
+// It is used to verify that InvokeDeleteActions surfaces plugin errors instead
+// of swallowing them.
+type failingAction struct {
+	selector velero.ResourceSelector
+	err      error
+	executed int
+}
+
+func (a *failingAction) AppliesTo() (velero.ResourceSelector, error) {
+	return a.selector, nil
+}
+
+func (a *failingAction) Execute(input *velero.DeleteItemActionExecuteInput) error {
+	a.executed++
+	return a.err
+}
+
+func TestInvokeDeleteActionsReturnsPluginErrors(t *testing.T) {
+	fs := test.NewFakeFileSystem()
+	log := logrus.StandardLogger()
+
+	tarball := test.NewTarWriter(t).
+		AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
+		Done()
+
+	action := &failingAction{err: errors.New("could not delete artifact")}
+
+	h := newHarness(t)
+	h.addResource(t, test.Pods())
+
+	c := &Context{
+		Backup:          builder.ForBackup("velero", "velero").Result(),
+		BackupReader:    tarball,
+		Filesystem:      fs,
+		DiscoveryHelper: h.discoveryHelper,
+		Actions:         []velero.DeleteItemAction{action},
+		Log:             log,
+	}
+
+	err := InvokeDeleteActions(c)
+
+	// The plugin error must be surfaced so the caller can fail the deletion
+	// rather than orphaning the artifacts the plugin failed to delete.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not delete artifact")
+	// The loop must keep going: the action should run for every matching item,
+	// not stop at the first failure.
+	assert.Equal(t, 2, action.executed)
 }

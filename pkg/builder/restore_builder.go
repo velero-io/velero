@@ -181,3 +181,9 @@ func (b *RestoreBuilder) ResourcePoliciesConfigmap(name string) *RestoreBuilder 
 	}
 	return b
 }
+
+// SkipDefaultResourceModifier sets whether to skip the server default resource modifier.
+func (b *RestoreBuilder) SkipDefaultResourceModifier(val bool) *RestoreBuilder {
+	b.object.Spec.SkipDefaultResourceModifier = &val
+	return b
+}

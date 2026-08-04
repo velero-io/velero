@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -610,6 +611,18 @@ func buildJob(
 	}
 	if config != nil && len(config.PodLabels) > 0 {
 		for k, v := range config.PodLabels {
+			if k == RepositoryNameLabel {
+				logger.Warnf("Skipping user-provided label with reserved key %q; this label is managed internally by Velero", k)
+				continue
+			}
+			if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+				logger.Warnf("Skipping user-provided label with invalid key %q: %s", k, strings.Join(errs, "; "))
+				continue
+			}
+			if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
+				logger.Warnf("Skipping user-provided label %q with invalid value %q: %s", k, v, strings.Join(errs, "; "))
+				continue
+			}
 			podLabels[k] = v
 		}
 	} else {
@@ -623,6 +636,10 @@ func buildJob(
 	podAnnotations := map[string]string{}
 	if config != nil && len(config.PodAnnotations) > 0 {
 		for k, v := range config.PodAnnotations {
+			if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+				logger.Warnf("Skipping user-provided annotation with invalid key %q: %s", k, strings.Join(errs, "; "))
+				continue
+			}
 			podAnnotations[k] = v
 		}
 	} else {

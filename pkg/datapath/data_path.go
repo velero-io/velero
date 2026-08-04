@@ -57,6 +57,11 @@ type BackupStartParam struct {
 	VolumeID       string
 	ChangeID       string
 	SnapshotID     string
+	CBTService     cbtservice.Service
+}
+
+// RestoreStartParam define the input param for restore start
+type RestoreStartParam struct {
 }
 
 type generalDataPath struct {
@@ -199,6 +204,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 					VolumeID: backupParam.VolumeID,
 					ChangeID: backupParam.ChangeID,
 				},
+				Service: backupParam.CBTService,
 			},
 			source.VolMode,
 			uploaderConfig,
@@ -221,7 +227,7 @@ func (dp *generalDataPath) StartBackup(source AccessPoint, uploaderConfig map[st
 	return nil
 }
 
-func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string) error {
+func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, uploaderConfigs map[string]string, param any) error {
 	if !dp.initialized {
 		return errors.New("data path is not initialized")
 	}

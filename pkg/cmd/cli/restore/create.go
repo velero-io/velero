@@ -85,32 +85,33 @@ Notes:
 }
 
 type CreateOptions struct {
-	BackupName                string
-	ScheduleName              string
-	RestoreName               string
-	RestoreVolumes            flag.OptionalBool
-	PreserveNodePorts         flag.OptionalBool
-	Labels                    flag.Map
-	Annotations               flag.Map
-	IncludeNamespaces         flag.StringArray
-	ExcludeNamespaces         flag.StringArray
-	ExistingResourcePolicy    string
-	IncludeResources          flag.StringArray
-	ExcludeResources          flag.StringArray
-	StatusIncludeResources    flag.StringArray
-	StatusExcludeResources    flag.StringArray
-	NamespaceMappings         flag.Map
-	Selector                  flag.LabelSelector
-	OrSelector                flag.OrLabelSelector
-	IncludeClusterResources   flag.OptionalBool
-	Wait                      bool
-	AllowPartiallyFailed      flag.OptionalBool
-	ItemOperationTimeout      time.Duration
-	ResourceModifierConfigMap string
-	ResourcePoliciesConfigMap string
-	WriteSparseFiles          flag.OptionalBool
-	ParallelFilesDownload     int
-	client                    kbclient.WithWatch
+	BackupName                  string
+	ScheduleName                string
+	RestoreName                 string
+	RestoreVolumes              flag.OptionalBool
+	PreserveNodePorts           flag.OptionalBool
+	Labels                      flag.Map
+	Annotations                 flag.Map
+	IncludeNamespaces           flag.StringArray
+	ExcludeNamespaces           flag.StringArray
+	ExistingResourcePolicy      string
+	IncludeResources            flag.StringArray
+	ExcludeResources            flag.StringArray
+	StatusIncludeResources      flag.StringArray
+	StatusExcludeResources      flag.StringArray
+	NamespaceMappings           flag.Map
+	Selector                    flag.LabelSelector
+	OrSelector                  flag.OrLabelSelector
+	IncludeClusterResources     flag.OptionalBool
+	Wait                        bool
+	AllowPartiallyFailed        flag.OptionalBool
+	ItemOperationTimeout        time.Duration
+	ResourceModifierConfigMap   string
+	ResourcePoliciesConfigMap   string
+	SkipDefaultResourceModifier bool
+	WriteSparseFiles            flag.OptionalBool
+	ParallelFilesDownload       int
+	client                      kbclient.WithWatch
 }
 
 func NewCreateOptions() *CreateOptions {
@@ -163,6 +164,8 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&o.ResourceModifierConfigMap, "resource-modifier-configmap", "", "Reference to the resource modifier configmap that restore will use")
 
 	flags.StringVar(&o.ResourcePoliciesConfigMap, "resource-policies-configmap", "", "Reference to the ConfigMap containing restore resource filter policies")
+
+	flags.BoolVar(&o.SkipDefaultResourceModifier, "skip-default-resource-modifier", false, "Skip applying the server-configured default resource modifier for this restore")
 
 	f = flags.VarPF(&o.WriteSparseFiles, "write-sparse-files", "", "Whether to write sparse files during restoring volumes")
 	f.NoOptDefVal = cmd.TRUE
@@ -360,6 +363,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 				ParallelFilesDownload: o.ParallelFilesDownload,
 			},
 		},
+	}
+
+	if o.SkipDefaultResourceModifier {
+		restore.Spec.SkipDefaultResourceModifier = boolptr.True()
 	}
 
 	if len([]string(o.StatusIncludeResources)) > 0 {

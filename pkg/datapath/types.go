@@ -66,7 +66,7 @@ type AsyncBR interface {
 	StartBackup(source AccessPoint, dataMoverConfig map[string]string, param any) error
 
 	// StartRestore starts an asynchronous data path instance for restore
-	StartRestore(snapshotID string, target AccessPoint, dataMoverConfig map[string]string) error
+	StartRestore(snapshotID string, target AccessPoint, dataMoverConfig map[string]string, param any) error
 
 	// Cancel cancels an asynchronous data path instance
 	Cancel()

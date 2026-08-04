@@ -348,7 +348,7 @@ func (f *fakeFSBR) StartBackup(source datapath.AccessPoint, uploaderConfigs map[
 	return f.startErr
 }
 
-func (f *fakeFSBR) StartRestore(snapshotID string, target datapath.AccessPoint, uploaderConfigs map[string]string) error {
+func (f *fakeFSBR) StartRestore(snapshotID string, target datapath.AccessPoint, uploaderConfigs map[string]string, param any) error {
 	return nil
 }
 

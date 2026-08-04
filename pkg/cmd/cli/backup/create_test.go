@@ -122,6 +122,42 @@ func TestCreateOptions_ValidateFromScheduleFlag(t *testing.T) {
 	})
 }
 
+func TestCreateOptions_ValidateBackupType(t *testing.T) {
+	t.Run("valid backup types", func(t *testing.T) {
+		o := NewCreateOptions()
+
+		o.BackupType = ""
+		err := o.validateBackupType()
+		require.NoError(t, err)
+
+		o.BackupType = "Incremental"
+		err = o.validateBackupType()
+		require.NoError(t, err)
+
+		o.BackupType = "Full"
+		err = o.validateBackupType()
+		require.NoError(t, err)
+
+		o.BackupType = " Incremental "
+		err = o.validateBackupType()
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid backup type", func(t *testing.T) {
+		o := NewCreateOptions()
+
+		o.BackupType = "incremental"
+		err := o.validateBackupType()
+		require.Error(t, err)
+		require.Equal(t, "invalid backup type incremental - valid values are 'Incremental', and 'Full'", err.Error())
+
+		o.BackupType = "invalid"
+		err = o.validateBackupType()
+		require.Error(t, err)
+		require.Equal(t, "invalid backup type invalid - valid values are 'Incremental', and 'Full'", err.Error())
+	})
+}
+
 func TestCreateOptions_BuildBackupFromSchedule(t *testing.T) {
 	o := NewCreateOptions()
 	o.FromSchedule = "test"
@@ -231,6 +267,7 @@ func TestCreateCommand(t *testing.T) {
 		resPoliciesConfigmap := "cm-name-2"
 		dataMover := "velero"
 		parallelFilesUpload := 10
+		backupType := "Incremental"
 		flags := new(flag.FlagSet)
 		o := NewCreateOptions()
 		o.BindFlags(flags)
@@ -260,6 +297,7 @@ func TestCreateCommand(t *testing.T) {
 		flags.Parse([]string{"--resource-policies-configmap", resPoliciesConfigmap})
 		flags.Parse([]string{"--data-mover", dataMover})
 		flags.Parse([]string{"--parallel-files-upload", strconv.Itoa(parallelFilesUpload)})
+		flags.Parse([]string{"--backup-type", backupType})
 		//flags.Parse([]string{"--wait"})
 
 		client := velerotest.NewFakeControllerRuntimeClient(t).(kbclient.WithWatch)
@@ -310,6 +348,7 @@ func TestCreateCommand(t *testing.T) {
 		require.Equal(t, resPoliciesConfigmap, o.ResPoliciesConfigmap)
 		require.Equal(t, dataMover, o.DataMover)
 		require.Equal(t, parallelFilesUpload, o.ParallelFilesUpload)
+		require.Equal(t, backupType, o.BackupType)
 		//assert.Equal(t, true, o.Wait)
 
 		// verify oldAndNewFilterParametersUsedTogether

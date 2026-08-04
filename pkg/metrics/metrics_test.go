@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -455,6 +456,32 @@ func getHistogramCount(t *testing.T, vec *prometheus.HistogramVec, scheduleLabel
 
 	t.Fatalf("Histogram with schedule label '%s' not found", scheduleLabel)
 	return 0
+}
+
+// TestDeleteBackupLastSuccessfulTimestamp verifies that DeleteBackupLastSuccessfulTimestamp
+// removes only the specified schedule's metric.
+func TestDeleteBackupLastSuccessfulTimestamp(t *testing.T) {
+	m := NewServerMetrics()
+
+	now := time.Now()
+	m.SetBackupLastSuccessfulTimestamp("schedule-1", now)
+	m.SetBackupLastSuccessfulTimestamp("schedule-2", now.Add(-time.Hour))
+	m.SetBackupLastSuccessfulTimestamp("", now.Add(-2*time.Hour))
+
+	g := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec)
+	assert.Equal(t, 3, testutil.CollectAndCount(g))
+
+	m.DeleteBackupLastSuccessfulTimestamp("schedule-1")
+	assert.Equal(t, 2, testutil.CollectAndCount(g))
+	assert.Equal(t, float64(now.Add(-time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("schedule-2")))
+	assert.Equal(t, float64(now.Add(-2*time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("")))
+
+	m.DeleteBackupLastSuccessfulTimestamp("schedule-2")
+	assert.Equal(t, 1, testutil.CollectAndCount(g))
+	assert.Equal(t, float64(now.Add(-2*time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("")))
+
+	m.DeleteBackupLastSuccessfulTimestamp("")
+	assert.Equal(t, 0, testutil.CollectAndCount(g))
 }
 
 // TestRepoMaintenanceMetrics verifies that repo maintenance metrics are properly recorded.

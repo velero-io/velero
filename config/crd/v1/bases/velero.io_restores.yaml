@@ -11,6 +11,8 @@ spec:
     kind: Restore
     listKind: RestoreList
     plural: restores
+    shortNames:
+    - rst
     singular: restore
   scope: Namespaced
   versions:
@@ -465,6 +467,14 @@ spec:
                   from. If specified, and BackupName is empty, Velero will restore
                   from the most recent successful backup created from this schedule.
                 type: string
+              skipDefaultResourceModifier:
+                description: |-
+                  SkipDefaultResourceModifier controls whether the server-configured default
+                  resource modifier is applied to this restore.
+                  When true, the default modifier is skipped even if configured on the server.
+                  Has no effect when a per-restore ResourceModifier is specified.
+                nullable: true
+                type: boolean
               uploaderConfig:
                 description: UploaderConfig specifies the configuration for the restore.
                 nullable: true

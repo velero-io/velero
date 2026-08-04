@@ -1,0 +1,1 @@
+Surface DeleteItemAction plugin errors from InvokeDeleteActions so backup deletion fails and retries instead of silently orphaning data mover snapshots and other private artifacts

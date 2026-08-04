@@ -135,6 +135,14 @@ type RestoreSpec struct {
 	// +nullable
 	ResourcePolicy *corev1api.TypedLocalObjectReference `json:"resourcePolicy,omitempty"`
 
+	// SkipDefaultResourceModifier controls whether the server-configured default
+	// resource modifier is applied to this restore.
+	// When true, the default modifier is skipped even if configured on the server.
+	// Has no effect when a per-restore ResourceModifier is specified.
+	// +optional
+	// +nullable
+	SkipDefaultResourceModifier *bool `json:"skipDefaultResourceModifier,omitempty"`
+
 	// UploaderConfig specifies the configuration for the restore.
 	// +optional
 	// +nullable
@@ -411,6 +419,7 @@ type RestoreProgress struct {
 // +kubebuilder:storageversion
 // +kubebuilder:rbac:groups=velero.io,resources=restores,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups=velero.io,resources=restores/status,verbs=get;update;patch
+// +kubebuilder:resource:shortName=rst
 
 // Restore is a Velero resource that represents the application of
 // resources from a Velero backup to a target Kubernetes cluster.

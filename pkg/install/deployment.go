@@ -34,37 +34,38 @@ import (
 type podTemplateOption func(*podTemplateConfig)
 
 type podTemplateConfig struct {
-	image                           string
-	envVars                         []corev1api.EnvVar
-	restoreOnly                     bool
-	annotations                     map[string]string
-	labels                          map[string]string
-	resources                       corev1api.ResourceRequirements
-	withSecret                      bool
-	defaultRepoMaintenanceFrequency time.Duration
-	garbageCollectionFrequency      time.Duration
-	podVolumeOperationTimeout       time.Duration
-	plugins                         []string
-	features                        []string
-	defaultVolumesToFsBackup        bool
-	serviceAccountName              string
-	uploaderType                    string
-	defaultSnapshotMoveData         bool
-	csiSnapshotEarlyFrequentPolling bool
-	privilegedNodeAgent             bool
-	disableInformerCache            bool
-	scheduleSkipImmediately         bool
-	podResources                    kube.PodResources
-	keepLatestMaintenanceJobs       int
-	backupRepoConfigMap             string
-	repoMaintenanceJobConfigMap     string
-	nodeAgentConfigMap              string
-	itemBlockWorkerCount            int
-	concurrentBackups               int
-	forWindows                      bool
-	kubeletRootDir                  string
-	nodeAgentDisableHostPath        bool
-	priorityClassName               string
+	image                            string
+	envVars                          []corev1api.EnvVar
+	restoreOnly                      bool
+	annotations                      map[string]string
+	labels                           map[string]string
+	resources                        corev1api.ResourceRequirements
+	withSecret                       bool
+	defaultRepoMaintenanceFrequency  time.Duration
+	garbageCollectionFrequency       time.Duration
+	podVolumeOperationTimeout        time.Duration
+	plugins                          []string
+	features                         []string
+	defaultVolumesToFsBackup         bool
+	serviceAccountName               string
+	uploaderType                     string
+	defaultSnapshotMoveData          bool
+	csiSnapshotEarlyFrequentPolling  bool
+	privilegedNodeAgent              bool
+	disableInformerCache             bool
+	scheduleSkipImmediately          bool
+	podResources                     kube.PodResources
+	keepLatestMaintenanceJobs        int
+	backupRepoConfigMap              string
+	repoMaintenanceJobConfigMap      string
+	defaultResourceModifierConfigMap string
+	nodeAgentConfigMap               string
+	itemBlockWorkerCount             int
+	concurrentBackups                int
+	forWindows                       bool
+	kubeletRootDir                   string
+	nodeAgentDisableHostPath         bool
+	priorityClassName                string
 }
 
 func WithImage(image string) podTemplateOption {
@@ -139,7 +140,10 @@ func WithPodVolumeOperationTimeout(val time.Duration) podTemplateOption {
 
 func WithPlugins(plugins []string) podTemplateOption {
 	return func(c *podTemplateConfig) {
-		c.plugins = plugins
+		c.plugins = make([]string, 0, len(plugins))
+		for _, plugin := range plugins {
+			c.plugins = append(c.plugins, strings.TrimSpace(plugin))
+		}
 	}
 }
 
@@ -223,6 +227,12 @@ func WithBackupRepoConfigMap(backupRepoConfigMap string) podTemplateOption {
 func WithRepoMaintenanceJobConfigMap(repoMaintenanceJobConfigMap string) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.repoMaintenanceJobConfigMap = repoMaintenanceJobConfigMap
+	}
+}
+
+func WithDefaultResourceModifierConfigMap(name string) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.defaultResourceModifierConfigMap = name
 	}
 }
 
@@ -345,6 +355,10 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 
 	if len(c.repoMaintenanceJobConfigMap) > 0 {
 		args = append(args, fmt.Sprintf("--repo-maintenance-job-configmap=%s", c.repoMaintenanceJobConfigMap))
+	}
+
+	if len(c.defaultResourceModifierConfigMap) > 0 {
+		args = append(args, fmt.Sprintf("--default-resource-modifier-configmap=%s", c.defaultResourceModifierConfigMap))
 	}
 
 	if c.itemBlockWorkerCount > 0 {

@@ -27,7 +27,7 @@ The following is an overview of Velero's restore process that starts after you r
 
 1. The Velero client makes a call to the Kubernetes API server to create a [`Restore`](api-types/restore.md) object.
 
-1. The `RestoreController` notices the new Restore object and performs validation. This includes verifying that the referenced backup is in a usable phase. Only backups in `Completed` or `PartiallyFailed` phase are accepted as restore sources.
+1. The `RestoreController` notices the new `Restore` object and performs validation. This includes verifying that the referenced backup is in a usable phase. Only backups in `Completed` or `PartiallyFailed` phase are accepted as restore sources.
 
 1. The `RestoreController` fetches basic information about the backup being restored, like the [BackupStorageLocation](locations.md) (BSL). It also fetches a tarball of the cluster resources in the backup, any volumes that will be restored using File System Backup, and any volume snapshots to be restored.
 
@@ -63,7 +63,7 @@ The following is an overview of Velero's restore process that starts after you r
 1. Once the resource is created on the target cluster, Velero may take some additional steps or wait for additional processes to complete before moving onto the next resource to restore.
 
     * If the resource is a Pod, the `RestoreController` will execute any [Restore Hooks](restore-hooks.md) and wait for the hook to finish.
-    * If the resource is a PV restored by File System Backup, the `RestoreController` waits for File System Backup’s restore to complete. The `RestoreController` sets a timeout for any resources restored with File System Backup during a restore. The default timeout is 4 hours, but you can configure this be setting using `--fs-backup-timeout` restore option.
+    * If the resource is a PV restored by File System Backup, the `RestoreController` starts a File System Backup’s restore. Velero continues to restore more resources while the file system restore is running. The `RestoreController` sets a timeout for any resources restored with File System Backup during a restore. The default timeout is 4 hours, but you can configure this be setting using `--fs-backup-timeout` restore option. The restore will not finish until either the file system restore is completed or times out.
     * If the resource is a Custom Resource Definition, the `RestoreController` waits for its availability in the cluster. The timeout is 1 minute.
 
     If any failures happen finishing these steps, the `RestoreController` will log an error in the restore result and will continue restoring.

@@ -219,6 +219,10 @@ func DescribeRestore(
 			DescribeResourceModifier(d, restore.Spec.ResourceModifier)
 		}
 
+		if boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
+			d.Printf("Skip Default Resource Modifier:\ttrue\n")
+		}
+
 		if restore.Spec.ResourcePolicy != nil {
 			d.Println()
 			DescribeResourcePolicies(d, restore.Spec.ResourcePolicy)

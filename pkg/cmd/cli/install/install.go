@@ -42,60 +42,61 @@ import (
 
 // Options collects all the options for installing Velero into a Kubernetes cluster.
 type Options struct {
-	Namespace                       string
-	Image                           string
-	BucketName                      string
-	Prefix                          string
-	ProviderName                    string
-	PodAnnotations                  flag.Map
-	PodLabels                       flag.Map
-	ServiceAccountAnnotations       flag.Map
-	ServiceAccountName              string
-	VeleroPodCPURequest             string
-	VeleroPodMemRequest             string
-	VeleroPodCPULimit               string
-	VeleroPodMemLimit               string
-	NodeAgentPodCPURequest          string
-	NodeAgentPodMemRequest          string
-	NodeAgentPodCPULimit            string
-	NodeAgentPodMemLimit            string
-	RestoreOnly                     bool
-	SecretFile                      string
-	NoSecret                        bool
-	DryRun                          bool
-	BackupStorageConfig             flag.Map
-	VolumeSnapshotConfig            flag.Map
-	UseNodeAgent                    bool
-	UseNodeAgentWindows             bool
-	PrivilegedNodeAgent             bool
-	Wait                            bool
-	UseVolumeSnapshots              bool
-	DefaultRepoMaintenanceFrequency time.Duration
-	GarbageCollectionFrequency      time.Duration
-	PodVolumeOperationTimeout       time.Duration
-	Plugins                         flag.StringArray
-	NoDefaultBackupLocation         bool
-	CRDsOnly                        bool
-	CACertFile                      string
-	Features                        string
-	DefaultVolumesToFsBackup        bool
-	UploaderType                    string
-	DefaultSnapshotMoveData         bool
-	CSISnapshotEarlyFrequentPolling bool
-	DisableInformerCache            bool
-	ScheduleSkipImmediately         bool
-	PodResources                    kubeutil.PodResources
-	KeepLatestMaintenanceJobs       int
-	BackupRepoConfigMap             string
-	RepoMaintenanceJobConfigMap     string
-	NodeAgentConfigMap              string
-	ItemBlockWorkerCount            int
-	ConcurrentBackups               int
-	NodeAgentDisableHostPath        bool
-	kubeletRootDir                  string
-	Apply                           bool
-	ServerPriorityClassName         string
-	NodeAgentPriorityClassName      string
+	Namespace                        string
+	Image                            string
+	BucketName                       string
+	Prefix                           string
+	ProviderName                     string
+	PodAnnotations                   flag.Map
+	PodLabels                        flag.Map
+	ServiceAccountAnnotations        flag.Map
+	ServiceAccountName               string
+	VeleroPodCPURequest              string
+	VeleroPodMemRequest              string
+	VeleroPodCPULimit                string
+	VeleroPodMemLimit                string
+	NodeAgentPodCPURequest           string
+	NodeAgentPodMemRequest           string
+	NodeAgentPodCPULimit             string
+	NodeAgentPodMemLimit             string
+	RestoreOnly                      bool
+	SecretFile                       string
+	NoSecret                         bool
+	DryRun                           bool
+	BackupStorageConfig              flag.Map
+	VolumeSnapshotConfig             flag.Map
+	UseNodeAgent                     bool
+	UseNodeAgentWindows              bool
+	PrivilegedNodeAgent              bool
+	Wait                             bool
+	UseVolumeSnapshots               bool
+	DefaultRepoMaintenanceFrequency  time.Duration
+	GarbageCollectionFrequency       time.Duration
+	PodVolumeOperationTimeout        time.Duration
+	Plugins                          flag.StringArray
+	NoDefaultBackupLocation          bool
+	CRDsOnly                         bool
+	CACertFile                       string
+	Features                         string
+	DefaultVolumesToFsBackup         bool
+	UploaderType                     string
+	DefaultSnapshotMoveData          bool
+	CSISnapshotEarlyFrequentPolling  bool
+	DisableInformerCache             bool
+	ScheduleSkipImmediately          bool
+	PodResources                     kubeutil.PodResources
+	KeepLatestMaintenanceJobs        int
+	BackupRepoConfigMap              string
+	RepoMaintenanceJobConfigMap      string
+	DefaultResourceModifierConfigMap string
+	NodeAgentConfigMap               string
+	ItemBlockWorkerCount             int
+	ConcurrentBackups                int
+	NodeAgentDisableHostPath         bool
+	kubeletRootDir                   string
+	Apply                            bool
+	ServerPriorityClassName          string
+	NodeAgentPriorityClassName       string
 }
 
 // BindFlags adds command line values to the options struct.
@@ -188,6 +189,12 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 		"repo-maintenance-job-configmap",
 		o.RepoMaintenanceJobConfigMap,
 		"The name of ConfigMap containing repository maintenance Job configurations.",
+	)
+	flags.StringVar(
+		&o.DefaultResourceModifierConfigMap,
+		"default-resource-modifier-configmap",
+		o.DefaultResourceModifierConfigMap,
+		"The name of a ConfigMap in the Velero namespace containing default resource modifier rules applied to all restores.",
 	)
 	flags.StringVar(
 		&o.NodeAgentConfigMap,
@@ -298,49 +305,50 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 	}
 
 	return &install.VeleroOptions{
-		Namespace:                       o.Namespace,
-		Image:                           o.Image,
-		ProviderName:                    o.ProviderName,
-		Bucket:                          o.BucketName,
-		Prefix:                          o.Prefix,
-		PodAnnotations:                  o.PodAnnotations.Data(),
-		PodLabels:                       o.PodLabels.Data(),
-		ServiceAccountAnnotations:       o.ServiceAccountAnnotations.Data(),
-		ServiceAccountName:              o.ServiceAccountName,
-		VeleroPodResources:              veleroPodResources,
-		NodeAgentPodResources:           nodeAgentPodResources,
-		SecretData:                      secretData,
-		RestoreOnly:                     o.RestoreOnly,
-		UseNodeAgent:                    o.UseNodeAgent,
-		UseNodeAgentWindows:             o.UseNodeAgentWindows,
-		PrivilegedNodeAgent:             o.PrivilegedNodeAgent,
-		UseVolumeSnapshots:              o.UseVolumeSnapshots,
-		BSLConfig:                       o.BackupStorageConfig.Data(),
-		VSLConfig:                       o.VolumeSnapshotConfig.Data(),
-		DefaultRepoMaintenanceFrequency: o.DefaultRepoMaintenanceFrequency,
-		GarbageCollectionFrequency:      o.GarbageCollectionFrequency,
-		PodVolumeOperationTimeout:       o.PodVolumeOperationTimeout,
-		Plugins:                         o.Plugins,
-		NoDefaultBackupLocation:         o.NoDefaultBackupLocation,
-		CACertData:                      caCertData,
-		Features:                        strings.Split(o.Features, ","),
-		DefaultVolumesToFsBackup:        o.DefaultVolumesToFsBackup,
-		UploaderType:                    o.UploaderType,
-		DefaultSnapshotMoveData:         o.DefaultSnapshotMoveData,
-		CSISnapshotEarlyFrequentPolling: o.CSISnapshotEarlyFrequentPolling,
-		DisableInformerCache:            o.DisableInformerCache,
-		ScheduleSkipImmediately:         o.ScheduleSkipImmediately,
-		PodResources:                    o.PodResources,
-		KeepLatestMaintenanceJobs:       o.KeepLatestMaintenanceJobs,
-		BackupRepoConfigMap:             o.BackupRepoConfigMap,
-		RepoMaintenanceJobConfigMap:     o.RepoMaintenanceJobConfigMap,
-		NodeAgentConfigMap:              o.NodeAgentConfigMap,
-		ItemBlockWorkerCount:            o.ItemBlockWorkerCount,
-		ConcurrentBackups:               o.ConcurrentBackups,
-		KubeletRootDir:                  o.kubeletRootDir,
-		NodeAgentDisableHostPath:        o.NodeAgentDisableHostPath,
-		ServerPriorityClassName:         o.ServerPriorityClassName,
-		NodeAgentPriorityClassName:      o.NodeAgentPriorityClassName,
+		Namespace:                        o.Namespace,
+		Image:                            o.Image,
+		ProviderName:                     o.ProviderName,
+		Bucket:                           o.BucketName,
+		Prefix:                           o.Prefix,
+		PodAnnotations:                   o.PodAnnotations.Data(),
+		PodLabels:                        o.PodLabels.Data(),
+		ServiceAccountAnnotations:        o.ServiceAccountAnnotations.Data(),
+		ServiceAccountName:               o.ServiceAccountName,
+		VeleroPodResources:               veleroPodResources,
+		NodeAgentPodResources:            nodeAgentPodResources,
+		SecretData:                       secretData,
+		RestoreOnly:                      o.RestoreOnly,
+		UseNodeAgent:                     o.UseNodeAgent,
+		UseNodeAgentWindows:              o.UseNodeAgentWindows,
+		PrivilegedNodeAgent:              o.PrivilegedNodeAgent,
+		UseVolumeSnapshots:               o.UseVolumeSnapshots,
+		BSLConfig:                        o.BackupStorageConfig.Data(),
+		VSLConfig:                        o.VolumeSnapshotConfig.Data(),
+		DefaultRepoMaintenanceFrequency:  o.DefaultRepoMaintenanceFrequency,
+		GarbageCollectionFrequency:       o.GarbageCollectionFrequency,
+		PodVolumeOperationTimeout:        o.PodVolumeOperationTimeout,
+		Plugins:                          o.Plugins,
+		NoDefaultBackupLocation:          o.NoDefaultBackupLocation,
+		CACertData:                       caCertData,
+		Features:                         strings.Split(o.Features, ","),
+		DefaultVolumesToFsBackup:         o.DefaultVolumesToFsBackup,
+		UploaderType:                     o.UploaderType,
+		DefaultSnapshotMoveData:          o.DefaultSnapshotMoveData,
+		CSISnapshotEarlyFrequentPolling:  o.CSISnapshotEarlyFrequentPolling,
+		DisableInformerCache:             o.DisableInformerCache,
+		ScheduleSkipImmediately:          o.ScheduleSkipImmediately,
+		PodResources:                     o.PodResources,
+		KeepLatestMaintenanceJobs:        o.KeepLatestMaintenanceJobs,
+		BackupRepoConfigMap:              o.BackupRepoConfigMap,
+		RepoMaintenanceJobConfigMap:      o.RepoMaintenanceJobConfigMap,
+		DefaultResourceModifierConfigMap: o.DefaultResourceModifierConfigMap,
+		NodeAgentConfigMap:               o.NodeAgentConfigMap,
+		ItemBlockWorkerCount:             o.ItemBlockWorkerCount,
+		ConcurrentBackups:                o.ConcurrentBackups,
+		KubeletRootDir:                   o.kubeletRootDir,
+		NodeAgentDisableHostPath:         o.NodeAgentDisableHostPath,
+		ServerPriorityClassName:          o.ServerPriorityClassName,
+		NodeAgentPriorityClassName:       o.NodeAgentPriorityClassName,
 	}, nil
 }
 

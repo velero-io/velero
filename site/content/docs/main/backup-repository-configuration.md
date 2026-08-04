@@ -18,7 +18,7 @@ Conclusively, you have two ways to add/change/delete configurations of a backup 
 - If the BackupRepository CR for the backup repository is already there, you should modify the `repositoryConfig` field. The new changes will be applied to the backup repository at the due time, it doesn't require Velero server to restart.   
 - Otherwise, you can create the backup repository configMap as a template for the BackupRepository CRs that are going to be created.  
 
-The backup repository configMap is repository type (i.e., kopia, restic) specific, so for one repository type, you only need to create one set of configurations, they will be applied to all BackupRepository CRs of the same type. Whereas, the changes of `repositoryConfig` field apply to the specific BackupRepository CR only, you may need to change every BackupRepository CR of the same type.  
+The backup repository configMap is repository type specific (for example, `kopia`), so for one repository type, you only need to create one set of configurations, they will be applied to all BackupRepository CRs of the same type. Whereas, the changes of `repositoryConfig` field apply to the specific BackupRepository CR only, you may need to change every BackupRepository CR of the same type.
 
 Below is an example of the BackupRepository configMap with the configurations:  
 ```yaml

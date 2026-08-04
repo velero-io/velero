@@ -15,6 +15,7 @@ package datamover
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
@@ -87,7 +88,10 @@ func NewBackupCommand(f client.Factory) *cobra.Command {
 				kube.ExitPodWithMessage(logger, false, "Failed to create data mover backup, %v", err)
 			}
 
-			s.run()
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				s.run()
+			})
 		},
 	}
 
@@ -327,6 +331,7 @@ func (s *dataMoverBackup) createDataPathService() (dataPathService, error) {
 		s.config.changeID,
 		s.config.volumeID,
 		s.config.snapshotID,
+		s.cbtService,
 		s.logger,
 	), nil
 }

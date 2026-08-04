@@ -19,7 +19,6 @@ package kopialib
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -913,8 +912,7 @@ func (kow *kopiaObjectWriterEx) Write(p []byte) (int, error) {
 		kow.entryLock.Unlock()
 
 		buffOffset := curPos - offset
-		objName := fmt.Sprintf("%s-b%v", kow.description, entryID)
-		kow.writeObjectAsync(objName, entryID, p[buffOffset:buffOffset+kow.blockSize])
+		kow.writeObjectAsync(entryID, p[buffOffset:buffOffset+kow.blockSize])
 
 		curPos += kow.blockSize
 	}
@@ -922,38 +920,38 @@ func (kow *kopiaObjectWriterEx) Write(p []byte) (int, error) {
 	return length, nil
 }
 
-func (kow *kopiaObjectWriterEx) writeObject(objName string, p []byte) (object.ID, error) {
+func (kow *kopiaObjectWriterEx) writeObject(p []byte) (object.ID, error) {
 	writer := kow.rawRepoWriter.NewObjectWriter(kopia.SetupKopiaLog(kow.ctx, kow.logger), object.WriterOptions{
-		Description: objName,
+		Description: kow.description,
 		Compressor:  kow.compressor,
 		Splitter:    kow.splitter,
 	})
 
 	if writer == nil {
-		return object.EmptyID, errors.Errorf("error opening writer for %s", objName)
+		return object.EmptyID, errors.New("error opening writer")
 	}
 
 	defer writer.Close()
 
 	written, err := writer.Write(p)
 	if err != nil {
-		return object.EmptyID, errors.Wrapf(err, "error writing for %s", objName)
+		return object.EmptyID, errors.Wrap(err, "error writing data")
 	}
 
 	if written != len(p) {
-		return object.EmptyID, errors.Errorf("short write for %s", objName)
+		return object.EmptyID, errors.New("short write")
 	}
 
 	objID, err := writer.Result()
 	if err != nil {
-		return object.EmptyID, errors.Wrapf(err, "error flushing data for %s", objName)
+		return object.EmptyID, errors.Wrap(err, "error flushing data")
 	}
 
 	return objID, nil
 }
 
-func (kow *kopiaObjectWriterEx) writeObjectSync(objName string, entry int, p []byte) error {
-	objID, err := kow.writeObject(objName, p)
+func (kow *kopiaObjectWriterEx) writeObjectSync(entry int, p []byte) error {
+	objID, err := kow.writeObject(p)
 	if err != nil {
 		return err
 	}
@@ -965,10 +963,10 @@ func (kow *kopiaObjectWriterEx) writeObjectSync(objName string, entry int, p []b
 	return nil
 }
 
-func (kow *kopiaObjectWriterEx) writeObjectAsync(objName string, entryID int, p []byte) {
+func (kow *kopiaObjectWriterEx) writeObjectAsync(entryID int, p []byte) {
 	if kow.asyncWritesSem == nil {
-		if err := kow.writeObjectSync(objName, entryID, p); err != nil {
-			kow.saveWriteError(errors.Wrapf(err, "error writing object for %s", objName))
+		if err := kow.writeObjectSync(entryID, p); err != nil {
+			kow.saveWriteError(errors.Wrapf(err, "error writing object for %s, entry %d", kow.description, entryID))
 		}
 	} else {
 		kow.asyncWritesSem <- struct{}{}
@@ -977,8 +975,8 @@ func (kow *kopiaObjectWriterEx) writeObjectAsync(objName string, entryID int, p 
 		copy(buffer, p)
 
 		kow.asyncWritesGroup.Go(func() {
-			if err := kow.writeObjectSync(objName, entryID, buffer); err != nil {
-				kow.saveWriteError(errors.Wrapf(err, "error writing object for %s", objName))
+			if err := kow.writeObjectSync(entryID, buffer); err != nil {
+				kow.saveWriteError(errors.Wrapf(err, "error writing object for %s, entry %d", kow.description, entryID))
 			}
 
 			kow.asyncBuffer.Return(buffer)
@@ -987,10 +985,10 @@ func (kow *kopiaObjectWriterEx) writeObjectAsync(objName string, entryID int, p 
 	}
 }
 
-func (kow *kopiaObjectWriterEx) writeZeroObject(objName string, entryID int) error {
+func (kow *kopiaObjectWriterEx) writeZeroObject(entryID int) error {
 	if kow.zeroObject == object.EmptyID {
 		zeroBuffer := make([]byte, kow.blockSize)
-		objectID, err := kow.writeObject(objName, zeroBuffer)
+		objectID, err := kow.writeObject(zeroBuffer)
 		if err != nil {
 			return err
 		}
@@ -1071,9 +1069,8 @@ func (kow *kopiaObjectWriterEx) WriteAt(p []byte, offset int64) (int, error) {
 		})
 		kow.entryLock.Unlock()
 
-		objName := fmt.Sprintf("%s-b%v", kow.description, entryID)
-		if err := kow.writeZeroObject(objName, entryID); err != nil {
-			return 0, errors.Wrapf(err, "error writing zero object for %s", objName)
+		if err := kow.writeZeroObject(entryID); err != nil {
+			return 0, errors.Wrapf(err, "error writing zero object for %s, entry %v", kow.description, entryID)
 		}
 
 		curPos += kow.blockSize
@@ -1093,8 +1090,7 @@ func (kow *kopiaObjectWriterEx) WriteAt(p []byte, offset int64) (int, error) {
 		kow.entryLock.Unlock()
 
 		buffOffset := curPos - offset
-		objName := fmt.Sprintf("%s-b%v", kow.description, entryID)
-		kow.writeObjectAsync(objName, entryID, p[buffOffset:buffOffset+kow.blockSize])
+		kow.writeObjectAsync(entryID, p[buffOffset:buffOffset+kow.blockSize])
 
 		curPos += kow.blockSize
 	}

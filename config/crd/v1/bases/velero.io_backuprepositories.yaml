@@ -11,6 +11,8 @@ spec:
     kind: BackupRepository
     listKind: BackupRepositoryList
     plural: backuprepositories
+    shortNames:
+    - repo
     singular: backuprepository
   scope: Namespaced
   versions:

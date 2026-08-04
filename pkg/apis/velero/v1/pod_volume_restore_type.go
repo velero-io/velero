@@ -133,6 +133,7 @@ type PodVolumeRestoreStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this PodVolumeRestore was created"
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the PodVolumeRestore is processed"
 // +kubebuilder:printcolumn:name="Uploader Type",type="string",JSONPath=".spec.uploaderType",description="The type of the uploader to handle data transfer"
+// +kubebuilder:resource:shortName=pvr
 
 type PodVolumeRestore struct {
 	metav1.TypeMeta `json:",inline"`

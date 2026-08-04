@@ -152,6 +152,7 @@ type DataDownloadStatus struct {
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where the backup data is stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this DataDownload was created"
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the DataDownload is processed"
+// +kubebuilder:resource:shortName=dd
 
 // DataDownload acts as the protocol between data mover plugins and data mover controller for the datamover restore operation
 type DataDownload struct {
