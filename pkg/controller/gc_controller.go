@@ -156,6 +156,10 @@ func (c *gcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	if !veleroutil.BSLIsAvailable(*loc) {
 		log.Infof("BSL %s is unavailable, cannot gc backup", loc.Name)
+		backup.Labels[garbageCollectionFailure] = gcFailureBSLUnavailable
+		if err := c.Update(ctx, backup); err != nil {
+			log.WithError(err).Error("error updating backup labels")
+		}
 		return ctrl.Result{}, fmt.Errorf("bsl %s is unavailable, cannot gc backup", loc.Name)
 	}
 

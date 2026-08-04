@@ -48,11 +48,12 @@ func TestGCReconcile(t *testing.T) {
 	defaultBackupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
 
 	tests := []struct {
-		name                 string
-		backup               *velerov1api.Backup
-		deleteBackupRequests []*velerov1api.DeleteBackupRequest
-		backupLocation       *velerov1api.BackupStorageLocation
-		expectError          bool
+		name                   string
+		backup                 *velerov1api.Backup
+		deleteBackupRequests   []*velerov1api.DeleteBackupRequest
+		backupLocation         *velerov1api.BackupStorageLocation
+		expectError            bool
+		expectedGCFailureLabel string
 	}{
 		{
 			name: "can't find backup - no error",
@@ -118,10 +119,11 @@ func TestGCReconcile(t *testing.T) {
 			},
 		},
 		{
-			name:           "BSL is unavailable",
-			backup:         defaultBackup().Expiration(fakeClock.Now().Add(-time.Second)).StorageLocation("default").Result(),
-			backupLocation: builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Phase(velerov1api.BackupStorageLocationPhaseUnavailable).Result(),
-			expectError:    true,
+			name:                   "BSL is unavailable",
+			backup:                 defaultBackup().Expiration(fakeClock.Now().Add(-time.Second)).StorageLocation("default").Result(),
+			backupLocation:         builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Phase(velerov1api.BackupStorageLocationPhaseUnavailable).Result(),
+			expectError:            true,
+			expectedGCFailureLabel: gcFailureBSLUnavailable,
 		},
 	}
 
@@ -147,6 +149,12 @@ func TestGCReconcile(t *testing.T) {
 			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}})
 			gotErr := err != nil
 			assert.Equal(t, test.expectError, gotErr)
+
+			if test.expectedGCFailureLabel != "" {
+				updatedBackup := &velerov1api.Backup{}
+				assert.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: test.backup.Namespace, Name: test.backup.Name}, updatedBackup))
+				assert.Equal(t, test.expectedGCFailureLabel, updatedBackup.Labels[garbageCollectionFailure])
+			}
 		})
 	}
 }
