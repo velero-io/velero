@@ -177,6 +177,9 @@ To launch your development environment, run:
 tilt up
 ```
 
+> [!NOTE]
+>  If you see "Build Failed: failed to dial gRPC: unable to upgrade to h2c, received 404" try `DOCKER_BUILDKIT=0 tilt up`
+
 This will output the address to a web browser interface where you can monitor Tilt's status and the logs for each Tilt resource. After a brief amount of time, you should have a running development environment, and you should now be able to
 create backups/restores and fully operate Velero.
 
