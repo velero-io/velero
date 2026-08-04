@@ -1,0 +1,1 @@
+Add additionalPrinterColumns for backups.velero.io crd to make kubectl (or other tools) default output more readable
