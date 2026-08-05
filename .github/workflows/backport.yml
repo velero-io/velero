@@ -48,7 +48,7 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           # First line only; strip /backport or /cherrypick prefix.
-          # Remaining text is a space-delimited list of target branches (may be empty GåÆ use labels).
+          # Remaining text is a space-delimited list of target branches (may be empty G?? use labels).
           line=$(printf '%s' "$COMMENT_BODY" | head -n1 | tr -d '\r')
           branches=$(printf '%s' "$line" | sed -E 's|^/(backport|cherrypick)[[:space:]]*||')
           echo "branches=${branches}" >> "$GITHUB_OUTPUT"
@@ -58,7 +58,8 @@ jobs:
           fetch-depth: 0
 
       - name: Create backport pull requests
-        uses: korthout/backport-action@v4
+        # Pin to commit SHA: workflow has contents/pull-requests write.
+        uses: korthout/backport-action@2e830a1d0b8269505846ddd407a70876913ad1f8 # v4.6.0
         with:
           # Labels like `backport release-1.17` select the target branch.
           label_pattern: '^backport ([^ ]+)$'
