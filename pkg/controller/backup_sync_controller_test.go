@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlClient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -913,5 +914,48 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				Expect(references).To(BeEquivalentTo(test.expectedReferences))
 			})
 		}
+	})
+
+	It("filterBackupOwnerReferences preserves owner reference on transient API error", func() {
+		// This test verifies the fix for the switch case ordering bug:
+		// When client.Get returns a non-NotFound error (e.g. transient API failure),
+		// the owner reference must be kept on the backup rather than silently dropped
+		// due to an incorrect UID comparison against a zero-value struct.
+		scheduleUID := types.UID("schedule-uid-1")
+		backup := &velerov1api.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-backup",
+				Namespace: "test-namespace",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "Schedule",
+						Name: "my-schedule",
+						UID:  scheduleUID,
+					},
+				},
+			},
+		}
+
+		// Build a fake client that returns a generic (non-NotFound) error on Get,
+		// simulating a transient API server failure.
+		transientErr := fmt.Errorf("transient connection error")
+		fakeClient := ctrlfake.NewClientBuilder().
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlClient.WithWatch, key ctrlClient.ObjectKey, obj ctrlClient.Object, opts ...ctrlClient.GetOption) error {
+					return transientErr
+				},
+			}).
+			Build()
+
+		b := backupSyncReconciler{
+			client: fakeClient,
+		}
+
+		logger := velerotest.NewLogger()
+		references := b.filterBackupOwnerReferences(context.Background(), backup, logger)
+
+		// The owner reference must be preserved when a transient error occurs.
+		Expect(references).To(HaveLen(1))
+		Expect(references[0].UID).To(Equal(scheduleUID))
 	})
 })
