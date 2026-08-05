@@ -380,11 +380,15 @@ func (ib *itemBackupper) executeActions(
 			}
 
 			if !snapshotVolume {
+				skipReason := "not satisfy the criteria for VolumePolicy or the legacy snapshot way"
+				if boolptr.IsSetToTrue(ib.backupRequest.Spec.DefaultVolumesToFsBackup) {
+					skipReason = "snapshot skipped, volume will use filesystem backup (defaultVolumesToFsBackup=true)"
+				}
 				ib.trackSkippedPV(
 					obj,
 					kuberesource.PersistentVolumeClaims,
 					volumeSnapshotApproach,
-					"not satisfy the criteria for VolumePolicy or the legacy snapshot way",
+					skipReason,
 					log,
 				)
 				continue
@@ -538,11 +542,15 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	}
 
 	if !snapshotVolume {
+		skipReason := "not satisfy the criteria for VolumePolicy or the legacy snapshot way"
+		if boolptr.IsSetToTrue(ib.backupRequest.Spec.DefaultVolumesToFsBackup) {
+			skipReason = "snapshot skipped, volume will use filesystem backup (defaultVolumesToFsBackup=true)"
+		}
 		ib.trackSkippedPV(
 			obj,
 			kuberesource.PersistentVolumes,
 			volumeSnapshotApproach,
-			"not satisfy the criteria for VolumePolicy or the legacy snapshot way",
+			skipReason,
 			log,
 		)
 		return nil

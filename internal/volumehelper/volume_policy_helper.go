@@ -68,6 +68,11 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 
 		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
 		if err != nil {
+			if v.defaultVolumesToFSBackup {
+				v.logger.Infof("PV not found for PVC %s, skipping snapshot because defaultVolumesToFsBackup is true",
+					pvc.Namespace+"/"+pvc.Name)
+				return false, nil
+			}
 			v.logger.WithError(err).Errorf("fail to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
 			return false, err
 		}
@@ -148,6 +153,7 @@ func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod cor
 		var err error
 		resource = &volume
 		var pvc = &corev1api.PersistentVolumeClaim{}
+		pvFound := true
 		if volume.VolumeSource.PersistentVolumeClaim != nil {
 			pvc, err = kubeutil.GetPVCForPodVolume(&volume, &pod, v.client)
 			if err != nil {
@@ -156,32 +162,40 @@ func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod cor
 			}
 			resource, err = kubeutil.GetPVForPVC(pvc, v.client)
 			if err != nil {
-				v.logger.WithError(err).Errorf("fail to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
-				return false, err
+				if v.defaultVolumesToFSBackup {
+					v.logger.Infof("PV not found for PVC %s, falling through to fs-backup because defaultVolumesToFsBackup is true",
+						pvc.Namespace+"/"+pvc.Name)
+					pvFound = false
+				} else {
+					v.logger.WithError(err).Errorf("fail to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
+					return false, err
+				}
 			}
 		}
 
-		pv, podVolume, err := v.getVolumeFromResource(resource)
-		if err != nil {
-			return false, err
-		}
+		if pvFound {
+			pv, podVolume, err := v.getVolumeFromResource(resource)
+			if err != nil {
+				return false, err
+			}
 
-		vfd := resourcepolicies.NewVolumeFilterData(pv, podVolume, pvc)
-		action, err := v.volumePolicy.GetMatchAction(vfd)
-		if err != nil {
-			v.logger.WithError(err).Error("fail to get VolumePolicy match action for volume")
-			return false, err
-		}
+			vfd := resourcepolicies.NewVolumeFilterData(pv, podVolume, pvc)
+			action, err := v.volumePolicy.GetMatchAction(vfd)
+			if err != nil {
+				v.logger.WithError(err).Error("fail to get VolumePolicy match action for volume")
+				return false, err
+			}
 
-		if action != nil {
-			if action.Type == resourcepolicies.FSBackup {
-				v.logger.Infof("Perform fs-backup action for volume %s of pod %s due to volume policy match",
-					volume.Name, pod.Namespace+"/"+pod.Name)
-				return true, nil
-			} else {
-				v.logger.Infof("Skip fs-backup action for volume %s for pod %s because the action type is %s",
-					volume.Name, pod.Namespace+"/"+pod.Name, action.Type)
-				return false, nil
+			if action != nil {
+				if action.Type == resourcepolicies.FSBackup {
+					v.logger.Infof("Perform fs-backup action for volume %s of pod %s due to volume policy match",
+						volume.Name, pod.Namespace+"/"+pod.Name)
+					return true, nil
+				} else {
+					v.logger.Infof("Skip fs-backup action for volume %s for pod %s because the action type is %s",
+						volume.Name, pod.Namespace+"/"+pod.Name, action.Type)
+					return false, nil
+				}
 			}
 		}
 	}

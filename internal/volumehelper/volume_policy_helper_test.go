@@ -295,6 +295,18 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
 			shouldSnapshot:      false,
 			expectedErr:         true,
 		},
+		{
+			name:          "PVC not having PV with defaultVolumesToFSBackup=true, return false and no error",
+			inputObj:      builder.ForPersistentVolumeClaim("default", "example-pvc").StorageClass("gp2-csi").Result(),
+			groupResource: kuberesource.PersistentVolumeClaims,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+			},
+			snapshotVolumesFlag:      ptr.To(true),
+			defaultVolumesToFSBackup: true,
+			shouldSnapshot:           false,
+			expectedErr:              false,
+		},
 	}
 
 	objs := []runtime.Object{
@@ -668,6 +680,72 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup(t *testing.T) {
 			defaultVolumesToFSBackup: true,
 			shouldFSBackup:           false,
 			expectedErr:              false,
+		},
+		{
+			name: "VolumePolicy no match, PV not found, defaultVolumesToFSBackup=true, falls through to legacy and returns true",
+			pod: builder.ForPod("ns", "pod-1").
+				Volumes(
+					&corev1api.Volume{
+						Name: "vol-1",
+						VolumeSource: corev1api.VolumeSource{
+							PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+								ClaimName: "pvc-no-pv",
+							},
+						},
+					}).Result(),
+			resources: []runtime.Object{
+				builder.ForPersistentVolumeClaim("ns", "pvc-no-pv").
+					StorageClass("gp2-csi").Phase(corev1api.ClaimPending).Result(),
+			},
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp3-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.FSBackup,
+						},
+					},
+				},
+			},
+			defaultVolumesToFSBackup: true,
+			shouldFSBackup:           true,
+			expectedErr:              false,
+		},
+		{
+			name: "VolumePolicy no match, PV not found, defaultVolumesToFSBackup=false, returns error",
+			pod: builder.ForPod("ns", "pod-1").
+				Volumes(
+					&corev1api.Volume{
+						Name: "vol-1",
+						VolumeSource: corev1api.VolumeSource{
+							PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+								ClaimName: "pvc-no-pv",
+							},
+						},
+					}).Result(),
+			resources: []runtime.Object{
+				builder.ForPersistentVolumeClaim("ns", "pvc-no-pv").
+					StorageClass("gp2-csi").Phase(corev1api.ClaimPending).Result(),
+			},
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp3-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.FSBackup,
+						},
+					},
+				},
+			},
+			defaultVolumesToFSBackup: false,
+			shouldFSBackup:           false,
+			expectedErr:              true,
 		},
 	}
 
