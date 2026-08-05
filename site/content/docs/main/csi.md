@@ -86,7 +86,18 @@ This section documents some of the choices made during implementing the CSI snap
         ```
         Note: Please ensure all your annotations are in lowercase. And follow the following format: `velero.io/csi-volumesnapshot-class_<driver name> = <VolumeSnapshotClass Name>`
 
-    3. **Choosing VolumeSnapshotClass for a particular PVC:**
+    3. **Choose VolumeSnapshotClass for a particular StorageClass:**
+    If you want to use a particular VolumeSnapshotClass for a particular StorageClass, you can add an annotation to the StorageClass to indicate which VolumeSnapshotClass to use. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular backup for snapshotting PVCs of a given StorageClass, you can annotate it:
+        ```yaml
+        apiVersion: storage/v1
+        kind: StorageClass
+        metadata:
+          name: test-storageclass
+          annotations:
+            velero.io/csi-volumesnapshot-class: "test-snapclass"
+        ```
+
+    4. **Choosing VolumeSnapshotClass for a particular PVC:**
     If you want to use a particular VolumeSnapshotClass for a particular PVC, you can add a annotation to the PVC to indicate which VolumeSnapshotClass to use. This overrides any annotation added to backup or schedule. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular PVC, you can create a PVC like this:
         ```yaml
         apiVersion: v1
