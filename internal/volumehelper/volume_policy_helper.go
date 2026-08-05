@@ -69,7 +69,7 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
 		if err != nil {
 			if v.defaultVolumesToFSBackup {
-				v.logger.Infof("PV not found for PVC %s, skipping snapshot because defaultVolumesToFsBackup is true",
+				v.logger.Infof("PV not found for PVC %s, skipping snapshot",
 					pvc.Namespace+"/"+pvc.Name)
 				return false, nil
 			}
@@ -163,7 +163,7 @@ func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod cor
 			resource, err = kubeutil.GetPVForPVC(pvc, v.client)
 			if err != nil {
 				if v.defaultVolumesToFSBackup {
-					v.logger.Infof("PV not found for PVC %s, falling through to fs-backup because defaultVolumesToFsBackup is true",
+					v.logger.Infof("PV not found for PVC %s, skipping volume policy check",
 						pvc.Namespace+"/"+pvc.Name)
 					pvFound = false
 				} else {
