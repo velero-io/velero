@@ -133,13 +133,19 @@ func (o *DownloadOptions) Run(c *cobra.Command, f client.Factory) error {
 		bslCACert = ""
 	}
 
+	// Inherit insecureSkipTLSVerify from BSL config if not set via CLI flag
+	bslInsecure, err := cacert.GetInsecureSkipTLSVerifyFromBackup(context.Background(), kbClient, f.Namespace(), backup)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting insecureSkipTLSVerify from BSL: %v\n", err)
+	}
+
 	backupDest, err := os.OpenFile(o.Output, o.writeOptions, 0600)
 	if err != nil {
 		return err
 	}
 	defer backupDest.Close()
 
-	err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), o.Name, velerov1api.DownloadTargetKindBackupContents, backupDest, o.Timeout, o.InsecureSkipTLSVerify, o.caCertFile, bslCACert)
+	err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), o.Name, velerov1api.DownloadTargetKindBackupContents, backupDest, o.Timeout, o.InsecureSkipTLSVerify || bslInsecure, o.caCertFile, bslCACert)
 	if err != nil {
 		os.Remove(o.Output)
 		cmd.CheckError(err)
