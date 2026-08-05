@@ -62,7 +62,11 @@ type BackupStartParam struct {
 
 // RestoreStartParam define the input param for restore start
 type RestoreStartParam struct {
-	Incremental bool
+	Incremental             bool
+	VolumeSnapshotNamespace string
+	VolumeSnapshotName      string
+	VolumeID                string
+	CBTService              cbtservice.Service
 }
 
 type generalDataPath struct {
@@ -245,7 +249,14 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			dp.wgDataPath.Done()
 		}()
 
-		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental, provider.CBTParam{}, target.VolMode, uploaderConfigs, dp)
+		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental,
+			provider.CBTParam{
+				Source: cbtservice.SourceInfo{
+					Snapshot: restoreParam.VolumeSnapshotName,
+					VolumeID: restoreParam.VolumeID,
+				},
+				Service: restoreParam.CBTService,
+			}, target.VolMode, uploaderConfigs, dp)
 
 		if err == provider.ErrorCanceled {
 			dp.callbacks.OnCancelled(context.Background(), dp.namespace, dp.jobName)

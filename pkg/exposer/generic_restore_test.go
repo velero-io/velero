@@ -1592,6 +1592,8 @@ func TestCreateRestorePod(t *testing.T) {
 				test.affinity,
 				"", // priority class name
 				nil,
+				"",
+				nil,
 			)
 
 			require.NoError(t, err)

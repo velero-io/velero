@@ -32,6 +32,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
@@ -62,11 +63,12 @@ type RestoreMicroService struct {
 	ddHandler  cachetool.ResourceEventHandlerRegistration
 	nodeName   string
 	cacheDir   string
+	cbtService cbtservice.Service
 }
 
 func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataDownloadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	ddInformer cache.Informer, cacheDir string, log logrus.FieldLogger) *RestoreMicroService {
+	ddInformer cache.Informer, cacheDir string, cbtService cbtservice.Service, log logrus.FieldLogger) *RestoreMicroService {
 	return &RestoreMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -82,6 +84,7 @@ func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClien
 		resultSignal:     make(chan dataPathResult),
 		ddInformer:       ddInformer,
 		cacheDir:         cacheDir,
+		cbtService:       cbtService,
 	}
 }
 
@@ -180,9 +183,16 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	}
 	log.Info("Async br init")
 
-	if err := dp.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig, &datapath.RestoreStartParam{
+	param := &datapath.RestoreStartParam{
 		Incremental: dd.Spec.RestoreType == string(velerov1api.VolumeDataPolicyTypeIncremental),
-	}); err != nil {
+		CBTService:  r.cbtService,
+	}
+	if dd.Spec.CSISnapshot != nil {
+		param.VolumeSnapshotNamespace = dd.Spec.CSISnapshot.VolumeSnapshotNamespace
+		param.VolumeSnapshotName = dd.Spec.CSISnapshot.VolumeSnapshot
+		param.VolumeID = dd.Spec.CSISnapshot.VolumeID
+	}
+	if err := dp.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig, param); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 

@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
@@ -510,6 +511,27 @@ func TestExecute(t *testing.T) {
 				return d
 			}(),
 		},
+		{
+			name:             "PVC exists and in-place incremental restore set, createVolumeSnapshot fails",
+			backup:           builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result(),
+			restore:          builder.ForRestore("velero", "testRestore").Backup("testBackup").ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeIncremental)).ItemOperationTimeout(time.Minute * 10).ObjectMeta(builder.WithUID("uid")).Result(),
+			pvc:              builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
+			pv:               builder.ForPersistentVolume("testPV").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result(),
+			dataUploadResult: builder.ForConfigMap("velero", "testCM").Data("uid", "{\"DataMover\":\"velero-block\", \"SnapshotClass\":\"test-snapclass\"}").ObjectMeta(builder.WithLabels(velerov1api.RestoreUIDLabel, "uid", velerov1api.PVCNamespaceNameLabel, "velero.testPVC", velerov1api.ResourceUsageLabel, label.GetValidName(string(velerov1api.VeleroResourceUsageDataUploadResult)))).Result(),
+			preCreatePVC:     true,
+			kubeClientObj: []runtime.Object{
+				builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
+			},
+			expectedDataDownload: func() *velerov2alpha1.DataDownload {
+				d := builder.ForDataDownload("velero", "name").TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "testPVC", Namespace: "velero", PV: "testPV"}).
+					ObjectMeta(builder.WithOwnerReference([]metav1.OwnerReference{{APIVersion: velerov1api.SchemeGroupVersion.String(), Kind: "Restore", Name: "testRestore", UID: "uid", Controller: boolptr.True()}}),
+						builder.WithLabelsMap(map[string]string{velerov1api.AsyncOperationIDLabel: "dd-uid.", velerov1api.RestoreNameLabel: "testRestore", velerov1api.RestoreUIDLabel: "uid"}),
+						builder.WithGenerateName("testRestore-")).Result()
+				d.Spec.RestoreType = "full"
+				d.Spec.DataMover = "velero-block"
+				return d
+			}(),
+		},
 	}
 
 	for _, tc := range tests {
@@ -626,6 +648,7 @@ func TestNewPvcRestoreItemAction(t *testing.T) {
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
 	f1.On("KubeClient").Return(nil, nil)
+	f1.On("ClientConfig").Return(&rest.Config{}, nil)
 	plugin1 := NewPvcRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)

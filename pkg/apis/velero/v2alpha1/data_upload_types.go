@@ -80,6 +80,9 @@ const (
 
 // CSISnapshotSpec is the specification for a CSI snapshot.
 type CSISnapshotSpec struct {
+	// VolumeSnapshotNamespace is the namespece of the volume snapshot to be backed up
+	VolumeSnapshotNamespace string `json:"volumeSnapshotNamespace"`
+
 	// VolumeSnapshot is the name of the volume snapshot to be backed up
 	VolumeSnapshot string `json:"volumeSnapshot"`
 
@@ -93,6 +96,9 @@ type CSISnapshotSpec struct {
 	// Driver is the driver used by the VolumeSnapshotContent
 	// +optional
 	Driver string `json:"driver,omitempty"`
+
+	// VolumeID is the ID of the volume that the volume snapshot is created from
+	VolumeID string `json:"volumeID,omitempty"`
 }
 
 // DataUploadPhase represents the lifecycle phase of a DataUpload.
