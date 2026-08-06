@@ -86,7 +86,9 @@ func (n *NamespaceMapping) Init() error {
 
 func (n *NamespaceMapping) CreateResources() error {
 	for index, ns := range *n.NSIncluded {
-		n.kibishiiData.Levels = len(*n.NSIncluded) + index
+		if n.VeleroCfg.CloudProvider != "kind" {
+			n.kibishiiData.Levels = len(*n.NSIncluded) + index
+		}
 		By(fmt.Sprintf("Creating namespaces ...%s\n", ns), func() {
 			Expect(CreateNamespace(n.Ctx, n.Client, ns)).To(Succeed(), fmt.Sprintf("Failed to create namespace %s", ns))
 		})
@@ -109,7 +111,9 @@ func (n *NamespaceMapping) CreateResources() error {
 
 func (n *NamespaceMapping) Verify() error {
 	for index, ns := range n.MappedNamespaceList {
-		n.kibishiiData.Levels = len(*n.NSIncluded) + index
+		if n.VeleroCfg.CloudProvider != "kind" {
+			n.kibishiiData.Levels = len(*n.NSIncluded) + index
+		}
 		By(fmt.Sprintf("Verify workload %s after restore ", ns), func() {
 			Expect(KibishiiVerifyAfterRestore(n.Client, ns,
 				n.Ctx, n.kibishiiData, "")).To(Succeed(), "Fail to verify workload after restore")
