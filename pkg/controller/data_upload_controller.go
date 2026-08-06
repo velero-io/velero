@@ -641,28 +641,38 @@ func (r *DataUploadReconciler) OnDataUploadProgress(ctx context.Context, namespa
 	}
 }
 
+func duGenericEventPredicate(object client.Object) bool {
+	du, ok := object.(*velerov2alpha1api.DataUpload)
+	if !ok {
+		return false
+	}
+
+	if du.Status.Phase == velerov2alpha1api.DataUploadPhaseAccepted {
+		return true
+	}
+
+	if du.Status.Phase == velerov2alpha1api.DataUploadPhasePrepared {
+		return true
+	}
+
+	if du.Spec.Cancel && !isDataUploadInFinalState(du) {
+		return true
+	}
+
+	if isDataUploadInFinalState(du) && !du.DeletionTimestamp.IsZero() {
+		return true
+	}
+
+	return false
+}
+
 // SetupWithManager registers the DataUpload controller.
 // The fresh new DataUpload CR first created will trigger to create one pod (long time, maybe failure or unknown status) by one of the dataupload controllers
 // then the request will get out of the Reconcile queue immediately by not blocking others' CR handling, in order to finish the rest data upload process we need to
 // re-enqueue the previous related request once the related pod is in running status to keep going on the rest logic. and below logic will avoid handling the unwanted
 // pod status and also avoid block others CR handling
 func (r *DataUploadReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	gp := kube.NewGenericEventPredicate(func(object client.Object) bool {
-		du := object.(*velerov2alpha1api.DataUpload)
-		if du.Status.Phase == velerov2alpha1api.DataUploadPhaseAccepted {
-			return true
-		}
-
-		if du.Spec.Cancel && !isDataUploadInFinalState(du) {
-			return true
-		}
-
-		if isDataUploadInFinalState(du) && !du.DeletionTimestamp.IsZero() {
-			return true
-		}
-
-		return false
-	})
+	gp := kube.NewGenericEventPredicate(duGenericEventPredicate)
 	s := kube.NewPeriodicalEnqueueSource(r.logger.WithField("controller", constant.ControllerDataUpload), r.client, &velerov2alpha1api.DataUploadList{}, preparingMonitorFrequency, kube.PeriodicalEnqueueSourceOption{
 		Predicates: []predicate.Predicate{gp},
 	})
