@@ -280,7 +280,7 @@ type ExecHook struct {
 }
 
 // HookErrorMode defines how Velero should treat an error from a hook.
-// +kubebuilder:validation:Enum=Continue;Fail
+// +kubebuilder:validation:Enum=Continue;Fail;FailBlock
 type HookErrorMode string
 
 const (
@@ -291,6 +291,11 @@ const (
 	// HookErrorModeFail means that an error from a hook is problematic and Velero should stop executing following hooks.
 	// This backup/restore should be in `PartiallyFailed` status.
 	HookErrorModeFail HookErrorMode = "Fail"
+
+	// HookErrorModeFailBlock means that a failed backup pre hook should skip every item in the pod's
+	// ItemBlock, including its PVCs, PVs and any other pods in the block. Restore hooks don't use
+	// ItemBlocks, so this has no effect there. This backup should be in `PartiallyFailed` status.
+	HookErrorModeFailBlock HookErrorMode = "FailBlock"
 )
 
 // BackupPhase is a string representation of the lifecycle phase

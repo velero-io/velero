@@ -561,6 +561,17 @@ func TestGetPodExecHookFromAnnotations(t *testing.T) {
 				},
 			},
 			{
+				name: "hook mode set to failblock",
+				annotations: map[string]string{
+					phasedKey(phase, podBackupHookCommandAnnotationKey): "/usr/bin/foo",
+					phasedKey(phase, podBackupHookOnErrorAnnotationKey): string(velerov1api.HookErrorModeFailBlock),
+				},
+				expectedHook: &velerov1api.ExecHook{
+					Command: []string{"/usr/bin/foo"},
+					OnError: velerov1api.HookErrorModeFailBlock,
+				},
+			},
+			{
 				name: "use the specified timeout",
 				annotations: map[string]string{
 					phasedKey(phase, podBackupHookCommandAnnotationKey): "/usr/bin/foo",

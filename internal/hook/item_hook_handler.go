@@ -70,6 +70,25 @@ const (
 	podRestoreHookInitContainerTimeoutAnnotationKey = "init.hook.restore.velero.io/timeout"
 )
 
+// ErrFailBlock wraps the error from a pre hook that was configured with OnError: FailBlock.
+// The backup workflow checks for it with errors.Is to decide whether to drop the whole ItemBlock
+// instead of just the pod.
+var ErrFailBlock = errors.New("pre hook failed with FailBlock error mode")
+
+// hookFailureError turns a hook error into the error HandleHooks should return for the given
+// error mode. Continue swallows it, Fail returns it as is, and FailBlock tags it so callers can
+// tell the two apart.
+func hookFailureError(err error, mode velerov1api.HookErrorMode) error {
+	switch mode {
+	case velerov1api.HookErrorModeFailBlock:
+		return fmt.Errorf("%w: %w", ErrFailBlock, err)
+	case velerov1api.HookErrorModeFail:
+		return err
+	default:
+		return nil
+	}
+}
+
 // ItemHookHandler invokes hooks for an item.
 type ItemHookHandler interface {
 	// HandleHooks invokes hooks for an item. If the item is a pod and the appropriate annotations exist
@@ -244,8 +263,8 @@ func (h *DefaultItemHookHandler) HandleHooks(
 			hookLog.WithError(errTracker).Warn("Error recording the hook in hook tracker")
 		}
 
-		if errExec != nil && hookFromAnnotations.OnError == velerov1api.HookErrorModeFail {
-			return errExec
+		if errExec != nil {
+			return hookFailureError(errExec, hookFromAnnotations.OnError)
 		}
 
 		return nil
@@ -253,7 +272,7 @@ func (h *DefaultItemHookHandler) HandleHooks(
 
 	labels := labels.Set(metadata.GetLabels())
 	// Otherwise, check for hooks defined in the backup spec.
-	// modeFailError records the error from the hook with "Fail" error mode
+	// modeFailError records the error from a hook whose error mode stops the run, so "Fail" or "FailBlock"
 	var modeFailError error
 	for _, resourceHook := range resourceHooks {
 		if !resourceHook.Selector.applicableTo(groupResource, namespace, labels) {
@@ -287,9 +306,7 @@ func (h *DefaultItemHookHandler) HandleHooks(
 						if err != nil {
 							hookLog.WithError(err).Error("Error executing hook")
 							hookFailed = true
-							if hook.Exec.OnError == velerov1api.HookErrorModeFail {
-								modeFailError = err
-							}
+							modeFailError = hookFailureError(err, hook.Exec.OnError)
 						}
 						errTracker := hookTracker.Record(namespace, name, hook.Exec.Container, HookSourceSpec, resourceHook.Name, phase, i, hookFailed, err)
 						if errTracker != nil {
@@ -341,7 +358,10 @@ func getPodExecHookFromAnnotations(annotations map[string]string, phase HookPhas
 	container := getHookAnnotation(annotations, podBackupHookContainerAnnotationKey, phase)
 
 	onError := velerov1api.HookErrorMode(getHookAnnotation(annotations, podBackupHookOnErrorAnnotationKey, phase))
-	if onError != velerov1api.HookErrorModeContinue && onError != velerov1api.HookErrorModeFail {
+	switch onError {
+	case velerov1api.HookErrorModeContinue, velerov1api.HookErrorModeFail, velerov1api.HookErrorModeFailBlock:
+		// use the specified value
+	default:
 		onError = ""
 	}
 

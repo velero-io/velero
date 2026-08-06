@@ -3959,6 +3959,166 @@ func TestBackupWithHooks(t *testing.T) {
 				"resources/pods/v1-preferredversion/namespaces/ns-2/pod-2.json",
 			},
 		},
+		{
+			name: "no item in the block is backed up if a pre hook returns an error when OnError=FailBlock",
+			backup: defaultBackup().
+				Hooks(velerov1.BackupHooks{
+					Resources: []velerov1.BackupResourceHookSpec{
+						{
+							Name: "hook-1",
+							PreHooks: []velerov1.BackupResourceHook{
+								{
+									Exec: &velerov1.ExecHook{
+										Command: []string{"pre"},
+										OnError: velerov1.HookErrorModeFailBlock,
+									},
+								},
+							},
+							PostHooks: []velerov1.BackupResourceHook{
+								{
+									Exec: &velerov1.ExecHook{
+										Command: []string{"post"},
+									},
+								},
+							},
+						},
+					},
+				}).
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-1", "pod-2").Result(),
+				),
+			},
+			actions: []ibav1.ItemBlockAction{
+				&pluggableIBA{
+					selector: velero.ResourceSelector{IncludedNamespaces: []string{"ns-1"}},
+					getRelatedItemsFunc: func(item runtime.Unstructured, backup *velerov1.Backup) ([]velero.ResourceIdentifier, error) {
+						return []velero.ResourceIdentifier{
+							{GroupResource: kuberesource.Pods, Namespace: "ns-1", Name: "pod-2"},
+						}, nil
+					},
+				},
+			},
+			wantExecutePodCommandCalls: []*expectedCall{
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-1",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"pre"},
+						OnError: velerov1.HookErrorModeFailBlock,
+					},
+					err: nil,
+				},
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-2",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"pre"},
+						OnError: velerov1.HookErrorModeFailBlock,
+					},
+					err: errors.New("exec hook error"),
+				},
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-1",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"post"},
+					},
+					err: nil,
+				},
+			},
+			// pod-1's pre hook succeeded, so its post hook still has to run before the block
+			// is dropped. pod-2's pre hook failed, so it never gets a post hook.
+			wantHookExecutionLog: []test.HookExecutionEntry{
+				{
+					Namespace:   "ns-1",
+					Name:        "pod-1",
+					HookName:    "hook-1",
+					HookCommand: []string{"pre"},
+				},
+				{
+					Namespace:   "ns-1",
+					Name:        "pod-2",
+					HookName:    "hook-1",
+					HookCommand: []string{"pre"},
+				},
+				{
+					Namespace:   "ns-1",
+					Name:        "pod-1",
+					HookName:    "hook-1",
+					HookCommand: []string{"post"},
+				},
+			},
+			wantBackedUp: []string{},
+		},
+		{
+			name: "only the failing pod is skipped if a pre hook returns an error when OnError=Fail",
+			backup: defaultBackup().
+				Hooks(velerov1.BackupHooks{
+					Resources: []velerov1.BackupResourceHookSpec{
+						{
+							Name: "hook-1",
+							PreHooks: []velerov1.BackupResourceHook{
+								{
+									Exec: &velerov1.ExecHook{
+										Command: []string{"pre"},
+										OnError: velerov1.HookErrorModeFail,
+									},
+								},
+							},
+						},
+					},
+				}).
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-1", "pod-2").Result(),
+				),
+			},
+			actions: []ibav1.ItemBlockAction{
+				&pluggableIBA{
+					selector: velero.ResourceSelector{IncludedNamespaces: []string{"ns-1"}},
+					getRelatedItemsFunc: func(item runtime.Unstructured, backup *velerov1.Backup) ([]velero.ResourceIdentifier, error) {
+						return []velero.ResourceIdentifier{
+							{GroupResource: kuberesource.Pods, Namespace: "ns-1", Name: "pod-2"},
+						}, nil
+					},
+				},
+			},
+			wantExecutePodCommandCalls: []*expectedCall{
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-1",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"pre"},
+						OnError: velerov1.HookErrorModeFail,
+					},
+					err: nil,
+				},
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-2",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"pre"},
+						OnError: velerov1.HookErrorModeFail,
+					},
+					err: errors.New("exec hook error"),
+				},
+			},
+			// Fail only drops the pod whose hook failed, the rest of the block is untouched.
+			wantBackedUp: []string{
+				"resources/pods/namespaces/ns-1/pod-1.json",
+				"resources/pods/v1-preferredversion/namespaces/ns-1/pod-1.json",
+			},
+		},
 	}
 
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
