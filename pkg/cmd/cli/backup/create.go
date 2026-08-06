@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -191,9 +192,11 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 		return err
 	}
 
-	// Ensure that unless FromSchedule is set, args contains a backup name
-	if o.FromSchedule == "" && len(args) != 1 {
-		return fmt.Errorf("a backup name is required, unless you are creating based on a schedule")
+	// Ensure the backup name is a valid Kubernetes resource name
+	if o.FromSchedule == "" {
+		if errs := validation.IsDNS1123Subdomain(o.Name); len(errs) > 0 {
+			return fmt.Errorf("invalid backup name %q: %s", o.Name, strings.Join(errs, "; "))
+		}
 	}
 
 	errs := collections.ValidateNamespaceIncludesExcludes(o.IncludeNamespaces, o.ExcludeNamespaces)
