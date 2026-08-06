@@ -95,6 +95,10 @@ func WaitPVCBound(ctx context.Context, pvcGetter corev1client.CoreV1Interface,
 			return false, nil
 		}
 
+		if tmpPVC.Status.Phase != corev1api.ClaimBound {
+			return false, nil
+		}
+
 		updated = tmpPVC
 
 		return true, nil
@@ -110,6 +114,16 @@ func WaitPVCBound(ctx context.Context, pvcGetter corev1client.CoreV1Interface,
 	}
 
 	return pv, err
+}
+
+// DeletePVCIfAny deletes a PVC by namespace and name if it exists, and log an error when the deletion fails
+func DeletePVCIfAny(ctx context.Context, client corev1client.CoreV1Interface, pvcName, pvcNamespace string, ensureTimeout time.Duration, log logrus.FieldLogger) {
+	if err := EnsureDeletePVC(ctx, client, pvcName, pvcNamespace, ensureTimeout); err != nil {
+		if apierrors.IsNotFound(err) {
+			return
+		}
+		log.Warnf("failed to delete pvc %s/%s with err %v", pvcNamespace, pvcName, err)
+	}
 }
 
 // DeletePVIfAny deletes a PV by name if it exists, and log an error when the deletion fails

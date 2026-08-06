@@ -298,6 +298,10 @@ func newPodVolumeRestore(restore *velerov1api.Restore, pod *corev1api.Pod, backu
 		pvr.Spec.UploaderSettings = uploaderutil.StoreRestoreConfig(restore.Spec.UploaderConfig)
 	}
 
+	if restore.IsVolumeDataInplaceRestore() {
+		pvr.Spec.RestoreType = string(restore.Spec.ExistingVolumeDataPolicy)
+	}
+
 	return pvr
 }
 

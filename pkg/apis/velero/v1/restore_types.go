@@ -154,10 +154,6 @@ type RestoreSpec struct {
 	UploaderConfig *UploaderConfigForRestore `json:"uploaderConfig,omitempty"`
 }
 
-func (r *RestoreSpec) IsVolumeDataInplaceRestore() bool {
-	return r.ExistingVolumeDataPolicy == VolumeDataPolicyTypeFull || r.ExistingVolumeDataPolicy == VolumeDataPolicyTypeIncremental
-}
-
 // UploaderConfigForRestore defines the configuration for the restore.
 type UploaderConfigForRestore struct {
 	// WriteSparseFiles is a flag to indicate whether write files sparsely or not.
@@ -457,6 +453,10 @@ type Restore struct {
 
 	// +optional
 	Status RestoreStatus `json:"status,omitempty"`
+}
+
+func (r *Restore) IsVolumeDataInplaceRestore() bool {
+	return r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeFull || r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeIncremental
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

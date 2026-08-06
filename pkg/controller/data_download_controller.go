@@ -936,6 +936,7 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 
 	return exposer.GenericRestoreExposeParam{
 		TargetPVCName:         dd.Spec.TargetVolume.PVC,
+		TargetPVName:          dd.Spec.TargetVolume.PV,
 		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
 		HostingPodLabels:      hostingPodLabels,
 		HostingPodAnnotations: hostingPodAnnotation,

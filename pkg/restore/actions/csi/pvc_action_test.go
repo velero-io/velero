@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/kubernetes/fake"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
@@ -371,6 +372,7 @@ func TestExecute(t *testing.T) {
 		backup               *velerov1api.Backup
 		restore              *velerov1api.Restore
 		pvc                  *corev1api.PersistentVolumeClaim
+		pv                   *corev1api.PersistentVolume
 		pvcFromBackup        *corev1api.PersistentVolumeClaim
 		vs                   *snapshotv1api.VolumeSnapshot
 		dataUploadResult     *corev1api.ConfigMap
@@ -378,9 +380,11 @@ func TestExecute(t *testing.T) {
 		expectedDataDownload *velerov2alpha1.DataDownload
 		expectedPVC          *corev1api.PersistentVolumeClaim
 		preCreatePVC         bool
+		kubeClientObj        []runtime.Object
 	}{
 		{
 			name:        "Don't restore PV",
+			backup:      builder.ForBackup("velero", "testBackup").Result(),
 			restore:     builder.ForRestore("velero", "testRestore").Backup("testBackup").RestorePVs(false).Result(),
 			pvc:         builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName")).Result(),
 			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName")).VolumeName("").Result(),
@@ -486,6 +490,26 @@ func TestExecute(t *testing.T) {
 			pvc:          builder.ForPersistentVolumeClaim("restore", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
 			preCreatePVC: true,
 		},
+		{
+			name:             "PVC exists and in-place restore set",
+			backup:           builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result(),
+			restore:          builder.ForRestore("velero", "testRestore").Backup("testBackup").ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull)).ItemOperationTimeout(time.Minute * 10).ObjectMeta(builder.WithUID("uid")).Result(),
+			pvc:              builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
+			pv:               builder.ForPersistentVolume("testPV").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result(),
+			dataUploadResult: builder.ForConfigMap("velero", "testCM").Data("uid", "{}").ObjectMeta(builder.WithLabels(velerov1api.RestoreUIDLabel, "uid", velerov1api.PVCNamespaceNameLabel, "velero.testPVC", velerov1api.ResourceUsageLabel, label.GetValidName(string(velerov1api.VeleroResourceUsageDataUploadResult)))).Result(),
+			preCreatePVC:     true,
+			kubeClientObj: []runtime.Object{
+				builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
+			},
+			expectedDataDownload: func() *velerov2alpha1.DataDownload {
+				d := builder.ForDataDownload("velero", "name").TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "testPVC", Namespace: "velero", PV: "testPV"}).
+					ObjectMeta(builder.WithOwnerReference([]metav1.OwnerReference{{APIVersion: velerov1api.SchemeGroupVersion.String(), Kind: "Restore", Name: "testRestore", UID: "uid", Controller: boolptr.True()}}),
+						builder.WithLabelsMap(map[string]string{velerov1api.AsyncOperationIDLabel: "dd-uid.", velerov1api.RestoreNameLabel: "testRestore", velerov1api.RestoreUIDLabel: "uid"}),
+						builder.WithGenerateName("testRestore-")).Result()
+				d.Spec.RestoreType = "full"
+				return d
+			}(),
+		},
 	}
 
 	for _, tc := range tests {
@@ -497,6 +521,10 @@ func TestExecute(t *testing.T) {
 
 			if tc.vs != nil {
 				object = append(object, tc.vs)
+			}
+
+			if tc.pv != nil {
+				object = append(object, tc.pv)
 			}
 
 			input := new(velero.RestoreItemActionExecuteInput)
@@ -524,8 +552,9 @@ func TestExecute(t *testing.T) {
 			}
 
 			pvcRIA := pvcRestoreItemAction{
-				log:      logrus.New(),
-				crClient: velerotest.NewFakeControllerRuntimeClient(t, object...),
+				log:        logrus.New(),
+				crClient:   velerotest.NewFakeControllerRuntimeClient(t, object...),
+				kubeClient: fake.NewSimpleClientset(tc.kubeClientObj...),
 			}
 
 			output, err := pvcRIA.Execute(input)
@@ -596,6 +625,7 @@ func TestNewPvcRestoreItemAction(t *testing.T) {
 
 	f1 := &factorymocks.Factory{}
 	f1.On("KubebuilderClient").Return(crClient, nil)
+	f1.On("KubeClient").Return(nil, nil)
 	plugin1 := NewPvcRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)

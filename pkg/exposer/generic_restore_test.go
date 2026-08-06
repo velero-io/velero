@@ -61,6 +61,11 @@ func TestRestoreExpose(t *testing.T) {
 			StorageClassName: &scName,
 		},
 	}
+	targetPVObj := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-target-pv",
+		},
+	}
 
 	modeFilesystem := corev1api.PersistentVolumeFilesystem
 	targetPVCObjWithVolumeMode := &corev1api.PersistentVolumeClaim{
@@ -118,6 +123,7 @@ func TestRestoreExpose(t *testing.T) {
 		ownerRestore    *velerov1.Restore
 		targetPVCName   string
 		targetNamespace string
+		targetPVName    string
 		kubeReactors    []reactor
 		cacheVolume     *CacheConfigs
 		dataMover       string
@@ -184,7 +190,7 @@ func TestRestoreExpose(t *testing.T) {
 					},
 				},
 			},
-			err: "error to create restore pvc: fake-create-error",
+			err: "error to create restore pvc: fail to create the restore PVC fake-restore in namespace velero: fake-create-error",
 		},
 		{
 			name:            "succeed",
@@ -195,6 +201,45 @@ func TestRestoreExpose(t *testing.T) {
 				targetPVCObj,
 				daemonSet,
 				storageClass,
+			},
+			expectBackupPod: true,
+			expectBackupPVC: true,
+		},
+		{
+			name:            "succeed with target PV set",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			targetPVName:    "fake-target-pv",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObj,
+				targetPVObj,
+				daemonSet,
+				storageClass,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "get",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						getAction := action.(clientTesting.GetAction)
+						if getAction.GetName() == "fake-restore" {
+							return true, &corev1api.PersistentVolumeClaim{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      "fake-restore",
+									Namespace: velerov1.DefaultNamespace,
+								},
+								Spec: corev1api.PersistentVolumeClaimSpec{
+									VolumeName: "fake-target-pv",
+								},
+								Status: corev1api.PersistentVolumeClaimStatus{
+									Phase: corev1api.ClaimBound,
+								},
+							}, nil
+						}
+						return false, nil, nil
+					},
+				},
 			},
 			expectBackupPod: true,
 			expectBackupPVC: true,
@@ -310,6 +355,7 @@ func TestRestoreExpose(t *testing.T) {
 				GenericRestoreExposeParam{
 					TargetPVCName:    test.targetPVCName,
 					TargetNamespace:  test.targetNamespace,
+					TargetPVName:     test.targetPVName,
 					HostingPodLabels: map[string]string{},
 					Resources:        corev1api.ResourceRequirements{},
 					ExposeTimeout:    time.Millisecond,
@@ -396,6 +442,9 @@ func TestRebindVolume(t *testing.T) {
 		},
 		Spec: corev1api.PersistentVolumeClaimSpec{
 			VolumeName: "fake-restore-pv",
+		},
+		Status: corev1api.PersistentVolumeClaimStatus{
+			Phase: corev1api.ClaimBound,
 		},
 	}
 
