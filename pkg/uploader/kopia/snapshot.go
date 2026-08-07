@@ -453,9 +453,12 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 			FilesystemOutput: fsOutput,
 		}
 	} else {
-		output = &fileSystemRestoreOutput{
-			FilesystemOutput: fsOutput,
-		}
+		// Wrap the filesystem output with the ownership verifier so that any
+		// silent attribute loss (NFS root_squash EPERM-swallow or SMB/FUSE
+		// fake-success chown/chmod) is detected and logged as a warning.
+		// See: https://github.com/velero-io/velero/issues/10043
+		fsRestoreOut := &fileSystemRestoreOutput{FilesystemOutput: fsOutput}
+		output = newVerifyingRestoreOutput(fsRestoreOut)
 	}
 
 	defer func() {
@@ -485,6 +488,32 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 		}
 	} else {
 		log.Infof("Flush done for volume dir %v", path)
+	}
+
+	// Emit ownership/mode mismatch warnings if the verifying output detected
+	// any silent attribute losses during the restore walk.
+	// Both known failure modes result in a zero-error restore that silently
+	// leaves files with wrong owners or permissions:
+	//   1. NFS root_squash / NFSv4 idmap: chown returns EPERM, swallowed by
+	//      IgnorePermissionErrors (hardcoded true above).
+	//   2. Azure Files SMB / blobfuse / gcsfuse: chown/chmod returns exit-0
+	//      but is a no-op on mount-constant-identity filesystems.
+	// See: https://github.com/velero-io/velero/issues/10043
+	if vOut, ok := output.(*verifyingRestoreOutput); ok {
+		if n := vOut.verifier.MismatchCount(); n > 0 {
+			samples := vOut.verifier.Samples()
+			sampleStrs := make([]string, len(samples))
+			for i, s := range samples {
+				sampleStrs[i] = s.String()
+			}
+			log.Warnf(
+				"Restore completed but %d file(s) have wrong ownership or permissions after "+
+					"chown/chmod — the target filesystem may not support attribute changes "+
+					"(NFS root_squash, Azure Files SMB, blobfuse, gcsfuse). "+
+					"Sample mismatches (up to %d shown): [%s]",
+				n, maxAttrMismatchSamples, strings.Join(sampleStrs, "; "),
+			)
+		}
 	}
 
 	return stat.RestoredTotalFileSize, stat.RestoredFileCount, nil
