@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -286,8 +287,8 @@ func TestGetVolumeSnapshotContentForVolumeSnapshot(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
-			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(test.snapshotObj, fakeClient.SnapshotV1())
-			if err != nil {
+			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(context.TODO(), test.snapshotObj, fakeClient.SnapshotV1())
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
