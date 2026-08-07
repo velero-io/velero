@@ -260,6 +260,20 @@ func (s *objectBackupStore) ListBackups() ([]string, error) {
 		// each of those off to get the backup name.
 		backupName := strings.TrimSuffix(strings.TrimPrefix(prefix, s.layout.subdirs["backups"]), "/")
 
+		// Verify that the backup metadata file exists before including this backup.
+		// This filters out empty directories that can persist in object stores with
+		// suspended versioning (e.g., MinIO) after backup deletion.
+		metadataKey := s.layout.getBackupMetadataKey(backupName)
+		exists, err := s.objectStore.ObjectExists(s.bucket, metadataKey)
+		if err != nil {
+			s.logger.WithError(err).WithField("backup", backupName).Warning("Failed to check backup metadata existence")
+			continue
+		}
+		if !exists {
+			s.logger.WithField("backup", backupName).Debug("Skipping backup directory without metadata file")
+			continue
+		}
+
 		output = append(output, backupName)
 	}
 
