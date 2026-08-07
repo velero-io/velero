@@ -613,7 +613,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 
 	// Enable BSL controller. No need to check whether it's enabled or not.
 	bslr := controller.NewBackupStorageLocationReconciler(
-		s.ctx,
 		s.mgr.GetClient(),
 		storage.DefaultBackupLocationInfo{
 			StorageLocation:           s.config.DefaultBackupLocation,
