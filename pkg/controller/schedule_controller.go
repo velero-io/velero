@@ -36,6 +36,7 @@ import (
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/constant"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
@@ -225,7 +226,7 @@ func (c *scheduleReconciler) checkIfBackupInNewOrProgress(schedule *velerov1.Sch
 	options := &client.ListOptions{
 		Namespace: schedule.Namespace,
 		LabelSelector: labels.Set(map[string]string{
-			velerov1.ScheduleNameLabel: schedule.Name,
+			velerov1.ScheduleNameLabel: label.GetValidName(schedule.Name),
 		}).AsSelector(),
 	}
 
