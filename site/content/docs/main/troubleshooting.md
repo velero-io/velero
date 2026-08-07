@@ -237,6 +237,24 @@ To resolve it, please use Kopia maintenance CLI to set the ownership correctly, 
 
 Please refer to [Issue 9007](https://github.com/velero-io/velero/issues/9007) for more information.
 
+## Disk space issues during restore
+
+If you encounter "no space left on device" errors during restore, the `--write-sparse-files` flag may help in certain scenarios.
+
+Example error message:
+```
+Velero: pod volume restore failed: error restoring volume: error creating .velero directory for done file: mkdir /host_pods/60880bf2-9d1c-47cf-ba8f-5f8db43b385b/volumes/kubernetes.io~csi/pvc-ee79e0f0-ed62-44f7-987e-16efca1d1cd5/mount/.velero: no space left on device
+```
+
+**Important Limitation**: The `--write-sparse-files` flag only works if the persistent volume had sparse files during backup that would free up enough space for the done file. If the volume doesn't contain sparse files, this option will not resolve the disk space issue.
+
+To try using sparse files during restore:
+```bash
+velero restore create <RESTORE_NAME> --from-backup <BACKUP_NAME> --write-sparse-files
+```
+
+See [Write Sparse files](restore-reference.md#write-sparse-files) for more details on using this option.
+
 [1]: debugging-restores.md
 [2]: debugging-install.md
 [3]: file-system-backup.md
