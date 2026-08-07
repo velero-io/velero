@@ -1,0 +1,1 @@
+Route orphaned backup deletion through DeleteBackupRequest so provider snapshots are cleaned up when a Backup CR has no matching backup in object storage.
