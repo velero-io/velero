@@ -407,6 +407,8 @@ func (p *pvcBackupItemAction) Execute(
 			"Backup":         backup.Name,
 		})
 
+		dataMoverFromVolumePolicy := vh.GetDataMoverFromActionParameters(item, kuberesource.PersistentVolumeClaims)
+
 		dataUploadLog.Info("Starting data upload of backup")
 
 		dataUpload, err := createDataUpload(
@@ -418,6 +420,7 @@ func (p *pvcBackupItemAction) Execute(
 			operationID,
 			vsc,
 			fsType,
+			dataMoverFromVolumePolicy,
 		)
 		if err != nil {
 			dataUploadLog.WithError(err).Error("failed to submit DataUpload")
@@ -557,11 +560,17 @@ func newDataUpload(
 	operationID string,
 	vsc *snapshotv1api.VolumeSnapshotContent,
 	fsType string,
+	dataMoverFromVolumePolicy string,
 ) *velerov2alpha1.DataUpload {
 	parentSnapshot := ""
 
 	if backup.Spec.BackupType == velerov1api.BackupTypeFull {
 		parentSnapshot = veleroshared.DataUploadParentSnapshotNone
+	}
+
+	dataMover := backup.Spec.DataMover
+	if dataMoverFromVolumePolicy != "" {
+		dataMover = dataMoverFromVolumePolicy
 	}
 
 	dataUpload := &velerov2alpha1.DataUpload{
@@ -596,7 +605,7 @@ func newDataUpload(
 				Driver:         vsc.Spec.Driver,
 			},
 			SourcePVC:             pvc.Name,
-			DataMover:             backup.Spec.DataMover,
+			DataMover:             dataMover,
 			BackupStorageLocation: backup.Spec.StorageLocation,
 			SourceNamespace:       pvc.Namespace,
 			OperationTimeout:      backup.Spec.CSISnapshotTimeout,
@@ -627,8 +636,9 @@ func createDataUpload(
 	operationID string,
 	vsc *snapshotv1api.VolumeSnapshotContent,
 	fsType string,
+	dataMoverFromVolumePolicy string,
 ) (*velerov2alpha1.DataUpload, error) {
-	dataUpload := newDataUpload(backup, vs, pvc, operationID, vsc, fsType)
+	dataUpload := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, dataMoverFromVolumePolicy)
 
 	err := crClient.Create(ctx, dataUpload)
 	if err != nil {

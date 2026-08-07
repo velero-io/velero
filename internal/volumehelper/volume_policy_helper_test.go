@@ -34,6 +34,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
 )
 
@@ -1540,6 +1541,142 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup_UnboundPVC(t *testing.T) {
 
 			require.NoError(t, actualError)
 			require.Equalf(t, tc.shouldFSBackup, actualShouldFSBackup, "Want shouldFSBackup as %t; Got shouldFSBackup as %t", tc.shouldFSBackup, actualShouldFSBackup)
+		})
+	}
+}
+
+func TestGetDataMoverFromActionParameters(t *testing.T) {
+	testCases := []struct {
+		name             string
+		inputObj         runtime.Object
+		groupResource    schema.GroupResource
+		resourcePolicies *resourcepolicies.ResourcePolicies
+		expected         string
+	}{
+		{
+			name:          "VolumePolicy match with dataMover parameter, returns dataMover string",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								datamover.DataMoverParameter: "velero-block",
+							},
+						},
+					},
+				},
+			},
+			expected: "velero-block",
+		},
+		{
+			name:          "VolumePolicy match without dataMover parameter, returns default dataMover",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								"otherParam": "value",
+							},
+						},
+					},
+				},
+			},
+			expected: "velero-fs",
+		},
+		{
+			name:          "VolumePolicy match with non-string dataMover parameter, returns empty string",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								datamover.DataMoverParameter: 123,
+							},
+						},
+					},
+				},
+			},
+			expected: "",
+		},
+		{
+			name:          "VolumePolicy not match, returns empty string",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp3-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								datamover.DataMoverParameter: "velero",
+							},
+						},
+					},
+				},
+			},
+			expected: "",
+		},
+		{
+			name:          "Error converting unstructured, returns empty string",
+			inputObj:      builder.ForPod("ns", "pod-1").Result(), // wrong type for PersistentVolumes
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+
+			var p *resourcepolicies.Policies
+			if tc.resourcePolicies != nil {
+				p = &resourcepolicies.Policies{}
+				err := p.BuildPolicy(tc.resourcePolicies)
+				require.NoError(t, err)
+			}
+
+			vh := NewVolumeHelperImpl(
+				p,
+				ptr.To(true),
+				logrus.StandardLogger(),
+				fakeClient,
+				false,
+				false,
+			)
+
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
+			require.NoError(t, err)
+
+			actual := vh.GetDataMoverFromActionParameters(&unstructured.Unstructured{Object: obj}, tc.groupResource)
+			assert.Equal(t, tc.expected, actual)
 		})
 	}
 }

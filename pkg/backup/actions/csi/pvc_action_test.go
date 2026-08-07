@@ -2229,12 +2229,13 @@ func TestGetOrCreateVolumeHelper(t *testing.T) {
 
 func TestNewDataUpload(t *testing.T) {
 	tests := []struct {
-		name                 string
-		backupType           velerov1api.BackupType
-		vsClassName          *string
-		uploaderConfig       *velerov1api.UploaderConfigForBackup
-		expectedParentSnap   string
-		expectedDataMoverCfg map[string]string
+		name                      string
+		backupType                velerov1api.BackupType
+		vsClassName               *string
+		uploaderConfig            *velerov1api.UploaderConfigForBackup
+		dataMoverFromVolumePolicy string
+		expectedParentSnap        string
+		expectedDataMoverCfg      map[string]string
 	}{
 		{
 			name:                 "Full backup type, no uploader config, no vs class name",
@@ -2261,6 +2262,15 @@ func TestNewDataUpload(t *testing.T) {
 			uploaderConfig:       &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
 			expectedParentSnap:   "",
 			expectedDataMoverCfg: nil,
+		},
+		{
+			name:                      "Default backup type, uploader config with 0 parallel files",
+			backupType:                "",
+			vsClassName:               ptr.To("test-vs-class"),
+			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
+			dataMoverFromVolumePolicy: "velero-block",
+			expectedParentSnap:        "",
+			expectedDataMoverCfg:      nil,
 		},
 	}
 
@@ -2310,7 +2320,7 @@ func TestNewDataUpload(t *testing.T) {
 			operationID := "test-op-id"
 			fsType := "ext4"
 
-			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType)
+			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy)
 
 			require.NotNil(t, du)
 			assert.Equal(t, velerov2alpha1.SchemeGroupVersion.String(), du.APIVersion)
@@ -2344,7 +2354,12 @@ func TestNewDataUpload(t *testing.T) {
 			}
 
 			assert.Equal(t, pvc.Name, du.Spec.SourcePVC)
-			assert.Equal(t, backup.Spec.DataMover, du.Spec.DataMover)
+			if tc.dataMoverFromVolumePolicy != "" {
+				assert.Equal(t, tc.dataMoverFromVolumePolicy, du.Spec.DataMover)
+			} else {
+				assert.Equal(t, backup.Spec.DataMover, du.Spec.DataMover)
+			}
+
 			assert.Equal(t, backup.Spec.StorageLocation, du.Spec.BackupStorageLocation)
 			assert.Equal(t, pvc.Namespace, du.Spec.SourceNamespace)
 			assert.Equal(t, backup.Spec.CSISnapshotTimeout, du.Spec.OperationTimeout)

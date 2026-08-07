@@ -20,6 +20,12 @@ limitations under the License.
 package datamover
 
 const (
+	// DataMoverParameter is the key of the action parameter that selects the data
+	// mover to be used for the matched volumes when the action type is snapshot.
+	DataMoverParameter = "dataMover"
+)
+
+const (
 	DataMoverTypeEmpty = ""
 	// DataMoverTypeVelero refers to the default built-in data mover. The default
 	// data mover may change among releases; see GetDefaultBuiltInDataMover.

@@ -28,4 +28,5 @@ type VolumeHelper interface {
 	ShouldPerformCustomAction(obj runtime.Unstructured, groupResource schema.GroupResource, matchParams map[string]any) (bool, error)
 	GetActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, string, map[string]any, error)
 	GetSnapshotClass(obj runtime.Unstructured, groupResource schema.GroupResource) (string, error)
+	GetDataMoverFromActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) string
 }

@@ -123,6 +123,45 @@ func NewVolumeHelperImplWithCache(
 	}, nil
 }
 
+func (v *volumeHelperImpl) getMatchAction(obj runtime.Unstructured, groupResource schema.GroupResource) (*resourcepolicies.Action, *corev1api.PersistentVolume, error) {
+	pvc := new(corev1api.PersistentVolumeClaim)
+	pv := new(corev1api.PersistentVolume)
+	var err error
+
+	if groupResource == kuberesource.PersistentVolumeClaims {
+		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pvc); err != nil {
+			v.logger.WithError(err).Warn("fail to convert unstructured into PVC")
+			return nil, nil, err
+		}
+
+		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
+		if err != nil {
+			v.logger.WithError(err).Warnf("failed to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
+			return nil, nil, nil
+		}
+	} else if groupResource == kuberesource.PersistentVolumes {
+		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pv); err != nil {
+			v.logger.WithError(err).Warn("fail to convert unstructured into PV")
+			return nil, nil, err
+		}
+	}
+
+	if v.volumePolicy != nil {
+		vfd := resourcepolicies.NewVolumeFilterData(pv, nil, pvc)
+		action, err := v.volumePolicy.GetMatchAction(vfd)
+		if err != nil {
+			pvName := ""
+			if pv != nil {
+				pvName = pv.Name
+			}
+			v.logger.WithError(err).Warnf("fail to get VolumePolicy match action for PV %s", pvName)
+			return nil, nil, err
+		}
+		return action, pv, nil
+	}
+	return nil, pv, nil
+}
+
 func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, error) {
 	// check if volume policy exists and also check if the object(pv/pvc) fits a volume policy criteria and see if the associated action is snapshot
 	// if it is not snapshot then skip the code path for snapshotting the PV/PVC
@@ -316,117 +355,53 @@ func (v volumeHelperImpl) shouldPerformFSBackupLegacy(
 }
 
 func (v *volumeHelperImpl) ShouldPerformCustomAction(obj runtime.Unstructured, groupResource schema.GroupResource, matchParams map[string]any) (bool, error) {
-	// check if volume policy exists and also check if the object(pv/pvc) fits a volume policy criteria and see if the associated action is custom with the provided param values
-	pvc := new(corev1api.PersistentVolumeClaim)
-	pv := new(corev1api.PersistentVolume)
-	var err error
-
-	var pvNotFoundErr error
-	if groupResource == kuberesource.PersistentVolumeClaims {
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pvc); err != nil {
-			v.logger.WithError(err).Error("fail to convert unstructured into PVC")
-			return false, err
-		}
-
-		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
-		if err != nil {
-			// Any error means PV not available - save to return later if no policy matches
-			v.logger.Debugf("PV not found for PVC %s: %v", pvc.Namespace+"/"+pvc.Name, err)
-			pvNotFoundErr = err
-			pv = nil
-		}
+	action, pv, err := v.getMatchAction(obj, groupResource)
+	if err != nil {
+		return false, err
 	}
 
-	if groupResource == kuberesource.PersistentVolumes {
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pv); err != nil {
-			v.logger.WithError(err).Error("fail to convert unstructured into PV")
-			return false, err
-		}
-	}
-
-	if v.volumePolicy != nil {
-		vfd := resourcepolicies.NewVolumeFilterData(pv, nil, pvc)
-		action, err := v.volumePolicy.GetMatchAction(vfd)
-		if err != nil {
-			v.logger.WithError(err).Errorf("fail to get VolumePolicy match action for %+v", vfd)
-			return false, err
-		}
-
-		// If there is a match action, and the action type is custom, return true
-		// if the provided parameters match as well, else return false.
-		// If there is no match action, also return false
-		if action != nil {
-			if action.Type == resourcepolicies.Custom {
-				for k, requiredValue := range matchParams {
-					if actionValue, ok := action.Parameters[k]; !ok || actionValue != requiredValue {
-						v.logger.Infof("Skipping custom action for %+v as value for parameter %s is %s rather than the required %s", vfd, k, actionValue, requiredValue)
-						return false, nil
-					}
+	if action != nil {
+		if action.Type == resourcepolicies.Custom {
+			for k, requiredValue := range matchParams {
+				if actionValue, ok := action.Parameters[k]; !ok || actionValue != requiredValue {
+					v.logger.Infof("Skipping custom action for pv %s as value for parameter %s is %s rather than the required %s", pv.Name, k, actionValue, requiredValue)
+					return false, nil
 				}
-				v.logger.Infof("performing custom action for %+v", vfd)
-				return true, nil
-			} else {
-				v.logger.Infof("Skipping custom action for %+v as the action type is %s", vfd, action.Type)
-				return false, nil
 			}
+			v.logger.Infof("performing custom action for pv %s", pv.Name)
+			return true, nil
+		} else {
+			v.logger.Infof("Skipping custom action for pv %s as the action type is %s", pv.Name, action.Type)
+			return false, nil
 		}
 	}
-	// If resource is PVC, and PV is nil (e.g., Pending/Lost PVC with no matching policy), return the original error
-	// Don't error out on no PV, just return false
-	if groupResource == kuberesource.PersistentVolumeClaims && pv == nil && pvNotFoundErr != nil {
-		v.logger.WithError(pvNotFoundErr).Warnf("fail to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
-		return false, nil
-	}
 
-	v.logger.Infof("skipping custom action for pv %s due to no matching volume policy", pv.Name)
+	pvName := ""
+	if pv != nil {
+		pvName = pv.Name
+	}
+	v.logger.Infof("skipping custom action for pv %s due to no matching volume policy", pvName)
 	return false, nil
 }
 
 // returns false if no matching action found. Returns true with the action name and Parameters map if there is a matching policy
 func (v *volumeHelperImpl) GetActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, string, map[string]any, error) {
-	// if volume policy exists, return action parameters.
-	pvc := new(corev1api.PersistentVolumeClaim)
-	pv := new(corev1api.PersistentVolume)
-	var err error
-
-	if groupResource == kuberesource.PersistentVolumeClaims {
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pvc); err != nil {
-			v.logger.WithError(err).Error("fail to convert unstructured into PVC")
-			return false, "", nil, err
-		}
-
-		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
-		if err != nil {
-			v.logger.WithError(err).Warnf("failed to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
-			return false, "", nil, nil
-		}
+	action, pv, err := v.getMatchAction(obj, groupResource)
+	if err != nil {
+		return false, "", nil, err
 	}
 
-	if groupResource == kuberesource.PersistentVolumes {
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), &pv); err != nil {
-			v.logger.WithError(err).Error("fail to convert unstructured into PV")
-			return false, "", nil, err
-		}
+	pvName := ""
+	if pv != nil {
+		pvName = pv.Name
 	}
 
-	if v.volumePolicy != nil {
-		vfd := resourcepolicies.NewVolumeFilterData(pv, nil, pvc)
-		action, err := v.volumePolicy.GetMatchAction(vfd)
-		if err != nil {
-			v.logger.WithError(err).Errorf("fail to get VolumePolicy match action for PV %s", pv.Name)
-			return false, "", nil, err
-		}
-
-		// If there is a match action, and the action type is custom, return true
-		// if the provided parameters match as well, else return false.
-		// If there is no match action, also return false
-		if action != nil {
-			v.logger.Infof("found matching action for pv %s, returning parameters", pv.Name)
-			return true, string(action.Type), action.Parameters, nil
-		}
+	if action != nil {
+		v.logger.Infof("found matching action for pv %s, returning parameters", pvName)
+		return true, string(action.Type), action.Parameters, nil
 	}
 
-	v.logger.Infof("no matching volume policy found for pv %s, no parameters to return", pv.Name)
+	v.logger.Infof("no matching volume policy found for pv %s, no parameters to return", pvName)
 	return false, "", nil, nil
 }
 
@@ -485,4 +460,29 @@ func (v *volumeHelperImpl) getVolumeFromResource(resource any) (*corev1api.Persi
 		return nil, podVol, nil
 	}
 	return nil, nil, fmt.Errorf("resource is not a PersistentVolume or Volume")
+}
+
+func (v *volumeHelperImpl) GetDataMoverFromActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) string {
+	action, pv, err := v.getMatchAction(obj, groupResource)
+	if err != nil {
+		return ""
+	}
+
+	pvName := ""
+	if pv != nil {
+		pvName = pv.Name
+	}
+
+	if action != nil {
+		dataMover, err := action.GetDataMover()
+		if err != nil {
+			v.logger.WithError(err).Warn("fail to get data mover.")
+			return ""
+		}
+		v.logger.Infof("found matching action for pv %s, returning data mover %s", pvName, dataMover)
+		return dataMover
+	}
+
+	v.logger.Infof("no matching volume policy found for pv %s, no parameters to return", pvName)
+	return ""
 }
