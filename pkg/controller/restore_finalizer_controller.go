@@ -35,6 +35,8 @@ import (
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -92,6 +94,19 @@ func (r *restoreFinalizerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.Restore{}).
 		Named(constant.ControllerRestoreFinalizer).
+		WithEventFilter(predicate.Funcs{
+			// Only process restore that are updated to finalizing phase after plugin operations are complete
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				restore, ok := e.ObjectNew.(*velerov1api.Restore)
+				if !ok {
+					return false
+				}
+				return restore.Status.Phase == velerov1api.RestorePhaseFinalizing || restore.Status.Phase == velerov1api.RestorePhaseFinalizingPartiallyFailed
+			},
+			CreateFunc:  func(e event.CreateEvent) bool { return false },
+			DeleteFunc:  func(e event.DeleteEvent) bool { return false },
+			GenericFunc: func(e event.GenericEvent) bool { return false },
+		}).
 		Complete(r)
 }
 
