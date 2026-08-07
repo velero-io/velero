@@ -1062,6 +1062,41 @@ func TestBatchForget(t *testing.T) {
 			},
 			expectedErr: []string{"error to flush repo: fake-error-4"},
 		},
+		{
+			name:            "delete and flush fail",
+			getter:          new(credmock.SecretStore),
+			credStoreReturn: "fake-password",
+			funcTable: localFuncTable{
+				getStorageVariables: func(*velerov1api.BackupStorageLocation, string, string, map[string]string, velerocredentials.CredentialGetter) (map[string]string, error) {
+					return map[string]string{}, nil
+				},
+				getStorageCredentials: func(*velerov1api.BackupStorageLocation, velerocredentials.FileStore) (map[string]string, error) {
+					return map[string]string{}, nil
+				},
+			},
+			repoService: new(reposervicenmocks.BackupRepoService),
+			backupRepo:  new(reposervicenmocks.BackupRepo),
+			retFuncOpen: []any{
+				func(context.Context, udmrepo.RepoOptions) udmrepo.BackupRepo {
+					return backupRepo
+				},
+
+				func(context.Context, udmrepo.RepoOptions) error {
+					return nil
+				},
+			},
+			retFuncDelete: func(context.Context, udmrepo.ID) error {
+				return errors.New("fake-delete-error")
+			},
+			retFuncFlush: func(context.Context) error {
+				return errors.New("fake-flush-error")
+			},
+			snapshots: []string{"snapshot-1"},
+			expectedErr: []string{
+				"error to delete manifest snapshot-1: fake-delete-error",
+				"error to flush repo: fake-flush-error",
+			},
+		},
 	}
 
 	for _, tc := range testCases {

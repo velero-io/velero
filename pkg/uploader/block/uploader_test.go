@@ -689,4 +689,52 @@ func TestBlockUploaderRestore(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int64(1048576), written)
 	})
+
+	t.Run("source size tag larger than object size", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		blkup := NewUploader(ctx, repoWriter, nil, logrus.New())
+
+		meta := &udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{
+				{ID: "data-id", Name: "bdev", Size: 1048576},
+			},
+		}
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(meta, nil)
+
+		snap := udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-id"},
+			Tags:       map[string]string{bdevSourceSizeTag: "2097152"},
+		}
+		dest := destInfo{size: 4194304, path: "/dev/target"}
+		iterMock := cbtmocks.NewIterator(t)
+
+		_, err := blkup.Restore(snap, dest, iterMock, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected size (1048576 vs. 2097152) for bdev object bdev")
+	})
+
+	t.Run("destination smaller than source size", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		blkup := NewUploader(ctx, repoWriter, nil, logrus.New())
+
+		meta := &udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{
+				{ID: "data-id", Name: "bdev", Size: 1048576},
+			},
+		}
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(meta, nil)
+
+		snap := udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-id"},
+			Tags:       map[string]string{bdevSourceSizeTag: "1048576"},
+		}
+		dest := destInfo{size: 512, path: "/dev/small"}
+		iterMock := cbtmocks.NewIterator(t)
+
+		_, err := blkup.Restore(snap, dest, iterMock, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "dest dev(/dev/small) size is too small")
+	})
 }

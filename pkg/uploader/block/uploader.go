@@ -169,11 +169,11 @@ func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bi
 	}
 
 	if sourceSize > meta.SubObjects[0].Size {
-		return 0, errors.Wrapf(err, "unexpected size (%v vs. %v) for bdev object %s", meta.SubObjects[0].Size, sourceSize, meta.SubObjects[0].Name)
+		return 0, errors.Errorf("unexpected size (%v vs. %v) for bdev object %s", meta.SubObjects[0].Size, sourceSize, meta.SubObjects[0].Name)
 	}
 
 	if sourceSize > dest.size {
-		return 0, errors.Wrapf(err, "dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
+		return 0, errors.Errorf("dest dev(%s) size is too small (%v vs. %v)", dest.path, dest.size, sourceSize)
 	}
 
 	reader, err := blkup.repoWriter.OpenObject(blkup.ctx, meta.SubObjects[0].ID)
@@ -616,7 +616,7 @@ func flushZeroBlocks(dest *os.File, start int64, length int64, zeroBlock []byte,
 		}
 
 		if writeSize != n {
-			return errors.Wrapf(err, "short write zero buffer at %v, length %v", start+written, writeSize)
+			return errors.Errorf("short write zero buffer at %v, length %v", start+written, writeSize)
 		}
 
 		written += int64(writeSize)
