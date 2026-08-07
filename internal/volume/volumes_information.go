@@ -457,7 +457,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 			size = volumeSnapshot.Status.RestoreSize.Value()
 		}
 		snapshotHandle := ""
-		if volumeSnapshotContent.Status.SnapshotHandle != nil {
+		if volumeSnapshotContent.Status != nil && volumeSnapshotContent.Status.SnapshotHandle != nil {
 			snapshotHandle = *volumeSnapshotContent.Status.SnapshotHandle
 		}
 		volumeGroupSnapshotHandle := ""
