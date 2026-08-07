@@ -62,7 +62,7 @@ type pvcRestoreItemAction struct {
 func (p *pvcRestoreItemAction) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
 		IncludedResources: []string{"persistentvolumeclaims"},
-		//TODO: add label selector volumeSnapshotLabel
+		LabelSelector:     velerov1api.VolumeSnapshotLabel,
 	}, nil
 }
 
@@ -134,7 +134,7 @@ func (p *pvcRestoreItemAction) Execute(
 
 		if err != nil {
 			logger.Error("Fail to get backup for restore.")
-			return nil, fmt.Errorf("fail to get backup for restore: %s", err.Error())
+			return nil, fmt.Errorf("fail to get backup for restore: %w", err)
 		}
 
 		if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
