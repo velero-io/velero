@@ -112,15 +112,15 @@ func WaitVolumeSnapshotReady(
 // GetVolumeSnapshotContentForVolumeSnapshot returns the VolumeSnapshotContent
 // object associated with the VolumeSnapshot.
 func GetVolumeSnapshotContentForVolumeSnapshot(
+	ctx context.Context,
 	volSnap *snapshotv1api.VolumeSnapshot,
 	snapshotClient snapshotter.SnapshotV1Interface,
 ) (*snapshotv1api.VolumeSnapshotContent, error) {
 	if volSnap.Status == nil || volSnap.Status.BoundVolumeSnapshotContentName == nil {
 		return nil, errors.Errorf("invalid snapshot info in volume snapshot %s", volSnap.Name)
 	}
-
 	vsc, err := snapshotClient.VolumeSnapshotContents().Get(
-		context.TODO(),
+		ctx,
 		*volSnap.Status.BoundVolumeSnapshotContentName,
 		metav1.GetOptions{},
 	)
