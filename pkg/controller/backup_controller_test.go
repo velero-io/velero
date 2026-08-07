@@ -551,6 +551,11 @@ func TestPrepareBackupRequest_SetBackupType(t *testing.T) {
 			backup:             defaultBackup().BackupType(velerov1api.BackupTypeIncremental).Result(),
 			expectedBackupType: velerov1api.BackupTypeIncremental,
 		},
+		{
+			name:               "case-insensitive type should be converted",
+			backup:             defaultBackup().BackupType("iNcReMeNtAl").Result(),
+			expectedBackupType: velerov1api.BackupTypeIncremental,
+		},
 	}
 
 	for _, test := range tests {

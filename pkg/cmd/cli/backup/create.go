@@ -243,10 +243,11 @@ func (o *CreateOptions) validateFromScheduleFlag(c *cobra.Command) error {
 }
 
 func (o *CreateOptions) validateBackupType() error {
-	backupType := strings.TrimSpace(o.BackupType)
+	// Allow full, Full, incremental, and Incremental from the CLI
+	backupType := strings.ToLower(strings.TrimSpace(o.BackupType))
 
 	switch backupType {
-	case "", "Incremental", "Full":
+	case "", "incremental", "full":
 	default:
 		return fmt.Errorf("invalid backup type %s - valid values are 'Incremental', and 'Full'", backupType)
 	}

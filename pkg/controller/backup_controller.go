@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -430,6 +431,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	if len(request.Spec.BackupType) == 0 {
 		// default backup type to incremental if not specified
 		request.Spec.BackupType = velerov1api.BackupTypeIncremental
+	} else {
+		// Convert the case-insensitive input into valid backupType
+		if strings.EqualFold(string(request.Spec.BackupType), string(velerov1api.BackupTypeFull)) {
+			request.Spec.BackupType = velerov1api.BackupTypeFull
+		} else if strings.EqualFold(string(request.Spec.BackupType), string(velerov1api.BackupTypeIncremental)) {
+			request.Spec.BackupType = velerov1api.BackupTypeIncremental
+		}
 	}
 
 	if len(request.Spec.DataMover) == 0 || request.Spec.DataMover == datamover.DataMoverTypeVelero {

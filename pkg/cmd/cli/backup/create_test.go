@@ -141,18 +141,17 @@ func TestCreateOptions_ValidateBackupType(t *testing.T) {
 		o.BackupType = " Incremental "
 		err = o.validateBackupType()
 		require.NoError(t, err)
+
+		o.BackupType = "iNcReMeNtAl"
+		err = o.validateBackupType()
+		require.NoError(t, err)
 	})
 
 	t.Run("invalid backup type", func(t *testing.T) {
 		o := NewCreateOptions()
 
-		o.BackupType = "incremental"
-		err := o.validateBackupType()
-		require.Error(t, err)
-		require.Equal(t, "invalid backup type incremental - valid values are 'Incremental', and 'Full'", err.Error())
-
 		o.BackupType = "invalid"
-		err = o.validateBackupType()
+		err := o.validateBackupType()
 		require.Error(t, err)
 		require.Equal(t, "invalid backup type invalid - valid values are 'Incremental', and 'Full'", err.Error())
 	})
