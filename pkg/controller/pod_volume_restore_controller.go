@@ -307,10 +307,23 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			return ctrl.Result{}, nil
 		}
 
+		// Reserve a slot atomically BEFORE doing expensive GetExposed operation
+		// This prevents race condition where multiple tasks waste time on GetExposed
+		// when the concurrent limit is already reached
+		if err := r.dataPathMgr.ReserveSlot(pvr.Name); err != nil {
+			if err == datapath.ConcurrentLimitExceed {
+				log.Debug("Data path concurrent limit reached, requeue later")
+				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			}
+			return r.errorOut(ctx, pvr, err, "error reserving data path slot", log)
+		}
+
 		res, err := r.exposer.GetExposed(ctx, getPVROwnerObject(pvr), r.client, r.nodeName, r.resourceTimeout)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(pvr.Name)
 			return r.errorOut(ctx, pvr, err, "exposed PVR is not ready", log)
 		} else if res == nil {
+			r.dataPathMgr.ReleaseReservation(pvr.Name)
 			return r.errorOut(ctx, pvr, errors.New("no expose result is available for the current node"), "exposed PVR is not ready", log)
 		}
 
@@ -326,6 +339,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		asyncBR, err = r.dataPathMgr.CreateMicroServiceBRWatcher(ctx, r.client, r.kubeClient, r.mgr, datapath.TaskTypeRestore,
 			pvr.Name, pvr.Namespace, res.ByPod.HostingPod.Name, res.ByPod.HostingContainer, pvr.Name, callbacks, false, log)
 		if err != nil {
+			r.dataPathMgr.ReleaseReservation(pvr.Name)
 			if err == datapath.ConcurrentLimitExceed {
 				log.Debug("Data path instance is concurrent limited requeue later")
 				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
@@ -333,6 +347,8 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				return r.errorOut(ctx, pvr, err, "error to create data path", log)
 			}
 		}
+
+		// Reservation is automatically completed in CreateMicroServiceBRWatcher
 
 		if err := r.initCancelableDataPath(ctx, asyncBR, res, log); err != nil {
 			log.WithError(err).Errorf("Failed to init cancelable data path for %s", pvr.Name)
