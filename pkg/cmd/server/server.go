@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -560,6 +561,14 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	}()
 	s.metrics = metrics.NewServerMetrics()
 	s.metrics.RegisterAllMetrics()
+	s.metrics.RegisterBuildInfo(
+		buildinfo.Version,
+		buildinfo.GitSHA,
+		buildinfo.GitTreeState,
+		goruntime.Version(),
+		goruntime.GOOS,
+		goruntime.GOARCH,
+	)
 	// Initialize manual backup metrics
 	s.metrics.InitSchedule("")
 
