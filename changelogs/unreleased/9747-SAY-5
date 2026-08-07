@@ -1,0 +1,1 @@
+Bound WaitRestoreExecHook polling with the restore resourceTimeout to avoid an infinite wait when a pod never becomes ready.
