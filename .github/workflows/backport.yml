@@ -1,0 +1,78 @@
+name: Backport merged pull request
+
+# Automates cherry-picking merged PRs onto release branches.
+# - Label a merged PR with e.g. `backport release-1.17` to backport on merge.
+# - Or comment `/backport release-1.17` or `/cherrypick release-1.17` on a merged PR.
+# See: https://github.com/velero-io/velero/issues/9603
+
+on:
+  pull_request_target:
+    types: [closed]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  backport:
+    name: Backport pull request
+    # Exclude comments from the backport-action bot (user id 97796249) to prevent
+    # recursive triggers. The bot does not post /backport commands, so startsWith
+    # already blocks recursion; the id check is defense in depth.
+    if: >
+      github.repository == 'velero-io/velero' &&
+      (
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.merged &&
+          contains(toJSON(github.event.pull_request.labels.*.name), '"backport ')
+        ) || (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          github.event.comment.user.id != 97796249 &&
+          contains(
+            fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+            github.event.comment.author_association
+          ) &&
+          (
+            startsWith(github.event.comment.body, '/backport') ||
+            startsWith(github.event.comment.body, '/cherrypick')
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push backport branches and comment
+      pull-requests: write # open backport PRs
+    steps:
+      - name: Parse target branches from comment
+        id: parse
+        if: github.event_name == 'issue_comment'
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          # First line only; strip /backport or /cherrypick prefix.
+          # Remaining text is a space-delimited list of target branches
+          # (may be empty, falls back to labels).
+          line=$(printf '%s' "$COMMENT_BODY" | head -n1 | tr -d '\r')
+          branches=$(printf '%s' "$line" | sed -E 's|^/(backport|cherrypick)[[:space:]]*||')
+          echo "branches=${branches}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create backport pull requests
+        # Pin to commit SHA: workflow has contents/pull-requests write.
+        uses: korthout/backport-action@2e830a1d0b8269505846ddd407a70876913ad1f8 # v4.6.0
+        with:
+          # Labels like `backport release-1.17` select the target branch.
+          label_pattern: '^backport ([^ ]+)$'
+          # Prefer draft PRs with conflict markers over failing the job silently.
+          experimental: |
+            {
+              "conflict_resolution": "draft_commit_conflicts"
+            }
+          # Empty when triggered by merge labels; set when `/backport` or `/cherrypick` includes branches.
+          target_branches: ${{ steps.parse.outputs.branches }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
