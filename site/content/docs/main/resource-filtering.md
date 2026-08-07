@@ -103,6 +103,30 @@ Includes cluster-scoped resources. Cannot work with `--include-cluster-scoped-re
   velero backup create <backup-name> --selector "<key> notin (<value>)"
   ```
 
+The same selector syntax works on restore. Set-based selectors are useful for phased restores: restore labeled resources first, then everything else.
+
+* Restore only resources matching the label selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector <key>=<value>
+  ```
+
+* Restore everything in the backup except resources matching the selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector "<key> notin (<value>)"
+  ```
+
+  `notin` also matches resources that don't have the `<key>` label at all: this restores resources whose `<key>` label has any other value, as well as resources without the `<key>` label.
+
+* Restore only resources that do not have a particular label key.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector '!<key>'
+  ```
+
+Note: resources pulled in as dependencies of selected items by restore item actions (for example, a restored pod's service account or persistent volume claims) are restored even if the label selector would exclude them.
+
 For more information read the [Kubernetes label selector documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors)
 
 ### --or-selector
