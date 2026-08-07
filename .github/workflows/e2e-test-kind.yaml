@@ -169,7 +169,7 @@ jobs:
           EOF
 
           # Match kubectl version to k8s server version
-          curl -LO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          curl -fLO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
           git init -q /tmp/kibishii

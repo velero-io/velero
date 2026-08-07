@@ -1,0 +1,1 @@
+Add curl --fail flag to kubectl download in e2e kind workflow
