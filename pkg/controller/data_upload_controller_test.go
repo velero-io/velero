@@ -1561,3 +1561,84 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 		})
 	}
 }
+
+func TestDUGenericEventPredicate(t *testing.T) {
+	tests := []struct {
+		name     string
+		object   kbclient.Object
+		expected bool
+	}{
+		{
+			name:     "invalid object type",
+			object:   &corev1api.Pod{},
+			expected: false,
+		},
+		{
+			name: "accepted phase",
+			object: &velerov2alpha1api.DataUpload{
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhaseAccepted,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "prepared phase",
+			object: &velerov2alpha1api.DataUpload{
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhasePrepared,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "in progress phase not canceled",
+			object: &velerov2alpha1api.DataUpload{
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhaseInProgress,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "canceled and not in final state",
+			object: &velerov2alpha1api.DataUpload{
+				Spec: velerov2alpha1api.DataUploadSpec{
+					Cancel: true,
+				},
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhaseInProgress,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "completed with deletion timestamp",
+			object: &velerov2alpha1api.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhaseCompleted,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "completed without deletion timestamp",
+			object: &velerov2alpha1api.DataUpload{
+				Status: velerov2alpha1api.DataUploadStatus{
+					Phase: velerov2alpha1api.DataUploadPhaseCompleted,
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := duGenericEventPredicate(tt.object)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
