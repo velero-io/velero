@@ -102,13 +102,21 @@ func printBackup(backup *velerov1api.Backup) []metav1.TableRow {
 		status = "Deleting"
 	}
 
+	// Show "N/A" for expiration if backup is in New phase
+	var expirationDisplay string
+	if status == string(velerov1api.BackupPhaseNew) {
+		expirationDisplay = "N/A"
+	} else {
+		expirationDisplay = humanReadableTimeFromNow(expiration)
+	}
+
 	row.Cells = append(row.Cells,
 		backup.Name,
 		status,
 		backup.Status.Errors,
 		backup.Status.Warnings,
 		backup.Status.StartTimestamp,
-		humanReadableTimeFromNow(expiration),
+		expirationDisplay,
 		backup.Spec.StorageLocation,
 		queuePosition(backup.Status.QueuePosition),
 		metav1.FormatLabelSelector(backup.Spec.LabelSelector),
