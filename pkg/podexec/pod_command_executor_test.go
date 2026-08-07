@@ -279,7 +279,7 @@ func TestEnsureContainerExists(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestPodCompeted(t *testing.T) {
+func TestPodCompleted(t *testing.T) {
 	pod := &corev1api.Pod{
 		Spec: corev1api.PodSpec{
 			Containers: []corev1api.Container{
