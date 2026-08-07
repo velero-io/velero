@@ -446,6 +446,12 @@ var _ = Describe(
 )
 
 var _ = Describe(
+	"Restore hook execution policies OnError Continue vs Fail are correctly evaluated",
+	Label("Basic", "Hooks"),
+	RestoreHooksPolicyTest,
+)
+
+var _ = Describe(
 	"Backup/restore of 2500 namespaces",
 	Label("Scale", "LongTime"),
 	MultiNSBackupRestore,
