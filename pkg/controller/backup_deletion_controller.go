@@ -531,7 +531,7 @@ func (r *backupDeletionReconciler) deleteCSIVolumeSnapshotsIfAny(ctx context.Con
 	}
 	for _, item := range vsList.Items {
 		vs := item
-		csi.CleanupVolumeSnapshot(&vs, r.Client, log)
+		csi.CleanupVolumeSnapshot(ctx, &vs, r.Client, log)
 	}
 }
 

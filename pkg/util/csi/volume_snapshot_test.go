@@ -1529,7 +1529,7 @@ func TestSetVolumeSnapshotContentDeletionPolicy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
-			_, err := SetVolumeSnapshotContentDeletionPolicy(tc.inputVSCName, fakeClient, tc.policy)
+			_, err := SetVolumeSnapshotContentDeletionPolicy(context.TODO(), tc.inputVSCName, fakeClient, tc.policy)
 			if tc.expectError {
 				assert.Error(t, err)
 			} else {
