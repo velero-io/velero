@@ -16,7 +16,27 @@ spec:
     singular: restore
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: The name of the backup this restore is from
+      jsonPath: .spec.backupName
+      name: Backup
+      type: string
+    - description: Restore status such as New/InProgress
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - description: Total number of errors logged during the restore
+      jsonPath: .status.errors
+      name: Errors
+      type: integer
+    - description: Total number of warnings logged during the restore
+      jsonPath: .status.warnings
+      name: Warnings
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
@@ -597,3 +617,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

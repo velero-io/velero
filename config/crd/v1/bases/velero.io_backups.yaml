@@ -16,7 +16,27 @@ spec:
     singular: backup
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: Backup status such as New/InProgress
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - description: Total number of errors logged during the backup
+      jsonPath: .status.errors
+      name: Errors
+      type: integer
+    - description: Total number of warnings logged during the backup
+      jsonPath: .status.warnings
+      name: Warnings
+      type: integer
+    - description: The time the backup was started
+      jsonPath: .status.startTimestamp
+      name: Started
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
@@ -688,3 +708,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}
