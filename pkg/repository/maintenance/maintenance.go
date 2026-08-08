@@ -351,7 +351,7 @@ func WaitJobComplete(cli client.Client, ctx context.Context, jobName, ns string,
 	if maintenanceJob.Status.Failed > 0 {
 		if r, err := getResultFromJob(cli, maintenanceJob); err != nil {
 			log.WithError(err).Warn("Failed to get maintenance job result")
-			result = "Repo maintenance failed but result is not retrieveable"
+			result = "Repo maintenance failed but result is not retrievable"
 		} else {
 			result = r
 		}
@@ -414,7 +414,7 @@ func WaitAllJobsComplete(ctx context.Context, cli client.Client, repo *velerov1a
 		if job.Status.Failed > 0 {
 			if msg, err := getResultFromJob(cli, job); err != nil {
 				log.WithError(err).Warnf("Failed to get result of maintenance job %s", job.Name)
-				message = fmt.Sprintf("Repo maintenance failed but result is not retrieveable, err: %v", err)
+				message = fmt.Sprintf("Repo maintenance failed but result is not retrievable, err: %v", err)
 			} else {
 				message = msg
 			}
