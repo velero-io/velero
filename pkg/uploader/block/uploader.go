@@ -599,6 +599,8 @@ func restoreWriteProc(ctx context.Context, dest *os.File, resultChan chan readRe
 }
 
 func flushZeroBlocks(dest *os.File, start int64, length int64, zeroBlock []byte, destPath string, log logrus.FieldLogger) error {
+	log.Infof("Flushing zero blocks to dev %s, offset %v, length %v", destPath, start, length)
+
 	err := blkZeroOut(dest, start, length)
 	if err == nil {
 		return nil

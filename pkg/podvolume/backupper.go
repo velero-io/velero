@@ -34,6 +34,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/label"
@@ -596,6 +597,10 @@ func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume c
 
 	if backup.Spec.UploaderConfig != nil {
 		pvb.Spec.UploaderSettings = uploaderutil.StoreBackupConfig(backup.Spec.UploaderConfig)
+	}
+
+	if backup.Spec.BackupType == velerov1api.BackupTypeFull {
+		pvb.Spec.ParentSnapshot = veleroshared.ParentSnapshotNone
 	}
 
 	return pvb

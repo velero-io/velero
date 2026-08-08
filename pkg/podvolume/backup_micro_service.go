@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
@@ -192,10 +193,18 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 
 	tags := map[string]string{}
 
+	// Modify the ParentSnapshot to "" and ForceFull to true when ParentSnapshot is "none".
+	parentSnapshot := pvb.Spec.ParentSnapshot
+	forceFull := false
+	if pvb.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
+		parentSnapshot = ""
+		forceFull = true
+	}
+
 	if err := fsBackup.StartBackup(r.sourceTargetPath, pvb.Spec.UploaderSettings, &datapath.BackupStartParam{
 		RealSource:     GetRealSource(pvb),
-		ParentSnapshot: "",
-		ForceFull:      false,
+		ParentSnapshot: parentSnapshot,
+		ForceFull:      forceFull,
 		Tags:           tags,
 	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path backup")

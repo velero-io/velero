@@ -345,7 +345,7 @@ func TestRunCancelableDataPath(t *testing.T) {
 			kubeClientObj:    []runtime.Object{duInProgress},
 			dataPathStarted:  true,
 			expectedEventMsg: fmt.Sprintf("Data path for %s stopped", dataUploadName),
-			expectedErr:      "timed out waiting for fs backup to complete",
+			expectedErr:      "timed out waiting for backup to complete",
 		},
 		{
 			name:            "data path returns error",
