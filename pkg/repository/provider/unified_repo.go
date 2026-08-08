@@ -632,6 +632,11 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 		validParams := []string{
 			udmrepo.StoreOptionCacheLimit,
 			udmrepo.StoreOptionKeyFullMaintenanceInterval,
+			udmrepo.ThrottleOptionReadOps,
+			udmrepo.ThrottleOptionWriteOps,
+			udmrepo.ThrottleOptionListOps,
+			udmrepo.ThrottleOptionUploadBytes,
+			udmrepo.ThrottleOptionDownloadBytes,
 		}
 		for _, param := range validParams {
 			if v, found := backupRepoConfig[param]; found {
