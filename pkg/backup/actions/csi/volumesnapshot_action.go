@@ -119,7 +119,9 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 
 	vsc, err := csi.GetVSCForVS(ctx, vs, p.crClient)
 	if err != nil {
-		csi.CleanupVolumeSnapshot(vs, p.crClient, p.log)
+		// context.TODO() is used here because the BackupItemAction plugin
+		// interface's Execute() does not accept a context.Context.
+		csi.CleanupVolumeSnapshot(context.TODO(), vs, p.crClient, p.log)
 		return nil, nil, "", nil, errors.WithStack(err)
 	}
 
