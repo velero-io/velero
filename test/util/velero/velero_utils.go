@@ -665,6 +665,40 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	secretKey,
 	caCertFile string,
 ) error {
+	args := createBackupLocationArgs(
+		veleroNamespace,
+		name,
+		objectStoreProvider,
+		bucket,
+		prefix,
+		config,
+		secretName,
+		secretKey,
+		caCertFile,
+	)
+
+	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
+		return err
+	}
+
+	return CheckBSL(ctx, veleroNamespace, name)
+}
+
+// createBackupLocationArgs builds the argument list for
+// `velero backup-location create`. It is separated from
+// VeleroCreateBackupLocation so that the argument construction can be verified
+// without invoking the Velero CLI.
+func createBackupLocationArgs(
+	veleroNamespace,
+	name,
+	objectStoreProvider,
+	bucket,
+	prefix,
+	config,
+	secretName,
+	secretKey,
+	caCertFile string,
+) []string {
 	args := []string{
 		"--namespace", veleroNamespace,
 		"create", "backup-location", name,
@@ -688,11 +722,7 @@ func VeleroCreateBackupLocation(ctx context.Context,
 		args = append(args, "--credential", fmt.Sprintf("%s=%s", secretName, secretKey))
 	}
 
-	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
-		return err
-	}
-
-	return CheckBSL(ctx, veleroNamespace, name)
+	return args
 }
 
 func VeleroVersion(ctx context.Context, veleroCLI, veleroNamespace string) error {

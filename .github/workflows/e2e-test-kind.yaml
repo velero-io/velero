@@ -151,8 +151,12 @@ jobs:
             -out /tmp/minio-certs/public.crt \
             -subj "/CN=${MINIO_HOST_IP}" \
             -addext "subjectAltName=IP:${MINIO_HOST_IP},IP:127.0.0.1,DNS:localhost"
-          # The MinIO container runs as a non-root user and must be able to read both files.
-          chmod 644 /tmp/minio-certs/private.key /tmp/minio-certs/public.crt
+          # The certificate is public, but the key must not be world-readable.
+          # The bitnami/minio image runs as uid 1001, so give that uid ownership
+          # of the key; 0600 is then still readable inside the container.
+          chmod 600 /tmp/minio-certs/private.key
+          chmod 644 /tmp/minio-certs/public.crt
+          sudo chown 1001:1001 /tmp/minio-certs/private.key
       - name: Install MinIO
         run: |
           set -euo pipefail
