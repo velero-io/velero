@@ -269,6 +269,17 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	io.BackupStorageConfig = flag.NewMap()
 	io.BackupStorageConfig.Set(veleroCfg.BSLConfig)
 
+	// CACertFile is the CA bundle used to verify TLS connections to the object
+	// store. It is passed through to `velero install --cacert`, which stores it
+	// in the BSL's spec.objectStorage.caCert.
+	if veleroCfg.CACertFile != "" {
+		realPath, err := filepath.Abs(veleroCfg.CACertFile)
+		if err != nil {
+			return nil, err
+		}
+		io.CACertFile = realPath
+	}
+
 	io.VolumeSnapshotConfig = flag.NewMap()
 	io.VolumeSnapshotConfig.Set(veleroCfg.VSLConfig)
 
@@ -651,7 +662,8 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	prefix,
 	config,
 	secretName,
-	secretKey string,
+	secretKey,
+	caCertFile string,
 ) error {
 	args := []string{
 		"--namespace", veleroNamespace,
@@ -666,6 +678,10 @@ func VeleroCreateBackupLocation(ctx context.Context,
 
 	if config != "" {
 		args = append(args, "--config", config)
+	}
+
+	if caCertFile != "" {
+		args = append(args, "--cacert", caCertFile)
 	}
 
 	if secretName != "" && secretKey != "" {

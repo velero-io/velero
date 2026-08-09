@@ -137,9 +137,37 @@ jobs:
         run: |
           echo "Loading MinIO image..."
           docker load < ./minio-image.tar
+      # Serve MinIO over TLS so the E2E suite exercises Velero's HTTPS object
+      # store path (BSL caCert / plugin TLS handshake) instead of plain HTTP.
+      - name: Generate MinIO TLS certificate
+        run: |
+          set -euo pipefail
+          # hostname -i can return several addresses; the certificate SAN needs exactly one.
+          MINIO_HOST_IP=$(hostname -i | awk '{print $1}')
+          echo "MINIO_HOST_IP=${MINIO_HOST_IP}" >> $GITHUB_ENV
+          mkdir -p /tmp/minio-certs
+          openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+            -keyout /tmp/minio-certs/private.key \
+            -out /tmp/minio-certs/public.crt \
+            -subj "/CN=${MINIO_HOST_IP}" \
+            -addext "subjectAltName=IP:${MINIO_HOST_IP},IP:127.0.0.1,DNS:localhost"
+          # The MinIO container runs as a non-root user and must be able to read both files.
+          chmod 644 /tmp/minio-certs/private.key /tmp/minio-certs/public.crt
       - name: Install MinIO
         run: |
-          docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
+          set -euo pipefail
+          # SSL_CERT_FILE / CURL_CA_BUNDLE let the container's own readiness probe
+          # (curl) and bucket bootstrap (mc) trust the self-signed certificate.
+          docker run -d --rm -p 9000:9000 \
+            -e "MINIO_ROOT_USER=minio" \
+            -e "MINIO_ROOT_PASSWORD=minio123" \
+            -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" \
+            -e "MINIO_SCHEME=https" \
+            -e "MINIO_SERVER_URL=https://${MINIO_HOST_IP}:9000" \
+            -e "SSL_CERT_FILE=/certs/public.crt" \
+            -e "CURL_CA_BUNDLE=/certs/public.crt" \
+            -v /tmp/minio-certs:/certs:ro \
+            bitnami/minio:local
       - uses: helm/kind-action@v1
         with:
           cluster_name: "kind"
@@ -180,11 +208,13 @@ jobs:
           GOPATH=~/go \
               CLOUD_PROVIDER=kind \
               OBJECT_STORE_PROVIDER=aws \
-              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=https://${MINIO_HOST_IP}:9000 \
+              BSL_CA_CERT_FILE=/tmp/minio-certs/public.crt \
               CREDS_FILE=/tmp/credential \
               BSL_BUCKET=bucket \
               ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
-              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=https://${MINIO_HOST_IP}:9000 \
+              ADDITIONAL_BSL_CA_CERT_FILE=/tmp/minio-certs/public.crt \
               ADDITIONAL_CREDS_FILE=/tmp/credential \
               ADDITIONAL_BSL_BUCKET=additional-bucket \
               VELERO_IMAGE=velero:pr-test-linux-amd64 \
