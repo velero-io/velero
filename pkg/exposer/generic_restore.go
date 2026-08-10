@@ -585,14 +585,11 @@ func (e *genericRestoreExposer) rebindVolumeSameMode(ctx context.Context, ownerO
 	curLog.WithField("restore PV", restorePV.Name).Info("Restore PV is ready")
 
 	retained = nil
-
 	_, err = kube.SetPVReclaimPolicy(ctx, e.kubeClient.CoreV1(), restorePV, orgReclaim)
 	if err != nil {
-		curLog.WithField("restore PV", restorePV.Name).WithError(err).Warn("Restore PV's reclaim policy is not restored")
-	} else {
-		curLog.WithField("restore PV", restorePV.Name).Info("Restore PV's reclaim policy is restored")
+		return errors.Wrapf(err, "error restoring reclaim policy for restore PV %s", restorePV.Name)
 	}
-
+	curLog.WithField("restore PV", restorePV.Name).Info("Restore PV's reclaim policy is restored")
 	return nil
 }
 

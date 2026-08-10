@@ -409,6 +409,19 @@ func TestRebindVolume(t *testing.T) {
 		},
 	}
 
+	restorePVObjBound := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-restore-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			PersistentVolumeReclaimPolicy: corev1api.PersistentVolumeReclaimDelete,
+			VolumeMode:                    &modeFilesystem,
+		},
+		Status: corev1api.PersistentVolumeStatus{
+			Phase: corev1api.VolumeBound,
+		},
+	}
+
 	restorePod := &corev1api.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: velerov1.DefaultNamespace,
@@ -761,6 +774,35 @@ func TestRebindVolume(t *testing.T) {
 				restorePod,
 			},
 			err: "error to wait restore PV bound, restore PV fake-restore-pv: error to wait for bound of PV: context deadline exceeded",
+		},
+		{
+			name:            "[same mode] restore reclaim policy fail",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObjSameMode,
+				restorePVCObj,
+				restorePVObjBound,
+				restorePod,
+			},
+			kubeReactors: []reactor{
+				{
+					verb:     "patch",
+					resource: "persistentvolumes",
+					reactorFunc: func() func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						patchCount := 0
+						return func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+							patchCount++
+							if patchCount < 3 {
+								return false, nil, nil
+							}
+							return true, nil, errors.New("fake-patch-error")
+						}
+					}(),
+				},
+			},
+			err: "error restoring reclaim policy for restore PV fake-restore-pv: error patching PV: fake-patch-error",
 		},
 	}
 
