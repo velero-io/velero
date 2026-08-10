@@ -6,6 +6,10 @@ name: "Auto Assign Author"
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
+  # Watch for submitted reviews so we can re-request a second CODEOWNERS
+  # review once only one maintainer has approved.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
@@ -14,10 +18,72 @@ permissions:
 jobs:
   # Automatically assigns reviewers and owner
   add-reviews:
-    if: github.repository == 'velero-io/velero'
+    if: github.repository == 'velero-io/velero' && github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Set the author of a PR as the assignee
         uses: kentaro-m/auto-assign-action@v2.0.0
         with:
           configuration-path: ".github/auto-assignees.yml"
+
+  # `.github/CODEOWNERS` automatically requests review from the
+  # velero-io/maintainer team, but that request is cleared as soon as a
+  # single member of the team submits a review. Since we require a minimum
+  # of 2 reviewers (see `number_of_reviewers` in auto-assignees.yml), this
+  # re-requests a review from the maintainer team whenever a PR still has
+  # fewer than the required number of approvals, so a second CODEOWNERS
+  # reviewer gets pinged.
+  re-request-review:
+    if: github.repository == 'velero-io/velero' && github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-request review from maintainers if more approvals are needed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const requiredApprovals = 2;
+            const maintainerTeam = 'maintainer';
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number,
+            });
+
+            // Count distinct users whose most recent review is an approval.
+            // The Reviews API does not guarantee chronological order, so
+            // sort by submission time before folding into the map.
+            const sortedReviews = [...reviews].sort(
+              (a, b) => new Date(a.submitted_at) - new Date(b.submitted_at)
+            );
+            const latestReviewByUser = new Map();
+            for (const review of sortedReviews) {
+              latestReviewByUser.set(review.user.login, review.state);
+            }
+            const approvedReviewers = [...latestReviewByUser.entries()].filter(
+              ([, state]) => state === 'APPROVED'
+            );
+
+            if (approvedReviewers.length >= requiredApprovals) {
+              console.log(
+                `PR already has ${approvedReviewers.length} approvals, no need to re-request review.`
+              );
+              return;
+            }
+
+            console.log(
+              `PR has ${approvedReviewers.length}/${requiredApprovals} approvals, re-requesting review from @${owner}/${maintainerTeam}.`
+            );
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number,
+                team_reviewers: [maintainerTeam],
+              });
+            } catch (error) {
+              core.warning(`Failed to re-request review from maintainers: ${error.message}`);
+            }
