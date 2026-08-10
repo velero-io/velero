@@ -21,6 +21,12 @@ Here you will find external resources about Velero, including conference talks, 
 
     {{< youtube oPQW99NiV_0 >}}
 
+### Open Source Summit
+
+* **Open Source Summit NA 2022 (Austin)** - [Velero - The Cloud Native Backup for Kubernetes](https://ossna2022.sched.com/event/11Nu9) - Orlin Vasilev, VMware & Scott Seago, Red Hat
+
+    {{< youtube DKMW69OSI7c >}}
+
 ### DevConf
 
 * **DevConf.IN 2025** - From Chaos to Control: Mastering Kubernetes Backups and Restore with Velero - Aziza Karol & Prasad Joshi
