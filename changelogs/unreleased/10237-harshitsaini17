@@ -1,0 +1,1 @@
+Reject negative --ttl in backup create validation, which previously produced a backup whose expiration was in the past and was garbage collected immediately after creation
