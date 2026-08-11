@@ -179,21 +179,28 @@ func TestSanitizeArchivePath(t *testing.T) {
 	tests := []struct {
 		name       string
 		sourcePath string
+		wantPath   string
 		wantErr    bool
 	}{
-		{"regular nested entry stays inside destDir", "resources/pods/ns/a.json", false},
-		{"parent traversal escapes destDir", "../../../etc/passwd", true},
-		{"sibling directory sharing the destDir name prefix escapes", "../velero-restore-evil/x.json", true},
+		{"regular nested entry stays inside destDir", "resources/pods/ns/a.json", destDir + "/resources/pods/ns/a.json", false},
+		{"parent traversal escapes destDir", "../../../etc/passwd", "", true},
+		{"sibling directory sharing the destDir name prefix escapes", "../velero-restore-evil/x.json", "", true},
+		// An entry naming destDir itself is contained, so it is accepted and resolves to
+		// destDir. Nothing escapes; a regular-file entry like this just fails later on the
+		// directory when it is created.
+		{"entry naming destDir itself resolves to destDir", ".", destDir, false},
+		{"entry with an empty name resolves to destDir", "", destDir, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := sanitizeArchivePath(destDir, tc.sourcePath)
+			targetPath, err := sanitizeArchivePath(destDir, tc.sourcePath)
 			if tc.wantErr {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "invalid archive path")
-			} else {
-				require.NoError(t, err)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPath, targetPath)
 		})
 	}
 }
