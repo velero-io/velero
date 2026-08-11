@@ -8,7 +8,7 @@ jobs:
     if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10.1.1
+      - uses: actions/stale@v11.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           stale-issue-message: "This issue is stale because it has been open 60 days with no activity. Remove stale label or comment or this will be closed in 14 days. If a Velero team member has requested log or more information, please provide the output of the shared commands."
