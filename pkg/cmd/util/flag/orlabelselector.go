@@ -45,7 +45,7 @@ func (ls *OrLabelSelector) Set(s string) error {
 	orItems := strings.Split(s, " or ")
 	ls.OrLabelSelectors = make([]*metav1.LabelSelector, 0)
 	for _, orItem := range orItems {
-		parsed, err := metav1.ParseToLabelSelector(orItem)
+		parsed, err := parseToLabelSelector(orItem)
 		if err != nil {
 			return err
 		}

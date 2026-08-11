@@ -36,7 +36,7 @@ func (ls *LabelSelector) String() string {
 // to the label-selector receiver. It returns an error if
 // the string is not parseable.
 func (ls *LabelSelector) Set(s string) error {
-	parsed, err := metav1.ParseToLabelSelector(s)
+	parsed, err := parseToLabelSelector(s)
 	if err != nil {
 		return err
 	}
