@@ -271,11 +271,11 @@ func (b *backupSyncReconciler) filterBackupOwnerReferences(ctx context.Context, 
 			case err != nil && apierrors.IsNotFound(err):
 				log.Warnf("Removing missing schedule ownership reference %s/%s from backup", backup.Namespace, v.Name)
 				continue
+			case err != nil && !apierrors.IsNotFound(err):
+				log.WithError(errors.WithStack(err)).Error("Error finding schedule ownership reference, keeping schedule on backup")
 			case schedule.UID != v.UID:
 				log.Warnf("Removing schedule ownership reference with mismatched UIDs. Expected %s, got %s", v.UID, schedule.UID)
 				continue
-			case err != nil && !apierrors.IsNotFound(err):
-				log.WithError(errors.WithStack(err)).Error("Error finding schedule ownership reference, keeping schedule on backup")
 			}
 		default:
 			log.Warnf("Unable to check ownership reference for unknown kind, %s", v.Kind)

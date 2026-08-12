@@ -107,7 +107,7 @@ func printBackup(backup *velerov1api.Backup) []metav1.TableRow {
 		status,
 		backup.Status.Errors,
 		backup.Status.Warnings,
-		backup.Status.StartTimestamp,
+		formatTimestamp(backup.Status.StartTimestamp),
 		humanReadableTimeFromNow(expiration),
 		backup.Spec.StorageLocation,
 		queuePosition(backup.Status.QueuePosition),

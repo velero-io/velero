@@ -14,7 +14,7 @@ jobs:
     if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
-      - uses: jpmcb/prow-github-actions@f4d01dd4b13f289014c23fe5a19878a2479cb35b # v1.1.3
+      - uses: jpmcb/prow-github-actions@c44ac3a57d67639e39e4a4988b52049ef45b80dd # v2.0.0
         with:
           # TODO: before allowing the /lgtm command, see if we can block merging if changelog labels are missing.
           prow-commands: |
