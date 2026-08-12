@@ -157,7 +157,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 
 	curLog.Info("Volumesnapshot is ready")
 
-	vsc, err := csi.GetVolumeSnapshotContentForVolumeSnapshot(volumeSnapshot, e.csiSnapshotClient)
+	vsc, err := csi.GetVolumeSnapshotContentForVolumeSnapshot(ctx, volumeSnapshot, e.csiSnapshotClient)
 	if err != nil {
 		return errors.Wrap(err, "error to get volume snapshot content")
 	}

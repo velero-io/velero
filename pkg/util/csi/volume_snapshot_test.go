@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -286,7 +287,7 @@ func TestGetVolumeSnapshotContentForVolumeSnapshot(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
-			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(test.snapshotObj, fakeClient.SnapshotV1())
+			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(context.TODO(), test.snapshotObj, fakeClient.SnapshotV1())
 			if err != nil {
 				require.EqualError(t, err, test.err)
 			} else {
@@ -1032,6 +1033,7 @@ func TestGetVolumeSnapshotClass(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actualSnapshotClass, actualError := GetVolumeSnapshotClass(
+				context.TODO(),
 				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient, "")
 			if tc.expectError {
 				require.Error(t, actualError)
@@ -1458,7 +1460,7 @@ func TestIsVolumeSnapshotExists(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := IsVolumeSnapshotExists(tc.vs.Namespace, tc.vs.Name, fakeClient)
+			actual := IsVolumeSnapshotExists(context.TODO(), tc.vs.Namespace, tc.vs.Name, fakeClient)
 			assert.Equal(t, tc.expected, actual)
 		})
 	}
@@ -1529,7 +1531,7 @@ func TestSetVolumeSnapshotContentDeletionPolicy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
-			_, err := SetVolumeSnapshotContentDeletionPolicy(tc.inputVSCName, fakeClient, tc.policy)
+			_, err := SetVolumeSnapshotContentDeletionPolicy(context.TODO(), tc.inputVSCName, fakeClient, tc.policy)
 			if tc.expectError {
 				assert.Error(t, err)
 			} else {
@@ -1586,7 +1588,7 @@ func TestDeleteVolumeSnapshots(t *testing.T) {
 			)
 			logger := logging.DefaultLogger(logrus.DebugLevel, logging.FormatText)
 
-			DeleteReadyVolumeSnapshot(tc.vs, client, logger)
+			DeleteReadyVolumeSnapshot(context.TODO(), tc.vs, client, logger)
 
 			vsList := new(snapshotv1api.VolumeSnapshotList)
 			err := client.List(

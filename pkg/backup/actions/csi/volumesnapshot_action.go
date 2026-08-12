@@ -78,6 +78,8 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 ) {
 	p.log.Infof("Executing VolumeSnapshotBackupItemAction")
 
+	ctx := context.Background()
+
 	vs := new(snapshotv1api.VolumeSnapshot)
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(
 		item.UnstructuredContent(), vs); err != nil {
@@ -90,7 +92,7 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 			WithField("Backup", fmt.Sprintf("%s/%s", backup.Namespace, backup.Name)).
 			WithField("BackupPhase", backup.Status.Phase).Debugf("Cleaning VolumeSnapshots.")
 
-		csi.DeleteReadyVolumeSnapshot(*vs, p.crClient, p.log)
+		csi.DeleteReadyVolumeSnapshot(ctx, *vs, p.crClient, p.log)
 		return item, nil, "", nil, nil
 	}
 
@@ -115,11 +117,9 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 	p.log.Infof("Getting VolumesnapshotContent for Volumesnapshot %s/%s",
 		vs.Namespace, vs.Name)
 
-	ctx := context.TODO()
-
 	vsc, err := csi.GetVSCForVS(ctx, vs, p.crClient)
 	if err != nil {
-		csi.CleanupVolumeSnapshot(vs, p.crClient, p.log)
+		csi.CleanupVolumeSnapshot(ctx, vs, p.crClient, p.log)
 		return nil, nil, "", nil, errors.WithStack(err)
 	}
 
@@ -187,7 +187,7 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 		)
 
 		if vscPatchError := p.crClient.Patch(
-			context.TODO(),
+			ctx,
 			vsc,
 			crclient.MergeFrom(originVSC),
 		); vscPatchError != nil {
@@ -203,7 +203,7 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 	originVS := vs.DeepCopy()
 	kubeutil.AddAnnotations(&vs.ObjectMeta, annotations)
 	if err := p.crClient.Patch(
-		context.TODO(),
+		ctx,
 		vs,
 		crclient.MergeFrom(originVS),
 	); err != nil {

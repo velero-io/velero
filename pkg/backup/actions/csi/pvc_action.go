@@ -212,6 +212,7 @@ func (p *pvcBackupItemAction) validatePVCAndPV(
 }
 
 func (p *pvcBackupItemAction) createVolumeSnapshot(
+	ctx context.Context,
 	pvc corev1api.PersistentVolumeClaim,
 	backup *velerov1api.Backup,
 	policySnapshotClass string,
@@ -222,7 +223,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 	p.log.Debugf("Fetching storage class for PV %s", *pvc.Spec.StorageClassName)
 	storageClass := new(storagev1api.StorageClass)
 	if err := p.crClient.Get(
-		context.TODO(), crclient.ObjectKey{Name: *pvc.Spec.StorageClassName},
+		ctx, crclient.ObjectKey{Name: *pvc.Spec.StorageClassName},
 		storageClass,
 	); err != nil {
 		return nil, errors.Wrap(err, "error getting storage class")
@@ -230,6 +231,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 
 	p.log.Debugf("Fetching VolumeSnapshotClass for %s", storageClass.Provisioner)
 	vsClass, err := csi.GetVolumeSnapshotClass(
+		ctx,
 		storageClass.Provisioner,
 		backup,
 		&pvc,
@@ -266,7 +268,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 		},
 	}
 
-	if err := p.crClient.Create(context.TODO(), vs); err != nil {
+	if err := p.crClient.Create(ctx, vs); err != nil {
 		return nil, errors.Wrapf(
 			err, "error creating volume snapshot",
 		)
@@ -295,6 +297,8 @@ func (p *pvcBackupItemAction) Execute(
 ) {
 	p.log.Info("Starting PVCBackupItemAction")
 
+	ctx := context.Background()
+
 	if valid := p.validateBackup(*backup); !valid {
 		return item, nil, "", nil, nil
 	}
@@ -319,7 +323,7 @@ func (p *pvcBackupItemAction) Execute(
 	}
 
 	// Ensure PVC-to-Pod cache is built for this namespace (lazy per-namespace caching)
-	if err := p.ensurePVCPodCacheForNamespace(context.TODO(), pvc.Namespace); err != nil {
+	if err := p.ensurePVCPodCacheForNamespace(ctx, pvc.Namespace); err != nil {
 		return nil, nil, "", nil, err
 	}
 
@@ -347,7 +351,7 @@ func (p *pvcBackupItemAction) Execute(
 	// created but never processed (the DataUpload controller runs inside node-agent),
 	// causing the backup to hang until itemOperationTimeout expires.
 	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) && datamover.IsBuiltInDataMover(backup.Spec.DataMover) {
-		if err := nodeagent.IsReady(context.TODO(), backup.Namespace, p.crClient, p.log); err != nil {
+		if err := nodeagent.IsReady(ctx, backup.Namespace, p.crClient, p.log); err != nil {
 			p.log.WithError(err).Error("cannot perform snapshot data movement without running node-agent pods")
 			return nil, nil, "", nil, errors.Wrap(err, "CSI PVC BIA cannot proceed: node-agent is not ready for snapshot data movement")
 		}
@@ -360,7 +364,7 @@ func (p *pvcBackupItemAction) Execute(
 		p.log.Infof("Volume policy specifies snapshotClass=%s for PVC %s/%s", policySnapshotClass, pvc.Namespace, pvc.Name)
 	}
 
-	vs, err := p.getVolumeSnapshotReference(context.TODO(), pvc, backup, policySnapshotClass)
+	vs, err := p.getVolumeSnapshotReference(ctx, pvc, backup, policySnapshotClass)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -376,7 +380,7 @@ func (p *pvcBackupItemAction) Execute(
 	if err != nil {
 		p.log.Errorf("Failed to wait for VolumeSnapshot %s/%s to become ReadyToUse within timeout %v: %s",
 			vs.Namespace, vs.Name, backup.Spec.CSISnapshotTimeout.Duration, err.Error())
-		csi.CleanupVolumeSnapshot(vs, p.crClient, p.log)
+		csi.CleanupVolumeSnapshot(ctx, vs, p.crClient, p.log)
 		return nil, nil, "", nil, errors.WithStack(err)
 	}
 
@@ -424,7 +428,7 @@ func (p *pvcBackupItemAction) Execute(
 
 			// TODO: need to use DeleteVolumeSnapshotIfAny, after data mover
 			// adopting the controller-runtime client.
-			if deleteErr := p.crClient.Delete(context.TODO(), vs); deleteErr != nil {
+			if deleteErr := p.crClient.Delete(ctx, vs); deleteErr != nil {
 				if !apierrors.IsNotFound(deleteErr) {
 					dataUploadLog.WithError(deleteErr).Error("fail to delete VolumeSnapshot")
 				}
@@ -831,7 +835,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 	}
 
 	// Legacy fallback: create individual VS
-	return p.createVolumeSnapshot(pvc, backup, policySnapshotClass)
+	return p.createVolumeSnapshot(ctx, pvc, backup, policySnapshotClass)
 }
 
 func (p *pvcBackupItemAction) findExistingVSForBackup(
