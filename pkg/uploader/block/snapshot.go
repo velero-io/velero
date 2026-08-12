@@ -235,12 +235,12 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 		return 0, errors.Wrapf(err, "error reset pos of block device %s", dest)
 	}
 
-	size, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath, size: destSize}, bitmap.Iterator(), uploaderCfg)
+	_, totalSize, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath, size: destSize}, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
 		return 0, errors.Wrapf(err, "error restoring to block dev %s", destPath)
 	}
 
-	return size, nil
+	return totalSize, nil
 }
 
 func findPreviousSnapshot(ctx context.Context, rep udmrepo.BackupRepo, path string, snapshotTags map[string]string, noLaterThan *time.Time, log logrus.FieldLogger) (udmrepo.Snapshot, error) {

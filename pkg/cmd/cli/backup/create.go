@@ -242,11 +242,17 @@ func (o *CreateOptions) validateFromScheduleFlag(c *cobra.Command) error {
 	return nil
 }
 
+// validateBackupType check the backupType value and return the valid value.
 func (o *CreateOptions) validateBackupType() error {
-	backupType := strings.TrimSpace(o.BackupType)
+	// Allow full, and incremental from the CLI, and ignore case of the input string's case.
+	backupType := strings.ToLower(strings.TrimSpace(o.BackupType))
 
 	switch backupType {
-	case "", "Incremental", "Full":
+	case "":
+	case "incremental":
+		o.BackupType = string(velerov1api.BackupTypeIncremental)
+	case "full":
+		o.BackupType = string(velerov1api.BackupTypeFull)
 	default:
 		return fmt.Errorf("invalid backup type %s - valid values are 'Incremental', and 'Full'", backupType)
 	}

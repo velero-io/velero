@@ -5430,6 +5430,29 @@ func TestBackupNamespaces(t *testing.T) {
 			},
 		},
 		{
+			name:   "Wildcard star with excluded namespaces test",
+			backup: defaultBackup().IncludedNamespaces("*").ExcludedNamespaces("ns-2").Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-3").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").Result(),
+				),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/namespaces/cluster/ns-3.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
+				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
+				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
+			},
+		},
+		{
 			name:   "Empty namespace test",
 			backup: defaultBackup().IncludedNamespaces("invalid*").Result(),
 			apiResources: []*test.APIResource{

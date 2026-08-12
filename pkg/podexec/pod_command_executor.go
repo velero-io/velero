@@ -36,6 +36,10 @@ import (
 
 const defaultTimeout = 30 * time.Second
 
+// maxHookTimeout bounds a user-supplied hook timeout, which can come from a pod
+// annotation, so a single hook cannot hold up a backup for an unbounded time.
+const maxHookTimeout = 4 * time.Hour
+
 // PodCommandExecutor is capable of executing a command in a container in a pod.
 type PodCommandExecutor interface {
 	// ExecutePodCommand executes a command in a container in a pod. If the command takes longer than
@@ -112,8 +116,14 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 		localHook.OnError = api.HookErrorModeFail
 	}
 
-	if localHook.Timeout.Duration == 0 {
+	// A non-positive timeout is not a valid bound. Timeouts sourced from pod annotations are
+	// parsed with time.ParseDuration, which accepts negative values, and a negative duration
+	// would otherwise leave the hook without any timeout at all.
+	if localHook.Timeout.Duration <= 0 {
 		localHook.Timeout.Duration = defaultTimeout
+	}
+	if localHook.Timeout.Duration > maxHookTimeout {
+		localHook.Timeout.Duration = maxHookTimeout
 	}
 
 	hookLog := log.WithFields(
@@ -158,23 +168,26 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 		Stderr: &stderr,
 	}
 
-	errCh := make(chan error)
+	// The timeout drives the context so the exec stream is actually canceled, rather than
+	// being left running on the API server after this function has returned.
+	ctx, cancel := context.WithTimeout(context.Background(), localHook.Timeout.Duration)
+	defer cancel()
+
+	// Buffered so the goroutine below can always send its result and exit, even when this
+	// function has already returned on the timeout path.
+	errCh := make(chan error, 1)
 
 	go func() {
-		err = executor.StreamWithContext(context.Background(), streamOptions)
-		errCh <- err
+		streamErr := executor.StreamWithContext(ctx, streamOptions)
+		// Inspect the local context as soon as the stream returns. Otherwise a stream error
+		// completed before the deadline could be misclassified if this goroutine sends its
+		// result before the caller is scheduled to receive it.
+		errCh <- normalizeExecHookError(streamErr, ctx.Err(), localHook.Timeout.Duration)
 	}()
-
-	var timeoutCh <-chan time.Time
-	if localHook.Timeout.Duration > 0 {
-		timer := time.NewTimer(localHook.Timeout.Duration)
-		defer timer.Stop()
-		timeoutCh = timer.C
-	}
 
 	select {
 	case err = <-errCh:
-	case <-timeoutCh:
+	case <-ctx.Done():
 		return errors.Errorf("timed out after %v", localHook.Timeout.Duration)
 	}
 
@@ -182,6 +195,14 @@ func (e *defaultPodCommandExecutor) ExecutePodCommand(log logrus.FieldLogger, it
 	hookLog.Infof("stderr: %s", stderr.String())
 
 	return err
+}
+
+func normalizeExecHookError(streamErr, contextErr error, timeout time.Duration) error {
+	if errors.Is(contextErr, context.DeadlineExceeded) {
+		return errors.Errorf("timed out after %v", timeout)
+	}
+
+	return streamErr
 }
 
 func ensureContainerExists(pod *corev1api.Pod, container string) error {

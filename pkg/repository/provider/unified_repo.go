@@ -384,7 +384,7 @@ func (urp *unifiedRepoProvider) BatchForget(ctx context.Context, snapshotIDs []s
 
 	err = bkRepo.Flush(ctx)
 	if err != nil {
-		return []error{errors.Wrap(err, "error to flush repo")}
+		return append(errs, errors.Wrap(err, "error to flush repo"))
 	}
 
 	log.Debug("Forget snapshot complete")

@@ -508,7 +508,8 @@ func (r *itemCollector) getResourceItems(
 				kind:          resource.Kind,
 			})
 
-			if item.GetNamespace() != "" {
+			if item.GetNamespace() != "" &&
+				r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(item.GetNamespace()) {
 				log.Debugf("Track namespace %s in nsTracker", item.GetNamespace())
 				r.nsTracker.track(item.GetNamespace())
 			}

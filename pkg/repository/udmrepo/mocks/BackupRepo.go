@@ -699,8 +699,8 @@ func (_c *BackupRepo_NewObjectWriter_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // OpenObject provides a mock function for the type BackupRepo
-func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error) {
-	ret := _mock.Called(ctx, id)
+func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error) {
+	ret := _mock.Called(ctx, id, opt)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OpenObject")
@@ -708,18 +708,18 @@ func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo
 
 	var r0 udmrepo.ObjectReader
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID) (udmrepo.ObjectReader, error)); ok {
-		return returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error)); ok {
+		return returnFunc(ctx, id, opt)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID) udmrepo.ObjectReader); ok {
-		r0 = returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) udmrepo.ObjectReader); ok {
+		r0 = returnFunc(ctx, id, opt)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(udmrepo.ObjectReader)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, udmrepo.ID) error); ok {
-		r1 = returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) error); ok {
+		r1 = returnFunc(ctx, id, opt)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -734,11 +734,12 @@ type BackupRepo_OpenObject_Call struct {
 // OpenObject is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id udmrepo.ID
-func (_e *BackupRepo_Expecter) OpenObject(ctx interface{}, id interface{}) *BackupRepo_OpenObject_Call {
-	return &BackupRepo_OpenObject_Call{Call: _e.mock.On("OpenObject", ctx, id)}
+//   - opt udmrepo.ObjectReadOptions
+func (_e *BackupRepo_Expecter) OpenObject(ctx interface{}, id interface{}, opt interface{}) *BackupRepo_OpenObject_Call {
+	return &BackupRepo_OpenObject_Call{Call: _e.mock.On("OpenObject", ctx, id, opt)}
 }
 
-func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmrepo.ID)) *BackupRepo_OpenObject_Call {
+func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions)) *BackupRepo_OpenObject_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -748,9 +749,14 @@ func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmre
 		if args[1] != nil {
 			arg1 = args[1].(udmrepo.ID)
 		}
+		var arg2 udmrepo.ObjectReadOptions
+		if args[2] != nil {
+			arg2 = args[2].(udmrepo.ObjectReadOptions)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -761,7 +767,7 @@ func (_c *BackupRepo_OpenObject_Call) Return(objectReader udmrepo.ObjectReader, 
 	return _c
 }
 
-func (_c *BackupRepo_OpenObject_Call) RunAndReturn(run func(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error)) *BackupRepo_OpenObject_Call {
+func (_c *BackupRepo_OpenObject_Call) RunAndReturn(run func(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error)) *BackupRepo_OpenObject_Call {
 	_c.Call.Return(run)
 	return _c
 }

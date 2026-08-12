@@ -1,0 +1,1 @@
+Make velero restore logs return errors instead of calling os.Exit directly, matching velero backup logs, and enable the two previously skipped tests

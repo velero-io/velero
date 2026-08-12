@@ -72,6 +72,11 @@ type ObjectWriteOptions struct {
 	ParentObject ID     // The object in the previous snapshot, for incremental backup
 }
 
+type ObjectReadOptions struct {
+	Prefetch         bool
+	PrefetchBudgetMB int
+}
+
 type AdvancedFeatureInfo struct {
 	MultiPartBackup bool // if set to true, it means the repo supports multiple-part backup
 }
@@ -136,7 +141,7 @@ type BackupRepoService interface {
 type BackupRepo interface {
 	// OpenObject opens an existing object for read.
 	// id: the object's unified identifier.
-	OpenObject(ctx context.Context, id ID) (ObjectReader, error)
+	OpenObject(ctx context.Context, id ID, opt ObjectReadOptions) (ObjectReader, error)
 
 	// GetManifest gets a manifest data from the backup repository.
 	GetManifest(ctx context.Context, id ID, mani *RepoManifest) error

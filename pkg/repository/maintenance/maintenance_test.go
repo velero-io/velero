@@ -789,7 +789,7 @@ func TestWaitAllJobsComplete(t *testing.T) {
 				{
 					Result:         velerov1api.BackupRepositoryMaintenanceFailed,
 					StartTimestamp: &metav1.Time{Time: now.Add(time.Hour)},
-					Message:        "Repo maintenance failed but result is not retrieveable, err: no pod found for job job2",
+					Message:        "Repo maintenance failed but result is not retrievable, err: no pod found for job job2",
 				},
 			},
 		},

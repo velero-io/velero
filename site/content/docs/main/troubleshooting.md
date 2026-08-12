@@ -77,6 +77,19 @@ Here are some things to verify if you receive `SignatureDoesNotMatch` errors:
   * Make sure your S3-compatible layer is using [signature version 4][5] (such as Ceph RADOS v12.2.7)
   * For Ceph, try using a native Ceph account for credentials instead of external providers such as OpenStack Keystone
 
+### `velero backup logs` or `velero describe` fails with `no such host`
+
+Downloading artifacts uses a pre-signed URL built from the `s3Url` in your `BackupStorageLocation`. If that address is only resolvable inside the cluster, such as a Kubernetes Service name, the Velero client cannot fetch the artifact even though the backup or restore itself succeeded:
+
+```
+Warnings:  <error getting warnings: Get "http://minio.velero.svc:9000/velero/restores/...":
+dial tcp: lookup minio.velero.svc: no such host>
+```
+
+The backup or restore is unaffected. Only the download of its log or results file fails.
+
+To fix this, give the location a `publicUrl` that your client can reach. See [Expose Minio outside your cluster][26] for the Minio case; the same applies to any object store addressed by an in-cluster name.
+
 ## Velero (or a pod it was backing up) restarted during a backup and the backup is stuck InProgress
 
 Velero cannot resume backups that were interrupted. Backups stuck in the `InProgress` phase can be deleted with `kubectl delete backup <name> -n <velero-namespace>`.
@@ -250,3 +263,4 @@ Please refer to [Issue 9007](https://github.com/velero-io/velero/issues/9007) fo
 [11]: /plugins
 [12]: https://kubernetes.io/docs/concepts/configuration/secret/#editing-a-secret
 [25]: https://kubernetes.slack.com/messages/velero
+[26]: contributions/minio.md

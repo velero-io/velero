@@ -12,6 +12,7 @@ If you are ready to jump in and test, add code, or help with documentation, foll
 You can follow the work we do via our [GitHub milestones](https://github.com/velero-io/velero/milestones) and the project [Roadmap](https://github.com/velero-io/velero/wiki/Roadmap).
 
 * Follow us on Twitter at [@projectvelero](https://twitter.com/projectvelero)
+* Follow us on LinkedIn at [Project Velero](https://www.linkedin.com/company/project-velero)
 * Join our Kubernetes Slack channel and talk to over 800 other community members: [#velero-users](https://kubernetes.slack.com/messages/velero-users)
 * Join the Velero community meetings 
 Bi-weekly  community meeting alternating every week between Beijing Friendly timezone and EST/Europe Friendly Timezone  
