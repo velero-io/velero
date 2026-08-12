@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	clientTesting "k8s.io/client-go/testing"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -1730,7 +1732,7 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		vscWithNilStatusField,
 		vsForNilStatusFieldVsc,
 	}
-	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+	fakeClient := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 	testCases := []struct {
 		name        string
 		volSnap     *snapshotv1api.VolumeSnapshot
@@ -1776,6 +1778,96 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 			assert.Equal(t, tc.exepctedVSC, actualVSC)
 		})
 	}
+}
+
+func TestFinalizeVSCHandleWaitErrorPreservesInterrupted(t *testing.T) {
+	log := logrus.New()
+	volSnap := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "vs", Namespace: "default"},
+	}
+	errMsg := "snapshot failed"
+	vsc := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc"},
+		Status: &snapshotv1api.VolumeSnapshotContentStatus{
+			Error: &snapshotv1api.VolumeSnapshotError{Message: &errMsg},
+		},
+	}
+
+	err := finalizeVSCHandleWaitError(context.DeadlineExceeded, volSnap, vsc, log)
+	require.Error(t, err)
+	assert.True(t, wait.Interrupted(err), "timeout with VSC error must remain Interrupted so callers do not fall back to polling")
+	assert.Contains(t, err.Error(), "CSI got timed out with error")
+}
+
+func TestWaitUntilVSCHandleIsReadyWatchPathEventuallyReady(t *testing.T) {
+	vscName := "watch-vsc"
+	snapshotHandle := "watch-handle"
+	vs := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "watch-vs",
+			Namespace: "default",
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{},
+	}
+	client := velerotest.NewFakeControllerRuntimeWatchClient(t, vs)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+
+		vsc := &snapshotv1api.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{Name: vscName},
+			Status: &snapshotv1api.VolumeSnapshotContentStatus{
+				SnapshotHandle: &snapshotHandle,
+			},
+		}
+		require.NoError(t, client.Create(context.Background(), vsc))
+
+		updatedVS := vs.DeepCopy()
+		updatedVS.Status = &snapshotv1api.VolumeSnapshotStatus{
+			BoundVolumeSnapshotContentName: &vscName,
+		}
+		require.NoError(t, client.Update(context.Background(), updatedVS))
+	}()
+
+	got, err := WaitUntilVSCHandleIsReady(
+		vs,
+		client,
+		logrus.New().WithField("fake", "test"),
+		5*time.Second,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotNil(t, got.Status)
+	require.NotNil(t, got.Status.SnapshotHandle)
+	assert.Equal(t, snapshotHandle, *got.Status.SnapshotHandle)
+}
+
+func TestWaitUntilVSCHandleIsReadyWatchTimeoutDoesNotFallBack(t *testing.T) {
+	vs := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "timeout-vs",
+			Namespace: "default",
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{},
+	}
+	client := velerotest.NewFakeControllerRuntimeWatchClient(t, vs)
+	timeout := 300 * time.Millisecond
+
+	start := time.Now()
+	got, err := WaitUntilVSCHandleIsReady(
+		vs,
+		client,
+		logrus.New().WithField("fake", "test"),
+		timeout,
+	)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.True(t, wait.Interrupted(err))
+	// If the watch timeout incorrectly fell back to another full poll wait,
+	// elapsed would be closer to 2x timeout.
+	assert.Less(t, elapsed, timeout+500*time.Millisecond)
 }
 
 func TestDiagnoseVS(t *testing.T) {

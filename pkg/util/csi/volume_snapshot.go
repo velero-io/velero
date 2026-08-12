@@ -33,9 +33,11 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -47,6 +49,8 @@ import (
 const (
 	waitInternal                          = 2 * time.Second
 	volumeSnapshotContentProtectFinalizer = "velero.io/volume-snapshot-content-protect-finalizer"
+	earlyFrequentPollingTimeout           = 10 * time.Second
+	defaultVSCHandlePollInterval          = 5 * time.Second
 )
 
 // WaitVolumeSnapshotReady waits a VS to become ready to use until the timeout reaches
@@ -631,94 +635,263 @@ func DeleteReadyVolumeSnapshot(
 	}
 }
 
-// WaitUntilVSCHandleIsReady returns the VolumeSnapshotContent
-// object associated with the volumesnapshot
-func WaitUntilVSCHandleIsReady(
-	volSnap *snapshotv1api.VolumeSnapshot,
+func earlyFrequentPollingEnabled() bool {
+	frequentPolling, err := strconv.ParseBool(os.Getenv("CSI_SNAPSHOT_EARLY_FREQUENT_POLLING"))
+	return err == nil && frequentPolling
+}
+
+// tryPopulateVSCHandle loads the VolumeSnapshotContent for volSnap when its
+// snapshot handle is ready.
+func tryPopulateVSCHandle(
+	ctx context.Context,
 	crClient crclient.Client,
+	volSnap *snapshotv1api.VolumeSnapshot,
+	vsc *snapshotv1api.VolumeSnapshotContent,
+	log logrus.FieldLogger,
+	retryInterval time.Duration,
+) (bool, error) {
+	vs := new(snapshotv1api.VolumeSnapshot)
+	if err := crClient.Get(
+		ctx,
+		crclient.ObjectKeyFromObject(volSnap),
+		vs,
+	); err != nil {
+		return false,
+			errors.Wrapf(
+				err,
+				"failed to get volumesnapshot %s/%s",
+				volSnap.Namespace, volSnap.Name,
+			)
+	}
+
+	if vs.Status == nil || vs.Status.BoundVolumeSnapshotContentName == nil {
+		if retryInterval > 0 {
+			log.Infof("Waiting for CSI driver to reconcile volumesnapshot %s/%s. Retrying in %ds",
+				volSnap.Namespace, volSnap.Name, retryInterval/time.Second)
+		} else {
+			log.Infof("Waiting for CSI driver to reconcile volumesnapshot %s/%s",
+				volSnap.Namespace, volSnap.Name)
+		}
+		return false, nil
+	}
+
+	if err := crClient.Get(
+		ctx,
+		crclient.ObjectKey{
+			Name: *vs.Status.BoundVolumeSnapshotContentName,
+		},
+		vsc,
+	); err != nil {
+		return false,
+			errors.Wrapf(
+				err,
+				"failed to get VolumeSnapshotContent %s for VolumeSnapshot %s/%s",
+				*vs.Status.BoundVolumeSnapshotContentName, vs.Namespace, vs.Name,
+			)
+	}
+
+	// we need to wait for the VolumeSnapshotContent
+	// to have a snapshot handle because during restore,
+	// we'll use that snapshot handle as the source for
+	// the VolumeSnapshotContent so it's statically
+	// bound to the existing snapshot.
+	if vsc.Status == nil ||
+		vsc.Status.SnapshotHandle == nil {
+		if retryInterval > 0 {
+			log.Infof(
+				"Waiting for VolumeSnapshotContents %s to have snapshot handle. Retrying in %ds",
+				vsc.Name, retryInterval/time.Second)
+		} else {
+			log.Infof(
+				"Waiting for VolumeSnapshotContents %s to have snapshot handle",
+				vsc.Name)
+		}
+		if vsc.Status != nil &&
+			vsc.Status.Error != nil {
+			log.Warnf("VolumeSnapshotContent %s has error: %v",
+				vsc.Name, *vsc.Status.Error.Message)
+		}
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func finalizeVSCHandleWaitError(
+	err error,
+	volSnap *snapshotv1api.VolumeSnapshot,
+	vsc *snapshotv1api.VolumeSnapshotContent,
+	log logrus.FieldLogger,
+) error {
+	if err == nil {
+		return nil
+	}
+	if wait.Interrupted(err) {
+		if vsc != nil &&
+			vsc.Status != nil &&
+			vsc.Status.Error != nil {
+			log.Errorf(
+				"Timed out awaiting reconciliation of VolumeSnapshot, VolumeSnapshotContent %s has error: %v",
+				vsc.Name, *vsc.Status.Error.Message)
+			// Wrap the original interrupted error so callers can still detect
+			// timeout via wait.Interrupted and avoid falling back to polling.
+			return errors.Wrapf(err, "CSI got timed out with error: %v",
+				*vsc.Status.Error.Message)
+		}
+		log.Errorf(
+			"Timed out awaiting reconciliation of volumesnapshot %s/%s",
+			volSnap.Namespace, volSnap.Name)
+	}
+	return err
+}
+
+func watchUntilVSCHandleReady(
+	ctx context.Context,
+	watchClient crclient.WithWatch,
+	crClient crclient.Client,
+	volSnap *snapshotv1api.VolumeSnapshot,
+	vsc *snapshotv1api.VolumeSnapshotContent,
+	log logrus.FieldLogger,
+) error {
+	if ready, err := tryPopulateVSCHandle(ctx, crClient, volSnap, vsc, log, 0); ready || err != nil {
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	vsList := &snapshotv1api.VolumeSnapshotList{}
+	vsWatch, err := watchClient.Watch(ctx, vsList, &crclient.ListOptions{
+		Namespace: volSnap.Namespace,
+		FieldSelector: fields.OneTermEqualSelector(
+			"metadata.name", volSnap.Name),
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to watch VolumeSnapshot")
+	}
+	defer vsWatch.Stop()
+
+	var boundVSCName string
+	for boundVSCName == "" {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-vsWatch.ResultChan():
+			if !ok {
+				return errors.New("VolumeSnapshot watch channel closed")
+			}
+			switch event.Type {
+			case watch.Deleted:
+				return errors.Errorf("VolumeSnapshot %s/%s was deleted",
+					volSnap.Namespace, volSnap.Name)
+			case watch.Error:
+				return errors.Errorf("VolumeSnapshot watch error: %v", event.Object)
+			default:
+				vs := new(snapshotv1api.VolumeSnapshot)
+				if err := crClient.Get(
+					ctx,
+					crclient.ObjectKeyFromObject(volSnap),
+					vs,
+				); err != nil {
+					return errors.Wrapf(
+						err,
+						"failed to get volumesnapshot %s/%s",
+						volSnap.Namespace, volSnap.Name,
+					)
+				}
+				if vs.Status != nil &&
+					vs.Status.BoundVolumeSnapshotContentName != nil {
+					boundVSCName = *vs.Status.BoundVolumeSnapshotContentName
+				}
+			}
+		}
+	}
+
+	if ready, err := tryPopulateVSCHandle(ctx, crClient, volSnap, vsc, log, 0); ready || err != nil {
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	vscList := &snapshotv1api.VolumeSnapshotContentList{}
+	vscWatch, err := watchClient.Watch(ctx, vscList, &crclient.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", boundVSCName),
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to watch VolumeSnapshotContent")
+	}
+	defer vscWatch.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-vscWatch.ResultChan():
+			if !ok {
+				return errors.New("VolumeSnapshotContent watch channel closed")
+			}
+			switch event.Type {
+			case watch.Deleted:
+				return errors.Errorf("VolumeSnapshotContent %s was deleted", boundVSCName)
+			case watch.Error:
+				return errors.Errorf("VolumeSnapshotContent watch error: %v", event.Object)
+			default:
+				if ready, err := tryPopulateVSCHandle(
+					ctx, crClient, volSnap, vsc, log, 0,
+				); ready {
+					return nil
+				} else if err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+func waitUntilVSCHandleIsReadyWithWatch(
+	watchClient crclient.WithWatch,
+	crClient crclient.Client,
+	volSnap *snapshotv1api.VolumeSnapshot,
 	log logrus.FieldLogger,
 	csiSnapshotTimeout time.Duration,
 ) (*snapshotv1api.VolumeSnapshotContent, error) {
-	// We'll wait for the VSC to be reconciled, trying a fast poll interval first
-	// before falling back to a slower poll interval for the full csiSnapshotTimeout.
+	ctx, cancel := context.WithTimeout(context.Background(), csiSnapshotTimeout)
+	defer cancel()
+
+	vsc := new(snapshotv1api.VolumeSnapshotContent)
+	err := watchUntilVSCHandleReady(ctx, watchClient, crClient, volSnap, vsc, log)
+	if err != nil {
+		return nil, finalizeVSCHandleWaitError(err, volSnap, vsc, log)
+	}
+	return vsc, nil
+}
+
+func waitUntilVSCHandleIsReadyWithPoll(
+	crClient crclient.Client,
+	volSnap *snapshotv1api.VolumeSnapshot,
+	log logrus.FieldLogger,
+	csiSnapshotTimeout time.Duration,
+) (*snapshotv1api.VolumeSnapshotContent, error) {
 	vsc := new(snapshotv1api.VolumeSnapshotContent)
 	var interval time.Duration
 
 	pollFunc := func(ctx context.Context) (bool, error) {
-		vs := new(snapshotv1api.VolumeSnapshot)
-		if err := crClient.Get(
-			ctx,
-			crclient.ObjectKeyFromObject(volSnap),
-			vs,
-		); err != nil {
-			return false,
-				errors.Wrapf(
-					err,
-					"failed to get volumesnapshot %s/%s",
-					volSnap.Namespace, volSnap.Name,
-				)
-		}
-
-		if vs.Status == nil || vs.Status.BoundVolumeSnapshotContentName == nil {
-			log.Infof("Waiting for CSI driver to reconcile volumesnapshot %s/%s. Retrying in %ds",
-				volSnap.Namespace, volSnap.Name, interval/time.Second)
-			return false, nil
-		}
-
-		if err := crClient.Get(
-			ctx,
-			crclient.ObjectKey{
-				Name: *vs.Status.BoundVolumeSnapshotContentName,
-			},
-			vsc,
-		); err != nil {
-			return false,
-				errors.Wrapf(
-					err,
-					"failed to get VolumeSnapshotContent %s for VolumeSnapshot %s/%s",
-					*vs.Status.BoundVolumeSnapshotContentName, vs.Namespace, vs.Name,
-				)
-		}
-
-		// we need to wait for the VolumeSnapshotContent
-		// to have a snapshot handle because during restore,
-		// we'll use that snapshot handle as the source for
-		// the VolumeSnapshotContent so it's statically
-		// bound to the existing snapshot.
-		if vsc.Status == nil ||
-			vsc.Status.SnapshotHandle == nil {
-			log.Infof(
-				"Waiting for VolumeSnapshotContents %s to have snapshot handle. Retrying in %ds",
-				vsc.Name, interval/time.Second)
-			if vsc.Status != nil &&
-				vsc.Status.Error != nil {
-				log.Warnf("VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
-			}
-			return false, nil
-		}
-
-		return true, nil
+		return tryPopulateVSCHandle(ctx, crClient, volSnap, vsc, log, interval)
 	}
 
-	var err error
-	frequentPolling, err := strconv.ParseBool(os.Getenv("CSI_SNAPSHOT_EARLY_FREQUENT_POLLING"))
-
-	if err == nil && frequentPolling {
+	if earlyFrequentPollingEnabled() {
 		// The short interval for the first ten seconds is due to the fact that
 		// Microsoft VSS backups have a hard-coded unfreeze call after 10 seconds,
 		// so we need to minimize waiting time during the first 10 seconds.
-		// First poll with a short interval and timeout.
 		interval = 1 * time.Second
-		timeout := 10 * time.Second
-		err = wait.PollUntilContextTimeout(
+		err := wait.PollUntilContextTimeout(
 			context.Background(),
 			interval,
-			timeout,
+			earlyFrequentPollingTimeout,
 			true,
 			pollFunc,
 		)
-
 		if err == nil {
 			return vsc, nil
 		}
@@ -727,37 +900,65 @@ func WaitUntilVSCHandleIsReady(
 		}
 	}
 
-	// If the first poll timed out, poll with a longer interval and the full timeout.
-	interval = 5 * time.Second
-	err = wait.PollUntilContextTimeout(
+	interval = defaultVSCHandlePollInterval
+	err := wait.PollUntilContextTimeout(
 		context.Background(),
 		interval,
 		csiSnapshotTimeout,
 		true,
 		pollFunc,
 	)
-
 	if err != nil {
-		if wait.Interrupted(err) {
-			if vsc != nil &&
-				vsc.Status != nil &&
-				vsc.Status.Error != nil {
-				log.Errorf(
-					"Timed out awaiting reconciliation of VolumeSnapshot, VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
-				return nil,
-					errors.Errorf("CSI got timed out with error: %v",
-						*vsc.Status.Error.Message)
-			} else {
-				log.Errorf(
-					"Timed out awaiting reconciliation of volumesnapshot %s/%s",
-					volSnap.Namespace, volSnap.Name)
-			}
+		return nil, finalizeVSCHandleWaitError(err, volSnap, vsc, log)
+	}
+	return vsc, nil
+}
+
+// WaitUntilVSCHandleIsReady returns the VolumeSnapshotContent
+// object associated with the volumesnapshot.
+func WaitUntilVSCHandleIsReady(
+	volSnap *snapshotv1api.VolumeSnapshot,
+	crClient crclient.Client,
+	log logrus.FieldLogger,
+	csiSnapshotTimeout time.Duration,
+) (*snapshotv1api.VolumeSnapshotContent, error) {
+	if watchClient, ok := crClient.(crclient.WithWatch); ok {
+		vsc, err := waitUntilVSCHandleIsReadyWithWatch(
+			watchClient,
+			crClient,
+			volSnap,
+			log,
+			csiSnapshotTimeout,
+		)
+		if err == nil {
+			return vsc, nil
 		}
-		return nil, err
+		// Do not fall back to polling on timeout or other permanent failures.
+		// Falling back after a timeout would approximately double the wait.
+		if wait.Interrupted(err) || isPermanentVSCHandleWaitError(err) {
+			return nil, err
+		}
+		log.Debugf(
+			"Watch-based wait for VolumeSnapshot %s/%s failed, falling back to polling: %v",
+			volSnap.Namespace, volSnap.Name, err,
+		)
 	}
 
-	return vsc, nil
+	return waitUntilVSCHandleIsReadyWithPoll(
+		crClient,
+		volSnap,
+		log,
+		csiSnapshotTimeout,
+	)
+}
+
+func isPermanentVSCHandleWaitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "was deleted") ||
+		strings.Contains(msg, "watch error:")
 }
 
 func DiagnoseVS(vs *snapshotv1api.VolumeSnapshot, events *corev1api.EventList) string {
