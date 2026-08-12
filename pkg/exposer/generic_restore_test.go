@@ -804,6 +804,18 @@ func TestRebindVolume(t *testing.T) {
 			},
 			err: "error restoring reclaim policy for restore PV fake-restore-pv: error patching PV: fake-patch-error",
 		},
+		{
+			name:            "[same mode] success",
+			targetPVCName:   "fake-target-pvc",
+			targetNamespace: "fake-ns",
+			ownerRestore:    restore,
+			kubeClientObj: []runtime.Object{
+				targetPVCObjSameMode,
+				restorePVCObj,
+				restorePVObjBound,
+				restorePod,
+			},
+		},
 	}
 
 	for _, test := range tests {
