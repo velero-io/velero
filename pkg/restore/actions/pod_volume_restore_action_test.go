@@ -156,6 +156,155 @@ func TestPodVolumeRestoreActionExecute(t *testing.T) {
 
 	defaultRestoreHelperImage := "velero/velero:v1.0"
 
+	podLevelUID := int64(999)
+	podLevelGID := int64(999)
+	podLevelSecurityContext := corev1api.SecurityContext{
+		AllowPrivilegeEscalation: boolptr.False(),
+		Capabilities: &corev1api.Capabilities{
+			Drop: []corev1api.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1api.SeccompProfile{
+			Type: corev1api.SeccompProfileTypeRuntimeDefault,
+		},
+		RunAsUser:    &podLevelUID,
+		RunAsGroup:   &podLevelGID,
+		RunAsNonRoot: boolptr.True(),
+	}
+
+	podWithPodLevelSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		Result()
+	podWithPodLevelSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &podLevelUID, RunAsGroup: &podLevelGID}
+
+	wantPodWithPodLevelSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		InitContainers(
+			newRestoreInitContainerBuilder(defaultRestoreHelperImage, "").
+				Resources(&resourceReqs).
+				SecurityContext(&podLevelSecurityContext).
+				VolumeMounts(builder.ForVolumeMount("myvol", "/restores/myvol").Result()).
+				Command([]string{"/velero-restore-helper"}).Result()).
+		Result()
+	wantPodWithPodLevelSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &podLevelUID, RunAsGroup: &podLevelGID}
+
+	podLevelRootUID := int64(0)
+	podLevelRootSecurityContext := corev1api.SecurityContext{
+		AllowPrivilegeEscalation: boolptr.False(),
+		Capabilities: &corev1api.Capabilities{
+			Drop: []corev1api.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1api.SeccompProfile{
+			Type: corev1api.SeccompProfileTypeRuntimeDefault,
+		},
+		RunAsUser: &podLevelRootUID,
+	}
+
+	podWithPodLevelRootSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		Result()
+	podWithPodLevelRootSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &podLevelRootUID}
+
+	wantPodWithPodLevelRootSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		InitContainers(
+			newRestoreInitContainerBuilder(defaultRestoreHelperImage, "").
+				Resources(&resourceReqs).
+				SecurityContext(&podLevelRootSecurityContext).
+				VolumeMounts(builder.ForVolumeMount("myvol", "/restores/myvol").Result()).
+				Command([]string{"/velero-restore-helper"}).Result()).
+		Result()
+	wantPodWithPodLevelRootSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &podLevelRootUID}
+
+	podLevelGroupOnlyGID := int64(777)
+	podLevelGroupOnlySecurityContext := corev1api.SecurityContext{
+		AllowPrivilegeEscalation: boolptr.False(),
+		Capabilities: &corev1api.Capabilities{
+			Drop: []corev1api.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1api.SeccompProfile{
+			Type: corev1api.SeccompProfileTypeRuntimeDefault,
+		},
+		RunAsUser:    &id,
+		RunAsGroup:   &podLevelGroupOnlyGID,
+		RunAsNonRoot: boolptr.True(),
+	}
+
+	podWithPodLevelGroupOnlySecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		Result()
+	podWithPodLevelGroupOnlySecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsGroup: &podLevelGroupOnlyGID}
+
+	wantPodWithPodLevelGroupOnlySecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		InitContainers(
+			newRestoreInitContainerBuilder(defaultRestoreHelperImage, "").
+				Resources(&resourceReqs).
+				SecurityContext(&podLevelGroupOnlySecurityContext).
+				VolumeMounts(builder.ForVolumeMount("myvol", "/restores/myvol").Result()).
+				Command([]string{"/velero-restore-helper"}).Result()).
+		Result()
+	wantPodWithPodLevelGroupOnlySecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsGroup: &podLevelGroupOnlyGID}
+
+	bothLevelsPodUID := int64(500)
+	bothLevelsContainerUID := int64(999)
+	bothLevelsContainerSecurityContext := corev1api.SecurityContext{
+		AllowPrivilegeEscalation: boolptr.False(),
+		Capabilities: &corev1api.Capabilities{
+			Drop: []corev1api.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1api.SeccompProfile{
+			Type: corev1api.SeccompProfileTypeRuntimeDefault,
+		},
+		RunAsUser:    &bothLevelsContainerUID,
+		RunAsNonRoot: boolptr.True(),
+	}
+
+	podWithBothLevelsSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		Containers(
+			builder.ForContainer("app-container", "app-image").
+				SecurityContext(&bothLevelsContainerSecurityContext).Result()).
+		Result()
+	podWithBothLevelsSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &bothLevelsPodUID}
+
+	wantPodWithBothLevelsSecurityContext := builder.ForPod("ns-1", "my-pod").
+		ObjectMeta(builder.WithAnnotations("snapshot.velero.io/myvol", "")).
+		Volumes(
+			builder.ForVolume("myvol").PersistentVolumeClaimSource("pvc-1").Result(),
+		).
+		Containers(
+			builder.ForContainer("app-container", "app-image").
+				SecurityContext(&bothLevelsContainerSecurityContext).Result()).
+		InitContainers(
+			newRestoreInitContainerBuilder(defaultRestoreHelperImage, "").
+				Resources(&resourceReqs).
+				SecurityContext(&bothLevelsContainerSecurityContext).
+				VolumeMounts(builder.ForVolumeMount("myvol", "/restores/myvol").Result()).
+				Command([]string{"/velero-restore-helper"}).Result()).
+		Result()
+	wantPodWithBothLevelsSecurityContext.Spec.SecurityContext = &corev1api.PodSecurityContext{RunAsUser: &bothLevelsPodUID}
+
 	tests := []struct {
 		name             string
 		pod              *corev1api.Pod
@@ -349,6 +498,62 @@ func TestPodVolumeRestoreActionExecute(t *testing.T) {
 						SecurityContext(&customSecurityContext).
 						VolumeMounts(builder.ForVolumeMount("myvol", "/restores/myvol").Result()).
 						Command([]string{"/velero-restore-helper"}).Result()).Result(),
+		},
+		{
+			name: "Restoring pod with pod-level securityContext (no container-level SecurityContext) uses pod-level runAsUser/runAsGroup for the restore initContainer",
+			pod:  podWithPodLevelSecurityContext,
+			podVolumeBackups: []runtime.Object{
+				builder.ForPodVolumeBackup(veleroNs, "pvb-1").
+					PodName("my-pod").
+					PodNamespace("ns-1").
+					Volume("myvol").
+					ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backupName)).
+					SnapshotID("foo").
+					Result(),
+			},
+			want: wantPodWithPodLevelSecurityContext,
+		},
+		{
+			name: "Restoring pod with pod-level securityContext.runAsUser=0 does not force RunAsNonRoot on the restore initContainer",
+			pod:  podWithPodLevelRootSecurityContext,
+			podVolumeBackups: []runtime.Object{
+				builder.ForPodVolumeBackup(veleroNs, "pvb-1").
+					PodName("my-pod").
+					PodNamespace("ns-1").
+					Volume("myvol").
+					ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backupName)).
+					SnapshotID("foo").
+					Result(),
+			},
+			want: wantPodWithPodLevelRootSecurityContext,
+		},
+		{
+			name: "Restoring pod with pod-level securityContext.runAsGroup only (no runAsUser) still applies the group to the restore initContainer",
+			pod:  podWithPodLevelGroupOnlySecurityContext,
+			podVolumeBackups: []runtime.Object{
+				builder.ForPodVolumeBackup(veleroNs, "pvb-1").
+					PodName("my-pod").
+					PodNamespace("ns-1").
+					Volume("myvol").
+					ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backupName)).
+					SnapshotID("foo").
+					Result(),
+			},
+			want: wantPodWithPodLevelGroupOnlySecurityContext,
+		},
+		{
+			name: "Restoring pod with both container-level and pod-level SecurityContext set uses the container-level SecurityContext for the restore initContainer (container-level takes priority)",
+			pod:  podWithBothLevelsSecurityContext,
+			podVolumeBackups: []runtime.Object{
+				builder.ForPodVolumeBackup(veleroNs, "pvb-1").
+					PodName("my-pod").
+					PodNamespace("ns-1").
+					Volume("myvol").
+					ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backupName)).
+					SnapshotID("foo").
+					Result(),
+			},
+			want: wantPodWithBothLevelsSecurityContext,
 		},
 		{
 			name: "pod volume backups in a different namespace are ignored when looking for matches due to namespace scoping",

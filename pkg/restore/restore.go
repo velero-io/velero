@@ -1954,6 +1954,8 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 						e := errors.Errorf("could not restore, %s %q already exists. Warning: the in-cluster version is different than the backed-up version",
 							obj.GetKind(), obj.GetName())
 						warnings.Add(namespace, e)
+						itemStatus.action = ItemRestoreResultSkipped
+						ctx.restoredItems[itemKey] = itemStatus
 						// existingResourcePolicy is set as update, attempt patch on the resource and add warning if it fails
 					} else if resourcePolicy == velerov1api.PolicyTypeUpdate {
 						// processing update as existingResourcePolicy
@@ -1969,6 +1971,8 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 					// Preserved Velero behavior when existingResourcePolicy is not specified by the user
 					e := errors.Errorf("could not restore, %s:%s already exists. Warning: the in-cluster version is different than the backed-up version",
 						obj.GetKind(), obj.GetName())
+					itemStatus.action = ItemRestoreResultSkipped
+					ctx.restoredItems[itemKey] = itemStatus
 					warnings.Add(namespace, e)
 				}
 			}

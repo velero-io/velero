@@ -1,0 +1,1 @@
+Fix restore-wait init container ignoring pod-level securityContext, falling back to hardcoded runAsUser 1000 instead of the workload's own uid/gid, causing fs-backup restores to deadlock at Init:0/1 on owner-restricted volumes

@@ -693,11 +693,11 @@ func (r *DataDownloadReconciler) findSnapshotRestoreForPod(ctx context.Context, 
 				r.prepareDataDownload(dd)
 				return true
 			}); err != nil {
-			log.WithError(err).Warn("failed to update dataudownload, prepare will halt for this dataudownload")
+			log.WithError(err).Warn("failed to update datadownload, prepare will halt for this datadownload")
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
-		err := UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownlad", dd.Name),
+		err := UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownload", dd.Name),
 			func(dataDownload *velerov2alpha1api.DataDownload) bool {
 				if dataDownload.Spec.Cancel {
 					return false

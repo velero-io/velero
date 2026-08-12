@@ -1086,6 +1086,7 @@ func TestRestoreItems(t *testing.T) {
 		apiResources         []*test.APIResource
 		tarball              io.Reader
 		want                 []*test.APIResource
+		wantWarnings         Result
 		expectedRestoreItems map[itemKey]restoredItemStatus
 		disableInformer      bool
 	}{
@@ -1329,6 +1330,52 @@ func TestRestoreItems(t *testing.T) {
 			},
 		},
 		{
+			name:    "mark item as skipped when pod exists in cluster and is different from backed up one, existing resource policy is none",
+			restore: defaultRestore().ExistingResourcePolicy("none").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "backed-up")).Result()).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "in-cluster")).Result()),
+			},
+			want: []*test.APIResource{
+				test.Pods(builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "in-cluster")).Result()),
+			},
+			wantWarnings: Result{
+				Namespaces: map[string][]string{
+					"ns-1": {"could not restore, Pod \"pod-1\" already exists. Warning: the in-cluster version is different than the backed-up version"},
+				},
+			},
+			expectedRestoreItems: map[itemKey]restoredItemStatus{
+				{resource: "v1/Namespace", namespace: "", name: "ns-1"}: {action: "created", itemExists: true, createdName: "ns-1"},
+				{resource: "v1/Pod", namespace: "ns-1", name: "pod-1"}:  {action: "skipped", itemExists: true},
+			},
+		},
+		{
+			name:    "mark item as skipped when pod exists in cluster and is different from backed up one, existing resource policy is not specified",
+			restore: defaultRestore().Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods", builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "backed-up")).Result()).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "in-cluster")).Result()),
+			},
+			want: []*test.APIResource{
+				test.Pods(builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("app", "in-cluster")).Result()),
+			},
+			wantWarnings: Result{
+				Namespaces: map[string][]string{
+					"ns-1": {"could not restore, Pod:pod-1 already exists. Warning: the in-cluster version is different than the backed-up version"},
+				},
+			},
+			expectedRestoreItems: map[itemKey]restoredItemStatus{
+				{resource: "v1/Namespace", namespace: "", name: "ns-1"}: {action: "created", itemExists: true, createdName: "ns-1"},
+				{resource: "v1/Pod", namespace: "ns-1", name: "pod-1"}:  {action: "skipped", itemExists: true},
+			},
+		},
+		{
 			name:    "service account secrets and image pull secrets are restored when service account already exists in cluster",
 			restore: defaultRestore().Result(),
 			backup:  defaultBackup().Result(),
@@ -1437,7 +1484,12 @@ func TestRestoreItems(t *testing.T) {
 				nil, // volume snapshotter getter
 			)
 
-			assertEmptyResults(t, warnings, errs)
+			if tc.wantWarnings.IsEmpty() {
+				assertEmptyResults(t, warnings)
+			} else {
+				assertWantErrsOrWarnings(t, tc.wantWarnings, warnings)
+			}
+			assertEmptyResults(t, errs)
 			assertRestoredItems(t, h, tc.want)
 			if len(tc.expectedRestoreItems) > 0 {
 				assert.Equal(t, tc.expectedRestoreItems, data.RestoredItems)

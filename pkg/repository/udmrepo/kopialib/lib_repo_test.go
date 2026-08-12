@@ -22,12 +22,14 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
@@ -285,6 +287,7 @@ func TestOpenObject(t *testing.T) {
 		name        string
 		rawRepo     *repomocks.MockRepository
 		objectID    string
+		opt         udmrepo.ObjectReadOptions
 		retErr      error
 		expectedErr string
 	}{
@@ -304,21 +307,38 @@ func TestOpenObject(t *testing.T) {
 			retErr:      errors.New("fake-open-error"),
 			expectedErr: "error to open object: fake-open-error",
 		},
+		{
+			name:     "raw open success, without prefetch",
+			rawRepo:  repomocks.NewMockRepository(t),
+			objectID: "D0123456789abcdef0123456789abcdef",
+		},
+		{
+			name:     "raw open success, with prefetch",
+			rawRepo:  repomocks.NewMockRepository(t),
+			objectID: "D0123456789abcdef0123456789abcdef",
+			opt:      udmrepo.ObjectReadOptions{Prefetch: true, PrefetchBudgetMB: 10},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			kr := &kopiaRepository{}
+			kr := &kopiaRepository{
+				logger: velerotest.NewLogger(),
+			}
 
 			if tc.rawRepo != nil {
-				if tc.retErr != nil {
-					tc.rawRepo.On("OpenObject", mock.Anything, mock.Anything).Return(nil, tc.retErr)
+				if tc.name != "objectID is invalid" {
+					if tc.retErr != nil {
+						tc.rawRepo.On("OpenObject", mock.Anything, mock.Anything).Return(nil, tc.retErr)
+					} else {
+						tc.rawRepo.On("OpenObject", mock.Anything, mock.Anything).Return(nil, nil)
+					}
 				}
 
 				kr.rawRepo = tc.rawRepo
 			}
 
-			_, err := kr.OpenObject(t.Context(), udmrepo.ID(tc.objectID))
+			_, err := kr.OpenObject(t.Context(), udmrepo.ID(tc.objectID), tc.opt)
 
 			if tc.expectedErr == "" {
 				assert.NoError(t, err)
@@ -845,6 +865,7 @@ func TestReaderClose(t *testing.T) {
 		name            string
 		rawObjReader    *repomocks.Reader
 		rawReaderRetErr error
+		withPrefetch    bool
 		expectedErr     string
 	}{
 		{
@@ -860,6 +881,11 @@ func TestReaderClose(t *testing.T) {
 			name:         "succeed",
 			rawObjReader: repomocks.NewReader(t),
 		},
+		{
+			name:         "succeed with prefetch",
+			rawObjReader: repomocks.NewReader(t),
+			withPrefetch: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -871,7 +897,19 @@ func TestReaderClose(t *testing.T) {
 				kr.rawReader = tc.rawObjReader
 			}
 
+			if tc.withPrefetch {
+				ctx, cancel := context.WithCancel(t.Context())
+				kr.prefetch = &objectPrefetch{
+					ctx:    ctx,
+					cancel: cancel,
+				}
+			}
+
 			err := kr.Close()
+
+			if tc.withPrefetch {
+				require.ErrorIs(t, kr.prefetch.ctx.Err(), context.Canceled)
+			}
 
 			if tc.expectedErr == "" {
 				assert.NoError(t, err)
@@ -1829,6 +1867,176 @@ func TestListSnapshot(t *testing.T) {
 			} else {
 				assert.EqualError(t, err, tc.expectedErr)
 			}
+		})
+	}
+}
+
+func mustParseID(s string) object.ID {
+	id, _ := object.ParseID(s)
+	return id
+}
+
+func TestPrefetchProc(t *testing.T) {
+	testCases := []struct {
+		name            string
+		setupPrefetch   func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch
+		mockRepo        func(mockRepo *repomocks.MockRepository)
+		runConcurrently bool
+		trigger         func(prefetch *objectPrefetch)
+	}{
+		{
+			name: "nil prefetch",
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				return nil
+			},
+		},
+		{
+			name: "context canceled",
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				cancel()
+				p := &objectPrefetch{
+					ctx: ctx,
+				}
+				p.cond = sync.NewCond(&p.mu)
+				return p
+			},
+		},
+		{
+			name: "fetch all entries and exit",
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				p := &objectPrefetch{
+					ctx: ctx,
+					entries: []object.IndirectObjectEntry{
+						{Start: 0, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdef")},
+						{Start: 100, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdeg")},
+					},
+					budget:    200,
+					curOffset: 0,
+				}
+				p.cond = sync.NewCond(&p.mu)
+				return p
+			},
+			mockRepo: func(mockRepo *repomocks.MockRepository) {
+				mockRepo.On("PrefetchObjects", mock.Anything, []object.ID{mustParseID("D0123456789abcdef0123456789abcdef"), mustParseID("D0123456789abcdef0123456789abcdeg")}, "").Return(([]content.ID)(nil), nil).Once()
+			},
+		},
+		{
+			name:            "fetch partial, wait, and fetch rest",
+			runConcurrently: true,
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				p := &objectPrefetch{
+					ctx: ctx,
+					entries: []object.IndirectObjectEntry{
+						{Start: 0, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdef")},
+						{Start: 100, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdeg")},
+					},
+					budget:    50,
+					curOffset: 0,
+				}
+				p.cond = sync.NewCond(&p.mu)
+				return p
+			},
+			mockRepo: func(mockRepo *repomocks.MockRepository) {
+				mockRepo.On("PrefetchObjects", mock.Anything, []object.ID{mustParseID("D0123456789abcdef0123456789abcdef")}, "").Return(([]content.ID)(nil), nil).Once()
+				mockRepo.On("PrefetchObjects", mock.Anything, []object.ID{mustParseID("D0123456789abcdef0123456789abcdeg")}, "").Return(([]content.ID)(nil), nil).Once()
+			},
+			trigger: func(prefetch *objectPrefetch) {
+				// Wait a bit for the first fetch and wait to happen
+				time.Sleep(50 * time.Millisecond)
+				prefetch.mu.Lock()
+				prefetch.curOffset = 100
+				prefetch.cond.Signal()
+				prefetch.mu.Unlock()
+			},
+		},
+		{
+			name:            "cancel while waiting on cond",
+			runConcurrently: true,
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				p := &objectPrefetch{
+					ctx:    ctx,
+					cancel: cancel,
+					entries: []object.IndirectObjectEntry{
+						{Start: 0, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdef")},
+						{Start: 100, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdeg")},
+					},
+					budget:    50,
+					curOffset: 0,
+				}
+				p.cond = sync.NewCond(&p.mu)
+				// Simulate the watcher goroutine spawned in OpenObject
+				go func() {
+					<-ctx.Done()
+					p.mu.Lock()
+					p.cond.Broadcast()
+					p.mu.Unlock()
+				}()
+				return p
+			},
+			mockRepo: func(mockRepo *repomocks.MockRepository) {
+				mockRepo.On("PrefetchObjects", mock.Anything, []object.ID{mustParseID("D0123456789abcdef0123456789abcdef")}, "").Return(([]content.ID)(nil), nil).Once()
+			},
+			trigger: func(prefetch *objectPrefetch) {
+				// Wait a bit for the first fetch and wait to happen
+				time.Sleep(50 * time.Millisecond)
+				prefetch.cancel() // This triggers the watcher, broadcasts, and exits prefetchProc
+			},
+		},
+		{
+			name: "prefetch error should not panic and continue",
+			setupPrefetch: func(ctx context.Context, cancel context.CancelFunc) *objectPrefetch {
+				p := &objectPrefetch{
+					ctx: ctx,
+					entries: []object.IndirectObjectEntry{
+						{Start: 0, Length: 100, Object: mustParseID("D0123456789abcdef0123456789abcdef")},
+					},
+					budget:    200,
+					curOffset: 0,
+				}
+				p.cond = sync.NewCond(&p.mu)
+				return p
+			},
+			mockRepo: func(mockRepo *repomocks.MockRepository) {
+				mockRepo.On("PrefetchObjects", mock.Anything, []object.ID{mustParseID("D0123456789abcdef0123456789abcdef")}, "").Return(([]content.ID)(nil), errors.New("fake-error")).Once()
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			mockRepo := repomocks.NewMockRepository(t)
+			if tc.mockRepo != nil {
+				tc.mockRepo(mockRepo)
+			}
+
+			kor := &kopiaObjectReader{
+				rawRepo:  mockRepo,
+				logger:   velerotest.NewLogger(),
+				prefetch: tc.setupPrefetch(ctx, cancel),
+			}
+
+			if tc.runConcurrently {
+				done := make(chan struct{})
+				go func() {
+					kor.prefetchProc()
+					close(done)
+				}()
+				if tc.trigger != nil {
+					tc.trigger(kor.prefetch)
+				}
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("prefetchProc did not finish in time")
+				}
+			} else {
+				kor.prefetchProc()
+			}
+
+			mockRepo.AssertExpectations(t)
 		})
 	}
 }

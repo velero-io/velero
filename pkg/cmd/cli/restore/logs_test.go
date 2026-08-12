@@ -17,10 +17,12 @@ limitations under the License.
 package restore
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	flag "github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,13 +79,20 @@ func TestNewLogsCommand(t *testing.T) {
 		c := NewLogsCommand(f)
 		assert.Equal(t, "Get restore logs", c.Short)
 
-		// The restore command exits with an error message when restore is not complete
-		// We can't easily test this since it calls cmd.Exit, which exits the process
-		// So we'll skip this test case
-		t.Skip("Cannot test restore not complete case due to cmd.Exit() call")
+		l := NewLogsOptions()
+		flags := new(flag.FlagSet)
+		l.BindFlags(flags)
+		err = l.Complete([]string{restoreName}, f)
+		require.NoError(t, err)
+
+		err = l.Run(c, f)
+		require.Error(t, err)
+		require.ErrorContains(t, err, fmt.Sprintf("logs for restore %q are not available until it's finished processing", restoreName))
 	})
 
 	t.Run("Restore not exist test", func(t *testing.T) {
+		restoreName := "not-exist"
+
 		// create a factory
 		f := &factorymocks.Factory{}
 
@@ -95,10 +104,15 @@ func TestNewLogsCommand(t *testing.T) {
 		c := NewLogsCommand(f)
 		assert.Equal(t, "Get restore logs", c.Short)
 
-		// The restore command exits with an error message when restore doesn't exist
-		// We can't easily test this since it calls cmd.Exit, which exits the process
-		// So we'll skip this test case
-		t.Skip("Cannot test restore not exist case due to cmd.Exit() call")
+		l := NewLogsOptions()
+		flags := new(flag.FlagSet)
+		l.BindFlags(flags)
+		err := l.Complete([]string{restoreName}, f)
+		require.NoError(t, err)
+
+		err = l.Run(c, f)
+		require.Error(t, err)
+		require.Equal(t, fmt.Sprintf("restore %q does not exist", restoreName), err.Error())
 	})
 
 	t.Run("Restore with BSL cacert test", func(t *testing.T) {

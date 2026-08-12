@@ -46,9 +46,9 @@ func (m *mockUploader) Backup(src sourceInfo, parent udmrepo.ID, iter cbttypes.I
 	return args.Get(0).(udmrepo.Snapshot), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *mockUploader) Restore(snap udmrepo.Snapshot, dest destInfo, iter cbttypes.Iterator, cfg map[string]string) (int64, error) {
+func (m *mockUploader) Restore(snap udmrepo.Snapshot, dest destInfo, iter cbttypes.Iterator, cfg map[string]string) (int64, int64, error) {
 	args := m.Called(snap, dest, iter, cfg)
-	return args.Get(0).(int64), args.Error(1)
+	return args.Get(0).(int64), args.Get(1).(int64), args.Error(2)
 }
 
 func testLog() logrus.FieldLogger {
@@ -574,7 +574,7 @@ func TestRestore(t *testing.T) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-001")).
 					Return(storedSnap, nil)
 				blkup.On("Restore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(int64(0), errors.New("restore I/O error"))
+					Return(int64(0), int64(0), errors.New("restore I/O error"))
 			},
 			setupOpenDev: func(t *testing.T) *os.File {
 				t.Helper()
@@ -588,7 +588,7 @@ func TestRestore(t *testing.T) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-001")).
 					Return(storedSnap, nil)
 				blkup.On("Restore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(int64(4096), nil)
+					Return(int64(4096), int64(4096), nil)
 			},
 			setupOpenDev: func(t *testing.T) *os.File {
 				t.Helper()

@@ -82,6 +82,9 @@ func (d *DataUploadRetrieveAction) Execute(input *velero.RestoreItemActionExecut
 		NodeOS:                dataUpload.Status.NodeOS,
 		FSType:                dataUpload.Spec.SourceFSType,
 	}
+	if dataUpload.Spec.CSISnapshot != nil {
+		dataUploadResult.SnapshotClass = dataUpload.Spec.CSISnapshot.SnapshotClass
+	}
 
 	jsonBytes, err := json.Marshal(dataUploadResult)
 	if err != nil {

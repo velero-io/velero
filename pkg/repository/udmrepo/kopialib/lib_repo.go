@@ -73,8 +73,22 @@ type logThrottle struct {
 	interval time.Duration
 }
 
+type objectPrefetch struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	entries   []object.IndirectObjectEntry
+	curOffset int64
+	cond      *sync.Cond
+	mu        sync.Mutex
+	nextEntry int
+	budget    int64
+}
+
 type kopiaObjectReader struct {
 	rawReader object.Reader
+	rawRepo   repo.Repository
+	prefetch  *objectPrefetch
+	logger    logrus.FieldLogger
 }
 
 type kopiaObjectWriter struct {
@@ -338,7 +352,7 @@ func (km *kopiaMaintenance) maintainProgress(uploaded int64) {
 	}
 }
 
-func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error) {
+func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error) {
 	if kr.rawRepo == nil {
 		return nil, errors.New("repo is closed or not open")
 	}
@@ -353,9 +367,42 @@ func (kr *kopiaRepository) OpenObject(ctx context.Context, id udmrepo.ID) (udmre
 		return nil, errors.Wrap(err, "error to open object")
 	}
 
-	return &kopiaObjectReader{
+	var prefetch *objectPrefetch
+	if opt.Prefetch {
+		if e, err := kr.getFlattenedEntries(ctx, objID); err != nil {
+			kr.logger.WithError(err).Warnf("Failed to load entries for object %v, skip prefetch", id)
+		} else {
+			pCtx, pCancel := context.WithCancel(ctx)
+			prefetch = &objectPrefetch{
+				ctx:     pCtx,
+				cancel:  pCancel,
+				budget:  int64(opt.PrefetchBudgetMB) << 20,
+				entries: e,
+			}
+
+			prefetch.cond = sync.NewCond(&prefetch.mu)
+		}
+	}
+
+	rd := &kopiaObjectReader{
 		rawReader: reader,
-	}, nil
+		rawRepo:   kr.rawRepo,
+		prefetch:  prefetch,
+		logger:    kr.logger,
+	}
+
+	if rd.prefetch != nil {
+		go rd.prefetchProc()
+
+		go func() {
+			<-rd.prefetch.ctx.Done()
+			prefetch.mu.Lock()
+			prefetch.cond.Broadcast()
+			prefetch.mu.Unlock()
+		}()
+	}
+
+	return rd, nil
 }
 
 func (kr *kopiaRepository) GetManifest(ctx context.Context, id udmrepo.ID, mani *udmrepo.RepoManifest) error {
@@ -550,7 +597,7 @@ func (kr *kopiaRepository) WriteMetadata(ctx context.Context, meta *udmrepo.Meta
 }
 
 func (kr *kopiaRepository) ReadMetadata(ctx context.Context, id udmrepo.ID) (*udmrepo.Metadata, error) {
-	reader, err := kr.OpenObject(ctx, id)
+	reader, err := kr.OpenObject(ctx, id, udmrepo.ObjectReadOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "error to open metadata object %v", id)
 	}
@@ -792,7 +839,16 @@ func (kor *kopiaObjectReader) Read(p []byte) (int, error) {
 		return 0, errors.New("object reader is closed or not open")
 	}
 
-	return kor.rawReader.Read(p)
+	n, err := kor.rawReader.Read(p)
+	if n > 0 {
+		if kor.prefetch != nil {
+			kor.prefetch.mu.Lock()
+			kor.prefetch.curOffset += int64(n)
+			kor.prefetch.cond.Signal()
+			kor.prefetch.mu.Unlock()
+		}
+	}
+	return n, err
 }
 
 func (kor *kopiaObjectReader) Seek(offset int64, whence int) (int64, error) {
@@ -800,10 +856,83 @@ func (kor *kopiaObjectReader) Seek(offset int64, whence int) (int64, error) {
 		return -1, errors.New("object reader is closed or not open")
 	}
 
-	return kor.rawReader.Seek(offset, whence)
+	off, err := kor.rawReader.Seek(offset, whence)
+	if err == nil {
+		if kor.prefetch != nil {
+			kor.prefetch.mu.Lock()
+			kor.prefetch.curOffset = off
+			kor.prefetch.cond.Signal()
+			kor.prefetch.mu.Unlock()
+		}
+	}
+
+	return off, err
+}
+
+func (kor *kopiaObjectReader) prefetchProc() {
+	prefetch := kor.prefetch
+	if prefetch == nil {
+		return
+	}
+
+	for {
+		prefetch.mu.Lock()
+
+		select {
+		case <-prefetch.ctx.Done():
+			prefetch.mu.Unlock()
+			return
+		default:
+		}
+
+		curOffset := prefetch.curOffset
+
+		for prefetch.nextEntry < len(prefetch.entries) {
+			entry := prefetch.entries[prefetch.nextEntry]
+			if entry.Start+entry.Length <= curOffset {
+				prefetch.nextEntry++
+			} else {
+				break
+			}
+		}
+
+		if prefetch.nextEntry >= len(prefetch.entries) {
+			prefetch.mu.Unlock()
+			return
+		}
+
+		var toFetch []object.ID
+		for prefetch.nextEntry < len(prefetch.entries) {
+			entry := prefetch.entries[prefetch.nextEntry]
+
+			if entry.Start > curOffset+prefetch.budget {
+				break
+			}
+
+			toFetch = append(toFetch, entry.Object)
+			prefetch.nextEntry++
+		}
+
+		if len(toFetch) == 0 {
+			prefetch.cond.Wait()
+			prefetch.mu.Unlock()
+			continue
+		}
+
+		prefetch.mu.Unlock()
+
+		_, err := kor.rawRepo.PrefetchObjects(prefetch.ctx, toFetch, "")
+		if err != nil && err != context.Canceled {
+			kor.logger.WithError(err).Warnf("Failed to prefetch contents for offset %v", curOffset)
+		}
+	}
 }
 
 func (kor *kopiaObjectReader) Close() error {
+	if kor.prefetch != nil && kor.prefetch.cancel != nil {
+		kor.prefetch.cancel()
+	}
+
 	if kor.rawReader == nil {
 		return nil
 	}

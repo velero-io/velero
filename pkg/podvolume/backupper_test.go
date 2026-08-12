@@ -380,6 +380,8 @@ func TestBackupPodVolumes(t *testing.T) {
 		pvbs                  int
 		mockGetRepositoryType bool
 		errs                  []string
+		expectedBackedup      []string
+		expectedSkipped       map[string]string
 	}{
 		{
 			name: "empty volume list",
@@ -573,6 +575,10 @@ func TestBackupPodVolumes(t *testing.T) {
 			uploaderType:  "kopia",
 			bsl:           "fake-bsl",
 			errs:          []string{},
+			expectedSkipped: map[string]string{
+				"fake-volume-1": "volume fake-volume-1 is declared in pod fake-ns/fake-pod but not mounted by any container, skipping",
+				"fake-volume-2": "volume fake-volume-2 is declared in pod fake-ns/fake-pod but not mounted by any container, skipping",
+			},
 		},
 		{
 			name: "return completed pvbs",
@@ -589,14 +595,14 @@ func TestBackupPodVolumes(t *testing.T) {
 			ctlClientObj: []runtime.Object{
 				createBackupRepoObj(),
 			},
-			runtimeScheme: scheme,
-			uploaderType:  "kopia",
-			bsl:           "fake-bsl",
-			pvbs:          1,
-			errs:          []string{},
+			runtimeScheme:    scheme,
+			uploaderType:     "kopia",
+			bsl:              "fake-bsl",
+			pvbs:             1,
+			errs:             []string{},
+			expectedBackedup: []string{"fake-volume-1"},
 		},
 	}
-	// TODO add more verification around PVCBackupSummary returned by "BackupPodVolumes"
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -627,7 +633,7 @@ func TestBackupPodVolumes(t *testing.T) {
 				funcGetRepositoryType = getRepositoryType
 			}
 
-			pvbs, _, errs := bp.BackupPodVolumes(backupObj, test.sourcePod, test.volumes, nil, velerotest.NewLogger())
+			pvbs, summary, errs := bp.BackupPodVolumes(backupObj, test.sourcePod, test.volumes, nil, velerotest.NewLogger())
 
 			if test.errs != nil {
 				for i := 0; i < len(errs); i++ {
@@ -636,6 +642,22 @@ func TestBackupPodVolumes(t *testing.T) {
 			}
 
 			assert.Len(t, pvbs, test.pvbs)
+
+			if summary != nil {
+				assert.Len(t, summary.Backedup, len(test.expectedBackedup))
+				for _, vol := range test.expectedBackedup {
+					assert.Contains(t, summary.Backedup, vol)
+				}
+
+				assert.Len(t, summary.Skipped, len(test.expectedSkipped))
+				for vol, reason := range test.expectedSkipped {
+					require.Contains(t, summary.Skipped, vol)
+					assert.Equal(t, reason, summary.Skipped[vol].Reason)
+				}
+			} else {
+				assert.Empty(t, test.expectedBackedup)
+				assert.Empty(t, test.expectedSkipped)
+			}
 		})
 	}
 }

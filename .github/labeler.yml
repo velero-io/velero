@@ -31,3 +31,25 @@ has-e2e-2tests:
 has-unit-tests:
   - changed-files:
       - any-glob-to-any-file: pkg/**/*_test.go
+# PRs that only touch non-shipping files (.github/ config, workflows, or docs)
+# do not need a changelog entry; auto-apply the label so the changelog check passes.
+kind/changelog-not-required:
+  - all:
+      - changed-files:
+          - any-glob-to-any-file:
+              - .github/**/*
+              - site/content/docs/**/*
+              - site/**/*
+              - '*.md'
+              - docs/**/*
+          - all-globs-to-all-files:
+              - '!pkg/**'
+              - '!internal/**'
+              - '!cmd/**'
+              - '!vendor/**'
+              - '!hack/**'
+              - '!Makefile'
+              - '!go.mod'
+              - '!go.sum'
+              - '!changelogs/**'
+              - '!**/*.go'

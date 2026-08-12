@@ -150,7 +150,7 @@ Velero provides a way for you to skip TLS verification on the object store when 
 * velero backup download
 * velero backup logs
 * velero restore describe
-* velero restore log
+* velero restore logs
 
 If true, the object store's TLS certificate will not be checked for validity before Velero or backup repository connects to the object storage. You can permanently skip TLS verification for an object store by setting `Spec.Config.InsecureSkipTLSVerify` to true in the [BackupStorageLocation](api-types/backupstoragelocation.md) CRD.
 

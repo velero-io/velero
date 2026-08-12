@@ -268,4 +268,8 @@ type DataUploadResult struct {
 	// FSType is the file system type of the volume.
 	// +optional
 	FSType string `json:"fsType,omitempty"`
+
+	// SnapshotClass is the name of the snapshot class that the volume snapshot is created with
+	// +optional
+	SnapshotClass string `json:"snapshotClass,omitempty"`
 }

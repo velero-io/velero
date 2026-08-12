@@ -420,6 +420,11 @@ type RestoreProgress struct {
 // +kubebuilder:rbac:groups=velero.io,resources=restores,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups=velero.io,resources=restores/status,verbs=get;update;patch
 // +kubebuilder:resource:shortName=rst
+// +kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.backupName",description="The name of the backup this restore is from"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="Restore status such as New/InProgress"
+// +kubebuilder:printcolumn:name="Errors",type="integer",JSONPath=".status.errors",description="Total number of errors logged during the restore"
+// +kubebuilder:printcolumn:name="Warnings",type="integer",JSONPath=".status.warnings",description="Total number of warnings logged during the restore"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Restore is a Velero resource that represents the application of
 // resources from a Velero backup to a target Kubernetes cluster.
