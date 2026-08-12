@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package client
+package config
 
 import (
 	"fmt"
@@ -26,17 +26,17 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 )
 
-func NewSetContextAsVeleroNamespaceCommand() *cobra.Command {
+func NewSetNamespaceFromContextCommand() *cobra.Command {
 	var kubeconfig, kubecontext string
 
 	c := &cobra.Command{
-		Use:   "set-context-as-velero-namespace",
+		Use:   "set-namespace-from-context",
 		Short: "Set the Velero client's configured namespace to the namespace of a kubeconfig context",
 		Long: "Reads the namespace associated with the current kubeconfig context (or the context " +
 			"specified by --kubecontext) and saves it to the Velero client configuration file, so " +
 			"subsequent commands use it as the default namespace without needing --namespace.",
 		Run: func(c *cobra.Command, args []string) {
-			namespace, err := setContextAsVeleroNamespace(kubeconfig, kubecontext)
+			namespace, err := setNamespaceFromContext(kubeconfig, kubecontext)
 			cmd.CheckError(err)
 
 			fmt.Printf("Velero client namespace set to %q\n", namespace)
@@ -49,10 +49,10 @@ func NewSetContextAsVeleroNamespaceCommand() *cobra.Command {
 	return c
 }
 
-// setContextAsVeleroNamespace reads the namespace from the given kubeconfig/kubecontext (falling
+// setNamespaceFromContext reads the namespace from the given kubeconfig/kubecontext (falling
 // back to the default kubeconfig loading rules and current-context when empty), saves it to the
 // Velero client configuration file, and returns the namespace that was set.
-func setContextAsVeleroNamespace(kubeconfig, kubecontext string) (string, error) {
+func setNamespaceFromContext(kubeconfig, kubecontext string) (string, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	loadingRules.ExplicitPath = kubeconfig
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubecontext}

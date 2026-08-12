@@ -1,1 +1,1 @@
-Add `velero client set-context-as-velero-namespace` command to save the namespace of the current (or a specified) kubeconfig context as the Velero client's default namespace
+Add `velero client config set-namespace-from-context` command to save the namespace of the current (or a specified) kubeconfig context as the Velero client's default namespace

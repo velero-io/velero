@@ -20,7 +20,7 @@ velero client config set namespace=<NAMESPACE_VALUE>
 If Velero was installed in the namespace of your current kubeconfig context, you can set that as the default namespace without having to type it out:
 
 ```bash
-velero client set-context-as-velero-namespace
+velero client config set-namespace-from-context
 ```
 
 This reads the namespace from the current kubeconfig context (or the context specified with `--kubecontext`) and saves it to the Velero client configuration file.

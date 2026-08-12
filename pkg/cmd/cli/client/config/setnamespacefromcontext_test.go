@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package client
+package config
 
 import (
 	"os"
@@ -56,11 +56,11 @@ func writeTestKubeconfig(t *testing.T) string {
 	return path
 }
 
-func TestSetContextAsVeleroNamespace(t *testing.T) {
+func TestSetNamespaceFromContext(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	kubeconfig := writeTestKubeconfig(t)
 
-	namespace, err := setContextAsVeleroNamespace(kubeconfig, "")
+	namespace, err := setNamespaceFromContext(kubeconfig, "")
 	require.NoError(t, err)
 	assert.Equal(t, "my-team-ns", namespace)
 
@@ -69,22 +69,22 @@ func TestSetContextAsVeleroNamespace(t *testing.T) {
 	assert.Equal(t, "my-team-ns", config.Namespace())
 }
 
-func TestSetContextAsVeleroNamespace_ExplicitContextWithoutNamespace(t *testing.T) {
+func TestSetNamespaceFromContext_ExplicitContextWithoutNamespace(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	kubeconfig := writeTestKubeconfig(t)
 
-	namespace, err := setContextAsVeleroNamespace(kubeconfig, "no-namespace-context")
+	namespace, err := setNamespaceFromContext(kubeconfig, "no-namespace-context")
 	require.NoError(t, err)
 	assert.Equal(t, "default", namespace)
 }
 
-func TestSetContextAsVeleroNamespace_OverwritesExistingConfig(t *testing.T) {
+func TestSetNamespaceFromContext_OverwritesExistingConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	kubeconfig := writeTestKubeconfig(t)
 
 	require.NoError(t, client.SaveConfig(client.VeleroConfig{client.ConfigKeyNamespace: "old-ns"}))
 
-	namespace, err := setContextAsVeleroNamespace(kubeconfig, "")
+	namespace, err := setNamespaceFromContext(kubeconfig, "")
 	require.NoError(t, err)
 	assert.Equal(t, "my-team-ns", namespace)
 
@@ -93,16 +93,16 @@ func TestSetContextAsVeleroNamespace_OverwritesExistingConfig(t *testing.T) {
 	assert.Equal(t, "my-team-ns", config.Namespace())
 }
 
-func TestSetContextAsVeleroNamespace_InvalidKubeconfig(t *testing.T) {
+func TestSetNamespaceFromContext_InvalidKubeconfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	_, err := setContextAsVeleroNamespace(filepath.Join(t.TempDir(), "does-not-exist"), "")
+	_, err := setNamespaceFromContext(filepath.Join(t.TempDir(), "does-not-exist"), "")
 	assert.Error(t, err)
 }
 
-func TestNewSetContextAsVeleroNamespaceCommand(t *testing.T) {
-	c := NewSetContextAsVeleroNamespaceCommand()
-	assert.Equal(t, "set-context-as-velero-namespace", c.Use)
+func TestNewSetNamespaceFromContextCommand(t *testing.T) {
+	c := NewSetNamespaceFromContextCommand()
+	assert.Equal(t, "set-namespace-from-context", c.Use)
 	assert.NotNil(t, c.Flags().Lookup("kubeconfig"))
 	assert.NotNil(t, c.Flags().Lookup("kubecontext"))
 }
