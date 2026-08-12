@@ -246,6 +246,54 @@ func parseTime(timeString string) time.Time {
 	return res
 }
 
+// TestReconcileDoesNotCorruptReconcilerSkipImmediately guards against a regression where
+// aliasing &c.skipImmediately into a Schedule's spec (when SkipImmediately is nil) let a
+// subsequent write-through-pointer mutate the reconciler's own shared default field,
+// silently corrupting it for every later reconcile in the process.
+func TestReconcileDoesNotCorruptReconcilerSkipImmediately(t *testing.T) {
+	require.NoError(t, velerov1.AddToScheme(scheme.Scheme))
+
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+	logger := velerotest.NewLogger()
+
+	// Server configured with schedule-skip-immediately=true.
+	reconciler := NewScheduleReconciler("ns", logger, client, metrics.NewServerMetrics(), true)
+	reconciler.clock = testclocks.NewFakeClock(time.Now())
+
+	makeSchedule := func(name string) *velerov1.Schedule {
+		return builder.ForSchedule("ns", name).
+			Phase(velerov1.SchedulePhaseEnabled).
+			CronSchedule("@every 5m").
+			LastBackupTime("2000-01-01 00:00:00"). // long past due, but should be skipped
+			Result()                               // SkipImmediately left nil
+	}
+
+	sched1 := makeSchedule("sched-1")
+	require.NoError(t, client.Create(ctx, sched1))
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "ns", Name: "sched-1"}})
+	require.NoError(t, err)
+
+	// The reconciler's own default must be unchanged after processing a schedule with a nil
+	// SkipImmediately -- every later schedule relies on this field still being true.
+	assert.True(t, reconciler.skipImmediately, "reconciler's shared skipImmediately default was mutated by reconciling sched-1")
+
+	sched2 := makeSchedule("sched-2")
+	require.NoError(t, client.Create(ctx, sched2))
+	_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "ns", Name: "sched-2"}})
+	require.NoError(t, err)
+
+	assert.True(t, reconciler.skipImmediately, "reconciler's shared skipImmediately default was mutated by reconciling sched-2")
+
+	// Functional check: sched-2 should ALSO have been skipped (server default still true),
+	// proving the bug's user-visible symptom (second+ schedule silently loses the skip
+	// behavior) is fixed, not just the internal field.
+	got := &velerov1.Schedule{}
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "sched-2"}, got))
+	require.NotNil(t, got.Status.LastSkipped, "sched-2 should have been skipped due to server-wide skipImmediately default")
+	require.NotNil(t, got.Status.LastBackup)
+	assert.Equal(t, parseTime("2000-01-01 00:00:00").Unix(), got.Status.LastBackup.Unix(), "sched-2 should not have triggered a new backup")
+}
+
 func TestGetNextRunTime(t *testing.T) {
 	defaultSchedule := func() *velerov1.Schedule {
 		return builder.ForSchedule("velero", "schedule-1").CronSchedule("@every 5m").Result()
