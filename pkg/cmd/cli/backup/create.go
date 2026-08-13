@@ -385,8 +385,19 @@ func ParseOrderedResources(orderMapStr string) (map[string]string, error) {
 			return nil, fmt.Errorf("invalid OrderedResources '%s'", entry)
 		}
 		kind := strings.TrimSpace(kv[0])
-		order := strings.TrimSpace(kv[1])
-		orderedResources[kind] = order
+		orderParts := strings.Split(kv[1], ",")
+		cleaned := make([]string, 0, len(orderParts))
+		for _, part := range orderParts {
+			name := strings.TrimSpace(part)
+			if name == "" {
+				continue
+			}
+			cleaned = append(cleaned, name)
+		}
+		if kind == "" || len(cleaned) == 0 {
+			return nil, fmt.Errorf("invalid OrderedResources '%s'", entry)
+		}
+		orderedResources[kind] = strings.Join(cleaned, ",")
 	}
 	return orderedResources, nil
 }

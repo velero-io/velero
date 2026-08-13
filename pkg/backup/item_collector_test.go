@@ -445,3 +445,24 @@ func TestGetResourceItems(t *testing.T) {
 		})
 	}
 }
+
+func TestGetOrderedResourcesForTypeTrimsSpaces(t *testing.T) {
+	// Spaces after commas are common in CLI input and should not break ordering.
+	orders := getOrderedResourcesForType(map[string]string{
+		"pods": "ns1/pod2, ns1/pod1",
+	}, "pods")
+	require.Equal(t, []string{"ns1/pod2", "ns1/pod1"}, orders)
+
+	log := logrus.StandardLogger()
+	podResources := []*kubernetesResource{
+		{namespace: "ns1", name: "pod3"},
+		{namespace: "ns1", name: "pod1"},
+		{namespace: "ns1", name: "pod2"},
+	}
+	sorted := sortResourcesByOrder(log, podResources, orders)
+	require.Equal(t, []*kubernetesResource{
+		{namespace: "ns1", name: "pod2", orderedResource: true},
+		{namespace: "ns1", name: "pod1", orderedResource: true},
+		{namespace: "ns1", name: "pod3"},
+	}, sorted)
+}

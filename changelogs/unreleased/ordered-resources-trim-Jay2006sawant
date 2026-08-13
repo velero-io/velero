@@ -1,0 +1,1 @@
+Trim spaces around resource names in --ordered-resources so comma-separated lists with spaces still match

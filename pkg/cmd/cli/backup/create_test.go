@@ -234,6 +234,14 @@ func TestCreateOptions_OrderedResources(t *testing.T) {
 		"persistentvolumes": "pv1,pv2",
 	}
 	assert.Equal(t, expectedMixedResources, orderedResources)
+
+	// Spaces after commas in the resource list must be trimmed.
+	orderedResources, err = ParseOrderedResources("pods=ns1/p1, ns1/p2 ; persistentvolumeclaims= ns2/pvc1,  ns2/pvc2")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"pods":                   "ns1/p1,ns1/p2",
+		"persistentvolumeclaims": "ns2/pvc1,ns2/pvc2",
+	}, orderedResources)
 }
 
 func TestCreateCommand(t *testing.T) {
