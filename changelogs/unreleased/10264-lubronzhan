@@ -1,0 +1,1 @@
+Fix issue #10207, release the data path instance when force-canceling a DataUpload/DataDownload so its loadConcurrency slot isn't held forever

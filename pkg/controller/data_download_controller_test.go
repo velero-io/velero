@@ -292,6 +292,15 @@ func TestDataDownloadReconcile(t *testing.T) {
 			expected:  dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseCanceled).Result(),
 		},
 		{
+			name:           "delay cancel affirmative for inProgress releases data path",
+			dd:             dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result(),
+			sportTime:      &metav1.Time{Time: time.Now().Add(-time.Hour)},
+			needCreateFSBR: true,
+			mockClose:      true,
+			expected:       dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseCanceled).Result(),
+			expectDataPath: false,
+		},
+		{
 			name:               "delay cancel failed",
 			dd:                 dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result(),
 			needErrs:           []bool{false, false, true, false},
