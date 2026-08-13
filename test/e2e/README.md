@@ -161,6 +161,104 @@ Stop kind cluster
 kind delete cluster
 ```
 
+#### Kind + CSI snapshots (local)
+
+Plain Kind does **not** ship VolumeSnapshot CRDs, a snapshot-controller, or a CSI driver that can take snapshots. So if you try to run CSI-labeled e2e specs (`Snapshot` / `CSISnapshot` / `CSIDataMover`) against a fresh Kind cluster, they will fail early (often on `VolumeSnapshotClass` with something like `no matches for kind "VolumeSnapshotClass"`).
+
+This section is only about getting a local Kind cluster far enough that those APIs exist. Wiring the same stack into PR CI is tracked separately in https://github.com/velero-io/velero/issues/7507.
+
+**1. Create a Kind cluster**
+
+```bash
+kind create cluster --name velero-csi
+kubectl config use-context kind-velero-csi
+```
+
+**2. Install external-snapshotter CRDs + snapshot-controller**
+
+Pick a recent release tag from https://github.com/kubernetes-csi/external-snapshotter/releases (example below uses `v8.2.0`):
+
+```bash
+SNAP_VER=v8.2.0
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAP_VER}/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAP_VER}/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAP_VER}/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAP_VER}/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAP_VER}/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+
+kubectl -n kube-system rollout status deploy/snapshot-controller
+```
+
+Do **not** apply a VolumeSnapshotClass before the CRDs exist. That is the most common first failure.
+
+**3. Install csi-driver-host-path**
+
+Clone https://github.com/kubernetes-csi/csi-driver-host-path and run the deploy script that matches your cluster (or close to it). Example:
+
+```bash
+git clone --depth 1 https://github.com/kubernetes-csi/csi-driver-host-path.git /tmp/csi-driver-host-path
+cd /tmp/csi-driver-host-path/deploy/kubernetes-latest   # or kubernetes-1.xx if that fits better
+bash ./deploy.sh
+kubectl rollout status statefulset/csi-hostpathplugin --timeout=180s
+```
+
+On Windows, run the deploy script from WSL/Git Bash. A normal Windows `git clone` can turn the `deploy.sh` symlink into a plain text file and break the script.
+
+**4. StorageClass + Velero VolumeSnapshotClass label**
+
+Host-path ships `csi-hostpath-snapclass`, but Velero looks for `velero.io/csi-volumesnapshot-class: "true"`. Either label the existing class:
+
+```bash
+kubectl label volumesnapshotclass csi-hostpath-snapclass velero.io/csi-volumesnapshot-class=true --overwrite
+```
+
+or apply the Kind testdata file:
+
+```bash
+kubectl apply -f test/testdata/volume-snapshot-class/kind.yaml
+```
+
+Also create a StorageClass that uses `hostpath.csi.k8s.io` (Kind's default `local-path` provisioner is not this CSI driver):
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: csi-hostpath-sc
+provisioner: hostpath.csi.k8s.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+EOF
+```
+
+**5. Quick sanity check**
+
+Create a PVC on `csi-hostpath-sc`, then a VolumeSnapshot that points at that PVC and `csi-hostpath-snapclass` (or `e2e-volume-snapshot-class`). `kubectl get volumesnapshot` should show `READYTOUSE=true`.
+
+**6. Running CSI e2e labels locally**
+
+You still need object storage (MinIO/S3/etc.) like the normal Kind e2e path. What changes for CSI is:
+
+- `FEATURES=EnableCSI`
+- a Ginkgo label filter that actually selects CSI specs, for example:
+
+```bash
+FEATURES=EnableCSI \
+GINKGO_LABELS='BackupVolumeInfo && CSISnapshot' \
+CLOUD_PROVIDER=kind \
+OBJECT_STORE_PROVIDER=aws \
+BSL_BUCKET=<bucket> \
+BSL_PREFIX=<prefix> \
+CREDS_FILE=/path/to/creds \
+make test-e2e
+```
+
+Other useful filters: `CSIDataMover`, or broader `Snapshot` depending on what you want to exercise. Check the current Kind CI matrix in `.github/workflows/e2e-test-kind.yaml` — today it does not select those CSI labels (see #7507).
+
 1. Run Velero tests in an AWS cluster:
 ```bash
 BSL_PREFIX=<PREFIX_UNDER_BUCKET> \
