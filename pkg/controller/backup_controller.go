@@ -635,6 +635,45 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "include-resources, exclude-resources and include-cluster-resources are old filter parameters.\n"+
 			"They cannot be used with namespace-scoped or fine-grained global filter policies.")
 	}
+
+	// Resolve includedNamespacesByLabel/excludedNamespacesByLabel from the resource policy
+	// (if configured) against the live namespace list, and merge into the effective
+	// namespace filter. Must run after the velero.io/exclude-from-backup hard-exclusion
+	// above, so that the "- BackupSpec.ExcludedNamespaces" term below already carries
+	// hard-excluded namespaces.
+	if resourcePolicies != nil && resourcePolicies.GetIncludeExcludePolicy() != nil {
+		iep := resourcePolicies.GetIncludeExcludePolicy()
+		if len(iep.IncludedNamespacesByLabel) > 0 || len(iep.ExcludedNamespacesByLabel) > 0 {
+			resolvedIncluded, resolvedExcluded, err := resourcepolicies.ResolveNamespacesByLabel(
+				context.Background(), b.kbClient,
+				iep.IncludedNamespacesByLabel, iep.ExcludedNamespacesByLabel, iep.LabelSelectorLogic)
+			if err != nil {
+				request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("error resolving namespace label selectors: %v", err))
+			} else {
+				logger.Infof("resolved %d namespace(s) via includedNamespacesByLabel, %d namespace(s) via excludedNamespacesByLabel",
+					len(resolvedIncluded), len(resolvedExcluded))
+				logger.Debugf("includedNamespacesByLabel resolved to %v; excludedNamespacesByLabel resolved to %v", resolvedIncluded, resolvedExcluded)
+
+				if len(iep.IncludedNamespacesByLabel) > 0 {
+					// request.Spec.IncludedNamespaces was normalized to ["*"] above when
+					// originally empty. An empty BackupSpec.IncludedNamespaces is Velero's
+					// shorthand for "all namespaces" - naively unioning resolvedIncluded into
+					// that would still be "all", defeating the feature. So when the baseline
+					// is still the wildcard (no explicit names were configured), the
+					// label-resolved set REPLACES it instead of being unioned into it.
+					if len(request.Spec.IncludedNamespaces) == 1 && request.Spec.IncludedNamespaces[0] == "*" {
+						request.Spec.IncludedNamespaces = resolvedIncluded
+					} else {
+						request.Spec.IncludedNamespaces = sets.NewString(request.Spec.IncludedNamespaces...).Insert(resolvedIncluded...).List()
+					}
+				}
+				if len(resolvedExcluded) > 0 {
+					request.Spec.ExcludedNamespaces = sets.NewString(request.Spec.ExcludedNamespaces...).Insert(resolvedExcluded...).List()
+				}
+			}
+		}
+	}
+
 	request.ResPolicies = resourcePolicies
 	return request
 }

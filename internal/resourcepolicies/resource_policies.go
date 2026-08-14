@@ -223,13 +223,125 @@ type IncludeExcludePolicy struct {
 	ExcludedClusterScopedResources   []string `yaml:"excludedClusterScopedResources"`
 	IncludedNamespaceScopedResources []string `yaml:"includedNamespaceScopedResources"`
 	ExcludedNamespaceScopedResources []string `yaml:"excludedNamespaceScopedResources"`
+
+	// IncludedNamespacesByLabel and ExcludedNamespacesByLabel are lists of Kubernetes
+	// label selector strings (same syntax as `kubectl get ns -l <selector>`, parsed via
+	// labels.Parse). At backup time, each selector is evaluated against the live namespace
+	// list to dynamically resolve which namespaces to include/exclude, without requiring
+	// namespaces to be enumerated by name in BackupSpec.
+	IncludedNamespacesByLabel []string `yaml:"includedNamespacesByLabel,omitempty"`
+	ExcludedNamespacesByLabel []string `yaml:"excludedNamespacesByLabel,omitempty"`
+
+	// LabelSelectorLogic controls how multiple entries within IncludedNamespacesByLabel are
+	// combined with each other, and independently how multiple entries within
+	// ExcludedNamespacesByLabel are combined with each other: "OR" (default) matches a
+	// namespace against any entry in the list; "AND" requires a namespace to match every
+	// entry in the list. Empty string is treated as "OR". This is unrelated to the
+	// comma-separated AND semantics within a single selector string, which is standard
+	// labels.Parse syntax.
+	LabelSelectorLogic string `yaml:"labelSelectorLogic,omitempty"`
 }
 
 func (p *IncludeExcludePolicy) Validate() error {
 	if err := p.validateIncludeExclude(p.IncludedClusterScopedResources, p.ExcludedClusterScopedResources); err != nil {
 		return err
 	}
-	return p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources)
+	if err := p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources); err != nil {
+		return err
+	}
+	if err := validateLabelSelectors(p.IncludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("includedNamespacesByLabel: %w", err)
+	}
+	if err := validateLabelSelectors(p.ExcludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("excludedNamespacesByLabel: %w", err)
+	}
+	return validateLabelSelectorLogic(p.LabelSelectorLogic)
+}
+
+// validateLabelSelectors returns an error if any selector string is empty/whitespace-only
+// (which labels.Parse would otherwise silently accept as labels.Everything(), matching
+// every namespace) or fails to parse as a Kubernetes label selector.
+func validateLabelSelectors(selectors []string) error {
+	for _, s := range selectors {
+		if strings.TrimSpace(s) == "" {
+			return fmt.Errorf("label selector cannot be empty")
+		}
+		if _, err := labels.Parse(s); err != nil {
+			return fmt.Errorf("invalid label selector %q: %w", s, err)
+		}
+	}
+	return nil
+}
+
+func validateLabelSelectorLogic(logic string) error {
+	switch logic {
+	case "", "OR", "AND":
+		return nil
+	default:
+		return fmt.Errorf("labelSelectorLogic must be \"OR\" or \"AND\", got %q", logic)
+	}
+}
+
+// ResolveNamespacesByLabel lists all cluster namespaces and returns two independently
+// resolved name sets: those matching includedSelectors, and those matching
+// excludedSelectors, combined per logic ("OR": any selector in the list matches; "AND":
+// every selector in the list matches; "" defaults to "OR"). It performs no cross-suppression
+// between the two sets - the caller decides how to combine them with
+// BackupSpec.IncludedNamespaces/ExcludedNamespaces. Both selector lists are assumed
+// pre-validated (see validateLabelSelectors); a parse failure here is treated as no match
+// for that selector rather than a hard error, since Validate() is expected to have already
+// rejected invalid selector strings before this is called.
+func ResolveNamespacesByLabel(
+	ctx context.Context,
+	client crclient.Client,
+	includedSelectors []string,
+	excludedSelectors []string,
+	logic string,
+) ([]string, []string, error) {
+	nsList := &corev1api.NamespaceList{}
+	if err := client.List(ctx, nsList); err != nil {
+		return nil, nil, errors.Wrap(err, "listing namespaces")
+	}
+
+	matchSet := func(selectors []string) []string {
+		result := sets.NewString()
+		if len(selectors) == 0 {
+			return result.List()
+		}
+		parsedSelectors := make([]labels.Selector, 0, len(selectors))
+		for _, sel := range selectors {
+			parsed, err := labels.Parse(sel)
+			if err != nil {
+				continue
+			}
+			parsedSelectors = append(parsedSelectors, parsed)
+		}
+		for _, ns := range nsList.Items {
+			nsLabels := labels.Set(ns.Labels)
+			if logic == "AND" {
+				allMatch := true
+				for _, parsed := range parsedSelectors {
+					if !parsed.Matches(nsLabels) {
+						allMatch = false
+						break
+					}
+				}
+				if allMatch {
+					result.Insert(ns.Name)
+				}
+			} else { // "OR" (default, including "")
+				for _, parsed := range parsedSelectors {
+					if parsed.Matches(nsLabels) {
+						result.Insert(ns.Name)
+						break
+					}
+				}
+			}
+		}
+		return result.List()
+	}
+
+	return matchSet(includedSelectors), matchSet(excludedSelectors), nil
 }
 
 func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList []string) error {
