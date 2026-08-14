@@ -169,22 +169,41 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 	return false, ""
 }
 
-// IsPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition is False
-// and its required node affinity cannot be satisfied by ANY node currently in the cluster.
+// IsPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition has held
+// False for at least unschedulableNodeAffinityGracePeriod, with its required node affinity
+// unsatisfiable by ANY node currently in the cluster.
 //
 // This is deliberately narrower than a blanket "Unschedulable" phase check - see the comment
 // above in IsPodUnrecoverable: a generic Unschedulable check was removed because Unschedulable
 // isn't always permanent (e.g. insufficient CPU/memory can resolve via cluster autoscaling,
 // untolerated taints can be removed, another pod can complete and free resources). Node
 // affinity requirements, in contrast, are purely label-based (they match node labels, not
-// capacity), so if zero nodes' labels satisfy them right now, no amount of waiting on existing
-// nodes will change that - it's a permanent scheduling mismatch, most commonly caused by a
-// node-agent loadAffinity configuration that references labels no node actually has. Reporting
-// this immediately, rather than waiting out the full preparing/operation timeout, gives users
-// an actionable error instead of an opaque "timeout" message.
+// capacity), so if zero EXISTING nodes' labels satisfy them, it's very likely a permanent
+// scheduling mismatch, most commonly caused by a node-agent loadAffinity configuration that
+// references labels no node actually has - though a brand new node joining later with
+// different labels (e.g. a fresh autoscaled node pool) could still resolve it, which is
+// exactly why this only fires after the grace period, not on the first observation. Reporting
+// it once persistent, rather than waiting out the full preparing/operation timeout, gives
+// users an actionable error instead of an opaque "timeout" message.
+
+// unschedulableNodeAffinityGracePeriod is the minimum time the PodScheduled condition must
+// have held False before IsPodUnschedulableDueToNodeAffinity will treat a node-affinity
+// mismatch as permanent. Without this, a single node-list snapshot taken at exactly the wrong
+// moment (e.g. a cluster-autoscaler-provisioned node that matches the affinity but hasn't
+// finished joining/registering yet, or an admin mid-relabel) could cause a false permanent
+// verdict on what's actually about to resolve itself - the same trap that #9697 hit with a
+// blanket Unschedulable check. Chosen short enough to still fail much faster than the default
+// ~10 minute preparing/operation timeout, long enough to ride out ordinary node-join latency.
+const unschedulableNodeAffinityGracePeriod = 2 * time.Minute
+
 func IsPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod) (bool, string) {
 	cond := getPodScheduledCondition(pod)
 	if cond == nil || cond.Status != corev1api.ConditionFalse {
+		return false, ""
+	}
+
+	if time.Since(cond.LastTransitionTime.Time) < unschedulableNodeAffinityGracePeriod {
+		// Too recent to distinguish from a transient/in-progress scheduling situation.
 		return false, ""
 	}
 
@@ -209,8 +228,8 @@ func IsPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kuberne
 	}
 
 	return true, fmt.Sprintf(
-		"pod %s/%s is unschedulable: no node in the cluster satisfies its required node affinity, so this cannot resolve by waiting; reported scheduling failure: %s",
-		pod.Namespace, pod.Name, cond.Message,
+		"pod %s/%s has been unschedulable for over %s: no node in the cluster satisfies its required node affinity, so this cannot resolve by waiting; reported scheduling failure: %s",
+		pod.Namespace, pod.Name, unschedulableNodeAffinityGracePeriod, cond.Message,
 	)
 }
 
@@ -236,8 +255,15 @@ func IsPodUnrecoverableOrUnschedulable(ctx context.Context, kubeClient kubernete
 
 // nodeAffinitySatisfiableByAny reports whether any node in nodes satisfies any of terms.
 // NodeSelectorTerms are OR'd together; a single term's MatchExpressions are AND'd (matching
-// standard Kubernetes node affinity semantics). MatchFields is intentionally not evaluated:
-// Velero's own affinity construction (ToSystemAffinity) never sets it.
+// standard Kubernetes node affinity semantics). MatchFields is intentionally not evaluated,
+// and Gt/Lt operators are intentionally treated as always-satisfiable (see
+// nodeMatchesSelectorRequirement): the only producer of node affinity for the pods this
+// function is ever called on is Velero's own ToSystemAffinity, which builds MatchExpressions
+// exclusively from a metav1.LabelSelector (LoadAffinity.NodeSelector) - a type whose operator
+// enum has no Gt/Lt - plus CSI topology requirements, which are always simple equality
+// matches. Neither MatchFields nor Gt/Lt can occur in practice here; implementing them (or
+// pulling in k8s.io/component-helpers/scheduling/corev1/nodeaffinity as a new dependency to
+// get them for free) would be dead code for this caller.
 func nodeAffinitySatisfiableByAny(nodes []corev1api.Node, terms []corev1api.NodeSelectorTerm) bool {
 	for i := range nodes {
 		for _, term := range terms {

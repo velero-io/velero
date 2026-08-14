@@ -541,6 +541,18 @@ func TestIsPodUnschedulableDueToNodeAffinity(t *testing.T) {
 			},
 			wantResult: false,
 		},
+		{
+			name: "PodScheduled just became False - within grace period, not yet reported",
+			pod: func() *corev1api.Pod {
+				p := podWithScheduledCondition(corev1api.ConditionFalse, "0/6 nodes are available: 3 node(s) didn't match Pod's node affinity/selector", requiredNodeAffinity(zoneAndFooTerm))
+				p.Status.Conditions[0].LastTransitionTime = metav1.NewTime(time.Now())
+				return p
+			}(),
+			nodes: []runtime.Object{
+				nodeWithLabels("node-a", map[string]string{"topology.gke.io/zone": "us-central1-a"}),
+			},
+			wantResult: false,
+		},
 	}
 
 	for _, test := range tests {
