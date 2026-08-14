@@ -28,6 +28,11 @@ const (
 	defaultPodVolumeOperationTimeout  = 240 * time.Minute
 	defaultResourceTerminatingTimeout = 10 * time.Minute
 
+	// DefaultResourceTimeout is the default for --resource-timeout. It matches
+	// defaultResourceTerminatingTimeout so controller fallbacks stay aligned with
+	// server defaults (see pkg/cmd/server/config/config.go).
+	DefaultResourceTimeout = defaultResourceTerminatingTimeout
+
 	// server's client default qps and burst
 	defaultClientQPS      float32 = 100.0
 	defaultClientBurst    int     = 100
@@ -41,7 +46,7 @@ const (
 	defaultCSISnapshotTimeout   = 10 * time.Minute
 	defaultItemOperationTimeout = 4 * time.Hour
 
-	resourceTimeout = 10 * time.Minute
+	resourceTimeout = defaultResourceTerminatingTimeout
 
 	defaultMaxConcurrentK8SConnections = 30
 	defaultDisableInformerCache        = false
