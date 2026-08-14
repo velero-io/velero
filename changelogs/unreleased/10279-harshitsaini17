@@ -1,0 +1,1 @@
+Use the well-known label constants exported by k8s.io/api/core/v1 instead of hardcoded label strings for kubernetes.io/hostname, kubernetes.io/os and topology.kubernetes.io/zone
