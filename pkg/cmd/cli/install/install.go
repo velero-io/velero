@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/vmware-tanzu/velero/internal/velero"
@@ -44,6 +45,7 @@ import (
 type Options struct {
 	Namespace                        string
 	Image                            string
+	ImagePullPolicy                  flag.Enum
 	BucketName                       string
 	Prefix                           string
 	ProviderName                     string
@@ -108,6 +110,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.Apply, "apply", o.Apply, "Flag indicating if resources should be applied instead of created. This can be used for updating existing resources.")
 	flags.BoolVar(&o.NoDefaultBackupLocation, "no-default-backup-location", o.NoDefaultBackupLocation, "Flag indicating if a default backup location should be created. Must be used as confirmation if --bucket or --provider are not provided. Optional.")
 	flags.StringVar(&o.Image, "image", o.Image, "Image to use for the Velero and node agent pods. Optional.")
+	flags.Var(&o.ImagePullPolicy, "image-pull-policy", fmt.Sprintf("The imagePullPolicy for the Velero, node agent, and plugin containers. Valid values are %s. Optional, defaults to Always for images tagged \"latest\" and IfNotPresent otherwise.", strings.Join(o.ImagePullPolicy.AllowedValues(), ", ")))
 	flags.StringVar(&o.Prefix, "prefix", o.Prefix, "Prefix under which all Velero data should be stored within the bucket. Optional.")
 	flags.Var(&o.PodAnnotations, "pod-annotations", "Annotations to add to the Velero and node agent pods. Optional. Format is key1=value1,key2=value2")
 	flags.Var(&o.PodLabels, "pod-labels", "Labels to add to the Velero and node agent pods. Optional. Format is key1=value1,key2=value2")
@@ -233,6 +236,7 @@ func NewInstallOptions() *Options {
 	return &Options{
 		Namespace:                 velerov1api.DefaultNamespace,
 		Image:                     velero.DefaultVeleroImage(),
+		ImagePullPolicy:           *flag.NewEnum("", string(corev1api.PullAlways), string(corev1api.PullIfNotPresent), string(corev1api.PullNever)),
 		BackupStorageConfig:       flag.NewMap(),
 		VolumeSnapshotConfig:      flag.NewMap(),
 		PodAnnotations:            flag.NewMap(),
@@ -307,6 +311,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 	return &install.VeleroOptions{
 		Namespace:                        o.Namespace,
 		Image:                            o.Image,
+		ImagePullPolicy:                  o.ImagePullPolicy.String(),
 		ProviderName:                     o.ProviderName,
 		Bucket:                           o.BucketName,
 		Prefix:                           o.Prefix,
