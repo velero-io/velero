@@ -775,7 +775,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForRestorePod(ctx context.Context, p
 			log.WithError(err).Warn("failed to update PVR, prepare will halt for this PVR")
 			return []reconcile.Request{}
 		}
-	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
+	} else if unrecoverable, reason := kube.IsPodUnrecoverableOrUnschedulable(ctx, r.kubeClient, pod, log); unrecoverable {
 		err := UpdatePVRWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
 			func(pvr *velerov1api.PodVolumeRestore) bool {
 				if pvr.Spec.Cancel {

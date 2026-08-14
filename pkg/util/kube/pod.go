@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
@@ -165,6 +167,114 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 		}
 	}
 	return false, ""
+}
+
+// IsPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition is False
+// and its required node affinity cannot be satisfied by ANY node currently in the cluster.
+//
+// This is deliberately narrower than a blanket "Unschedulable" phase check - see the comment
+// above in IsPodUnrecoverable: a generic Unschedulable check was removed because Unschedulable
+// isn't always permanent (e.g. insufficient CPU/memory can resolve via cluster autoscaling,
+// untolerated taints can be removed, another pod can complete and free resources). Node
+// affinity requirements, in contrast, are purely label-based (they match node labels, not
+// capacity), so if zero nodes' labels satisfy them right now, no amount of waiting on existing
+// nodes will change that - it's a permanent scheduling mismatch, most commonly caused by a
+// node-agent loadAffinity configuration that references labels no node actually has. Reporting
+// this immediately, rather than waiting out the full preparing/operation timeout, gives users
+// an actionable error instead of an opaque "timeout" message.
+func IsPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod) (bool, string) {
+	cond := getPodScheduledCondition(pod)
+	if cond == nil || cond.Status != corev1api.ConditionFalse {
+		return false, ""
+	}
+
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return false, ""
+	}
+
+	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	if len(terms) == 0 {
+		return false, ""
+	}
+
+	nodeList, err := kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// Can't verify one way or the other; don't claim a permanent mismatch on missing data.
+		return false, ""
+	}
+
+	if nodeAffinitySatisfiableByAny(nodeList.Items, terms) {
+		return false, ""
+	}
+
+	return true, fmt.Sprintf(
+		"pod %s/%s is unschedulable: no node in the cluster satisfies its required node affinity, so this cannot resolve by waiting; reported scheduling failure: %s",
+		pod.Namespace, pod.Name, cond.Message,
+	)
+}
+
+func getPodScheduledCondition(pod *corev1api.Pod) *corev1api.PodCondition {
+	for i := range pod.Status.Conditions {
+		if pod.Status.Conditions[i].Type == corev1api.PodScheduled {
+			return &pod.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
+// IsPodUnrecoverableOrUnschedulable combines IsPodUnrecoverable and
+// IsPodUnschedulableDueToNodeAffinity into the single check callers actually want: "has this
+// pod reached a state it cannot recover from, and if so why". Kept as two separate functions
+// above so each is independently testable, but every current caller wants both checks together.
+func IsPodUnrecoverableOrUnschedulable(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
+	if unrecoverable, reason := IsPodUnrecoverable(pod, log); unrecoverable {
+		return true, reason
+	}
+	return IsPodUnschedulableDueToNodeAffinity(ctx, kubeClient, pod)
+}
+
+// nodeAffinitySatisfiableByAny reports whether any node in nodes satisfies any of terms.
+// NodeSelectorTerms are OR'd together; a single term's MatchExpressions are AND'd (matching
+// standard Kubernetes node affinity semantics). MatchFields is intentionally not evaluated:
+// Velero's own affinity construction (ToSystemAffinity) never sets it.
+func nodeAffinitySatisfiableByAny(nodes []corev1api.Node, terms []corev1api.NodeSelectorTerm) bool {
+	for i := range nodes {
+		for _, term := range terms {
+			if nodeMatchesSelectorTerm(&nodes[i], term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nodeMatchesSelectorTerm(node *corev1api.Node, term corev1api.NodeSelectorTerm) bool {
+	for _, req := range term.MatchExpressions {
+		if !nodeMatchesSelectorRequirement(node, req) {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeMatchesSelectorRequirement(node *corev1api.Node, req corev1api.NodeSelectorRequirement) bool {
+	value, exists := node.Labels[req.Key]
+	switch req.Operator {
+	case corev1api.NodeSelectorOpIn:
+		return exists && slices.Contains(req.Values, value)
+	case corev1api.NodeSelectorOpNotIn:
+		return !exists || !slices.Contains(req.Values, value)
+	case corev1api.NodeSelectorOpExists:
+		return exists
+	case corev1api.NodeSelectorOpDoesNotExist:
+		return !exists
+	default:
+		// NodeSelectorOpGt/Lt and any future/unknown operator: don't have a precise
+		// implementation here, so err on the side of "might be satisfiable" rather than
+		// risk a false permanent-mismatch report.
+		return true
+	}
 }
 
 // GetPodContainerTerminateMessage returns the terminate message for a specific container of a pod

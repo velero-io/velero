@@ -276,7 +276,7 @@ func (e *podVolumeExposer) PeekExposed(ctx context.Context, ownerObject corev1ap
 		return nil
 	}
 
-	if podFailed, message := kube.IsPodUnrecoverable(pod, curLog); podFailed {
+	if podFailed, message := kube.IsPodUnrecoverableOrUnschedulable(ctx, e.kubeClient, pod, curLog); podFailed {
 		return errors.New(message)
 	}
 

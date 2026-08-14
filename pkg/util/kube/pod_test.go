@@ -473,6 +473,121 @@ func TestIsPodUnrecoverable(t *testing.T) {
 	}
 }
 
+func podWithScheduledCondition(status corev1api.ConditionStatus, message string, affinity *corev1api.Affinity) *corev1api.Pod {
+	return &corev1api.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "backup-pod"},
+		Spec:       corev1api.PodSpec{Affinity: affinity},
+		Status: corev1api.PodStatus{
+			Phase: corev1api.PodPending,
+			Conditions: []corev1api.PodCondition{
+				{Type: corev1api.PodScheduled, Status: status, Reason: "Unschedulable", Message: message},
+			},
+		},
+	}
+}
+
+func requiredNodeAffinity(terms ...corev1api.NodeSelectorTerm) *corev1api.Affinity {
+	return &corev1api.Affinity{
+		NodeAffinity: &corev1api.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+				NodeSelectorTerms: terms,
+			},
+		},
+	}
+}
+
+func nodeWithLabels(name string, labels map[string]string) *corev1api.Node {
+	return &corev1api.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
+}
+
+func TestIsPodUnschedulableDueToNodeAffinity(t *testing.T) {
+	zoneAndFooTerm := corev1api.NodeSelectorTerm{
+		MatchExpressions: []corev1api.NodeSelectorRequirement{
+			{Key: "topology.gke.io/zone", Operator: corev1api.NodeSelectorOpIn, Values: []string{"us-central1-c"}},
+			{Key: "foo", Operator: corev1api.NodeSelectorOpIn, Values: []string{"bar"}},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		pod        *corev1api.Pod
+		nodes      []runtime.Object
+		wantResult bool
+	}{
+		{
+			name:       "PodScheduled condition true - not unschedulable",
+			pod:        podWithScheduledCondition(corev1api.ConditionTrue, "", requiredNodeAffinity(zoneAndFooTerm)),
+			wantResult: false,
+		},
+		{
+			name:       "no node affinity configured - not our targeted case",
+			pod:        podWithScheduledCondition(corev1api.ConditionFalse, "0/6 nodes are available", nil),
+			wantResult: false,
+		},
+		{
+			name: "no node in cluster satisfies the required affinity - permanent mismatch",
+			pod:  podWithScheduledCondition(corev1api.ConditionFalse, "0/6 nodes are available: 3 node(s) didn't match Pod's node affinity/selector", requiredNodeAffinity(zoneAndFooTerm)),
+			nodes: []runtime.Object{
+				nodeWithLabels("node-a", map[string]string{"topology.gke.io/zone": "us-central1-a"}),
+				nodeWithLabels("node-c-no-foo", map[string]string{"topology.gke.io/zone": "us-central1-c"}),
+			},
+			wantResult: true,
+		},
+		{
+			name: "a node satisfies the required affinity - not a permanent mismatch",
+			pod:  podWithScheduledCondition(corev1api.ConditionFalse, "0/6 nodes are available: Insufficient cpu", requiredNodeAffinity(zoneAndFooTerm)),
+			nodes: []runtime.Object{
+				nodeWithLabels("node-c-foo", map[string]string{"topology.gke.io/zone": "us-central1-c", "foo": "bar"}),
+			},
+			wantResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.nodes...)
+			got, msg := IsPodUnschedulableDueToNodeAffinity(t.Context(), fakeKubeClient, test.pod)
+			assert.Equal(t, test.wantResult, got)
+			if test.wantResult {
+				assert.NotEmpty(t, msg)
+			}
+		})
+	}
+}
+
+func TestIsPodUnrecoverableOrUnschedulable(t *testing.T) {
+	t.Run("falls through to node affinity check when not otherwise unrecoverable", func(t *testing.T) {
+		pod := podWithScheduledCondition(corev1api.ConditionFalse, "0/1 nodes are available: didn't match node affinity",
+			requiredNodeAffinity(corev1api.NodeSelectorTerm{
+				MatchExpressions: []corev1api.NodeSelectorRequirement{
+					{Key: "foo", Operator: corev1api.NodeSelectorOpIn, Values: []string{"bar"}},
+				},
+			}))
+		fakeKubeClient := fake.NewSimpleClientset(nodeWithLabels("node-a", map[string]string{"foo": "baz"}))
+
+		got, msg := IsPodUnrecoverableOrUnschedulable(t.Context(), fakeKubeClient, pod, velerotest.NewLogger())
+		assert.True(t, got)
+		assert.NotEmpty(t, msg)
+	})
+
+	t.Run("IsPodUnrecoverable takes precedence and short-circuits the node affinity check", func(t *testing.T) {
+		pod := &corev1api.Pod{Status: corev1api.PodStatus{Phase: corev1api.PodFailed}}
+		fakeKubeClient := fake.NewSimpleClientset()
+
+		got, msg := IsPodUnrecoverableOrUnschedulable(t.Context(), fakeKubeClient, pod, velerotest.NewLogger())
+		assert.True(t, got)
+		assert.Contains(t, msg, "abnormal state")
+	})
+
+	t.Run("neither check trips on a healthy pending pod", func(t *testing.T) {
+		pod := podWithScheduledCondition(corev1api.ConditionTrue, "", nil)
+		fakeKubeClient := fake.NewSimpleClientset()
+
+		got, _ := IsPodUnrecoverableOrUnschedulable(t.Context(), fakeKubeClient, pod, velerotest.NewLogger())
+		assert.False(t, got)
+	})
+}
+
 func TestGetPodTerminateMessage(t *testing.T) {
 	tests := []struct {
 		name    string
