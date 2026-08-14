@@ -1,9 +1,10 @@
 name: Pull Request File Path Check
-on: [pull_request]
+on:
+  pull_request:
+  workflow_call:
 jobs:
 
   filepath-check:
-    if: github.repository == 'velero-io/velero'
     name: Check for invalid characters in file paths
     runs-on: ubuntu-latest
     steps:
