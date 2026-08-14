@@ -3028,7 +3028,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "zone-1")).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels(corev1api.LabelTopologyZone, "zone-1")).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3065,7 +3065,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{"failure-domain.beta.kubernetes.io/zone": "zone-1-deprecated", "topology.kubernetes.io/zone": "zone-1-ga"})).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{"failure-domain.beta.kubernetes.io/zone": "zone-1-deprecated", corev1api.LabelTopologyZone: "zone-1-ga"})).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{

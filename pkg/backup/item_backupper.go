@@ -571,7 +571,7 @@ func (ib *itemBackupper) executeActions(
 const (
 	zoneLabelDeprecated = "failure-domain.beta.kubernetes.io/zone"
 	// this is reused for nodeAffinity requirements
-	zoneLabel = "topology.kubernetes.io/zone"
+	zoneLabel = corev1api.LabelTopologyZone
 
 	awsEbsCsiZoneKey = "topology.ebs.csi.aws.com/zone"
 	azureCsiZoneKey  = "topology.disk.csi.azure.com/zone"

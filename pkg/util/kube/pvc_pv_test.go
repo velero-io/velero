@@ -1729,7 +1729,7 @@ func TestDiagnosePV(t *testing.T) {
 func TestGetPVCAttachingNodeOS(t *testing.T) {
 	storageClass := "fake-storage-class"
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
 
 	pvcObj := &corev1api.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{

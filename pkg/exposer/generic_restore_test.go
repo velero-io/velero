@@ -1345,7 +1345,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"linux"},
 						},
@@ -1363,7 +1363,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"windows"},
 						},

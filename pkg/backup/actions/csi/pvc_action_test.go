@@ -131,7 +131,7 @@ func TestExecute(t *testing.T) {
 			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
 			extraObjects: []runtime.Object{
 				&corev1api.Node{
-					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{"kubernetes.io/os": "linux"}},
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
 				},
 				&appsv1api.DaemonSet{
 					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
@@ -186,7 +186,7 @@ func TestExecute(t *testing.T) {
 			vsClass: builder.ForVolumeSnapshotClass("tescVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
 			extraObjects: []runtime.Object{
 				&corev1api.Node{
-					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{"kubernetes.io/os": "linux"}},
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
 				},
 				&appsv1api.DaemonSet{
 					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},

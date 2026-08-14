@@ -247,7 +247,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{"windows"},
 									Operator: corev1api.NodeSelectorOpIn,
 								},
@@ -280,7 +280,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{"windows"},
 									Operator: corev1api.NodeSelectorOpNotIn,
 								},

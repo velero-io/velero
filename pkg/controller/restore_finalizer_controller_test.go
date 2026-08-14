@@ -676,11 +676,11 @@ func TestNeedPatch(t *testing.T) {
 		{
 			name: "same label key different values",
 			newPV: builder.ForPersistentVolume("pv1").
-				ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "us-west-2a")).
+				ObjectMeta(builder.WithLabels(corev1api.LabelTopologyZone, "us-west-2a")).
 				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
 			pvInfo: &volume.PVInfo{
 				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
-				Labels:        map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+				Labels:        map[string]string{corev1api.LabelTopologyZone: "us-east-1a"},
 			},
 			expected: false,
 		},
