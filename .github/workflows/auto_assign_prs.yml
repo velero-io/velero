@@ -6,10 +6,14 @@ name: "Auto Assign Author"
 #
 # Also callable as a reusable workflow (`uses:
 # velero-io/velero/.github/workflows/auto_assign_prs.yml@main`) from other
-# velero-io repos — see velero-plugin-for-aws/gcp/microsoft-azure. Each caller
-# repo needs its own `.github/auto-assignees.yml` (checkout below resolves to
-# the calling repo) and its own `.github/CODEOWNERS` naming the reviewer team
-# for the re-request-review job below to make sense.
+# velero-io repos — see velero-plugin-for-aws/gcp/microsoft-azure. Each
+# caller repo needs its own `.github/auto-assignees.yml` (kentaro-m/auto-
+# assign-action fetches it via the GitHub API using the calling repo's
+# context — there's no checkout step in this workflow) and its own
+# `.github/CODEOWNERS` naming the reviewer team for the re-request-review
+# job below to make sense. Callers must grant at least `pull-requests: write`
+# in their own job-level permissions — a caller's permissions cap what this
+# called workflow's jobs can request, regardless of what's declared here.
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
