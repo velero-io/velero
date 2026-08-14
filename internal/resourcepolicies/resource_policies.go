@@ -288,9 +288,11 @@ func validateLabelSelectorLogic(logic string) error {
 // every selector in the list matches; "" defaults to "OR"). It performs no cross-suppression
 // between the two sets - the caller decides how to combine them with
 // BackupSpec.IncludedNamespaces/ExcludedNamespaces. Both selector lists are assumed
-// pre-validated (see validateLabelSelectors); a parse failure here is treated as no match
-// for that selector rather than a hard error, since Validate() is expected to have already
-// rejected invalid selector strings before this is called.
+// pre-validated (see validateLabelSelectors); a parse failure here (which should not happen,
+// since Validate() is expected to have already rejected invalid selector strings before this
+// is called) fails that whole list closed - returning no matches at all - rather than
+// silently dropping just the bad selector, which would change AND/OR join semantics
+// unexpectedly for the remaining selectors.
 func ResolveNamespacesByLabel(
 	ctx context.Context,
 	client crclient.Client,
@@ -312,7 +314,10 @@ func ResolveNamespacesByLabel(
 		for _, sel := range selectors {
 			parsed, err := labels.Parse(sel)
 			if err != nil {
-				continue
+				// Should not happen - Validate() rejects invalid selectors before this is
+				// called. Fail closed (no matches at all) rather than silently dropping just
+				// the bad selector, which would change AND/OR join semantics unexpectedly.
+				return result.List()
 			}
 			parsedSelectors = append(parsedSelectors, parsed)
 		}

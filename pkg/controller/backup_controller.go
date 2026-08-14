@@ -645,7 +645,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		iep := resourcePolicies.GetIncludeExcludePolicy()
 		if len(iep.IncludedNamespacesByLabel) > 0 || len(iep.ExcludedNamespacesByLabel) > 0 {
 			resolvedIncluded, resolvedExcluded, err := resourcepolicies.ResolveNamespacesByLabel(
-				context.Background(), b.kbClient,
+				ctx, b.kbClient,
 				iep.IncludedNamespacesByLabel, iep.ExcludedNamespacesByLabel, iep.LabelSelectorLogic)
 			if err != nil {
 				request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("error resolving namespace label selectors: %v", err))
