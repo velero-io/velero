@@ -26,6 +26,7 @@ import (
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	clocks "k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,6 +44,18 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
+
+// objectStorageBackoff retries object storage writes (PutBackupMetadata,
+// PutBackupContents). Bounded (Steps) so a persistent failure surfaces as an
+// error within a bounded time rather than retrying forever; see the retry
+// call sites below for rationale. Var (not const) so tests can shrink it for
+// speed, matching pkg/repository/maintenance's waitCompletionBackOff pattern.
+var objectStorageBackoff = wait.Backoff{
+	Duration: time.Second,
+	Factor:   2.0,
+	Steps:    5,
+	Jitter:   0.1,
+}
 
 // backupFinalizerReconciler reconciles a Backup object
 type backupFinalizerReconciler struct {
@@ -232,14 +245,24 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := encode.To(backupForUpload, "json", backupJSON); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error encoding backup json")
 	}
-	if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return err != nil },
+	// retry.DefaultBackoff is tuned for API server optimistic-concurrency
+	// conflicts (4 steps, ~1.25s total) and gives up far too quickly for
+	// object storage calls, which can see longer transient outages or
+	// throttling. objectStorageBackoff (above) grows more slowly and gives
+	// up after a bounded time instead of retrying forever, so a persistent
+	// failure (e.g. an object-lock/immutability policy) surfaces as an error
+	// promptly; controller-runtime requeues the Reconcile on error, so
+	// retries continue across reconciles rather than blocking a worker
+	// goroutine indefinitely on a call that will never succeed.
+	if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
 		func() error { return backupStore.PutBackupMetadata(backup.Name, backupJSON) },
 	); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
 	}
 	if len(operations) > 0 {
-		err = backupStore.PutBackupContents(backup.Name, outBackupFile)
-		if err != nil {
+		if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
+			func() error { return backupStore.PutBackupContents(backup.Name, outBackupFile) },
+		); err != nil {
 			return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
 		}
 	}

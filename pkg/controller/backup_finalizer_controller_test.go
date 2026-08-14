@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	testclocks "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -246,6 +247,10 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 }
 
 func TestBackupFinalizerReconcile_PutBackupMetadataFail(t *testing.T) {
+	origBackoff := objectStorageBackoff
+	objectStorageBackoff = wait.Backoff{Duration: time.Millisecond, Steps: 2}
+	t.Cleanup(func() { objectStorageBackoff = origBackoff })
+
 	tests := []struct {
 		name         string
 		initialPhase velerov1api.BackupPhase
@@ -317,6 +322,10 @@ func TestBackupFinalizerReconcile_PutBackupMetadataFail(t *testing.T) {
 }
 
 func TestBackupFinalizerReconcile_PutBackupContentsFail(t *testing.T) {
+	origBackoff := objectStorageBackoff
+	objectStorageBackoff = wait.Backoff{Duration: time.Millisecond, Steps: 2}
+	t.Cleanup(func() { objectStorageBackoff = origBackoff })
+
 	tests := []struct {
 		name         string
 		initialPhase velerov1api.BackupPhase
