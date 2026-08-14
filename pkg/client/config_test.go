@@ -37,6 +37,13 @@ func TestVeleroConfig(t *testing.T) {
 	assert.True(t, c.Colorized())
 }
 
+func TestVeleroConfigFeaturesTrimSpaces(t *testing.T) {
+	c := VeleroConfig{
+		ConfigKeyFeatures: "EnableCSI, EnableAPIGroupVersions, ",
+	}
+	assert.Equal(t, []string{"EnableCSI", "EnableAPIGroupVersions"}, c.Features())
+}
+
 func removeConfigfileName() error {
 	// Remove config file if it exist
 	configFile := configFileName()

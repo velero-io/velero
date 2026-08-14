@@ -330,7 +330,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		Plugins:                          o.Plugins,
 		NoDefaultBackupLocation:          o.NoDefaultBackupLocation,
 		CACertData:                       caCertData,
-		Features:                         strings.Split(o.Features, ","),
+		Features:                         splitAndTrimCSV(o.Features),
 		DefaultVolumesToFsBackup:         o.DefaultVolumesToFsBackup,
 		UploaderType:                     o.UploaderType,
 		DefaultSnapshotMoveData:          o.DefaultSnapshotMoveData,
@@ -597,4 +597,19 @@ func (o *Options) Validate(c *cobra.Command, args []string, f client.Factory) er
 	}
 
 	return nil
+}
+
+// splitAndTrimCSV splits a comma-separated string and trims whitespace so values
+// like "EnableCSI, EnableAPIGroupVersions" produce the intended feature names.
+func splitAndTrimCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }

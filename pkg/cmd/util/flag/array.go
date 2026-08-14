@@ -40,7 +40,16 @@ func (sa *StringArray) String() string {
 // the results to the receiver. It returns an error if
 // the string is not parseable.
 func (sa *StringArray) Set(s string) error {
-	*sa = strings.Split(s, ",")
+	parts := strings.Split(s, ",")
+	out := make(StringArray, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	*sa = out
 	return nil
 }
 
