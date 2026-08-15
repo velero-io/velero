@@ -198,7 +198,7 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 
 	curLog.WithField("vs name", volumeSnapshot.Name).Infof("VS is deleted in namespace %s", volumeSnapshot.Namespace)
 
-	err = csi.EnsureDeleteVSC(ctx, e.csiSnapshotClient, vsc.Name, csiExposeParam.OperationTimeout)
+	err = csi.EnsureDeleteVSC(ctx, e.csiSnapshotClient, vsc.Name, csiExposeParam.OperationTimeout, curLog)
 	if err != nil {
 		return errors.Wrap(err, "error to delete volume snapshot content")
 	}
