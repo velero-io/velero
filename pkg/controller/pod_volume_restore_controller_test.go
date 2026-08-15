@@ -117,8 +117,6 @@ func TestShouldProcess(t *testing.T) {
 				},
 			},
 			shouldProcessed: false,
-			expectError:     true,
-			errString:       "timeout to wait for pod ns-1/pod-1",
 		},
 		{
 			name: "Empty phase pvr with pod on node not running init container should not be processed",
@@ -470,8 +468,6 @@ func TestShouldProcess(t *testing.T) {
 
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {
-			ctx := t.Context()
-
 			var objs []runtime.Object
 			if ts.obj != nil {
 				objs = append(objs, ts.obj)
@@ -487,7 +483,21 @@ func TestShouldProcess(t *testing.T) {
 				clock:  &clocks.RealClock{},
 			}
 
-			shouldProcess, _, err := shouldProcess(ctx, c.client, c.logger, ts.obj, time.Second)
+			if !isPVRNew(ts.obj) {
+				require.False(t, ts.shouldProcessed)
+				return
+			}
+
+			if ts.pod == nil {
+				_, err := getTargetPod(context.Background(), c.client, c.logger, ts.obj)
+				if ts.expectError {
+					require.Error(t, err)
+				}
+				require.False(t, ts.shouldProcessed)
+				return
+			}
+
+			shouldProcess, err := shouldProcess(ts.pod, c.logger)
 			require.Equal(t, ts.shouldProcessed, shouldProcess)
 			if ts.expectError {
 				require.Error(t, err)

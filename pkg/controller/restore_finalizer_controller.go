@@ -374,19 +374,20 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// failures due to the PVC not being bound, which could cause a timeout and result in a failed restore.
 					if pvc.Status.Phase == corev1api.ClaimPending {
 						// check if storage class used has VolumeBindingMode as WaitForFirstConsumer
-						scName := *pvc.Spec.StorageClassName
-						sc := &storagev1api.StorageClass{}
-						err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
+						if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+							scName := *pvc.Spec.StorageClassName
+							sc := &storagev1api.StorageClass{}
+							err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
 
-						if err != nil {
-							errs.Add(restoredNamespace, err)
-							return false, err
-						}
-						// skip PV patch step for this scenario
-						// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
-						if *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
-							log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
-							return true, nil
+							if err != nil {
+								return false, err
+							}
+							// skip PV patch step for this scenario
+							// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
+							if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
+								log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
+								return true, nil
+							}
 						}
 					}
 
