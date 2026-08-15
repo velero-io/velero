@@ -794,7 +794,7 @@ func TestExpose(t *testing.T) {
 						NodeSelector: metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
-									Key:      "kubernetes.io/arch",
+									Key:      corev1api.LabelArchStable,
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{"amd64"},
 								},
@@ -820,7 +820,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/arch",
+										Key:      corev1api.LabelArchStable,
 										Operator: corev1api.NodeSelectorOpIn,
 										Values:   []string{"amd64"},
 									},
