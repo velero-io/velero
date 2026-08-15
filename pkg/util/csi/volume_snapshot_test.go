@@ -2251,6 +2251,39 @@ func TestCleanupVolumeSnapshot(t *testing.T) {
 			expectDeleted: true,
 			expectedVSC:   "retain-vsc",
 		},
+		{
+			name: "should fall back to VolumeSnapshotRef lookup when BoundVolumeSnapshotContentName is not yet set",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-not-yet-bound",
+					Namespace: "velero",
+				},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vs-not-yet-bound",
+						Namespace: "velero",
+					},
+					// Status intentionally nil, simulating cleanup running before
+					// the CSI snapshot controller has bound the VolumeSnapshot.
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "orphan-prone-vsc",
+					},
+					Spec: snapshotv1api.VolumeSnapshotContentSpec{
+						DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+						VolumeSnapshotRef: corev1api.ObjectReference{
+							Name:      "vs-not-yet-bound",
+							Namespace: "velero",
+						},
+					},
+				},
+			},
+			expectDeleted: true,
+			expectedVSC:   "orphan-prone-vsc",
+		},
 	}
 
 	for _, tc := range testCases {
