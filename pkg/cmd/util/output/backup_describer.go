@@ -739,8 +739,12 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 		d.Printf("\t\t\t\tData Mover: %s\n", dataMover)
 		d.Printf("\t\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
 		d.Printf("\t\t\t\tMoved data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)
-		if info.SnapshotDataMovementInfo.IncrementalSize > 0 {
-			d.Printf("\t\t\t\tIncremental data Size (bytes): %d\n", info.SnapshotDataMovementInfo.IncrementalSize)
+		// Print whenever the uploader measured a figure, including zero. A zero-delta
+		// incremental transfers nothing, which is the whole point of CBT; hiding it
+		// leaves only the volume size on display and makes the best possible result
+		// indistinguishable from a full transfer.
+		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
+			d.Printf("\t\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
 		}
 		d.Printf("\t\t\t\tResult: %s\n", info.Result)
 	} else {
@@ -915,7 +919,7 @@ type volumesByPod struct {
 // Add adds a pod volume with the specified pod namespace, name
 // and volume to the appropriate group.
 // Used for both backup and restore
-func (v *volumesByPod) Add(namespace, name, volume, phase string, progress veleroapishared.DataMoveOperationProgress, incrementalBytes int64) {
+func (v *volumesByPod) Add(namespace, name, volume, phase string, progress veleroapishared.DataMoveOperationProgress, incrementalBytes *int64) {
 	if v.volumesByPodMap == nil {
 		v.volumesByPodMap = make(map[string]*podVolumeGroup)
 	}
@@ -925,8 +929,12 @@ func (v *volumesByPod) Add(namespace, name, volume, phase string, progress veler
 	// append backup progress percentage if backup is in progress
 	if phase == "In Progress" && progress.TotalBytes != 0 {
 		volume = fmt.Sprintf("%s (%.2f%%)", volume, float64(progress.BytesDone)/float64(progress.TotalBytes)*100)
-	} else if phase == string(velerov1api.PodVolumeBackupPhaseCompleted) && incrementalBytes > 0 {
-		volume = fmt.Sprintf("%s (size: %v, incremental size: %v)", volume, progress.TotalBytes, incrementalBytes)
+	} else if phase == string(velerov1api.PodVolumeBackupPhaseCompleted) && incrementalBytes != nil {
+		// Report the incremental figure whenever it was measured, including zero. Zero is
+		// the best possible outcome - nothing changed, so nothing was transferred - and
+		// suppressing it leaves only the volume size on display, which reads as a full
+		// transfer.
+		volume = fmt.Sprintf("%s (size: %v, incremental size: %v)", volume, progress.TotalBytes, *incrementalBytes)
 	} else if (phase == string(velerov1api.PodVolumeBackupPhaseCompleted) ||
 		phase == string(velerov1api.PodVolumeRestorePhaseCompleted)) &&
 		progress.TotalBytes > 0 {

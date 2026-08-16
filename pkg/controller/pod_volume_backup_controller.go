@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clocks "k8s.io/utils/clock"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -550,7 +551,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathCompleted(ctx context.Context, nam
 		pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseCompleted
 		pvb.Status.SnapshotID = result.Backup.SnapshotID
 		pvb.Status.CompletionTimestamp = &completionTime
-		pvb.Status.IncrementalBytes = result.Backup.IncrementalBytes
+		pvb.Status.IncrementalBytes = ptr.To(result.Backup.IncrementalBytes)
 		if result.Backup.EmptySnapshot {
 			pvb.Status.Message = "volume was empty so no snapshot was taken"
 		}

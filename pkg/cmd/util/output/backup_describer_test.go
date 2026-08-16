@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -629,7 +630,7 @@ func TestCSISnapshots(t *testing.T) {
 						SnapshotHandle:  "fake-repo-id-5",
 						OperationID:     "fake-operation-5",
 						Size:            100,
-						IncrementalSize: 50,
+						IncrementalSize: ptr.To(int64(50)),
 						Phase:           velerov2alpha1.DataUploadPhaseFailed,
 					},
 				},

@@ -147,7 +147,7 @@ func (d *DataUploadBuilder) Progress(progress shared.DataMoveOperationProgress) 
 
 // IncrementalBytes sets the DataUpload's IncrementalBytes.
 func (d *DataUploadBuilder) IncrementalBytes(incrementalBytes int64) *DataUploadBuilder {
-	d.object.Status.IncrementalBytes = incrementalBytes
+	d.object.Status.IncrementalBytes = &incrementalBytes
 	return d
 }
 
