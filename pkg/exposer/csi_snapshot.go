@@ -332,6 +332,11 @@ func (e *csiSnapshotExposer) getCBTInfo(ctx context.Context, vs *snapshotv1api.V
 
 		if vsc.Status != nil && vsc.Status.SnapshotHandle != nil {
 			cbtInfo.changeID = *vsc.Status.SnapshotHandle
+		} else if vsc.Spec.Source.SnapshotHandle != nil {
+			// The backup VSC is statically provisioned from the source VSC's
+			// snapshot handle; its status is populated asynchronously and may
+			// not be set yet, but the handle is already in the spec.
+			cbtInfo.changeID = *vsc.Spec.Source.SnapshotHandle
 		}
 
 		if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
@@ -510,12 +515,20 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	backupPodName := ownerObject.Name
 	backupPVCName := ownerObject.Name
 	backupVSName := ownerObject.Name
+	backupVSCName := ownerObject.Name
 
 	kube.DeletePodIfAny(ctx, e.kubeClient.CoreV1(), backupPodName, ownerObject.Namespace, e.log)
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), backupPVCName, ownerObject.Namespace, cleanUpTimeout, e.log)
 
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
+
+	// The backup VSC is created by Velero as an internal handle to the source
+	// snapshot. Deleting the backup VS above only cascades to it when its
+	// deletion policy is Delete, so remove it explicitly to avoid leaking the
+	// object under a Retain policy. Deleting a Retain VSC drops only the API
+	// object and leaves the underlying snapshot intact.
+	csi.DeleteVolumeSnapshotContentIfAny(ctx, e.csiSnapshotClient, backupVSCName, e.log)
 }
 
 func getVolumeModeByAccessMode(accessMode string, dataMover string) (corev1api.PersistentVolumeMode, error) {
@@ -580,7 +593,13 @@ func (e *csiSnapshotExposer) createBackupVSC(ctx context.Context, ownerObject co
 			Source: snapshotv1api.VolumeSnapshotContentSource{
 				SnapshotHandle: snapshotVSC.Status.SnapshotHandle,
 			},
-			DeletionPolicy:          snapshotv1api.VolumeSnapshotContentDelete,
+			// The backup VSC is statically provisioned against the same
+			// snapshot handle as the source VSC, so both objects refer to one
+			// physical snapshot. Inherit the source's deletion policy instead
+			// of forcing Delete, otherwise a user who configured Retain on the
+			// VolumeSnapshotClass still loses the snapshot when the backup VSC
+			// is cleaned up.
+			DeletionPolicy:          snapshotVSC.Spec.DeletionPolicy,
 			Driver:                  snapshotVSC.Spec.Driver,
 			VolumeSnapshotClassName: snapshotVSC.Spec.VolumeSnapshotClassName,
 		},
