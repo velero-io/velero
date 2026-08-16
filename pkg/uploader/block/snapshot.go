@@ -110,10 +110,23 @@ func snapshotSource(
 
 	bitmap := cbt.NewBitmap(blockSize, uint64(source.size), cbtSource.Snapshot, parentBackup.changeID, parentBackup.volumeID)
 
-	err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap)
-	if err != nil {
+	tier, err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap)
+	switch {
+	case tier == cbt.TierAllocated && err != nil:
+		// The bitmap describes blocks that are allocated *now*, not blocks that changed.
+		// The uploader only writes bitmap blocks and lets everything else resolve to the
+		// parent object, so a block that was written in the parent and has since been
+		// discarded would be inherited back from the parent instead of reading as a hole.
+		// Drop the parent so the object is written in full mode, where unwritten ranges
+		// are holes. This is still far cheaper than a whole-device transfer.
 		parentBackup.parentObject = ""
-		log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to real full backup", cbtSource)
+		log.WithError(err).Warnf("CBT delta unavailable for source %v, degraded to allocated-blocks backup", cbtSource)
+	case tier == cbt.TierFull:
+		// Every block is dirty, so every block is written and nothing can be inherited
+		// from the parent. parentBackup.parentObject is deliberately kept: it was resolved
+		// from the repository's own snapshot manifests and validated independently of the
+		// CBT service, so it remains a correct base to dedup against.
+		log.WithError(err).Warnf("Failed to get any CBT data for source %v, fallback to whole-device backup", cbtSource)
 	}
 
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
