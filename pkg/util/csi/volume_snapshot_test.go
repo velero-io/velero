@@ -378,6 +378,29 @@ func TestEnsureDeleteVS(t *testing.T) {
 			err: "timeout to assure VolumeSnapshot fake-vs is deleted, finalizers in VS []",
 		},
 		{
+			name:      "wait timeout before the VS is ever retrieved",
+			vsName:    "fake-vs",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{vsObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure VolumeSnapshot fake-vs is deleted",
+		},
+		{
 			name:      "success",
 			vsName:    "fake-vs",
 			namespace: "fake-ns",
@@ -487,6 +510,28 @@ func TestEnsureDeleteVSC(t *testing.T) {
 				},
 			},
 			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted, finalizers in VSC []",
+		},
+		{
+			name:      "wait timeout before the VSC is ever retrieved",
+			vscName:   "fake-vsc",
+			clientObj: []runtime.Object{vscObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted",
 		},
 		{
 			name:      "success",
