@@ -107,6 +107,29 @@ func TestEnsureDeletePod(t *testing.T) {
 			err: "timeout to assure pod fake-pod is deleted, finalizers in pod []",
 		},
 		{
+			name:      "wait timeout before the pod is ever retrieved",
+			podName:   "fake-pod",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{podObjectWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "pods",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "pods",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure pod fake-pod is deleted",
+		},
+		{
 			name:      "wait fail",
 			podName:   "fake-pod",
 			namespace: "fake-ns",
