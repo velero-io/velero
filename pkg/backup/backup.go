@@ -871,8 +871,13 @@ func (kb *kubernetesBackupper) backupItemBlock(itemBlock *BackupItemBlock) []sch
 		}
 	}
 	postHookPods, failedPods, errs := kb.handleItemBlockPreHooks(itemBlock, preHookPods)
+	failBlock := false
 	for i, pod := range failedPods {
 		itemBlock.Log.WithError(errs[i]).WithField("name", pod.Item.GetName()).Error("Error running pre hooks for pod")
+		if errors.Is(errs[i], hook.ErrFailBlock) {
+			failBlock = true
+			continue
+		}
 		// if pre hook fails, flag pod as backed-up and move on
 		key, err := kb.getItemKey(pod)
 		if err != nil {
@@ -880,6 +885,15 @@ func (kb *kubernetesBackupper) backupItemBlock(itemBlock *BackupItemBlock) []sch
 			continue
 		}
 		itemBlock.itemBackupper.backupRequest.BackedUpItems.AddItem(key)
+	}
+
+	// A pre hook set to FailBlock means none of the items here can be trusted, so drop the whole
+	// block. The pods whose pre hooks did succeed still need their post hooks, otherwise anything
+	// they quiesced stays that way.
+	if failBlock {
+		itemBlock.Log.Error("Skipping all items in the ItemBlock, a pre hook failed with the FailBlock error mode")
+		kb.handleItemBlockPostHooks(itemBlock, postHookPods)
+		return nil
 	}
 
 	itemBlock.Log.Debug("Backing up items in BackupItemBlock")

@@ -29,7 +29,7 @@ You can use the following annotations on a pod to make Velero execute a hook whe
 * `pre.hook.backup.velero.io/command`
   * The command to execute. This command is not executed within a shell by default. If a shell is needed to run your command, include a shell command, like `/bin/sh`, that is supported by the container at the beginning of your command. If you need multiple arguments, specify the command as a JSON array, such as `["/usr/bin/uname", "-a"]`. See [examples of using pre hook commands](#backup-hook-commands-examples). Optional.
 * `pre.hook.backup.velero.io/on-error`
-  * What to do if the command returns a non-zero exit code.  Defaults to `Fail`. Valid values are Fail and Continue. Optional.
+  * What to do if the command returns a non-zero exit code.  Defaults to `Fail`. Valid values are Fail, Continue and FailBlock. `Fail` skips the pod but still backs up its volumes, while `FailBlock` skips every item in the pod's ItemBlock, so the PVCs, PVs and any other pods sharing the block. Use `FailBlock` when a failed hook means the volume data can't be trusted, for example a database that was never quiesced. Optional.
 * `pre.hook.backup.velero.io/timeout`
   * How long to wait for the command to execute. The hook is considered in error if the command exceeds the timeout. Defaults to 30s. Optional.
 
@@ -41,7 +41,7 @@ You can use the following annotations on a pod to make Velero execute a hook whe
 * `post.hook.backup.velero.io/command`
   * The command to execute. This command is not executed within a shell by default. If a shell is needed to run your command, include a shell command, like `/bin/sh`, that is supported by the container at the beginning of your command. If you need multiple arguments, specify the command as a JSON array, such as `["/usr/bin/uname", "-a"]`. See [examples of using pre hook commands](#backup-hook-commands-examples). Optional.
 * `post.hook.backup.velero.io/on-error`
-  * What to do if the command returns a non-zero exit code.  Defaults to `Fail`. Valid values are Fail and Continue. Optional.
+  * What to do if the command returns a non-zero exit code.  Defaults to `Fail`. Valid values are Fail and Continue. `FailBlock` is accepted but behaves like `Fail` here, since the items have already been backed up by the time post hooks run. Optional.
 * `post.hook.backup.velero.io/timeout`
   * How long to wait for the command to execute. The hook is considered in error if the command exceeds the timeout. Defaults to 30s. Optional.
 

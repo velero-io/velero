@@ -253,6 +253,7 @@ spec:
                                     enum:
                                     - Continue
                                     - Fail
+                                    - FailBlock
                                     type: string
                                   timeout:
                                     description: |-
@@ -295,6 +296,7 @@ spec:
                                     enum:
                                     - Continue
                                     - Fail
+                                    - FailBlock
                                     type: string
                                   timeout:
                                     description: |-
