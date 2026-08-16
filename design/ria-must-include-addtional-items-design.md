@@ -230,7 +230,7 @@ That matches BIA must-include semantics (plugin-trusted hard dependencies), rath
 
 ### Interaction with fine-grained restore filters
 
-Per [Fine Grained Restore Filters via Resource Policies](../restore-filter-enhancement/fine-grained-restore-filters-design.md), plugin additional items already bypass `namespacedFilterPolicies` / `clusterScopedFilterPolicy` kind, name, and label checks.
+Per [Fine Grained Restore Filters via Resource Policies](./restore-filter-enhancement/fine-grained-restore-filters-design.md), plugin additional items already bypass `namespacedFilterPolicies` / `clusterScopedFilterPolicy` kind, name, and label checks.
 Those filters live in the selection phases; additional items enter `restoreItem()` directly.
 
 This proposal only changes the remaining global gates inside `restoreItem()`.

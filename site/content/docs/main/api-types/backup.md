@@ -16,7 +16,7 @@ Backup belongs to the API group version `velero.io/v1`.
 
 Here is a sample `Backup` object with each of the fields documented:
 
-**Note:** Namespace includes/excludes support glob patterns (`*`, `?`, `[abc]`). See [Namespace Glob Patterns](../namespace-glob-patterns) for more details.
+**Note:** Namespace includes/excludes support glob patterns (`*`, `?`, `[abc]`). See [Namespace Glob Patterns](../namespace-glob-patterns.md) for more details.
 
 ```yaml
 # Standard Kubernetes API Version declaration. Required.
