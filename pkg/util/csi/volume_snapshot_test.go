@@ -202,7 +202,7 @@ func TestWaitVolumeSnapshotReady(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
 			vs, err := WaitVolumeSnapshotReady(t.Context(), fakeClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond, velerotest.NewLogger())
-			if err != nil {
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestGetVolumeSnapshotContentForVolumeSnapshot(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
 			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(context.TODO(), test.snapshotObj, fakeClient.SnapshotV1())
-			if err != nil {
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestEnsureDeleteVS(t *testing.T) {
 			}
 
 			err := EnsureDeleteVS(t.Context(), fakeSnapshotClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond)
-			if err != nil {
+			if test.err != "" {
 				assert.EqualError(t, err, test.err)
 			} else {
 				assert.NoError(t, err)
