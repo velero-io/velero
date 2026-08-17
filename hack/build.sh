@@ -67,7 +67,8 @@ fi
 
 export CGO_ENABLED=0
 
-LDFLAGS="-X ${PKG}/pkg/buildinfo.Version=${VERSION}"
+LDFLAGS="-s -w"
+LDFLAGS="${LDFLAGS} -X ${PKG}/pkg/buildinfo.Version=${VERSION}"
 LDFLAGS="${LDFLAGS} -X ${PKG}/pkg/buildinfo.ImageRegistry=${REGISTRY}"
 LDFLAGS="${LDFLAGS} -X ${PKG}/pkg/buildinfo.GitSHA=${GIT_SHA}"
 LDFLAGS="${LDFLAGS} -X ${PKG}/pkg/buildinfo.GitTreeState=${GIT_TREE_STATE}"
