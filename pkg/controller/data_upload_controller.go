@@ -607,8 +607,6 @@ func (r *DataUploadReconciler) tryCancelDataUpload(ctx context.Context, du *vele
 
 	// success update
 	r.metrics.RegisterDataUploadCancel(r.nodeName)
-	// release the data path instance so its loadConcurrency slot isn't held forever
-	r.closeDataPath(ctx, du.Name)
 	// cleans up any objects generated during the snapshot expose
 	r.cleanUp(ctx, du, log)
 

@@ -586,8 +586,6 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 
 	// success update
 	r.metrics.RegisterDataDownloadCancel(r.nodeName)
-	// release the data path instance so its loadConcurrency slot isn't held forever
-	r.closeDataPath(ctx, dd.Name)
 	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
 
 	log.Warn("data download is canceled")

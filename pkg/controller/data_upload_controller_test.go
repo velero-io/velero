@@ -469,14 +469,6 @@ func TestReconcile(t *testing.T) {
 			expected:  dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseCanceled).Result(),
 		},
 		{
-			name:           "delay cancel affirmative for inProgress releases data path",
-			du:             dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result(),
-			sportTime:      &metav1.Time{Time: time.Now().Add(-time.Hour)},
-			needCreateFSBR: true,
-			expected:       dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseCanceled).Result(),
-			expectDataPath: false,
-		},
-		{
 			name:               "delay cancel failed",
 			du:                 dataUploadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result(),
 			needErrs:           []bool{false, false, true, false},

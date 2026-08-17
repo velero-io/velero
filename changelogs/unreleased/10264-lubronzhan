@@ -1,1 +1,1 @@
-Fix issue #10207, release the data path instance when force-canceling a DataUpload/DataDownload so its loadConcurrency slot isn't held forever
+Fix issue #10207, cancel the data-mover pod when its DataUpload/DataDownload CR is deleted directly, so node-agent's watcher and loadConcurrency slot for it aren't held forever

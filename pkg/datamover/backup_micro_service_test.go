@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
+	cachetool "k8s.io/client-go/tools/cache"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -282,6 +283,71 @@ func TestCancelDataUpload(t *testing.T) {
 			assert.True(t, bt.withEvent)
 			assert.Equal(t, test.expectedEventReason, bt.EventReason())
 			assert.Equal(t, test.expectedEventMsg, bt.EventMessage())
+		})
+	}
+}
+
+func TestHandleDataUploadDelete(t *testing.T) {
+	dataUploadName := "fake-data-upload"
+	duInProgress := builder.ForDataUpload(velerov1api.DefaultNamespace, dataUploadName).Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result()
+	duCompleted := builder.ForDataUpload(velerov1api.DefaultNamespace, dataUploadName).Phase(velerov2alpha1api.DataUploadPhaseCompleted).Result()
+	duOther := builder.ForDataUpload(velerov1api.DefaultNamespace, "other-data-upload").Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result()
+
+	tests := []struct {
+		name         string
+		obj          any
+		expectCancel bool
+	}{
+		{
+			name:         "in progress du deleted directly, cancel is triggered",
+			obj:          duInProgress,
+			expectCancel: true,
+		},
+		{
+			name:         "in progress du deleted via tombstone, cancel is triggered",
+			obj:          cachetool.DeletedFinalStateUnknown{Key: dataUploadName, Obj: duInProgress},
+			expectCancel: true,
+		},
+		{
+			name: "already terminal du deleted, cancel is not triggered",
+			obj:  duCompleted,
+		},
+		{
+			name: "du of another name deleted, cancel is not triggered",
+			obj:  duOther,
+		},
+		{
+			name: "tombstone with unexpected object, cancel is not triggered",
+			obj:  cachetool.DeletedFinalStateUnknown{Key: dataUploadName, Obj: "not-a-du"},
+		},
+		{
+			name: "unexpected object type, cancel is not triggered",
+			obj:  "not-a-du",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bt := &backupMsTestHelper{}
+
+			bs := &BackupMicroService{
+				dataUploadName: dataUploadName,
+				dataPathMgr:    datapath.NewManager(1),
+				eventRecorder:  bt,
+				resultSignal:   make(chan dataPathResult),
+				logger:         velerotest.NewLogger(),
+			}
+
+			if test.expectCancel {
+				go bs.handleDataUploadDelete(test.obj)
+
+				result := <-bs.resultSignal
+				require.EqualError(t, result.err, datapath.ErrCancelled)
+				assert.True(t, bt.withEvent)
+			} else {
+				bs.handleDataUploadDelete(test.obj)
+				assert.False(t, bt.withEvent)
+			}
 		})
 	}
 }
