@@ -212,21 +212,27 @@ func resultsKey(ns, name string) string {
 	return fmt.Sprintf("%s/%s", ns, name)
 }
 
-func (b *backupper) getMatchAction(resPolicies *resourcepolicies.Policies, pvc *corev1api.PersistentVolumeClaim, volume *corev1api.Volume) (*resourcepolicies.Action, error) {
+func (b *backupper) volumeFilterData(pvc *corev1api.PersistentVolumeClaim, volume *corev1api.Volume) (resourcepolicies.VolumeFilterData, error) {
 	if pvc != nil {
 		// Ignore err, if the PV is not available (Pending/Lost PVC or PV fetch failed) - try matching with PVC only
 		// GetPVForPVC returns nil for all error cases
 		pv, _ := kube.GetPVForPVC(pvc, b.crClient)
-		vfd := resourcepolicies.NewVolumeFilterData(pv, nil, pvc)
-		return resPolicies.GetMatchAction(vfd)
+		return resourcepolicies.NewVolumeFilterData(pv, nil, pvc), nil
 	}
 
 	if volume != nil {
-		vfd := resourcepolicies.NewVolumeFilterData(nil, volume, pvc)
-		return resPolicies.GetMatchAction(vfd)
+		return resourcepolicies.NewVolumeFilterData(nil, volume, pvc), nil
 	}
 
-	return nil, errors.Errorf("failed to check resource policies for empty volume")
+	return resourcepolicies.VolumeFilterData{}, errors.Errorf("failed to check resource policies for empty volume")
+}
+
+func (b *backupper) getMatchAction(resPolicies *resourcepolicies.Policies, pvc *corev1api.PersistentVolumeClaim, volume *corev1api.Volume) (*resourcepolicies.Action, error) {
+	vfd, err := b.volumeFilterData(pvc, volume)
+	if err != nil {
+		return nil, err
+	}
+	return resPolicies.GetMatchAction(vfd)
 }
 
 var funcGetRepositoryType = getRepositoryType
@@ -324,11 +330,41 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			}
 		}
 
+		var (
+			exclude        []string
+			excludeDropped bool
+		)
 		if resPolicies != nil {
-			if action, err := b.getMatchAction(resPolicies, pvc, &volume); err != nil {
-				errs = append(errs, errors.Wrapf(err, "error getting pv for pvc %s", pvc.Spec.VolumeName))
+			vfd, err := b.volumeFilterData(pvc, &volume)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "error getting pv for volume %s", volumeName))
 				continue
-			} else if action != nil && action.Type == resourcepolicies.Skip {
+			}
+			action, err := resPolicies.GetMatchAction(vfd)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "error getting match action for volume %s", volumeName))
+				continue
+			}
+			exclude, excludeDropped, err = resPolicies.GetEffectiveExclude(vfd)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "error getting exclude patterns for volume %s", volumeName))
+				continue
+			}
+			if excludeDropped {
+				// The winning action (skip/custom/velero-block) cannot honor
+				// exclusions; inherited patterns are dropped.
+				actionType := ""
+				if action != nil {
+					actionType = string(action.Type)
+				}
+				log.Warnf("Volume policy exclusions from global baseline were dropped for volume %s of pod %s/%s: winning action %q cannot filter source data", volumeName, pod.Namespace, pod.Name, actionType)
+			} else if len(exclude) > 0 {
+				// Log at the wiring point (server process) so the
+				// resolved list lands in the backup logs.
+				log.WithField("exclude", exclude).Infof("Resolved volume policy exclude patterns for volume %s of pod %s/%s (uploader: %s)", volumeName, pod.Namespace, pod.Name, b.uploaderType)
+			}
+
+			if action != nil && action.Type == resourcepolicies.Skip {
 				log.Infof("skip backup of volume %s for the matched resource policies", volumeName)
 				pvcSummary.addSkipped(volumeName, "matched action is 'skip' in chosen resource policies")
 				continue
@@ -365,7 +401,11 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			continue
 		}
 
-		volumeBackup := newPodVolumeBackup(backup, pod, volume, "", b.uploaderType, pvc)
+		volumeBackup, err := newPodVolumeBackup(backup, pod, volume, "", b.uploaderType, pvc, exclude)
+		if err != nil {
+			errs = append(errs, errors.Wrapf(err, "error creating PodVolumeBackup for volume %s", volumeName))
+			continue
+		}
 		// the PVB must be added into the indexer before creating it in API server otherwise unexpected behavior may happen:
 		// the PVB may be handled very quickly by the controller and the informer handler will insert the PVB before "b.pvbIndexer.Add(volumeBackup)" runs,
 		// this causes the PVB inserted by "b.pvbIndexer.Add(volumeBackup)" overrides the PVB in the indexer while the PVB inserted by "b.pvbIndexer.Add(volumeBackup)"
@@ -538,7 +578,7 @@ func isHostPathVolume(volume *corev1api.Volume, pvc *corev1api.PersistentVolumeC
 	return pv.Spec.HostPath != nil, nil
 }
 
-func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume corev1api.Volume, repoIdentifier, uploaderType string, pvc *corev1api.PersistentVolumeClaim) *velerov1api.PodVolumeBackup {
+func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume corev1api.Volume, repoIdentifier, uploaderType string, pvc *corev1api.PersistentVolumeClaim, exclude []string) (*velerov1api.PodVolumeBackup, error) {
 	pvb := &velerov1api.PodVolumeBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:    backup.Namespace,
@@ -598,10 +638,15 @@ func newPodVolumeBackup(backup *velerov1api.Backup, pod *corev1api.Pod, volume c
 	if backup.Spec.UploaderConfig != nil {
 		pvb.Spec.UploaderSettings = uploaderutil.StoreBackupConfig(backup.Spec.UploaderConfig)
 	}
+	var err error
+	pvb.Spec.UploaderSettings, err = uploaderutil.MergeExclude(pvb.Spec.UploaderSettings, exclude)
+	if err != nil {
+		return nil, err
+	}
 
 	if backup.Spec.BackupType == velerov1api.BackupTypeFull {
 		pvb.Spec.ParentSnapshot = veleroshared.ParentSnapshotNone
 	}
 
-	return pvb
+	return pvb, nil
 }

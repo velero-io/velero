@@ -436,6 +436,47 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 	})
 }
 
+func TestBlockProviderRunBackupRejectsExclude(t *testing.T) {
+	bp := &blockProvider{
+		requestorType: "test-requestor",
+		log:           logrus.New(),
+	}
+
+	t.Run("non-empty Exclude is rejected", func(t *testing.T) {
+		_, _, _, _, _, _, err := bp.RunBackup(
+			t.Context(),
+			"/dev/sda",
+			"",
+			nil,
+			false,
+			"",
+			CBTParam{},
+			uploader.PersistentVolumeBlock,
+			map[string]string{"Exclude": `["*.tmp"]`},
+			&FakeBackupProgressUpdater{},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exclude is not supported by data mover")
+	})
+
+	t.Run("malformed Exclude JSON is wrapped", func(t *testing.T) {
+		_, _, _, _, _, _, err := bp.RunBackup(
+			t.Context(),
+			"/dev/sda",
+			"",
+			nil,
+			false,
+			"",
+			CBTParam{},
+			uploader.PersistentVolumeBlock,
+			map[string]string{"Exclude": "not-json"},
+			&FakeBackupProgressUpdater{},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read Exclude uploader config")
+	})
+}
+
 func TestBlockProviderRunRestore(t *testing.T) {
 	testCases := []struct {
 		name            string

@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/velero-io/velero/pkg/util/boolptr"
 )
 
 func TestCapacityConditionValidate(t *testing.T) {
@@ -731,6 +733,258 @@ func TestValidate(t *testing.T) {
 						Action: Action{
 							Type:       Snapshot,
 							Parameters: map[string]any{"snapshotClass": ""},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "fs-backup action with exclude list is accepted",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: FSBackup,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"/cache/*", "*.tmp"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with exclude and velero-fs is accepted",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Snapshot,
+							Parameters: map[string]any{
+								"dataMover": "velero-fs",
+							},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"/cache/*", "*.tmp"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "snapshot action with exclude and omitted dataMover is accepted",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Snapshot,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"*.log"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "skip action with exclude is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Skip,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"*.tmp"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "custom action with exclude is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Custom,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"*.tmp"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "snapshot action with exclude and velero-block is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Snapshot,
+							Parameters: map[string]any{
+								"dataMover": "velero-block",
+							},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"*.tmp"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty exclude list is accepted as no-op",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: FSBackup,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty exclude list on skip is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Skip,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty exclude list on snapshot with velero-block is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Snapshot,
+							Parameters: map[string]any{
+								"dataMover": "velero-block",
+							},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "exclude with empty-after-trim entry is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: FSBackup,
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+						Exclude:    []string{"*.tmp", "  "},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "inheritExcludes on fs-backup is accepted",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: FSBackup,
+						},
+						Conditions:      map[string]any{"storageClass": []string{"gp2"}},
+						InheritExcludes: boolptr.False(),
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "inheritExcludes on skip is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Skip,
+						},
+						Conditions:      map[string]any{"storageClass": []string{"gp2"}},
+						InheritExcludes: boolptr.False(),
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "inheritExcludes on velero-block is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type: Snapshot,
+							Parameters: map[string]any{
+								"dataMover": "velero-block",
+							},
+						},
+						Conditions:      map[string]any{"storageClass": []string{"gp2"}},
+						InheritExcludes: boolptr.False(),
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "action parameters with exclude is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       FSBackup,
+							Parameters: map[string]any{ExcludeParameter: []string{"*.tmp"}},
+						},
+						Conditions: map[string]any{"storageClass": []string{"gp2"}},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "action parameters with inheritExcludes is rejected",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{
+							Type:       FSBackup,
+							Parameters: map[string]any{InheritExcludesParameter: false},
 						},
 						Conditions: map[string]any{"storageClass": []string{"gp2"}},
 					},

@@ -31,8 +31,10 @@ import (
 )
 
 type volPolicy struct {
-	action     Action
-	conditions []volumeCondition
+	action          Action
+	conditions      []volumeCondition
+	exclude         []string
+	inheritExcludes *bool
 }
 
 type volumeCondition interface {

@@ -1110,3 +1110,111 @@ func TestGetMatchAction_PVCWithoutPVLookupError(t *testing.T) {
 	require.NotNil(t, action)
 	assert.Equal(t, resourcepolicies.Skip, action.Type)
 }
+
+func TestNewPodVolumeBackupExclude(t *testing.T) {
+	backup := builder.ForBackup("velero", "backup-1").Result()
+	pod := builder.ForPod("ns", "pod-1").Result()
+	volume := corev1api.Volume{Name: "data"}
+
+	t.Run("sets Exclude JSON when patterns are present", func(t *testing.T) {
+		pvb, err := newPodVolumeBackup(backup, pod, volume, "", "kopia", nil, []string{"*.tmp", "node_modules/"})
+		require.NoError(t, err)
+		require.Contains(t, pvb.Spec.UploaderSettings, "Exclude")
+		assert.Equal(t, `["*.tmp","node_modules/"]`, pvb.Spec.UploaderSettings["Exclude"])
+	})
+
+	t.Run("omits Exclude key when patterns are empty", func(t *testing.T) {
+		pvb, err := newPodVolumeBackup(backup, pod, volume, "", "kopia", nil, nil)
+		require.NoError(t, err)
+		_, ok := pvb.Spec.UploaderSettings["Exclude"]
+		assert.False(t, ok)
+	})
+}
+
+func TestVolumeFilterData(t *testing.T) {
+	b := &backupper{}
+
+	t.Run("non-PVC volume produces valid volume filter data without panic", func(t *testing.T) {
+		vol := &corev1api.Volume{
+			Name: "empty-dir",
+			VolumeSource: corev1api.VolumeSource{
+				EmptyDir: &corev1api.EmptyDirVolumeSource{},
+			},
+		}
+		vfd, err := b.volumeFilterData(nil, vol)
+		require.NoError(t, err)
+		assert.NotNil(t, vfd.PodVolume)
+		assert.Nil(t, vfd.PVC)
+	})
+
+	t.Run("nil pvc and nil volume returns error", func(t *testing.T) {
+		_, err := b.volumeFilterData(nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to check resource policies for empty volume")
+	})
+}
+
+func TestBackupPodVolumesDroppedExclusionsWarningOnSkip(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	require.NoError(t, corev1api.AddToScheme(scheme))
+
+	backupYAML := `version: v1
+volumePolicies:
+  - conditions: {}
+    action:
+      type: skip
+`
+	globalYAML := `version: v1
+volumePolicies:
+  - conditions: {}
+    action:
+      type: fs-backup
+    exclude:
+      - "*.tmp"
+`
+	backupCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: "backup-policy"},
+		Data:       map[string]string{"policy": backupYAML},
+	}
+	globalCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: "global-policy"},
+		Data:       map[string]string{"policy": globalYAML},
+	}
+
+	pod := createPodObj(true, true, true, 1)
+	nodeAgent := createNodeAgentPodObj(true)
+	node := createNodeObj()
+	pvc := createPVCObj(1)
+	pv := createPVObj(1, false)
+	bsl := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "fake-bsl").Result()
+	repo := createBackupRepoObj()
+
+	fakeCtrlClient := ctrlfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(backupCM, globalCM, pod, nodeAgent, node, pvc, pv, bsl, repo).
+		Build()
+
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "b1").
+		StorageLocation("fake-bsl").
+		ResourcePolicies("backup-policy").
+		ObjectMeta(builder.WithAnnotations(velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation, "global-policy")).
+		Result()
+
+	p, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(*backup, fakeCtrlClient, "global-policy", velerov1api.DefaultNamespace, logrus.New())
+	require.NoError(t, err)
+
+	logOutput := bytes.Buffer{}
+	log := logrus.New()
+	log.SetOutput(&logOutput)
+
+	pvbInformer := cache.NewSharedIndexInformer(&cache.ListWatch{}, &velerov1api.PodVolumeBackup{}, 0, cache.Indexers{})
+	ensurer := repository.NewEnsurer(fakeCtrlClient, velerotest.NewLogger(), time.Millisecond)
+	bp := newBackupper(t.Context(), log, repository.NewRepoLocker(), ensurer, pvbInformer, fakeCtrlClient, "kopia", backup)
+
+	_, summary, errs := bp.BackupPodVolumes(backup, pod, []string{"fake-volume-1"}, p, log)
+	assert.Empty(t, errs)
+	assert.NotNil(t, summary)
+	assert.Contains(t, logOutput.String(), "Volume policy exclusions from global baseline were dropped for volume fake-volume-1 of pod fake-ns/fake-pod")
+	assert.Contains(t, logOutput.String(), "cannot filter source data")
+}

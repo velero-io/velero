@@ -17,7 +17,10 @@ limitations under the License.
 package util
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -30,6 +33,10 @@ const (
 	WriteSparseFiles     = "WriteSparseFiles"
 	RestoreConcurrency   = "ParallelFilesDownload"
 	DeleteExtraFiles     = "DeleteExtraFiles"
+
+	// Exclude is the reserved transport key in PVB UploaderSettings and
+	// DU DataMoverConfig. Value is a JSON-encoded []string.
+	Exclude = "Exclude"
 )
 
 func StoreBackupConfig(config *velerov1api.UploaderConfigForBackup) map[string]string {
@@ -118,4 +125,45 @@ func GetDeleteExtraFiles(uploaderCfg map[string]string) (bool, error) {
 		return deleteExtraFilesBool, nil
 	}
 	return false, nil
+}
+
+func StoreExclude(patterns []string) (string, error) {
+	if len(patterns) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(patterns)
+	if err != nil {
+		return "", fmt.Errorf("failed to JSON-encode exclude patterns: %w", err)
+	}
+	return string(b), nil
+}
+
+func GetExclude(uploaderCfg map[string]string) ([]string, error) {
+	raw, ok := uploaderCfg[Exclude]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var patterns []string
+	if err := json.Unmarshal([]byte(raw), &patterns); err != nil {
+		return nil, fmt.Errorf("invalid %q config (expected JSON-encoded string array): %w", Exclude, err)
+	}
+	return patterns, nil
+}
+
+// MergeExclude JSON-encodes patterns into cfg under the Exclude key.
+// Empty lists leave cfg unchanged (the key is not written). A nil cfg is
+// allocated only when a non-empty payload must be stored.
+func MergeExclude(cfg map[string]string, patterns []string) (map[string]string, error) {
+	serialized, err := StoreExclude(patterns)
+	if err != nil {
+		return nil, err
+	}
+	if serialized == "" {
+		return cfg, nil
+	}
+	if cfg == nil {
+		cfg = make(map[string]string)
+	}
+	cfg[Exclude] = serialized
+	return cfg, nil
 }

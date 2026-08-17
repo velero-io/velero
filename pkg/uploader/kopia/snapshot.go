@@ -110,7 +110,7 @@ func getDefaultPolicy() *policy.Policy {
 	}
 }
 
-func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snapshot.SourceInfo, uploaderCfg map[string]string) (*policy.Tree, error) {
+func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snapshot.SourceInfo, uploaderCfg map[string]string, log logrus.FieldLogger) (*policy.Tree, error) {
 	// some internal operations from Kopia code retrieves policies from repo directly, so we need to persist the policy to repo
 	curPolicy := getDefaultPolicy()
 
@@ -131,10 +131,21 @@ func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snap
 	}
 
 	if runtime.GOOS == "windows" {
-		curPolicy.FilesPolicy.IgnoreRules = []string{"/System Volume Information/", "/$Recycle.Bin/"}
+		curPolicy.FilesPolicy.IgnoreRules = append(curPolicy.FilesPolicy.IgnoreRules,
+			"/System Volume Information/", "/$Recycle.Bin/")
 	}
 
-	err := setPolicyFunc(ctx, rep, sourceInfo, curPolicy)
+	patterns, err := uploaderutil.GetExclude(uploaderCfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read Exclude uploader config")
+	}
+	if len(patterns) > 0 {
+		curPolicy.FilesPolicy.IgnoreRules = append(curPolicy.FilesPolicy.IgnoreRules, patterns...)
+	}
+
+	log.WithField("exclude", patterns).Info("resolved filesystem exclude patterns for volume backup")
+
+	err = setPolicyFunc(ctx, rep, sourceInfo, curPolicy)
 	if err != nil {
 		return nil, errors.Wrap(err, "error to set policy")
 	}
@@ -291,7 +302,7 @@ func SnapshotSource(
 		log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", previous[i].ID, previous[i].StartTime.ToTime(), previous[i].EndTime.ToTime(), previous[i].Description)
 	}
 
-	policyTree, err := setupPolicy(ctx, rep, sourceInfo, uploaderCfg)
+	policyTree, err := setupPolicy(ctx, rep, sourceInfo, uploaderCfg, log)
 	if err != nil {
 		return "", 0, fallback, errors.Wrapf(err, "unable to set policy for si %v", sourceInfo)
 	}

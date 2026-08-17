@@ -534,3 +534,38 @@ func (v *volumeHelperImpl) GetDataMoverFromActionParameters(obj runtime.Unstruct
 		groupResource.String(), metadata.GetNamespace()+"/"+metadata.GetName())
 	return ""
 }
+
+func (v *volumeHelperImpl) GetEffectiveExclude(obj runtime.Unstructured, groupResource schema.GroupResource) ([]string, bool, error) {
+	if v.volumePolicy == nil {
+		return nil, false, nil
+	}
+
+	var pvcPtr *corev1api.PersistentVolumeClaim
+	var pv *corev1api.PersistentVolume
+
+	if groupResource == kuberesource.PersistentVolumeClaims {
+		pvc := new(corev1api.PersistentVolumeClaim)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pvc); err != nil {
+			v.logger.WithError(err).Warn("fail to convert unstructured into PVC")
+			return nil, false, err
+		}
+		pvcPtr = pvc
+		foundPV, err := kubeutil.GetPVForPVC(pvc, v.client)
+		if err != nil {
+			// Leave pv nil so matching falls through to PVC-only conditions,
+			// matching ShouldPerformSnapshot. A zero PV would fail storageClass
+			// rules and silently drop exclude patterns.
+			v.logger.WithError(err).Warnf("failed to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
+		} else {
+			pv = foundPV
+		}
+	} else if groupResource == kuberesource.PersistentVolumes {
+		pv = new(corev1api.PersistentVolume)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pv); err != nil {
+			v.logger.WithError(err).Warn("fail to convert unstructured into PV")
+			return nil, false, err
+		}
+	}
+
+	return v.volumePolicy.GetEffectiveExclude(resourcepolicies.NewVolumeFilterData(pv, nil, pvcPtr))
+}

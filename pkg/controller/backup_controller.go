@@ -631,13 +631,21 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "encountered labelSelector as well as orLabelSelectors in backup spec, only one can be specified")
 	}
 
+	globalConfigMapName := b.globalVolumePoliciesConfigMap
+	if globalConfigMapName == "" && request.Annotations != nil {
+		globalConfigMapName = request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+
 	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
-		*request.Backup, b.kbClient, b.globalVolumePoliciesConfigMap, request.Namespace, logger)
+		*request.Backup, b.kbClient, globalConfigMapName, request.Namespace, logger)
 	if err != nil {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("invalid resource policies: %v", err))
-	} else if b.globalVolumePoliciesConfigMap != "" {
+	} else if globalConfigMapName != "" {
 		// Record the contributing global volume policies ConfigMap so `velero backup describe` can surface it.
-		request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = b.globalVolumePoliciesConfigMap
+		if request.Annotations == nil {
+			request.Annotations = make(map[string]string)
+		}
+		request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = globalConfigMapName
 	}
 	if resourcePolicies != nil && resourcePolicies.GetIncludeExcludePolicy() != nil && collections.UseOldResourceFilters(request.Spec) {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, "include-resources, exclude-resources and include-cluster-resources are old filter parameters.\n"+

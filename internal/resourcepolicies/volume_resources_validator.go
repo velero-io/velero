@@ -18,6 +18,7 @@ package resourcepolicies
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.yaml.in/yaml/v3"
@@ -132,5 +133,73 @@ func (a *Action) validate() error {
 		}
 	}
 
+	if _, ok := a.Parameters[ExcludeParameter]; ok {
+		return fmt.Errorf("parameter %q is not supported in action.parameters; declare %q at the volume policy rule level", ExcludeParameter, ExcludeParameter)
+	}
+
+	if _, ok := a.Parameters[InheritExcludesParameter]; ok {
+		return fmt.Errorf("parameter %q is not supported in action.parameters; declare %q at the volume policy rule level", InheritExcludesParameter, InheritExcludesParameter)
+	}
+
 	return nil
+}
+
+func (v *volPolicy) validate() error {
+	if v.exclude != nil {
+		for _, pat := range v.exclude {
+			if strings.TrimSpace(pat) == "" {
+				return fmt.Errorf("%s must not contain empty entries", ExcludeParameter)
+			}
+		}
+		if err := v.validateExcludeForAction(); err != nil {
+			return err
+		}
+	}
+	if v.inheritExcludes != nil {
+		if err := v.validateInheritExcludesForAction(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *volPolicy) validateExcludeForAction() error {
+	switch v.action.Type {
+	case Skip, Custom:
+		return fmt.Errorf("%s is not supported for action type %q", ExcludeParameter, v.action.Type)
+	case FSBackup:
+		return nil
+	case Snapshot:
+		dataMover, err := v.action.GetDataMover()
+		if err != nil {
+			return err
+		}
+		// GetDataMover already maps empty/"velero" to the default built-in (FS today).
+		if dataMover == datamover.DataMoverTypeVeleroBlock {
+			return fmt.Errorf("%s is not supported for data mover %q", ExcludeParameter, dataMover)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s is not supported for action type %q", ExcludeParameter, v.action.Type)
+	}
+}
+
+func (v *volPolicy) validateInheritExcludesForAction() error {
+	switch v.action.Type {
+	case Skip, Custom:
+		return fmt.Errorf("%s is not supported for action type %q", InheritExcludesParameter, v.action.Type)
+	case FSBackup:
+		return nil
+	case Snapshot:
+		dataMover, err := v.action.GetDataMover()
+		if err != nil {
+			return err
+		}
+		if dataMover == datamover.DataMoverTypeVeleroBlock {
+			return fmt.Errorf("%s is not supported for data mover %q", InheritExcludesParameter, dataMover)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s is not supported for action type %q", InheritExcludesParameter, v.action.Type)
+	}
 }

@@ -58,6 +58,15 @@ const (
 	// SnapshotClassParameter is the key of the action parameter that selects the
 	// VolumeSnapshotClass to use for CSI snapshots when the action type is snapshot.
 	SnapshotClassParameter = "snapshotClass"
+
+	// ExcludeParameter is the Volume Policy YAML key (lowercase) for the
+	// exclude pattern list. Distinct from the transport key "Exclude"
+	// in pkg/uploader/util.
+	ExcludeParameter = "exclude"
+
+	// InheritExcludesParameter is the Volume Policy YAML key for controlling
+	// baseline exclude inheritance from the winning global policy rule.
+	InheritExcludesParameter = "inheritExcludes"
 )
 
 // validDataMovers is the set of data mover values accepted in the snapshot
@@ -135,6 +144,42 @@ func (a *Action) GetSnapshotClass() (string, error) {
 		return "", fmt.Errorf("parameter %q must be a string, got %T", SnapshotClassParameter, raw)
 	}
 	return snapshotClass, nil
+}
+
+// actionHonorsExclude reports whether the winning action can apply exclude
+// patterns. skip / custom have no data path; velero-block has no source tree.
+func actionHonorsExclude(a *Action) bool {
+	if a == nil {
+		return false
+	}
+	switch a.Type {
+	case Skip, Custom:
+		return false
+	case FSBackup:
+		return true
+	case Snapshot:
+		dataMover, err := a.GetDataMover()
+		if err != nil {
+			return false
+		}
+		return dataMover != datamover.DataMoverTypeVeleroBlock
+	default:
+		return false
+	}
+}
+
+// ValidateExcludeForDataMover is a wiring-level guard: if exclude is non-empty
+// and the effective data mover is velero-block, return an error. Phase 1
+// already rejects this combination on a validated action; this is defense in
+// depth for test paths that bypass validate().
+func ValidateExcludeForDataMover(exclude []string, dataMover string) error {
+	if len(exclude) == 0 {
+		return nil
+	}
+	if dataMover == datamover.DataMoverTypeVeleroBlock {
+		return fmt.Errorf("exclude is not supported by data mover %q", dataMover)
+	}
+	return nil
 }
 
 // PolicyLabelSelector mirrors metav1.LabelSelector with yaml tags for ConfigMap decode.
@@ -437,8 +482,10 @@ func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList
 // VolumePolicy defined policy to conditions to match Volumes and related action to handle matched Volumes
 type VolumePolicy struct {
 	// Conditions defined list of conditions to match Volumes
-	Conditions map[string]any `yaml:"conditions"`
-	Action     Action         `yaml:"action"`
+	Conditions      map[string]any `yaml:"conditions"`
+	Action          Action         `yaml:"action"`
+	Exclude         []string       `yaml:"exclude,omitempty"`
+	InheritExcludes *bool          `yaml:"inheritExcludes,omitempty"`
 }
 
 // ResourcePolicies currently defined slice of volume policies to handle backup
@@ -458,6 +505,12 @@ type Policies struct {
 	includeExcludePolicy      *IncludeExcludePolicy
 	clusterScopedFilterPolicy *ClusterScopedFilterPolicy
 	namespacedFilterPolicies  []NamespacedFilterPolicy
+	// globalPolicyCount is the number of trailing volumePolicies that came from
+	// the global ConfigMap. GetResourcePoliciesFromBackupWithGlobal builds the
+	// merged list as [backup-level..., global...]; GetEffectiveExclude splits
+	// here so global exclude lists are applied first and backup-level lists
+	// overlay them (gitignore last-match-wins).
+	globalPolicyCount int
 	// OtherPolicies
 }
 
@@ -517,6 +570,14 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 		}
 		var volP volPolicy
 		volP.action = vp.Action
+		if vp.Exclude != nil {
+			trimmed := make([]string, 0, len(vp.Exclude))
+			for _, pat := range vp.Exclude {
+				trimmed = append(trimmed, strings.TrimSpace(pat))
+			}
+			volP.exclude = trimmed
+		}
+		volP.inheritExcludes = vp.InheritExcludes
 		volP.conditions = append(volP.conditions, &capacityCondition{capacity: *volCap})
 		volP.conditions = append(volP.conditions, &storageClassCondition{storageClass: con.StorageClass})
 		volP.conditions = append(volP.conditions, &nfsCondition{nfs: con.NFS})
@@ -546,24 +607,28 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 	return nil
 }
 
-func (p *Policies) match(res *structuredVolume) *Action {
-	for _, policy := range p.volumePolicies {
-		isAllMatch := false
-		for _, con := range policy.conditions {
-			if !con.match(res) {
-				isAllMatch = false
-				break
-			}
-			isAllMatch = true
+func policyMatches(policy *volPolicy, res *structuredVolume) bool {
+	if policy == nil {
+		return false
+	}
+	for _, con := range policy.conditions {
+		if !con.match(res) {
+			return false
 		}
-		if isAllMatch {
-			return &policy.action
+	}
+	return true
+}
+
+func (p *Policies) match(res *structuredVolume) *Action {
+	for i := range p.volumePolicies {
+		if policyMatches(&p.volumePolicies[i], res) {
+			return &p.volumePolicies[i].action
 		}
 	}
 	return nil
 }
 
-func (p *Policies) GetMatchAction(res any) (*Action, error) {
+func parseVolumeFilterData(res any) (*structuredVolume, error) {
 	data, ok := res.(VolumeFilterData)
 	if !ok {
 		return nil, errors.New("failed to convert input to VolumeFilterData")
@@ -587,8 +652,92 @@ func (p *Policies) GetMatchAction(res any) (*Action, error) {
 	default:
 		return nil, errors.New("failed to convert object")
 	}
+	return volume, nil
+}
 
+func (p *Policies) GetMatchAction(res any) (*Action, error) {
+	volume, err := parseVolumeFilterData(res)
+	if err != nil {
+		return nil, err
+	}
 	return p.match(volume), nil
+}
+
+// GetEffectiveExclude evaluates exclude patterns using the Two-Level Winner
+// Overlay model:
+//  1. Intra-scope first-match in Backup Scope (B_win).
+//  2. Intra-scope first-match in Global Scope (G_win).
+//  3. Winning action is B_win.action (or G_win.action if no backup rule matched).
+//  4. Incompatible action check (skip, custom, snapshot with velero-block). If the
+//     winning action cannot honor exclusions, inherited patterns are dropped and
+//     (nil, true, nil) is returned if global patterns were inherited.
+//  5. Two-Level Overlay:
+//     - If B_win sets inheritExcludes: false, global exclusions are discarded,
+//     returning B_win.exclude alone.
+//     - Otherwise, effective = G_win.exclude ++ B_win.exclude.
+func (p *Policies) GetEffectiveExclude(res any) (patterns []string, dropped bool, err error) {
+	if p == nil {
+		return nil, false, nil
+	}
+	volume, err := parseVolumeFilterData(res)
+	if err != nil {
+		return nil, false, err
+	}
+
+	n := len(p.volumePolicies)
+	globalCount := p.globalPolicyCount
+	if globalCount > n {
+		globalCount = n
+	}
+	backupRules := p.volumePolicies[:n-globalCount]
+	globalRules := p.volumePolicies[n-globalCount:]
+
+	// 1. Find winning rule in Backup Scope (first-match-wins)
+	var bWin *volPolicy
+	for i := range backupRules {
+		if policyMatches(&backupRules[i], volume) {
+			bWin = &backupRules[i]
+			break
+		}
+	}
+
+	// 2. Find winning rule in Global Scope (first-match-wins)
+	var gWin *volPolicy
+	for i := range globalRules {
+		if policyMatches(&globalRules[i], volume) {
+			gWin = &globalRules[i]
+			break
+		}
+	}
+
+	// 3. Resolve winning Action (Backup overrides Global)
+	var winningAction *Action
+	if bWin != nil {
+		winningAction = &bWin.action
+	} else if gWin != nil {
+		winningAction = &gWin.action
+	}
+
+	// 4. Incompatible action check (skip, custom, snapshot with velero-block)
+	shouldInherit := true
+	if bWin != nil && bWin.inheritExcludes != nil {
+		shouldInherit = *bWin.inheritExcludes
+	}
+
+	if !actionHonorsExclude(winningAction) {
+		hasInherited := shouldInherit && (gWin != nil && len(gWin.exclude) > 0)
+		return nil, hasInherited, nil
+	}
+
+	// 5. Two-Level Overlay: Global baseline ++ Backup overlay
+	var effective []string
+	if shouldInherit && gWin != nil && len(gWin.exclude) > 0 {
+		effective = append(effective, gWin.exclude...)
+	}
+	if bWin != nil && len(bWin.exclude) > 0 {
+		effective = append(effective, bWin.exclude...)
+	}
+	return effective, false, nil
 }
 
 func (p *Policies) Validate() error {
@@ -604,6 +753,9 @@ func (p *Policies) Validate() error {
 			if err := con.validate(); err != nil {
 				return errors.WithStack(err)
 			}
+		}
+		if err := policy.validate(); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 
@@ -719,6 +871,12 @@ func GetGlobalResourcePolicies(
 		return nil, fmt.Errorf("fail to validate global backup volume policies in ConfigMap %s/%s: %w", namespace, configMapName, err)
 	}
 
+	for _, vp := range policies.volumePolicies {
+		if vp.inheritExcludes != nil {
+			return nil, fmt.Errorf("invalid global backup volume policy in ConfigMap %s/%s: inheritExcludes is not supported on global policies as there is no higher policy baseline to inherit from", namespace, configMapName)
+		}
+	}
+
 	// Only volumePolicies apply globally; warn about any other filter policies that will be ignored.
 	if policies.includeExcludePolicy != nil ||
 		policies.clusterScopedFilterPolicy != nil ||
@@ -761,6 +919,9 @@ func GetResourcePoliciesFromBackupWithGlobal(
 	}
 
 	if globalConfigMapName == "" {
+		if backupPolicies != nil {
+			backupPolicies.globalPolicyCount = 0
+		}
 		return backupPolicies, nil
 	}
 
@@ -770,10 +931,13 @@ func GetResourcePoliciesFromBackupWithGlobal(
 	}
 
 	if backupPolicies == nil {
+		globalPolicies.globalPolicyCount = len(globalPolicies.volumePolicies)
 		return globalPolicies, nil
 	}
 	// Backup-level policies first, then global, so backups can override the global baseline.
+	globalCount := len(globalPolicies.volumePolicies)
 	backupPolicies.volumePolicies = append(backupPolicies.volumePolicies, globalPolicies.volumePolicies...)
+	backupPolicies.globalPolicyCount = globalCount
 	return backupPolicies, nil
 }
 
