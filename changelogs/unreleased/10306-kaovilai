@@ -1,0 +1,1 @@
+Degrade CBT bitmap failures to allocated blocks instead of a whole-device transfer
