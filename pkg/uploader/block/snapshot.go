@@ -79,7 +79,7 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 		return uploader.SnapshotInfo{}, false, errors.Wrapf(err, "error reset pos of block device %s", source)
 	}
 
-	snapID, backupSize, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log, "Block Uploader")
+	snapID, backupSize, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log)
 	snapshotInfo := uploader.SnapshotInfo{
 		ID:              snapID,
 		Size:            sourceInfo.size,
@@ -101,7 +101,6 @@ func snapshotSource(
 	snapshotTags map[string]string,
 	uploaderCfg map[string]string,
 	log logrus.FieldLogger,
-	description string,
 ) (string, int64, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
@@ -144,7 +143,7 @@ func snapshotSource(
 		maps.Copy(snap.Tags, snapshotTags)
 	}
 
-	snap.Description = description
+	snap.Description = "Block Uploader"
 
 	snapID, err := rep.SaveSnapshot(ctx, snap)
 	if err != nil {

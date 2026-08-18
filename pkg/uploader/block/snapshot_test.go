@@ -261,7 +261,7 @@ func TestSnapshotSource(t *testing.T) {
 				true, "",
 				cbtSrc, nil,
 				snapshotTags, map[string]string{},
-				testLog(), "Block Uploader",
+				testLog(),
 			)
 
 			if tc.expectedErrStr != "" {
@@ -278,7 +278,7 @@ func TestSnapshotSource(t *testing.T) {
 	}
 }
 
-// TestSnapshotSourceKeepsParentOnCBTFailure pins the behaviour that a CBT failure must not
+// TestSnapshotSourceKeepsParentOnCBTFailure pins the behavior that a CBT failure must not
 // discard an already-resolved repository parent. The bitmap and the parent object come from
 // two independent sources: the bitmap from the CBT service, the parent from the repository's
 // own snapshot manifests (validated separately by getParentBackupInfo). Dropping the parent
@@ -328,7 +328,7 @@ func TestSnapshotSourceKeepsParentOnCBTFailure(t *testing.T) {
 		false, "snap-parent",
 		cbtservice.SourceInfo{Snapshot: "snap-cbt", ChangeID: "cid-new", VolumeID: volumeID}, svcMock,
 		snapshotTags, map[string]string{},
-		testLog(), "Block Uploader",
+		testLog(),
 	)
 
 	require.NoError(t, err)
@@ -387,7 +387,7 @@ func TestSnapshotSourceDropsParentOnAllocatedTier(t *testing.T) {
 		false, "snap-parent",
 		cbtservice.SourceInfo{Snapshot: "snap-cbt", ChangeID: "cid-new", VolumeID: volumeID}, svcMock,
 		snapshotTags, map[string]string{},
-		testLog(), "Block Uploader",
+		testLog(),
 	)
 	require.NoError(t, err)
 
