@@ -17,13 +17,13 @@ To have namespace consistency, specify the namespace for all Velero operational 
 velero client config set namespace=<NAMESPACE_VALUE>
 ```
 
-If Velero was installed in the namespace of your current kubeconfig context, you can set that as the default namespace without having to type it out:
+If Velero was installed in the namespace of your current kubeconfig context, you can have operational commands automatically use that namespace, without having to type it out or update it every time you switch contexts:
 
 ```bash
-velero client config set-namespace-from-context
+velero client config set namespace-mode=auto
 ```
 
-This reads the namespace from the current kubeconfig context (or the context specified with `--kubecontext`) and saves it to the Velero client configuration file.
+With `namespace-mode=auto` set, Velero resolves the namespace from the current kubeconfig context (or the context specified with `--kubecontext`) on every command invocation, instead of using the static `namespace` value.
 
 Alternatively, you may use the global `--namespace` flag with any operational command to tell Velero where to run.
 

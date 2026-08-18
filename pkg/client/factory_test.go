@@ -64,6 +64,36 @@ func TestFactory(t *testing.T) {
 
 	os.Unsetenv("VELERO_NAMESPACE")
 
+	// namespace-mode=auto should resolve the namespace from the current kubeconfig context.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context"}))
+	assert.Equal(t, "chisel-ns", f.Namespace())
+
+	// namespace-mode=auto should track kubecontext changes dynamically.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "queen-anne-context"}))
+	assert.Equal(t, "saw-ns", f.Namespace())
+
+	// An explicit --namespace flag overrides namespace-mode=auto.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context", "--namespace", s}))
+	assert.Equal(t, s, f.Namespace())
+
+	// VELERO_NAMESPACE overrides namespace-mode=auto.
+	os.Setenv("VELERO_NAMESPACE", "env-velero")
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context"}))
+	assert.Equal(t, "env-velero", f.Namespace())
+	os.Unsetenv("VELERO_NAMESPACE")
+
 	tests := []struct {
 		name         string
 		kubeconfig   string
