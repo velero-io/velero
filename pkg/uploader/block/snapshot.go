@@ -89,6 +89,7 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 	return snapshotInfo, false, err
 }
 
+//nolint:unparam // description is part of the function's public contract, not dead weight
 func snapshotSource(
 	ctx context.Context,
 	rep udmrepo.BackupRepo,
