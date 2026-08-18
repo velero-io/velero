@@ -1,0 +1,1 @@
+Fail fast with a clear error when a data mover pod is unschedulable due to node affinity that no node in the cluster can satisfy, instead of waiting out the full preparing/operation timeout.
