@@ -20,6 +20,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -111,6 +112,66 @@ func TestUnzipAndExtractBackupRejectsPathTraversal(t *testing.T) {
 	_, err = ext.UnzipAndExtractBackup(&buf)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid archive path")
+}
+
+func TestUnzipAndExtractBackupRejectsLargeFile(t *testing.T) {
+	SetMaxExtractionSize(1024)
+	defer SetMaxExtractionSize(16 * 1024 * 1024 * 1024)
+	ext := NewExtractor(test.NewLogger(), test.NewFakeFileSystem())
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	data := make([]byte, 2048) // 2KB data
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "large.txt",
+		Mode:     0600,
+		Typeflag: tar.TypeReg,
+		Size:     int64(len(data)),
+	})
+	require.NoError(t, err)
+
+	_, err = tw.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gzw.Close())
+
+	_, err = ext.UnzipAndExtractBackup(&buf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decompressed backup exceeds maximum allowed size")
+}
+
+func TestUnzipAndExtractBackupRejectsManySmallFiles(t *testing.T) {
+	SetMaxExtractionSize(1024)
+	defer SetMaxExtractionSize(16 * 1024 * 1024 * 1024)
+	ext := NewExtractor(test.NewLogger(), test.NewFakeFileSystem())
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	// Create 100 files of 20 bytes each (total 2000 bytes, exceeding the 1024 byte limit)
+	for i := 0; i < 100; i++ {
+		data := make([]byte, 20)
+		err := tw.WriteHeader(&tar.Header{
+			Name:     fmt.Sprintf("small_%d.txt", i),
+			Mode:     0600,
+			Typeflag: tar.TypeReg,
+			Size:     int64(len(data)),
+		})
+		require.NoError(t, err)
+
+		_, err = tw.Write(data)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gzw.Close())
+
+	_, err := ext.UnzipAndExtractBackup(&buf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decompressed backup exceeds maximum allowed size")
 }
 
 func createArchive(files []string, fs filesystem.Interface) (string, error) {

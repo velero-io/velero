@@ -61,6 +61,12 @@ type PodVolumeBackupSpec struct {
 	// Cancel indicates request to cancel the ongoing PodVolumeBackup. It can be set
 	// when the PodVolumeBackup is in InProgress phase
 	Cancel bool `json:"cancel,omitempty"`
+
+	// ParentSnapshot specifies the parent snapshot that current backup is based on.
+	// If its value is "" or "auto", the data mover finds the recent backup of the same volume as parent.
+	// If its value is "none", the data mover will do a full backup
+	// If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
+	ParentSnapshot string `json:"parentSnapshot,omitempty"`
 }
 
 // PodVolumeBackupPhase represents the lifecycle phase of a PodVolumeBackup.

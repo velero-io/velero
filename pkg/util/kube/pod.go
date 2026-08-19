@@ -129,6 +129,12 @@ func EnsureDeletePod(ctx context.Context, podGetter corev1client.CoreV1Interface
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the pod has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure pod %s is deleted", pod)
+			}
 			return errors.Errorf("timeout to assure pod %s is deleted, finalizers in pod %v", pod, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to assure pod is deleted, %s", pod)

@@ -357,7 +357,7 @@ func createPVBObj(fail bool, withSnapshot bool, index int, uploaderType string) 
 }
 
 func createNodeObj() *corev1api.Node {
-	return builder.ForNode("fake-node-name").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	return builder.ForNode("fake-node-name").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 }
 
 func TestBackupPodVolumes(t *testing.T) {

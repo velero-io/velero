@@ -1330,12 +1330,13 @@ func TestCreateRestorePod(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		kubeClientObj []runtime.Object
-		selectedNode  string
-		affinity      *kube.LoadAffinity
-		nodeOS        string
-		expectedPod   *corev1api.Pod
+		name                 string
+		kubeClientObj        []runtime.Object
+		selectedNode         string
+		affinity             *kube.LoadAffinity
+		nodeOS               string
+		expectedPod          *corev1api.Pod
+		expectedNodeSelector map[string]string
 	}{
 		{
 			name:          "linux",
@@ -1345,7 +1346,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"linux"},
 						},
@@ -1363,7 +1364,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"windows"},
 						},
@@ -1372,6 +1373,29 @@ func TestCreateRestorePod(t *testing.T) {
 				StorageClass: scName,
 			},
 			nodeOS: "windows",
+		},
+		{
+			// A selected node is pinned through the node selector, and the
+			// affinity from the node-agent config is ignored.
+			name:          "selected node",
+			kubeClientObj: []runtime.Object{daemonSet, daemonSetWin, targetPVCObj},
+			selectedNode:  "fake-selected-node",
+			affinity: &kube.LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      corev1api.LabelOSStable,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"linux"},
+						},
+					},
+				},
+				StorageClass: scName,
+			},
+			nodeOS: "linux",
+			expectedNodeSelector: map[string]string{
+				corev1api.LabelHostname: "fake-selected-node",
+			},
 		},
 	}
 
@@ -1406,6 +1430,9 @@ func TestCreateRestorePod(t *testing.T) {
 			require.NoError(t, err)
 			if test.expectedPod != nil {
 				assert.Equal(t, test.expectedPod, pod)
+			}
+			if test.expectedNodeSelector != nil {
+				assert.Equal(t, test.expectedNodeSelector, pod.Spec.NodeSelector)
 			}
 		})
 	}

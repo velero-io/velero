@@ -35,8 +35,8 @@ import (
 
 func TestIsLinuxNode(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
@@ -90,8 +90,8 @@ func TestIsLinuxNode(t *testing.T) {
 }
 
 func TestWithLinuxNode(t *testing.T) {
-	nodeWindows := builder.ForNode("fake-node-1").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node-2").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node-1").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node-2").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
@@ -135,8 +135,8 @@ func TestWithLinuxNode(t *testing.T) {
 
 func TestGetNodeOSType(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
 	tests := []struct {
@@ -185,8 +185,8 @@ func TestGetNodeOSType(t *testing.T) {
 
 func TestHasNodeWithOS(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node-1").Result()
-	nodeWindows := builder.ForNode("fake-node-2").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node-3").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node-2").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node-3").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)

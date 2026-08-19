@@ -620,7 +620,7 @@ func (e *genericRestoreExposer) createRestorePod(
 	nodeSelector := map[string]string{}
 	if selectedNode != "" {
 		affinity = nil
-		nodeSelector["kubernetes.io/hostname"] = selectedNode
+		nodeSelector[corev1api.LabelHostname] = selectedNode
 		e.log.Infof("Selected node for restore pod. Ignore affinity from the node-agent config.")
 	}
 
@@ -762,7 +762,7 @@ func (e *genericRestoreExposer) createRestorePod(
 			TopologySpreadConstraints: []corev1api.TopologySpreadConstraint{
 				{
 					MaxSkew:           1,
-					TopologyKey:       "kubernetes.io/hostname",
+					TopologyKey:       corev1api.LabelHostname,
 					WhenUnsatisfiable: corev1api.ScheduleAnyway,
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{

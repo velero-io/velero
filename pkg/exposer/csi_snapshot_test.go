@@ -492,7 +492,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -530,7 +530,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -570,7 +570,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -615,7 +615,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -661,7 +661,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -705,7 +705,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -732,7 +732,7 @@ func TestExpose(t *testing.T) {
 						NodeSelector: metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{"Linux"},
 								},
@@ -757,12 +757,12 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpIn,
 										Values:   []string{"Linux"},
 									},
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -794,7 +794,7 @@ func TestExpose(t *testing.T) {
 						NodeSelector: metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
-									Key:      "kubernetes.io/arch",
+									Key:      corev1api.LabelArchStable,
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{"amd64"},
 								},
@@ -820,12 +820,12 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/arch",
+										Key:      corev1api.LabelArchStable,
 										Operator: corev1api.NodeSelectorOpIn,
 										Values:   []string{"amd64"},
 									},
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -870,7 +870,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -923,7 +923,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -968,7 +968,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
@@ -1015,12 +1015,12 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},
 									{
-										Key:      "kubernetes.io/hostname",
+										Key:      corev1api.LabelHostname,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"node-1", "node-2"},
 									},
@@ -1061,7 +1061,7 @@ func TestExpose(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "kubernetes.io/os",
+										Key:      corev1api.LabelOSStable,
 										Operator: corev1api.NodeSelectorOpNotIn,
 										Values:   []string{"windows"},
 									},

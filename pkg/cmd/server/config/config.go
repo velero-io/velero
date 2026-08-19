@@ -188,6 +188,7 @@ type Config struct {
 	ConcurrentBackups                   int
 	GlobalBackupVolumePoliciesConfigMap string
 	DefaultResourceModifierConfigMap    string
+	MaxBackupExtractionSize             int
 }
 
 func GetDefaultConfig() *Config {
@@ -293,5 +294,11 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"default-resource-modifier-configmap",
 		c.DefaultResourceModifierConfigMap,
 		"The name of a ConfigMap in the Velero namespace containing default resource modifier rules applied to all restores. Ignored when a per-restore resource modifier is specified.",
+	)
+	flags.IntVar(
+		&c.MaxBackupExtractionSize,
+		"max-backup-extraction-size",
+		c.MaxBackupExtractionSize,
+		"Maximum size of a backup extraction in megabytes. If not set, default value (16GB) will be used.",
 	)
 }

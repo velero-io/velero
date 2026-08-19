@@ -1263,21 +1263,12 @@ func buildFinalTarball(tr *tar.Reader, tw tarWriter, updateFiles map[string]File
 				return errors.WithStack(err)
 			}
 			delete(updateFiles, header.Name)
-			// skip over file contents from old tarball
-			_, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 		} else {
 			// Add original content to new tarball, as item wasn't updated
-			oldContents, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 			if err := tw.WriteHeader(header); err != nil {
 				return errors.WithStack(err)
 			}
-			if _, err := tw.Write(oldContents); err != nil {
+			if _, err := io.Copy(tw, tr); err != nil {
 				return errors.WithStack(err)
 			}
 		}

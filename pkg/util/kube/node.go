@@ -30,7 +30,7 @@ import (
 const (
 	NodeOSLinux   = "linux"
 	NodeOSWindows = "windows"
-	NodeOSLabel   = "kubernetes.io/os"
+	NodeOSLabel   = corev1api.LabelOSStable
 )
 
 var realNodeOSMap = map[string]string{

@@ -19,8 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
+
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -507,7 +510,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledDataDownload[test.dd.Name] = test.sportTime.Time
+				r.cancelledDataDownload.Store(test.dd.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -624,9 +627,15 @@ func TestDataDownloadReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledDataDownload, test.dd.Name)
+				_, ok := r.cancelledDataDownload.Load(test.dd.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledDataDownload)
+				empty := true
+				r.cancelledDataDownload.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isDataDownloadInFinalState(&dd) || dd.Status.Phase == velerov2alpha1api.DataDownloadPhaseInProgress {
@@ -1436,4 +1445,51 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 			assert.Equal(t, tt.want.annotations, got.HostingPodAnnotations)
 		})
 	}
+}
+
+type sequenceClock struct {
+	*clocktesting.FakeClock
+	mu sync.Mutex
+}
+
+func (c *sequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestDataDownloadCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	dd := dataDownloadBuilder().Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
+
+	r, err := initDataDownloadReconciler(t, nil)
+	require.NoError(t, err)
+
+	err = r.client.Create(ctx, dd)
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledDataDownload.Store(dd.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.Clock = &sequenceClock{FakeClock: clocktesting.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: dd.Name, Namespace: dd.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledDataDownload.Load(dd.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

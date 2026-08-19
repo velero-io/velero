@@ -85,7 +85,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
@@ -96,7 +96,7 @@ func TestGetStorageCredentials(t *testing.T) {
 			},
 			credFileStore: new(credmock.FileStore),
 			expected: map[string]string{
-				"accessKeyID":     "from: credentials-from-config-map",
+				"accessKeyID":     "from: ",
 				"providerName":    "",
 				"secretAccessKey": "",
 				"sessionToken":    "",
@@ -108,7 +108,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 					Credential: &corev1api.SecretKeySelector{},
 				},
@@ -134,7 +134,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
@@ -176,16 +176,16 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/gcp",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
 			getGCPCredentials: func(config map[string]string) string {
-				return "credentials-from-config-map"
+				return config["credentialsFile"]
 			},
 			credFileStore: new(credmock.FileStore),
 			expected: map[string]string{
-				"credFile": "credentials-from-config-map",
+				"credFile": "",
 			},
 		},
 	}

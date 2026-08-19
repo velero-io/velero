@@ -16,7 +16,23 @@ spec:
     singular: downloadrequest
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: The type of file to download
+      jsonPath: .spec.target.kind
+      name: Target Kind
+      type: string
+    - description: The name of the resource the file is associated with
+      jsonPath: .spec.target.name
+      name: Target Name
+      type: string
+    - description: The status of the download request
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
@@ -104,3 +120,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

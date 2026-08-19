@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -90,7 +91,6 @@ func NewPodVolumeRestoreReconciler(
 		preparingTimeout:      preparingTimeout,
 		resourceTimeout:       resourceTimeout,
 		exposer:               exposer.NewPodVolumeExposer(kubeClient, logger),
-		cancelledPVR:          make(map[string]time.Time),
 		dataMovePriorityClass: dataMovePriorityClass,
 		privileged:            privileged,
 		repoConfigMgr:         repoConfigMgr,
@@ -114,7 +114,7 @@ type PodVolumeRestoreReconciler struct {
 	vgdpCounter           *exposer.VgdpCounter
 	preparingTimeout      time.Duration
 	resourceTimeout       time.Duration
-	cancelledPVR          map[string]time.Time
+	cancelledPVR          sync.Map
 	dataMovePriorityClass string
 	privileged            bool
 	repoConfigMgr         repository.ConfigManager
@@ -188,7 +188,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			}
 		}
 	} else {
-		delete(r.cancelledPVR, pvr.Name)
+		r.cancelledPVR.Delete(pvr.Name)
 
 		if controllerutil.ContainsFinalizer(pvr, PodVolumeFinalizer) {
 			if err := UpdatePVRWithRetry(ctx, r.client, req.NamespacedName, log, func(pvr *velerov1api.PodVolumeRestore) bool {
@@ -209,9 +209,9 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	if pvr.Spec.Cancel {
-		if spotted, found := r.cancelledPVR[pvr.Name]; !found {
-			r.cancelledPVR[pvr.Name] = r.clock.Now()
-		} else {
+		v, loaded := r.cancelledPVR.LoadOrStore(pvr.Name, r.clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseInProgress {
 				delay = cancelDelayInProgress
@@ -220,7 +220,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			if time.Since(spotted) > delay {
 				log.Infof("PVR %s is canceled in Phase %s but not handled in rasonable time", pvr.GetName(), pvr.Status.Phase)
 				if r.tryCancelPodVolumeRestore(ctx, pvr, "") {
-					delete(r.cancelledPVR, pvr.Name)
+					r.cancelledPVR.Delete(pvr.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -895,7 +895,7 @@ func (r *PodVolumeRestoreReconciler) OnDataPathCancelled(ctx context.Context, na
 	}); err != nil {
 		log.WithError(err).Error("error updating PVR status on cancel")
 	} else {
-		delete(r.cancelledPVR, pvr.Name)
+		r.cancelledPVR.Delete(pvr.Name)
 	}
 }
 

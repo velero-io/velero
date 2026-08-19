@@ -372,6 +372,63 @@ func TestBlockProviderRunBackup(t *testing.T) {
 	}
 }
 
+// TestBlockProviderCancelThroughWrappedError pins that cancellation is recognized
+// after the sentinel has been wrapped, which is the only way it ever arrives in
+// production: block/uploader.go wraps it with "error backing up bdev %s" and
+// block/snapshot.go wraps that with "Failed to run uploader backup for si %v".
+//
+// Asserting on the message is useless here — provider.ErrorCanceled and
+// block.ErrCanceled carry the *same* text ("uploader is canceled"), so a substring
+// check passes whether or not the sentinel was actually recognized. The assertion
+// has to be on identity.
+func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
+	t.Run("backup", func(t *testing.T) {
+		orig := blockBackupFunc
+		defer func() { blockBackupFunc = orig }()
+		blockBackupFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ cbtservice.SourceInfo, _ bool, _ string, _ cbtservice.Service, _ map[string]string, _ map[string]string, _ logrus.FieldLogger) (uploader.SnapshotInfo, bool, error) {
+			return uploader.SnapshotInfo{ID: "snap-cancel", Size: 2048, IncrementalSize: 1024}, false,
+				errors.Wrapf(
+					errors.Wrapf(block.ErrCanceled, "error backing up bdev %s", "ns/pvc"),
+					"Failed to run uploader backup for si %v", "si")
+		}
+
+		bp := &blockProvider{
+			requestorType: "test",
+			bkRepo:        udmrepomocks.NewBackupRepo(t),
+			log:           logrus.New(),
+		}
+
+		_, _, _, _, err := bp.RunBackup(
+			t.Context(), "/dev/sda", "ns/pvc", map[string]string{}, false, "",
+			CBTParam{}, uploader.PersistentVolumeBlock, map[string]string{},
+			&FakeBackupProgressUpdater{},
+		)
+
+		require.ErrorIs(t, err, ErrorCanceled,
+			"a wrapped block.ErrCanceled must surface as provider.ErrorCanceled; otherwise the "+
+				"DataUpload is marked Failed and the Backup PartiallyFailed for a user-requested cancel")
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		orig := blockRestoreFunc
+		defer func() { blockRestoreFunc = orig }()
+		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ map[string]string, _ logrus.FieldLogger) (int64, error) {
+			return 0, errors.Wrap(block.ErrCanceled, "error restoring bdev")
+		}
+
+		bp := &blockProvider{
+			requestorType: "test",
+			bkRepo:        udmrepomocks.NewBackupRepo(t),
+			log:           logrus.New(),
+		}
+
+		_, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda",
+			uploader.PersistentVolumeBlock, map[string]string{}, &blockMockProgressUpdater{})
+
+		require.ErrorIs(t, err, ErrorCanceled)
+	})
+}
+
 func TestBlockProviderRunRestore(t *testing.T) {
 	testCases := []struct {
 		name            string
