@@ -319,7 +319,6 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		csiExposeParam.Resources,
 		backupPVCReadOnly,
 		spcNoRelabeling,
-		backupPVCReadWriteOncePod,
 		csiExposeParam.NodeOS,
 		csiExposeParam.PriorityClassName,
 		intoleratableNodes,
@@ -716,7 +715,6 @@ func (e *csiSnapshotExposer) createBackupPod(
 	resources corev1api.ResourceRequirements,
 	backupPVCReadOnly bool,
 	spcNoRelabeling bool,
-	backupPVCReadWriteOncePod bool,
 	nodeOS string,
 	priorityClassName string,
 	intoleratableNodes []string,
@@ -839,11 +837,6 @@ func (e *csiSnapshotExposer) createBackupPod(
 			securityCtx.SELinuxOptions = &corev1api.SELinuxOptions{
 				Type: "spc_t",
 			}
-		}
-
-		if backupPVCReadWriteOncePod {
-			policy := corev1api.SELinuxChangePolicyMountOption
-			securityCtx.SELinuxChangePolicy = &policy
 		}
 
 		podOS.Name = kube.NodeOSLinux

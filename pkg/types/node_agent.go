@@ -59,8 +59,7 @@ type BackupPVC struct {
 
 	// ReadWriteOncePod sets the backupPVC's access mode to ReadWriteOncePod so the kubelet can use
 	// mount-level SELinux labeling (-o context) instead of per-file relabeling, when the CSI driver
-	// advertises SELinux mount support. It also sets Spec.SecurityContext.SELinuxChangePolicy to
-	// "MountOption" for the pod mounting the backupPVC.
+	// advertises SELinux mount support.
 	// ignored if ReadOnly is true
 	ReadWriteOncePod bool `json:"readWriteOncePod,omitempty"`
 

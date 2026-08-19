@@ -220,7 +220,6 @@ func TestExpose(t *testing.T) {
 		expectedVolumeSize            *resource.Quantity
 		expectedReadOnlyPVC           bool
 		expectedRWOPPVC               bool
-		expectedSELinuxChangePolicy   *corev1api.PodSELinuxChangePolicy
 		expectedBackupPVCStorageClass string
 		expectedAffinity              *corev1api.Affinity
 		expectedPVCAnnotation         map[string]string
@@ -675,7 +674,7 @@ func TestExpose(t *testing.T) {
 			},
 		},
 		{
-			name:        "backupPVC uses ReadWriteOncePod and pod gets MountOption SELinux change policy",
+			name:        "backupPVC uses ReadWriteOncePod access mode",
 			ownerBackup: backup,
 			exposeParam: CSISnapshotExposeParam{
 				SnapshotName:     "fake-vs",
@@ -699,8 +698,7 @@ func TestExpose(t *testing.T) {
 				daemonSet,
 				scObj,
 			},
-			expectedRWOPPVC:             true,
-			expectedSELinuxChangePolicy: ptr.To(corev1api.SELinuxChangePolicyMountOption),
+			expectedRWOPPVC: true,
 			expectedAffinity: &corev1api.Affinity{
 				NodeAffinity: &corev1api.NodeAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
@@ -1246,14 +1244,6 @@ func TestExpose(t *testing.T) {
 					assert.Equal(t, []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOncePod}, backupPVC.Spec.AccessModes)
 				} else {
 					assert.NotContains(t, backupPVC.Spec.AccessModes, corev1api.ReadWriteOncePod)
-				}
-
-				if test.expectedSELinuxChangePolicy != nil {
-					require.NotNil(t, backupPod.Spec.SecurityContext)
-					require.NotNil(t, backupPod.Spec.SecurityContext.SELinuxChangePolicy)
-					assert.Equal(t, *test.expectedSELinuxChangePolicy, *backupPod.Spec.SecurityContext.SELinuxChangePolicy)
-				} else if backupPod.Spec.SecurityContext != nil {
-					assert.Nil(t, backupPod.Spec.SecurityContext.SELinuxChangePolicy)
 				}
 
 				if test.expectedBackupPVCStorageClass != "" {

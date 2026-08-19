@@ -34,11 +34,11 @@ default the source PVC's storage class will be used.
   the SELinux point of view, this will be considered a "Super Privileged Container" which means that selinux enforcement will be disabled and
   volume relabeling will not occur. This field is ignored if `readOnly` is `false`.
 
-- `readWriteOncePod`: This is a boolean value. If set to `true`, then `ReadWriteOncePod` will be the only value set to the backupPVC's access modes and
-  `pod.Spec.SecurityContext.SELinuxChangePolicy` will be set to `MountOption` for the backupPod. This lets the kubelet apply the SELinux label at mount
-  time (`-o context=`) instead of recursively relabeling every file on the volume, which can take hours on volumes with a high file count. It requires a
-  CSI driver that advertises SELinux mount support (`CSIDriver.spec.seLinuxMount: true`) and a storage class that supports creating `ReadWriteOncePod`
-  PVCs from a snapshot. This field is ignored if `readOnly` is `true`.
+- `readWriteOncePod`: This is a boolean value. If set to `true`, then `ReadWriteOncePod` will be the only value set to the backupPVC's access modes. On
+  SELinux-enabled clusters the kubelet applies the SELinux label to a `ReadWriteOncePod` volume at mount time (`-o context=`) instead of recursively
+  relabeling every file on the volume, which can take hours on volumes with a high file count. It requires a CSI driver that advertises SELinux mount
+  support (`CSIDriver.spec.seLinuxMount: true`) and a storage class that supports creating `ReadWriteOncePod` PVCs from a snapshot. This field is ignored
+  if `readOnly` is `true`.
 
 The users can specify the ConfigMap name during velero installation by CLI:
 `velero install --node-agent-configmap=<ConfigMap-Name>`
