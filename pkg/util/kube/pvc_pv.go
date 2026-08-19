@@ -35,6 +35,7 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	storagev1api "k8s.io/api/storage/v1"
 	storagev1 "k8s.io/client-go/kubernetes/typed/storage/v1"
 )
@@ -134,6 +135,47 @@ func DeletePVIfAny(ctx context.Context, pvGetter corev1client.CoreV1Interface, p
 			log.WithError(err).Debugf("Abort deleting PV, it doesn't exist, %s", pvName)
 		} else {
 			log.WithError(err).Errorf("Failed to delete PV %s", pvName)
+		}
+	}
+}
+
+// EnsureDeleteVolumeSnapshotIfAny deletes a VolumeSnapshot by namespace and name if it exists, and log an error when the deletion fails
+func EnsureDeleteVolumeSnapshotIfAny(ctx context.Context, client crclient.Client, namespace, name string, ensureTimeout time.Duration, log logrus.FieldLogger) {
+	if err := client.Delete(ctx, &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}); err != nil && !apierrors.IsNotFound(err) {
+		log.WithError(err).Errorf("Failed to delete the VolumeSnapshot %s/%s", namespace, name)
+	}
+
+	if ensureTimeout == 0 {
+		return
+	}
+
+	var updated *snapshotv1api.VolumeSnapshot
+	err := wait.PollUntilContextTimeout(ctx, waitInternal, ensureTimeout, true, func(ctx context.Context) (bool, error) {
+		if err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, updated); err != nil {
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			}
+
+			return false, errors.Wrapf(err, "error to get VolumeSnapshot %s/%s", namespace, name)
+		}
+
+		return false, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			if updated == nil {
+				log.WithError(err).Errorf("Timeout to assure VolumeSnapshot %s/%s is deleted", namespace, name)
+			} else {
+				log.WithError(err).Errorf("Timeout to assure VolumeSnapshot %s/%s is deleted, finalizers in VolumeSnapshot %v", namespace, name, updated.Finalizers)
+			}
+		} else {
+			log.WithError(err).Errorf("Error to assure VolumeSnapshot %s/%s is deleted", namespace, name)
 		}
 	}
 }

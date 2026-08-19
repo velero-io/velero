@@ -59,27 +59,28 @@ import (
 
 // DataDownloadReconciler reconciles a DataDownload object
 type DataDownloadReconciler struct {
-	client                client.Client
-	kubeClient            kubernetes.Interface
-	mgr                   manager.Manager
-	logger                logrus.FieldLogger
-	Clock                 clock.WithTickerAndDelayedExecution
-	restoreExposer        exposer.GenericRestoreExposer
-	nodeName              string
-	dataPathMgr           *datapath.Manager
-	vgdpCounter           *exposer.VgdpCounter
-	loadAffinity          []*kube.LoadAffinity
-	restorePVCConfig      velerotypes.RestorePVC
-	backupRepoConfigs     map[string]string
-	cacheVolumeConfigs    *velerotypes.CachePVC
-	podResources          corev1api.ResourceRequirements
-	preparingTimeout      time.Duration
-	metrics               *metrics.ServerMetrics
-	cancelledDataDownload sync.Map
-	dataMovePriorityClass string
-	repoConfigMgr         repository.ConfigManager
-	podLabels             map[string]string
-	podAnnotations        map[string]string
+	client                         client.Client
+	kubeClient                     kubernetes.Interface
+	mgr                            manager.Manager
+	logger                         logrus.FieldLogger
+	Clock                          clock.WithTickerAndDelayedExecution
+	restoreExposer                 exposer.GenericRestoreExposer
+	nodeName                       string
+	dataPathMgr                    *datapath.Manager
+	vgdpCounter                    *exposer.VgdpCounter
+	loadAffinity                   []*kube.LoadAffinity
+	restorePVCConfig               velerotypes.RestorePVC
+	backupRepoConfigs              map[string]string
+	cacheVolumeConfigs             *velerotypes.CachePVC
+	podResources                   corev1api.ResourceRequirements
+	preparingTimeout               time.Duration
+	metrics                        *metrics.ServerMetrics
+	cancelledDataDownload          sync.Map
+	dataMovePriorityClass          string
+	repoConfigMgr                  repository.ConfigManager
+	podLabels                      map[string]string
+	podAnnotations                 map[string]string
+	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
 }
 
 func NewDataDownloadReconciler(
@@ -101,28 +102,30 @@ func NewDataDownloadReconciler(
 	repoConfigMgr repository.ConfigManager,
 	podLabels map[string]string,
 	podAnnotations map[string]string,
+	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
 ) *DataDownloadReconciler {
 	return &DataDownloadReconciler{
-		client:                client,
-		kubeClient:            kubeClient,
-		mgr:                   mgr,
-		logger:                logger.WithField("controller", "DataDownload"),
-		Clock:                 &clock.RealClock{},
-		nodeName:              nodeName,
-		restoreExposer:        exposer.NewGenericRestoreExposer(kubeClient, logger),
-		restorePVCConfig:      restorePVCConfig,
-		backupRepoConfigs:     backupRepoConfigs,
-		cacheVolumeConfigs:    cacheVolumeConfigs,
-		dataPathMgr:           dataPathMgr,
-		vgdpCounter:           counter,
-		loadAffinity:          loadAffinity,
-		podResources:          podResources,
-		preparingTimeout:      preparingTimeout,
-		metrics:               metrics,
-		dataMovePriorityClass: dataMovePriorityClass,
-		repoConfigMgr:         repoConfigMgr,
-		podLabels:             podLabels,
-		podAnnotations:        podAnnotations,
+		client:                         client,
+		kubeClient:                     kubeClient,
+		mgr:                            mgr,
+		logger:                         logger.WithField("controller", "DataDownload"),
+		Clock:                          &clock.RealClock{},
+		nodeName:                       nodeName,
+		restoreExposer:                 exposer.NewGenericRestoreExposer(kubeClient, client, logger),
+		restorePVCConfig:               restorePVCConfig,
+		backupRepoConfigs:              backupRepoConfigs,
+		cacheVolumeConfigs:             cacheVolumeConfigs,
+		dataPathMgr:                    dataPathMgr,
+		vgdpCounter:                    counter,
+		loadAffinity:                   loadAffinity,
+		podResources:                   podResources,
+		preparingTimeout:               preparingTimeout,
+		metrics:                        metrics,
+		dataMovePriorityClass:          dataMovePriorityClass,
+		repoConfigMgr:                  repoConfigMgr,
+		podLabels:                      podLabels,
+		podAnnotations:                 podAnnotations,
+		snapshotMetadataServiceConfigs: snapshotMetadataServiceConfigs,
 	}
 }
 
@@ -487,7 +490,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	log.Info("Cleaning up exposed environment")
-	r.restoreExposer.CleanUp(ctx, objRef)
+	r.restoreExposer.CleanUp(ctx, &dd)
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -536,7 +539,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		return
 	}
 	// cleans up any objects generated during the snapshot expose
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(&dd))
+	r.restoreExposer.CleanUp(ctx, &dd)
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -586,7 +589,7 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 
 	// success update
 	r.metrics.RegisterDataDownloadCancel(r.nodeName)
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, dd)
 
 	log.Warn("data download is canceled")
 
@@ -734,7 +737,7 @@ func (r *DataDownloadReconciler) prepareDataDownload(ssb *velerov2alpha1api.Data
 
 func (r *DataDownloadReconciler) errorOut(ctx context.Context, dd *velerov2alpha1api.DataDownload, err error, msg string, log logrus.FieldLogger) (ctrl.Result, error) {
 	if r.restoreExposer != nil {
-		r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+		r.restoreExposer.CleanUp(ctx, dd)
 	}
 	return ctrl.Result{}, r.updateStatusToFailed(ctx, dd, err, msg, log)
 }
@@ -824,7 +827,7 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 		log.Warnf("[Diagnose DD expose]%s", diag)
 	}
 
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, dd)
 
 	log.Info("Datadownload has been cleaned up")
 
@@ -935,22 +938,23 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 	}
 
 	return exposer.GenericRestoreExposeParam{
-		TargetPVCName:         dd.Spec.TargetVolume.PVC,
-		TargetPVName:          dd.Spec.TargetVolume.PV,
-		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
-		HostingPodLabels:      hostingPodLabels,
-		HostingPodAnnotations: hostingPodAnnotation,
-		HostingPodTolerations: hostingPodTolerations,
-		Resources:             r.podResources,
-		OperationTimeout:      dd.Spec.OperationTimeout.Duration,
-		ExposeTimeout:         r.preparingTimeout,
-		NodeOS:                nodeOS,
-		RestorePVCConfig:      r.restorePVCConfig,
-		LoadAffinity:          r.loadAffinity,
-		PriorityClassName:     r.dataMovePriorityClass,
-		RestoreSize:           dd.Spec.SnapshotSize,
-		CacheVolume:           cacheVolume,
-		DataMover:             dd.Spec.DataMover,
+		TargetPVCName:                  dd.Spec.TargetVolume.PVC,
+		TargetPVName:                   dd.Spec.TargetVolume.PV,
+		TargetNamespace:                dd.Spec.TargetVolume.Namespace,
+		HostingPodLabels:               hostingPodLabels,
+		HostingPodAnnotations:          hostingPodAnnotation,
+		HostingPodTolerations:          hostingPodTolerations,
+		Resources:                      r.podResources,
+		OperationTimeout:               dd.Spec.OperationTimeout.Duration,
+		ExposeTimeout:                  r.preparingTimeout,
+		NodeOS:                         nodeOS,
+		RestorePVCConfig:               r.restorePVCConfig,
+		LoadAffinity:                   r.loadAffinity,
+		PriorityClassName:              r.dataMovePriorityClass,
+		RestoreSize:                    dd.Spec.SnapshotSize,
+		CacheVolume:                    cacheVolume,
+		DataMover:                      dd.Spec.DataMover,
+		SnapshotMetadataServiceConfigs: r.snapshotMetadataServiceConfigs,
 	}, nil
 }
 

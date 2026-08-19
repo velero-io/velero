@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mock "github.com/stretchr/testify/mock"
+	v2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/exposer"
 	"k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,8 +43,8 @@ func (_m *GenericRestoreExposer) EXPECT() *GenericRestoreExposer_Expecter {
 }
 
 // CleanUp provides a mock function for the type GenericRestoreExposer
-func (_mock *GenericRestoreExposer) CleanUp(context1 context.Context, objectReference v1.ObjectReference) {
-	_mock.Called(context1, objectReference)
+func (_mock *GenericRestoreExposer) CleanUp(context1 context.Context, dataDownload *v2alpha1.DataDownload) {
+	_mock.Called(context1, dataDownload)
 	return
 }
 
@@ -54,20 +55,20 @@ type GenericRestoreExposer_CleanUp_Call struct {
 
 // CleanUp is a helper method to define mock.On call
 //   - context1 context.Context
-//   - objectReference v1.ObjectReference
-func (_e *GenericRestoreExposer_Expecter) CleanUp(context1 interface{}, objectReference interface{}) *GenericRestoreExposer_CleanUp_Call {
-	return &GenericRestoreExposer_CleanUp_Call{Call: _e.mock.On("CleanUp", context1, objectReference)}
+//   - dataDownload *v2alpha1.DataDownload
+func (_e *GenericRestoreExposer_Expecter) CleanUp(context1 interface{}, dataDownload interface{}) *GenericRestoreExposer_CleanUp_Call {
+	return &GenericRestoreExposer_CleanUp_Call{Call: _e.mock.On("CleanUp", context1, dataDownload)}
 }
 
-func (_c *GenericRestoreExposer_CleanUp_Call) Run(run func(context1 context.Context, objectReference v1.ObjectReference)) *GenericRestoreExposer_CleanUp_Call {
+func (_c *GenericRestoreExposer_CleanUp_Call) Run(run func(context1 context.Context, dataDownload *v2alpha1.DataDownload)) *GenericRestoreExposer_CleanUp_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 v1.ObjectReference
+		var arg1 *v2alpha1.DataDownload
 		if args[1] != nil {
-			arg1 = args[1].(v1.ObjectReference)
+			arg1 = args[1].(*v2alpha1.DataDownload)
 		}
 		run(
 			arg0,
@@ -82,7 +83,7 @@ func (_c *GenericRestoreExposer_CleanUp_Call) Return() *GenericRestoreExposer_Cl
 	return _c
 }
 
-func (_c *GenericRestoreExposer_CleanUp_Call) RunAndReturn(run func(context1 context.Context, objectReference v1.ObjectReference)) *GenericRestoreExposer_CleanUp_Call {
+func (_c *GenericRestoreExposer_CleanUp_Call) RunAndReturn(run func(context1 context.Context, dataDownload *v2alpha1.DataDownload)) *GenericRestoreExposer_CleanUp_Call {
 	_c.Run(run)
 	return _c
 }

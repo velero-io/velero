@@ -464,6 +464,14 @@ func (r *Restore) IsVolumeDataInplaceRestore() bool {
 	return r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeFull || r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeIncremental
 }
 
+func (r *Restore) IsVolumeDataInplaceFullRestore() bool {
+	return r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeFull
+}
+
+func (r *Restore) IsVolumeDataInplaceIncrementalRestore() bool {
+	return r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeIncremental
+}
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // RestoreList is a list of Restores.
