@@ -202,6 +202,29 @@ func GetPodTerminateMessage(pod *corev1api.Pod) string {
 	return message.String()
 }
 
+// GetPodFailureReason extracts the most informative failure reason from a pod
+// Priority: pod.Status.Message > pod.Status.Conditions > container termination message
+func GetPodFailureReason(pod *corev1api.Pod) string {
+	if pod == nil {
+		return ""
+	}
+
+	// Priority 1: Pod Status Message (where eviction details are stored)
+	if pod.Status.Message != "" {
+		return pod.Status.Message
+	}
+
+	// Priority 2: Pod Conditions (fallback to detailed condition messages)
+	for _, condition := range pod.Status.Conditions {
+		if condition.Status == corev1api.ConditionFalse && condition.Message != "" {
+			return fmt.Sprintf("%s: %s", condition.Reason, condition.Message)
+		}
+	}
+
+	// Priority 3: Container termination message (existing approach)
+	return GetPodTerminateMessage(pod)
+}
+
 func getPodLogReader(ctx context.Context, podGetter corev1client.CoreV1Interface, pod string, namespace string, logOptions *corev1api.PodLogOptions) (io.ReadCloser, error) {
 	request := podGetter.Pods(namespace).GetLogs(pod, logOptions)
 	return request.Stream(ctx)

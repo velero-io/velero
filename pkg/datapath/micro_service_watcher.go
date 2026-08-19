@@ -324,10 +324,15 @@ func (ms *microServiceBRWatcher) startWatch() {
 			ms.callbacks.OnProgress(ms.ctx, ms.namespace, ms.taskName, getCompletionProgressFromResult(ms.taskType, result))
 			ms.callbacks.OnCompleted(ms.ctx, ms.namespace, ms.taskName, result)
 		} else {
-			if strings.HasSuffix(terminateMessage, ErrCancelled) {
+			errorMessage := terminateMessage
+			if errorMessage == "" {
+				errorMessage = kube.GetPodFailureReason(lastPod)
+			}
+
+			if strings.HasSuffix(errorMessage, ErrCancelled) {
 				ms.callbacks.OnCancelled(ms.ctx, ms.namespace, ms.taskName)
 			} else {
-				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(terminateMessage))
+				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(errorMessage))
 			}
 		}
 

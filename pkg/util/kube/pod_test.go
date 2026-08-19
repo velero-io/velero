@@ -1383,6 +1383,112 @@ func TestExitPodWithMessage(t *testing.T) {
 	}
 }
 
+func TestGetPodFailureReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1api.Pod
+		expected string
+	}{
+		{
+			name: "pod with status message (eviction case)",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase:   corev1api.PodFailed,
+					Message: "The node was low on resource: ephemeral-storage",
+					Reason:  "Evicted",
+				},
+			},
+			expected: "The node was low on resource: ephemeral-storage",
+		},
+		{
+			name: "pod with condition message when status message empty",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+					Conditions: []corev1api.PodCondition{
+						{
+							Type:    corev1api.PodReady,
+							Status:  corev1api.ConditionFalse,
+							Reason:  "ContainersNotReady",
+							Message: "containers with unready status: [app]",
+						},
+					},
+				},
+			},
+			expected: "ContainersNotReady: containers with unready status: [app]",
+		},
+		{
+			name: "pod with termination message only",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+					ContainerStatuses: []corev1api.ContainerStatus{
+						{
+							Name: "main",
+							State: corev1api.ContainerState{
+								Terminated: &corev1api.ContainerStateTerminated{
+									Message: "OOMKilled",
+									Reason:  "OOMKilled",
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: "OOMKilled/",
+		},
+		{
+			name: "pod with status message takes priority over condition",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase:   corev1api.PodFailed,
+					Message: "Status message should win",
+					Reason:  "Evicted",
+					Conditions: []corev1api.PodCondition{
+						{
+							Type:    corev1api.PodReady,
+							Status:  corev1api.ConditionFalse,
+							Reason:  "ConditionReason",
+							Message: "Condition message should not be used",
+						},
+					},
+				},
+			},
+			expected: "Status message should win",
+		},
+		{
+			name: "pod with no failure details",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+				},
+			},
+			expected: "",
+		},
+		{
+			name: "pod with succeeded phase",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodSucceeded,
+				},
+			},
+			expected: "",
+		},
+		{
+			name:     "pod is nil",
+			pod:      nil,
+			expected: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := GetPodFailureReason(test.pod)
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
 func TestGetLoadAffinityByStorageClass(t *testing.T) {
 	tests := []struct {
 		name             string

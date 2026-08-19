@@ -1,0 +1,1 @@
+Fix issue #10321, populate the failure reason on DataUpload/DataDownload/PodVolumeBackup/PodVolumeRestore when the data mover pod is evicted (fall back to pod status message/conditions when the container termination message is empty)

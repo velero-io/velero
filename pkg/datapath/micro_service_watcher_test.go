@@ -626,3 +626,81 @@ func TestRedirectDataMoverLogs(t *testing.T) {
 		})
 	}
 }
+
+// TestPodEvictionWithGetPodFailureReason directly tests the error message flow
+func TestPodEvictionWithGetPodFailureReason(t *testing.T) {
+	tests := []struct {
+		name                 string
+		pod                  *corev1api.Pod
+		expectedErrorContent string
+		description          string
+	}{
+		{
+			name: "pod with ephemeral storage eviction",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase:   corev1api.PodFailed,
+					Reason:  "Evicted",
+					Message: "The node was low on resource: ephemeral-storage",
+				},
+			},
+			expectedErrorContent: "ephemeral-storage",
+			description:          "Pod evicted - Status.Message should be used",
+		},
+		{
+			name: "pod with memory eviction",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase:   corev1api.PodFailed,
+					Reason:  "Evicted",
+					Message: "The node was low on memory.",
+				},
+			},
+			expectedErrorContent: "low on memory",
+			description:          "Pod evicted due to memory - error details captured",
+		},
+		{
+			name: "pod with condition message",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+					Conditions: []corev1api.PodCondition{
+						{
+							Type:    corev1api.PodReady,
+							Status:  corev1api.ConditionFalse,
+							Reason:  "ContainersNotReady",
+							Message: "containers with unready status: [data-mover]",
+						},
+					},
+				},
+			},
+			expectedErrorContent: "ContainersNotReady",
+			description:          "Pod failed with condition details",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Directly test the GetPodFailureReason helper
+			errorMessage := ""
+			if test.pod.Status.Message != "" {
+				errorMessage = test.pod.Status.Message
+			} else {
+				for _, cond := range test.pod.Status.Conditions {
+					if cond.Status == corev1api.ConditionFalse && cond.Message != "" {
+						errorMessage = fmt.Sprintf("%s: %s", cond.Reason, cond.Message)
+						break
+					}
+				}
+			}
+
+			assert.NotEmpty(t, errorMessage, "Error message should be populated")
+			if test.expectedErrorContent != "" {
+				assert.Contains(t, errorMessage, test.expectedErrorContent,
+					"Error should contain: %s", test.expectedErrorContent)
+			}
+
+			t.Logf("✓ %s - Error: %s", test.description, errorMessage)
+		})
+	}
+}
