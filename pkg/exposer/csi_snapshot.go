@@ -743,7 +743,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 
 	if csiSnapshotMetadataServiceConfigs != nil {
 		if csiSnapshotMetadataServiceConfigs.SAName != "" {
-			args = append(args, fmt.Sprintf("--csi-snapshot-metadata-service-sa=%s", csiSnapshotMetadataServiceConfigs.SAName))
+			args = append(args, fmt.Sprintf("--cbt-sa-name=%s", csiSnapshotMetadataServiceConfigs.SAName))
 		}
 	}
 
