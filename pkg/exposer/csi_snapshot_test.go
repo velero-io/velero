@@ -2198,3 +2198,62 @@ func TestGetCBTInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateBackupVSCDeletionPolicy(t *testing.T) {
+	tests := []struct {
+		name           string
+		sourcePolicy   snapshotv1api.DeletionPolicy
+		expectedPolicy snapshotv1api.DeletionPolicy
+	}{
+		{
+			name:           "Delete policy is inherited",
+			sourcePolicy:   snapshotv1api.VolumeSnapshotContentDelete,
+			expectedPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+		},
+		{
+			// The backup VSC points at the same snapshot handle as the source
+			// VSC, so forcing Delete here would destroy a snapshot the user
+			// asked to keep.
+			name:           "Retain policy is inherited",
+			sourcePolicy:   snapshotv1api.VolumeSnapshotContentRetain,
+			expectedPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handle := "fake-snapshot-handle"
+			className := "fake-snapshot-class"
+
+			sourceVSC := &snapshotv1api.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{Name: "source-vsc"},
+				Spec: snapshotv1api.VolumeSnapshotContentSpec{
+					DeletionPolicy:          test.sourcePolicy,
+					Driver:                  "fake-driver",
+					VolumeSnapshotClassName: &className,
+				},
+				Status: &snapshotv1api.VolumeSnapshotContentStatus{
+					SnapshotHandle: &handle,
+				},
+			}
+
+			exposer := csiSnapshotExposer{
+				csiSnapshotClient: snapshotFake.NewSimpleClientset().SnapshotV1(),
+				log:               velerotest.NewLogger(),
+			}
+
+			ownerObject := corev1api.ObjectReference{
+				Name:      "fake-du",
+				Namespace: "velero",
+			}
+			vs := &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "fake-du", Namespace: "velero"},
+			}
+
+			backupVSC, err := exposer.createBackupVSC(t.Context(), ownerObject, sourceVSC, vs)
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedPolicy, backupVSC.Spec.DeletionPolicy)
+			assert.Equal(t, handle, *backupVSC.Spec.Source.SnapshotHandle)
+		})
+	}
+}
