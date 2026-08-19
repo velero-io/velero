@@ -34,12 +34,11 @@ type BackupResult struct {
 	EmptySnapshot bool        `json:"emptySnapshot"`
 	Source        AccessPoint `json:"source,omitempty"`
 	TotalBytes    int64       `json:"totalBytes,omitempty"`
-	// IncrementalBytes deliberately carries no omitempty. This struct crosses a JSON
-	// boundary from the data mover pod to the controller (see
-	// micro_service_watcher.go), and every uploader always reports a figure here, so
-	// 0 means "nothing was transferred" rather than "not measured". Omitting it would
-	// erase that measurement and make a perfect incremental look like an unmeasured one.
-	IncrementalBytes int64 `json:"incrementalBytes"`
+	// IncrementalBytes is a pointer so an old data mover (release-1.17 and earlier,
+	// which predates this field) that omits it unmarshals to nil -- "not measured" --
+	// while a current mover reporting a genuine zero still serializes the key and
+	// unmarshals to a non-nil zero, distinguishing "measured zero" from "not measured".
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
 }
 
 // RestoreResult represents the result of a restore
