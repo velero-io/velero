@@ -151,6 +151,7 @@ func TestCreateBackupPodWithPriorityClass(t *testing.T) {
 				corev1api.ResourceRequirements{},
 				false, // backupPVCReadOnly
 				false, // spcNoRelabeling
+				false, // backupPVCReadWriteOncePod
 				kube.NodeOSLinux,
 				tc.expectedPriorityClass,
 				nil,
@@ -239,6 +240,7 @@ func TestCreateBackupPodWithMissingConfigMap(t *testing.T) {
 		corev1api.ResourceRequirements{},
 		false, // backupPVCReadOnly
 		false, // spcNoRelabeling
+		false, // backupPVCReadWriteOncePod
 		kube.NodeOSLinux,
 		"", // empty priority class since config map is missing
 		nil,
