@@ -324,9 +324,26 @@ func ExitPodWithMessage(logger logrus.FieldLogger, succeed bool, message string,
 	funcExit(exitCode)
 }
 
+// deepCopy returns a deep copy of the LoadAffinity, so that the returned value
+// can be safely modified without affecting the source.
+func (a *LoadAffinity) deepCopy() *LoadAffinity {
+	if a == nil {
+		return nil
+	}
+
+	result := &LoadAffinity{
+		StorageClass: a.StorageClass,
+	}
+	a.NodeSelector.DeepCopyInto(&result.NodeSelector)
+
+	return result
+}
+
 // GetLoadAffinityByStorageClass retrieves the LoadAffinity from the parameter affinityList.
 // The function first try to find by the scName. If there is no such LoadAffinity,
 // it will try to get the LoadAffinity whose StorageClass has no value.
+// The returned LoadAffinity is a deep copy of the matched element, so that the
+// callers can modify it without corrupting the shared node-agent configuration.
 func GetLoadAffinityByStorageClass(
 	affinityList []*LoadAffinity,
 	scName string,
@@ -337,7 +354,7 @@ func GetLoadAffinityByStorageClass(
 	for _, affinity := range affinityList {
 		if affinity.StorageClass == scName {
 			logger.WithField("StorageClass", scName).Info("Found pod's affinity setting per StorageClass.")
-			return affinity
+			return affinity.deepCopy()
 		}
 
 		if affinity.StorageClass == "" && globalAffinity == nil {
@@ -351,5 +368,5 @@ func GetLoadAffinityByStorageClass(
 		logger.Info("No Affinity is found for pod.")
 	}
 
-	return globalAffinity
+	return globalAffinity.deepCopy()
 }
