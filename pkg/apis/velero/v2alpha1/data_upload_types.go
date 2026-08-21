@@ -165,9 +165,13 @@ type DataUploadStatus struct {
 	// +optional
 	Progress shared.DataMoveOperationProgress `json:"progress,omitempty"`
 
-	// IncrementalBytes holds the number of bytes new or changed since the last backup
+	// IncrementalBytes holds the number of bytes new or changed since the last backup.
+	// A nil value means the uploader did not report a figure; a pointer to 0 means it
+	// reported zero, i.e. nothing changed and nothing was transferred. The two are
+	// distinct: erasing a measured zero makes a perfect incremental indistinguishable
+	// from a full transfer in every downstream report.
 	// +optional
-	IncrementalBytes int64 `json:"incrementalBytes,omitempty"`
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
 
 	// Node is name of the node where the DataUpload is processed.
 	// +optional

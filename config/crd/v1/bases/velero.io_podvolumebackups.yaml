@@ -205,8 +205,12 @@ spec:
                 nullable: true
                 type: string
               incrementalBytes:
-                description: IncrementalBytes holds the number of bytes new or changed
-                  since the last backup
+                description: |-
+                  IncrementalBytes holds the number of bytes new or changed since the last backup.
+                  A nil value means the uploader did not report a figure; a pointer to 0 means it
+                  reported zero, i.e. nothing changed and nothing was transferred. The two are
+                  distinct: erasing a measured zero makes a perfect incremental indistinguishable
+                  from a full transfer in every downstream report.
                 format: int64
                 type: integer
               message:

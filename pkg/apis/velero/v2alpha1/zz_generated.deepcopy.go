@@ -270,6 +270,11 @@ func (in *DataUploadStatus) DeepCopyInto(out *DataUploadStatus) {
 		*out = (*in).DeepCopy()
 	}
 	out.Progress = in.Progress
+	if in.IncrementalBytes != nil {
+		in, out := &in.IncrementalBytes, &out.IncrementalBytes
+		*out = new(int64)
+		**out = **in
+	}
 	if in.AcceptedTimestamp != nil {
 		in, out := &in.AcceptedTimestamp, &out.AcceptedTimestamp
 		*out = (*in).DeepCopy()
