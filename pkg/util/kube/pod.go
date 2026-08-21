@@ -142,7 +142,7 @@ func EnsureDeletePod(ctx context.Context, podGetter corev1client.CoreV1Interface
 
 // IsPodUnrecoverable checks if the pod is in an abnormal state and could not be recovered
 // It could not cover all the cases but we could add more cases in the future
-func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
+func IsPodUnrecoverable(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
 	// Check the Phase field
 	if pod.Status.Phase == corev1api.PodFailed || pod.Status.Phase == corev1api.PodUnknown {
 		message := ""
@@ -156,7 +156,9 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 		return true, fmt.Sprintf("Pod is in abnormal state [%s], message [%s]", pod.Status.Phase, message)
 	}
 
-	// removed "Unschedulable" check since unschedulable condition isn't always permanent
+	// removed "Unschedulable" check since unschedulable condition isn't always permanent -- see
+	// the node-affinity check below for the one case (zero nodes can ever satisfy the pod's
+	// required node affinity) narrow enough to still treat as permanent.
 
 	// Check the Status field
 	for _, containerStatus := range pod.Status.ContainerStatuses {
@@ -166,37 +168,45 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 			return true, fmt.Sprintf("Container %s in Pod %s/%s is in pull image failed with reason %s", containerStatus.Name, pod.Namespace, pod.Name, containerStatus.State.Waiting.Reason)
 		}
 	}
+
+	// Node affinity requirements are purely label-based (they match node labels, not capacity),
+	// so if zero EXISTING nodes' labels satisfy them, it's very likely a permanent scheduling
+	// mismatch, most commonly caused by a node-agent loadAffinity configuration that references
+	// labels no node actually has - though a brand new node joining later with different labels
+	// (e.g. a fresh autoscaled node pool) could still resolve it, which is exactly why this only
+	// fires after the grace period below, not on the first observation. Reporting it once
+	// persistent, rather than waiting out the full preparing/operation timeout, gives users an
+	// actionable error instead of an opaque "timeout" message.
+	if unschedulable, reason := isPodUnschedulableDueToNodeAffinity(ctx, kubeClient, pod); unschedulable {
+		return true, reason
+	}
+
 	return false, ""
 }
 
-// IsPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition has held
-// False for at least unschedulableNodeAffinityGracePeriod, with its required node affinity
-// unsatisfiable by ANY node currently in the cluster.
+// unschedulableNodeAffinityGracePeriod is the minimum time the PodScheduled condition must have
+// held False before isPodUnschedulableDueToNodeAffinity will treat a node-affinity mismatch as
+// permanent. Without this, a single node-list snapshot taken at exactly the wrong moment (e.g. a
+// cluster-autoscaler-provisioned node that matches the affinity but hasn't finished
+// joining/registering yet, or an admin mid-relabel) could cause a false permanent verdict on
+// what's actually about to resolve itself - the same trap that #9697 hit with a blanket
+// Unschedulable check.
 //
-// This is deliberately narrower than a blanket "Unschedulable" phase check - see the comment
-// above in IsPodUnrecoverable: a generic Unschedulable check was removed because Unschedulable
-// isn't always permanent (e.g. insufficient CPU/memory can resolve via cluster autoscaling,
-// untolerated taints can be removed, another pod can complete and free resources). Node
-// affinity requirements, in contrast, are purely label-based (they match node labels, not
-// capacity), so if zero EXISTING nodes' labels satisfy them, it's very likely a permanent
-// scheduling mismatch, most commonly caused by a node-agent loadAffinity configuration that
-// references labels no node actually has - though a brand new node joining later with
-// different labels (e.g. a fresh autoscaled node pool) could still resolve it, which is
-// exactly why this only fires after the grace period, not on the first observation. Reporting
-// it once persistent, rather than waiting out the full preparing/operation timeout, gives
-// users an actionable error instead of an opaque "timeout" message.
+// Deliberately set toward the generous end of "long enough to ride out ordinary node-join
+// latency": a false "permanent" verdict silently fails the data mover, while a slower-than-ideal
+// but correct verdict just costs a few extra minutes of an operation that was already going to
+// take a while. 5 minutes is still well short of the default ~10 minute preparing/operation
+// timeout, so misconfigured node affinity (the actual permanent case this exists for) is still
+// reported far faster than that opaque timeout would.
+const unschedulableNodeAffinityGracePeriod = 5 * time.Minute
 
-// unschedulableNodeAffinityGracePeriod is the minimum time the PodScheduled condition must
-// have held False before IsPodUnschedulableDueToNodeAffinity will treat a node-affinity
-// mismatch as permanent. Without this, a single node-list snapshot taken at exactly the wrong
-// moment (e.g. a cluster-autoscaler-provisioned node that matches the affinity but hasn't
-// finished joining/registering yet, or an admin mid-relabel) could cause a false permanent
-// verdict on what's actually about to resolve itself - the same trap that #9697 hit with a
-// blanket Unschedulable check. Chosen short enough to still fail much faster than the default
-// ~10 minute preparing/operation timeout, long enough to ride out ordinary node-join latency.
-const unschedulableNodeAffinityGracePeriod = 2 * time.Minute
-
-func IsPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod) (bool, string) {
+// isPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition has held
+// False for at least unschedulableNodeAffinityGracePeriod, with its required node affinity
+// unsatisfiable by ANY node currently in the cluster. See the comment on
+// unschedulableNodeAffinityGracePeriod above for why this only fires after the grace period, and
+// the comment on IsPodUnrecoverable above for why this check is narrower than a blanket
+// Unschedulable check.
+func isPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod) (bool, string) {
 	cond := getPodScheduledCondition(pod)
 	if cond == nil || cond.Status != corev1api.ConditionFalse {
 		return false, ""
@@ -240,17 +250,6 @@ func getPodScheduledCondition(pod *corev1api.Pod) *corev1api.PodCondition {
 		}
 	}
 	return nil
-}
-
-// IsPodUnrecoverableOrUnschedulable combines IsPodUnrecoverable and
-// IsPodUnschedulableDueToNodeAffinity into the single check callers actually want: "has this
-// pod reached a state it cannot recover from, and if so why". Kept as two separate functions
-// above so each is independently testable, but every current caller wants both checks together.
-func IsPodUnrecoverableOrUnschedulable(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
-	if unrecoverable, reason := IsPodUnrecoverable(pod, log); unrecoverable {
-		return true, reason
-	}
-	return IsPodUnschedulableDueToNodeAffinity(ctx, kubeClient, pod)
 }
 
 // nodeAffinitySatisfiableByAny reports whether any node in nodes satisfies any of terms.
