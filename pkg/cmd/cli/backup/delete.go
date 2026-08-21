@@ -122,6 +122,17 @@ func Run(o *cli.DeleteOptions) error {
 
 	// create a backup deletion request for each
 	for _, b := range backups {
+		location := &velerov1api.BackupStorageLocation{}
+		if err := o.Client.Get(context.TODO(), controllerclient.ObjectKey{Namespace: o.Namespace, Name: b.Spec.StorageLocation}, location); err != nil {
+			errs = append(errs, errors.WithStack(err))
+			continue
+		}
+
+		if location.Spec.AccessMode == velerov1api.BackupStorageLocationAccessModeReadOnly {
+			errs = append(errs, errors.Errorf("cannot delete backup %q because backup storage location %q is currently in read-only mode", b.Name, location.Name))
+			continue
+		}
+
 		deleteRequest := builder.ForDeleteBackupRequest(o.Namespace, "").BackupName(b.Name).
 			ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, label.GetValidName(b.Name),
 				velerov1api.BackupUIDLabel, string(b.UID)), builder.WithGenerateName(b.Name+"-")).Result()

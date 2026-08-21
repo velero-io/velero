@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
@@ -81,4 +82,34 @@ func TestDeleteCommand(t *testing.T) {
 	if err != nil {
 		require.Contains(t, stdout, fmt.Sprintf("backups.velero.io \"%s\" not found.", backup2))
 	}
+}
+
+func TestDeleteCommandReadOnlyBSL(t *testing.T) {
+	const (
+		backupName = "backup-readonly"
+		bslName    = "readonly-bsl"
+	)
+
+	client := velerotest.NewFakeControllerRuntimeClient(t)
+	require.NoError(t, client.Create(t.Context(), builder.ForBackupStorageLocation(cmdtest.VeleroNameSpace, bslName).
+		AccessMode(velerov1api.BackupStorageLocationAccessModeReadOnly).
+		Phase(velerov1api.BackupStorageLocationPhaseAvailable).
+		Result(), &controllerclient.CreateOptions{}))
+	require.NoError(t, client.Create(t.Context(), builder.ForBackup(cmdtest.VeleroNameSpace, backupName).
+		StorageLocation(bslName).
+		Result(), &controllerclient.CreateOptions{}))
+
+	o := cli.NewDeleteOptions("backup")
+	o.Client = client
+	o.Namespace = cmdtest.VeleroNameSpace
+	o.Confirm = true
+	o.Names = []string{backupName}
+
+	err := Run(o)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), fmt.Sprintf("cannot delete backup %q because backup storage location %q is currently in read-only mode", backupName, bslName))
+
+	deleteRequestList := new(velerov1api.DeleteBackupRequestList)
+	require.NoError(t, client.List(t.Context(), deleteRequestList, &controllerclient.ListOptions{Namespace: cmdtest.VeleroNameSpace}))
+	require.Empty(t, deleteRequestList.Items)
 }
