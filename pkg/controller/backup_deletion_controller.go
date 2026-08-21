@@ -136,9 +136,9 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Since we use the reconciler along with the PeriodicalEnqueueSource, there may be reconciliation triggered by
-	// stale requests.
-	if dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseProcessed ||
-		dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseInProgress {
+	// stale requests. Processed requests are terminal and can be cleaned up once expired. InProgress requests are
+	// re-processed so a failed final status patch does not leave the request stuck until expiry.
+	if dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseProcessed {
 		age := r.clock.Now().Sub(dbr.CreationTimestamp.Time)
 		if age >= deleteBackupRequestMaxAge { // delete the expired request
 			log.Debugf("The request is expired, status: %s, deleting it.", dbr.Status.Phase)

@@ -48,6 +48,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
 	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
@@ -789,6 +790,82 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
 		assert.True(t, apierrors.IsNotFound(err), "Expected not found error, but actual value of error: %v", err)
 		td.backupStore.AssertNotCalled(t, "DeleteBackup", mock.Anything)
+	})
+
+	t.Run("InProgress request is re-processed instead of skipped", func(t *testing.T) {
+		input := defaultTestDbr()
+		input.Status.Phase = velerov1api.DeleteBackupRequestPhaseInProgress
+		input.Labels = map[string]string{
+			velerov1api.BackupNameLabel: label.GetValidName(input.Spec.BackupName),
+			velerov1api.BackupUIDLabel:  "uid",
+		}
+
+		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").Result()
+		backup.UID = "uid"
+		backup.Spec.StorageLocation = "primary"
+
+		location := &velerov1api.BackupStorageLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      backup.Spec.StorageLocation,
+			},
+			Spec: velerov1api.BackupStorageLocationSpec{
+				Provider: "objStoreProvider",
+				StorageType: velerov1api.StorageType{
+					ObjectStorage: &velerov1api.ObjectStorageLocation{
+						Bucket: "bucket",
+					},
+				},
+			},
+			Status: velerov1api.BackupStorageLocationStatus{
+				Phase: velerov1api.BackupStorageLocationPhaseAvailable,
+			},
+		}
+
+		td := setupBackupDeletionControllerTest(t, input, backup, location)
+
+		pluginManager := &pluginmocks.Manager{}
+		pluginManager.On("GetDeleteItemActions").Return(nil, nil)
+		pluginManager.On("CleanupClients")
+		td.controller.newPluginManager = func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager }
+
+		td.backupStore.On("GetBackupVolumeSnapshots", input.Spec.BackupName).Return(nil, nil)
+		td.backupStore.On("DeleteBackup", input.Spec.BackupName).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		res := &velerov1api.DeleteBackupRequest{}
+		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
+		assert.True(t, apierrors.IsNotFound(err), "Expected DBR to be deleted after retrying InProgress request, but actual error: %v", err)
+
+		err = td.fakeClient.Get(t.Context(), types.NamespacedName{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      backup.Name,
+		}, &velerov1api.Backup{})
+		assert.True(t, apierrors.IsNotFound(err), "Expected backup CR to be deleted after retrying InProgress request, but actual error: %v", err)
+	})
+
+	t.Run("Expired InProgress request is re-processed instead of deleted", func(t *testing.T) {
+		expired := time.Date(2018, 4, 3, 12, 0, 0, 0, time.UTC)
+		input := defaultTestDbr()
+		input.CreationTimestamp = metav1.Time{
+			Time: expired,
+		}
+		input.Status.Phase = velerov1api.DeleteBackupRequestPhaseInProgress
+
+		td := setupBackupDeletionControllerTest(t, input)
+		td.backupStore.On("DeleteBackup", mock.Anything).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		res := &velerov1api.DeleteBackupRequest{}
+		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
+		require.NoError(t, err)
+		assert.Equal(t, "Processed", string(res.Status.Phase))
+		assert.Len(t, res.Status.Errors, 1)
+		assert.Equal(t, "backup not found", res.Status.Errors[0])
 	})
 
 	t.Run("Expired request will not be deleted if the status is not processed", func(t *testing.T) {
