@@ -341,7 +341,7 @@ func (e *genericRestoreExposer) PeekExposed(ctx context.Context, ownerObject cor
 		return nil
 	}
 
-	if podFailed, message := kube.IsPodUnrecoverable(pod, curLog); podFailed {
+	if podFailed, message := kube.IsPodUnrecoverable(ctx, e.kubeClient, pod, curLog); podFailed {
 		return errors.New(message)
 	}
 

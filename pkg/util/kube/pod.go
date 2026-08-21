@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
@@ -146,7 +148,7 @@ func EnsureDeletePod(ctx context.Context, podGetter corev1client.CoreV1Interface
 
 // IsPodUnrecoverable checks if the pod is in an abnormal state and could not be recovered
 // It could not cover all the cases but we could add more cases in the future
-func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
+func IsPodUnrecoverable(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod, log logrus.FieldLogger) (bool, string) {
 	// Check the Phase field
 	if pod.Status.Phase == corev1api.PodFailed || pod.Status.Phase == corev1api.PodUnknown {
 		message := ""
@@ -160,7 +162,9 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 		return true, fmt.Sprintf("Pod is in abnormal state [%s], message [%s]", pod.Status.Phase, message)
 	}
 
-	// removed "Unschedulable" check since unschedulable condition isn't always permanent
+	// removed "Unschedulable" check since unschedulable condition isn't always permanent -- see
+	// the node-affinity check below for the one case (zero nodes can ever satisfy the pod's
+	// required node affinity) narrow enough to still treat as permanent.
 
 	// Check the Status field
 	for _, containerStatus := range pod.Status.ContainerStatuses {
@@ -170,7 +174,138 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 			return true, fmt.Sprintf("Container %s in Pod %s/%s is in pull image failed with reason %s", containerStatus.Name, pod.Namespace, pod.Name, containerStatus.State.Waiting.Reason)
 		}
 	}
+
+	// Node affinity requirements are purely label-based (they match node labels, not capacity),
+	// so if zero EXISTING nodes' labels satisfy them, it's very likely a permanent scheduling
+	// mismatch, most commonly caused by a node-agent loadAffinity configuration that references
+	// labels no node actually has - though a brand new node joining later with different labels
+	// (e.g. a fresh autoscaled node pool) could still resolve it, which is exactly why this only
+	// fires after the grace period below, not on the first observation. Reporting it once
+	// persistent, rather than waiting out the full preparing/operation timeout, gives users an
+	// actionable error instead of an opaque "timeout" message.
+	if unschedulable, reason := isPodUnschedulableDueToNodeAffinity(ctx, kubeClient, pod); unschedulable {
+		return true, reason
+	}
+
 	return false, ""
+}
+
+// unschedulableNodeAffinityGracePeriod is the minimum time the PodScheduled condition must have
+// held False before isPodUnschedulableDueToNodeAffinity will treat a node-affinity mismatch as
+// permanent. Without this, a single node-list snapshot taken at exactly the wrong moment (e.g. a
+// cluster-autoscaler-provisioned node that matches the affinity but hasn't finished
+// joining/registering yet, or an admin mid-relabel) could cause a false permanent verdict on
+// what's actually about to resolve itself - the same trap that #9697 hit with a blanket
+// Unschedulable check.
+//
+// Deliberately set toward the generous end of "long enough to ride out ordinary node-join
+// latency": a false "permanent" verdict silently fails the data mover, while a slower-than-ideal
+// but correct verdict just costs a few extra minutes of an operation that was already going to
+// take a while. 5 minutes is still well short of the default ~10 minute preparing/operation
+// timeout, so misconfigured node affinity (the actual permanent case this exists for) is still
+// reported far faster than that opaque timeout would.
+const unschedulableNodeAffinityGracePeriod = 5 * time.Minute
+
+// isPodUnschedulableDueToNodeAffinity reports whether pod's PodScheduled condition has held
+// False for at least unschedulableNodeAffinityGracePeriod, with its required node affinity
+// unsatisfiable by ANY node currently in the cluster. See the comment on
+// unschedulableNodeAffinityGracePeriod above for why this only fires after the grace period, and
+// the comment on IsPodUnrecoverable above for why this check is narrower than a blanket
+// Unschedulable check.
+func isPodUnschedulableDueToNodeAffinity(ctx context.Context, kubeClient kubernetes.Interface, pod *corev1api.Pod) (bool, string) {
+	cond := getPodScheduledCondition(pod)
+	if cond == nil || cond.Status != corev1api.ConditionFalse {
+		return false, ""
+	}
+
+	if time.Since(cond.LastTransitionTime.Time) < unschedulableNodeAffinityGracePeriod {
+		// Too recent to distinguish from a transient/in-progress scheduling situation.
+		return false, ""
+	}
+
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return false, ""
+	}
+
+	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	if len(terms) == 0 {
+		return false, ""
+	}
+
+	nodeList, err := kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// Can't verify one way or the other; don't claim a permanent mismatch on missing data.
+		return false, ""
+	}
+
+	if nodeAffinitySatisfiableByAny(nodeList.Items, terms) {
+		return false, ""
+	}
+
+	return true, fmt.Sprintf(
+		"pod %s/%s has been unschedulable for over %s: no node in the cluster satisfies its required node affinity, so this cannot resolve by waiting; reported scheduling failure: %s",
+		pod.Namespace, pod.Name, unschedulableNodeAffinityGracePeriod, cond.Message,
+	)
+}
+
+func getPodScheduledCondition(pod *corev1api.Pod) *corev1api.PodCondition {
+	for i := range pod.Status.Conditions {
+		if pod.Status.Conditions[i].Type == corev1api.PodScheduled {
+			return &pod.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
+// nodeAffinitySatisfiableByAny reports whether any node in nodes satisfies any of terms.
+// NodeSelectorTerms are OR'd together; a single term's MatchExpressions are AND'd (matching
+// standard Kubernetes node affinity semantics). MatchFields is intentionally not evaluated,
+// and Gt/Lt operators are intentionally treated as always-satisfiable (see
+// nodeMatchesSelectorRequirement): the only producer of node affinity for the pods this
+// function is ever called on is Velero's own ToSystemAffinity, which builds MatchExpressions
+// exclusively from a metav1.LabelSelector (LoadAffinity.NodeSelector) - a type whose operator
+// enum has no Gt/Lt - plus CSI topology requirements, which are always simple equality
+// matches. Neither MatchFields nor Gt/Lt can occur in practice here; implementing them (or
+// pulling in k8s.io/component-helpers/scheduling/corev1/nodeaffinity as a new dependency to
+// get them for free) would be dead code for this caller.
+func nodeAffinitySatisfiableByAny(nodes []corev1api.Node, terms []corev1api.NodeSelectorTerm) bool {
+	for i := range nodes {
+		for _, term := range terms {
+			if nodeMatchesSelectorTerm(&nodes[i], term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nodeMatchesSelectorTerm(node *corev1api.Node, term corev1api.NodeSelectorTerm) bool {
+	for _, req := range term.MatchExpressions {
+		if !nodeMatchesSelectorRequirement(node, req) {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeMatchesSelectorRequirement(node *corev1api.Node, req corev1api.NodeSelectorRequirement) bool {
+	value, exists := node.Labels[req.Key]
+	switch req.Operator {
+	case corev1api.NodeSelectorOpIn:
+		return exists && slices.Contains(req.Values, value)
+	case corev1api.NodeSelectorOpNotIn:
+		return !exists || !slices.Contains(req.Values, value)
+	case corev1api.NodeSelectorOpExists:
+		return exists
+	case corev1api.NodeSelectorOpDoesNotExist:
+		return !exists
+	default:
+		// NodeSelectorOpGt/Lt and any future/unknown operator: don't have a precise
+		// implementation here, so err on the side of "might be satisfiable" rather than
+		// risk a false permanent-mismatch report.
+		return true
+	}
 }
 
 // GetPodContainerTerminateMessage returns the terminate message for a specific container of a pod
