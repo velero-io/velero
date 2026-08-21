@@ -532,7 +532,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 
 	if len(c.plugins) > 0 {
 		for _, image := range c.plugins {
-			container := *builder.ForPluginContainer(image, pullPolicy).Result()
+			container := *builder.ForPluginContainer(image, pullPolicy, deployment.Spec.Template.Spec.InitContainers).Result()
 			deployment.Spec.Template.Spec.InitContainers = append(deployment.Spec.Template.Spec.InitContainers, container)
 		}
 	}

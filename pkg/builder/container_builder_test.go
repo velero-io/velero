@@ -16,16 +16,19 @@ limitations under the License.
 package builder
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	corev1api "k8s.io/api/core/v1"
 )
 
 func TestGetName(t *testing.T) {
 	tests := []struct {
-		name     string
-		image    string
-		expected string
+		name               string
+		image              string
+		existingContainers []corev1api.Container
+		expected           string
 	}{
 		{
 			name:     "image name with registry hostname and tag",
@@ -92,11 +95,25 @@ func TestGetName(t *testing.T) {
 			image:    "quay.io/vmware-tanzu/velero@sha256:a75f9e8c3ced3943515f249597be389f8233e1258d289b11184796edceaa7dab",
 			expected: "vmware-tanzu-velero",
 		},
+		{
+			name:  "duplicate plugin name",
+			image: "gcr.io/my-repo/my-image:latest",
+			existingContainers: []corev1api.Container{
+				{Name: "my-repo-my-image"},
+			},
+			expected: "my-repo-my-image-", // we will check it has the prefix
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.expected, getName(test.image))
+			if test.name == "duplicate plugin name" {
+				result := getName(test.image, test.existingContainers)
+				assert.True(t, strings.HasPrefix(result, test.expected), "expected prefix %s in %s", test.expected, result)
+				assert.Len(t, result, len(test.expected)+5)
+			} else {
+				assert.Equal(t, test.expected, getName(test.image, test.existingContainers))
+			}
 		})
 	}
 }
@@ -117,7 +134,7 @@ func TestGetNameWithLongPaths(t *testing.T) {
 				// Should be exactly 63 characters (truncated with hash)
 				assert.Len(t, result, 63)
 				// Should be deterministic
-				result2 := getName("arohcpsvcdev.azurecr.io/redhat-user-workloads/ocp-art-tenant/oadp-hypershift-oadp-plugin-main@sha256:adb840bf3890b4904a8cdda1a74c82cf8d96c52eba9944ac10e795335d6fd450")
+				result2 := getName("arohcpsvcdev.azurecr.io/redhat-user-workloads/ocp-art-tenant/oadp-hypershift-oadp-plugin-main@sha256:adb840bf3890b4904a8cdda1a74c82cf8d96c52eba9944ac10e795335d6fd450", nil)
 				assert.Equal(t, result, result2)
 			},
 		},
@@ -142,7 +159,7 @@ func TestGetNameWithLongPaths(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := getName(test.image)
+			result := getName(test.image, nil)
 			test.validate(t, result)
 		})
 	}
