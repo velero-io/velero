@@ -430,7 +430,7 @@ func TestBackupPodVolumes(t *testing.T) {
 			},
 			uploaderType: "kopia",
 			errs: []string{
-				"daemonset pod not found in running state in node fake-node-name",
+				"daemonset pod not found in node fake-node-name",
 			},
 		},
 		{
