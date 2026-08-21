@@ -4331,7 +4331,7 @@ func (a *pluggableIBA) Name() string {
 }
 
 type harness struct {
-	*test.APIServer
+	*test.Harness
 	backupper     *kubernetesBackupper
 	log           logrus.FieldLogger
 	itemBlockPool ItemBlockWorkerPool
@@ -4339,23 +4339,7 @@ type harness struct {
 
 func (h *harness) addItems(t *testing.T, resource *test.APIResource) {
 	t.Helper()
-
-	h.DiscoveryClient.WithAPIResource(resource)
-	require.NoError(t, h.backupper.discoveryHelper.Refresh())
-
-	for _, item := range resource.Items {
-		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
-		require.NoError(t, err)
-
-		unstructuredObj := &unstructured.Unstructured{Object: obj}
-
-		if resource.Namespaced {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Namespace(item.GetNamespace()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		} else {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		}
-		require.NoError(t, err)
-	}
+	h.Harness.AddResource(t, h.backupper.discoveryHelper, resource)
 }
 
 func newHarness(t *testing.T, itemBlockPool *ItemBlockWorkerPool) *harness {
@@ -4364,18 +4348,18 @@ func newHarness(t *testing.T, itemBlockPool *ItemBlockWorkerPool) *harness {
 	apiServer := test.NewAPIServer(t)
 	log := logrus.StandardLogger()
 
-	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
+	dh, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
 	require.NoError(t, err)
 
 	if itemBlockPool == nil {
 		itemBlockPool = StartItemBlockWorkerPool(t.Context(), 1, log)
 	}
 	return &harness{
-		APIServer: apiServer,
+		Harness: test.NewHarness(t, apiServer),
 		backupper: &kubernetesBackupper{
 			kbClient:        test.NewFakeControllerRuntimeClient(t),
 			dynamicFactory:  client.NewDynamicFactory(apiServer.DynamicClient),
-			discoveryHelper: discoveryHelper,
+			discoveryHelper: dh,
 
 			// unsupported
 			podCommandExecutor:        nil,

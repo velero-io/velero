@@ -4367,10 +4367,10 @@ func assertNonEmptyResults(t *testing.T, typeMsg string, res ...Result) {
 }
 
 type harness struct {
-	*test.APIServer
-
-	restorer *kubernetesRestorer
-	log      logrus.FieldLogger
+	*test.Harness
+	discoveryHelper discovery.Helper
+	restorer        *kubernetesRestorer
+	log             logrus.FieldLogger
 }
 
 func newHarness(t *testing.T) *harness {
@@ -4380,13 +4380,14 @@ func newHarness(t *testing.T) *harness {
 	log := logrus.StandardLogger()
 	kbClient := test.NewFakeControllerRuntimeClient(t)
 
-	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
+	dh, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
 	require.NoError(t, err)
 
 	return &harness{
-		APIServer: apiServer,
+		Harness:         test.NewHarness(t, apiServer),
+		discoveryHelper: dh,
 		restorer: &kubernetesRestorer{
-			discoveryHelper:            discoveryHelper,
+			discoveryHelper:            dh,
 			dynamicFactory:             client.NewDynamicFactory(apiServer.DynamicClient),
 			namespaceClient:            apiServer.KubeClient.CoreV1().Namespaces(),
 			resourceTerminatingTimeout: time.Minute,
@@ -4407,7 +4408,7 @@ func (h *harness) AddItems(t *testing.T, resource *test.APIResource) {
 	t.Helper()
 
 	h.DiscoveryClient.WithAPIResource(resource)
-	require.NoError(t, h.restorer.discoveryHelper.Refresh())
+	require.NoError(t, h.discoveryHelper.Refresh())
 
 	for _, item := range resource.Items {
 		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
