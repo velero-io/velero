@@ -54,6 +54,12 @@ const (
 	// RepositoryTypeLabel is the label key used to identify the type of a repository
 	RepositoryTypeLabel = "velero.io/repository-type"
 
+	// BSLConfigHashAnnotation records a hash of the BSL storage config (bucket, prefix,
+	// CA certificate and config) that a BackupRepository was last made Ready against, so
+	// that BSL changes not observed by the server (e.g. made while it was not running)
+	// can be detected on reconciliation.
+	BSLConfigHashAnnotation = "velero.io/bsl-config-hash"
+
 	// DataUploadLabel is the label key used to identify the dataupload for snapshot backup pod
 	DataUploadLabel = "velero.io/data-upload"
 
