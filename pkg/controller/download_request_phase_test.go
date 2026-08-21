@@ -31,7 +31,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	v1crds "github.com/vmware-tanzu/velero/config/crd/v1/crds"
+	v1crds "github.com/vmware-tanzu/velero/config/crd/v1"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
