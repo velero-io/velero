@@ -1,0 +1,1 @@
+Fix nil pointer dereference in WaitUntilVSCHandleIsReady when a VolumeSnapshotContent error has no message
