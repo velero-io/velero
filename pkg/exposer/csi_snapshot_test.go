@@ -219,6 +219,7 @@ func TestExpose(t *testing.T) {
 		err                           string
 		expectedVolumeSize            *resource.Quantity
 		expectedReadOnlyPVC           bool
+		expectedRWOPPVC               bool
 		expectedBackupPVCStorageClass string
 		expectedAffinity              *corev1api.Affinity
 		expectedPVCAnnotation         map[string]string
@@ -654,6 +655,95 @@ func TestExpose(t *testing.T) {
 			},
 			expectedReadOnlyPVC:           true,
 			expectedBackupPVCStorageClass: "fake-sc-read-only",
+			expectedAffinity: &corev1api.Affinity{
+				NodeAffinity: &corev1api.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+						NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      corev1api.LabelOSStable,
+										Operator: corev1api.NodeSelectorOpNotIn,
+										Values:   []string{"windows"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:        "backupPVC uses ReadWriteOncePod access mode",
+			ownerBackup: backup,
+			exposeParam: CSISnapshotExposeParam{
+				SnapshotName:     "fake-vs",
+				SourceNamespace:  "fake-ns",
+				StorageClass:     "fake-sc",
+				SourcePVName:     "fake-pv",
+				AccessMode:       AccessModeFileSystem,
+				OperationTimeout: time.Millisecond,
+				ExposeTimeout:    time.Millisecond,
+				BackupPVCConfig: map[string]velerotypes.BackupPVC{
+					"fake-sc": {
+						ReadWriteOncePod: true,
+					},
+				},
+			},
+			snapshotClientObj: []runtime.Object{
+				vsObject,
+				vscObj,
+			},
+			kubeClientObj: []runtime.Object{
+				daemonSet,
+				scObj,
+			},
+			expectedRWOPPVC: true,
+			expectedAffinity: &corev1api.Affinity{
+				NodeAffinity: &corev1api.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+						NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      corev1api.LabelOSStable,
+										Operator: corev1api.NodeSelectorOpNotIn,
+										Values:   []string{"windows"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:        "readOnly takes precedence over readWriteOncePod",
+			ownerBackup: backup,
+			exposeParam: CSISnapshotExposeParam{
+				SnapshotName:     "fake-vs",
+				SourceNamespace:  "fake-ns",
+				StorageClass:     "fake-sc",
+				SourcePVName:     "fake-pv",
+				AccessMode:       AccessModeFileSystem,
+				OperationTimeout: time.Millisecond,
+				ExposeTimeout:    time.Millisecond,
+				BackupPVCConfig: map[string]velerotypes.BackupPVC{
+					"fake-sc": {
+						ReadOnly:         true,
+						ReadWriteOncePod: true,
+					},
+				},
+			},
+			snapshotClientObj: []runtime.Object{
+				vsObject,
+				vscObj,
+			},
+			kubeClientObj: []runtime.Object{
+				daemonSet,
+				scObj,
+			},
+			expectedReadOnlyPVC: true,
 			expectedAffinity: &corev1api.Affinity{
 				NodeAffinity: &corev1api.NodeAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
@@ -1150,6 +1240,12 @@ func TestExpose(t *testing.T) {
 					assert.Equal(t, test.expectedReadOnlyPVC, gotReadOnlyAccessMode)
 				}
 
+				if test.expectedRWOPPVC {
+					assert.Equal(t, []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOncePod}, backupPVC.Spec.AccessModes)
+				} else {
+					assert.NotContains(t, backupPVC.Spec.AccessModes, corev1api.ReadWriteOncePod)
+				}
+
 				if test.expectedBackupPVCStorageClass != "" {
 					assert.Equal(t, test.expectedBackupPVCStorageClass, *backupPVC.Spec.StorageClassName)
 				}
@@ -1521,6 +1617,37 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 		},
 	}
 
+	backupPVCReadWriteOncePod := corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   velerov1.DefaultNamespace,
+			Name:        "fake-backup",
+			Annotations: map[string]string{},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: backup.APIVersion,
+					Kind:       backup.Kind,
+					Name:       backup.Name,
+					UID:        backup.UID,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+		Spec: corev1api.PersistentVolumeClaimSpec{
+			AccessModes: []corev1api.PersistentVolumeAccessMode{
+				corev1api.ReadWriteOncePod,
+			},
+			VolumeMode:       &volumeMode,
+			DataSource:       dataSource,
+			DataSourceRef:    nil,
+			StorageClassName: ptr.To("fake-storage-class"),
+			Resources: corev1api.VolumeResourceRequirements{
+				Requests: corev1api.ResourceList{
+					corev1api.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name              string
 		ownerBackup       *velerov1.Backup
@@ -1529,6 +1656,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 		accessMode        string
 		resource          resource.Quantity
 		readOnly          bool
+		readWriteOncePod  bool
 		kubeClientObj     []runtime.Object
 		snapshotClientObj []runtime.Object
 		want              *corev1api.PersistentVolumeClaim
@@ -1556,6 +1684,30 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 			want:         &backupPVCReadOnly,
 			wantErr:      assert.NoError,
 		},
+		{
+			name:             "backupPVC gets created with ReadWriteOncePod access mode when readWriteOncePod is set",
+			ownerBackup:      backup,
+			backupVS:         "fake-snapshot",
+			storageClass:     "fake-storage-class",
+			accessMode:       AccessModeFileSystem,
+			resource:         resource.MustParse("1Gi"),
+			readOnly:         false,
+			readWriteOncePod: true,
+			want:             &backupPVCReadWriteOncePod,
+			wantErr:          assert.NoError,
+		},
+		{
+			name:             "readOnly takes precedence over readWriteOncePod",
+			ownerBackup:      backup,
+			backupVS:         "fake-snapshot",
+			storageClass:     "fake-storage-class",
+			accessMode:       AccessModeFileSystem,
+			resource:         resource.MustParse("1Gi"),
+			readOnly:         true,
+			readWriteOncePod: true,
+			want:             &backupPVCReadOnly,
+			wantErr:          assert.NoError,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1576,7 +1728,7 @@ func Test_csiSnapshotExposer_createBackupPVC(t *testing.T) {
 					APIVersion: tt.ownerBackup.APIVersion,
 				}
 			}
-			got, err := e.createBackupPVC(t.Context(), ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly, map[string]string{}, "")
+			got, err := e.createBackupPVC(t.Context(), ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly, tt.readWriteOncePod, map[string]string{}, "")
 			if !tt.wantErr(t, err, fmt.Sprintf("createBackupPVC(%v, %v, %v, %v, %v, %v)", ownerObject, tt.backupVS, tt.storageClass, tt.accessMode, tt.resource, tt.readOnly)) {
 				return
 			}
