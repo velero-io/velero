@@ -39,6 +39,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/velero/restore"
@@ -237,7 +238,7 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 	case o.ScheduleName != "":
 		backupList := new(api.BackupList)
 		err := o.client.List(context.TODO(), backupList, &kbclient.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{api.ScheduleNameLabel: o.ScheduleName}),
+			LabelSelector: labels.SelectorFromSet(map[string]string{api.ScheduleNameLabel: label.GetValidName(o.ScheduleName)}),
 			Namespace:     f.Namespace(),
 		})
 		if err != nil {
@@ -299,7 +300,7 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 	if o.ScheduleName != "" && boolptr.IsSetToTrue(o.AllowPartiallyFailed.Value) {
 		backupList := new(api.BackupList)
 		err := o.client.List(context.TODO(), backupList, &kbclient.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{api.ScheduleNameLabel: o.ScheduleName}),
+			LabelSelector: labels.SelectorFromSet(map[string]string{api.ScheduleNameLabel: label.GetValidName(o.ScheduleName)}),
 			Namespace:     f.Namespace(),
 		})
 		if err != nil {
