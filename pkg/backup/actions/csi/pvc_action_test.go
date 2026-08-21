@@ -63,7 +63,7 @@ const testDriver = "csi.example.com"
 // errorInjectingClient is a wrapper around a normal client that injects an error
 // when a specific resource type (VolumeSnapshot) is created.
 type errorInjectingClient struct {
-	crclient.Client
+	crclient.WithWatch
 }
 
 // Create overrides the embedded client's Create method.
@@ -74,7 +74,7 @@ func (c *errorInjectingClient) Create(ctx context.Context, obj crclient.Object, 
 		return errors.New("injected error on create")
 	}
 	// For all other object types, call the original, embedded Create method.
-	return c.Client.Create(ctx, obj, opts...)
+	return c.WithWatch.Create(ctx, obj, opts...)
 }
 
 func TestExecute(t *testing.T) {
@@ -252,12 +252,12 @@ func TestExecute(t *testing.T) {
 			}
 			objects = append(objects, tc.extraObjects...)
 
-			var crClient crclient.Client
+			var crClient crclient.WithWatch
 			if tc.failVSCreate {
-				realFakeClient := velerotest.NewFakeControllerRuntimeClient(t, objects...)
-				crClient = &errorInjectingClient{Client: realFakeClient}
+				realFakeClient := velerotest.NewFakeControllerRuntimeWatchClient(t, objects...)
+				crClient = &errorInjectingClient{WithWatch: realFakeClient}
 			} else {
-				crClient = velerotest.NewFakeControllerRuntimeClient(t, objects...)
+				crClient = velerotest.NewFakeControllerRuntimeWatchClient(t, objects...)
 			}
 
 			pvcBIA := pvcBackupItemAction{
@@ -435,7 +435,7 @@ func TestProgress(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
+			crClient := velerotest.NewFakeControllerRuntimeWatchClient(t)
 			logger := logrus.New()
 
 			pvcBIA := pvcBackupItemAction{
@@ -529,7 +529,7 @@ func TestCancel(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
+			crClient := velerotest.NewFakeControllerRuntimeWatchClient(t)
 			logger := logrus.New()
 
 			pvcBIA := pvcBackupItemAction{
@@ -577,16 +577,16 @@ func TestPVCAppliesTo(t *testing.T) {
 
 func TestNewPVCBackupItemAction(t *testing.T) {
 	logger := logrus.StandardLogger()
-	crClient := velerotest.NewFakeControllerRuntimeClient(t)
+	crClient := velerotest.NewFakeControllerRuntimeWatchClient(t)
 
 	f := &factorymocks.Factory{}
-	f.On("KubebuilderClient").Return(nil, fmt.Errorf(""))
+	f.On("KubebuilderWatchClient").Return(nil, fmt.Errorf(""))
 	plugin := NewPvcBackupItemAction(f)
 	_, err := plugin(logger)
 	require.Error(t, err)
 
 	f1 := &factorymocks.Factory{}
-	f1.On("KubebuilderClient").Return(crClient, nil)
+	f1.On("KubebuilderWatchClient").Return(crClient, nil)
 	plugin1 := NewPvcBackupItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
@@ -685,7 +685,7 @@ func TestListGroupedPVCs(t *testing.T) {
 			for i := range tt.pvcs {
 				objs = append(objs, &tt.pvcs[i])
 			}
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 
 			action := &pvcBackupItemAction{
 				log:      logrus.New(),
@@ -925,7 +925,7 @@ volumePolicies:
 				objs = append(objs, &tt.pvs[i])
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 
 			backup := &velerov1api.Backup{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1034,7 +1034,7 @@ func TestFilterPVCsByVolumePolicyWithVolumeHelper(t *testing.T) {
 	for i := range pvs {
 		objs = append(objs, &pvs[i])
 	}
-	client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+	client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 
 	// Create backup with volume policy that skips NFS volumes
 	volumePolicyStr := `
@@ -1216,7 +1216,7 @@ func TestDetermineCSIDriver(t *testing.T) {
 				initObjs = append(initObjs, &pv)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, initObjs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, initObjs...)
 			action := &pvcBackupItemAction{
 				log:      logrus.New(),
 				crClient: client,
@@ -1319,7 +1319,7 @@ func TestDetermineVGSClass(t *testing.T) {
 				initObjs = append(initObjs, &vgsClassCopy)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, initObjs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, initObjs...)
 			logger := logrus.New()
 			require.NoError(t, volumegroupsnapshotv1beta2.AddToScheme(client.Scheme()))
 
@@ -1358,7 +1358,7 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 		},
 	}
 
-	crClient := velerotest.NewFakeControllerRuntimeClient(t)
+	crClient := velerotest.NewFakeControllerRuntimeWatchClient(t)
 	log := logrus.New()
 	action := &pvcBackupItemAction{
 		log:      log,
@@ -1514,7 +1514,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 				objs = append(objs, &pvc)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
 				crClient: client,
@@ -1613,7 +1613,7 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := velerotest.NewFakeControllerRuntimeClient(t, vgs, tt.vs)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, vgs, tt.vs)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
 				crClient: client,
@@ -1694,7 +1694,7 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 				},
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, vgs, vgsc)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, vgs, vgsc)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
 				crClient: client,
@@ -1774,7 +1774,7 @@ func TestDeleteVGSAndVGSC(t *testing.T) {
 				objs = append(objs, tt.existingVGSC)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
 				crClient: client,
@@ -1866,7 +1866,7 @@ func TestFindExistingVSForBackup(t *testing.T) {
 				objs = append(objs, vs)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, objs...)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
 				crClient: client,
@@ -1921,7 +1921,7 @@ func TestWaitForVGSCBinding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := velerotest.NewFakeControllerRuntimeClient(t, tt.vgs.DeepCopy())
+			client := velerotest.NewFakeControllerRuntimeWatchClient(t, tt.vgs.DeepCopy())
 
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
@@ -1992,12 +1992,14 @@ func TestGetVGSByLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var client crclient.Client
+			var client crclient.WithWatch
 			if tt.name == "client list error" {
 				// Inject a client that always errors on List
-				client = &failingClient{}
+				client = &failingClient{
+					WithWatch: velerotest.NewFakeControllerRuntimeWatchClient(t),
+				}
 			} else {
-				client = velerotest.NewFakeControllerRuntimeClient(t, tt.vgsObjects...)
+				client = velerotest.NewFakeControllerRuntimeWatchClient(t, tt.vgsObjects...)
 			}
 
 			action := &pvcBackupItemAction{
@@ -2025,7 +2027,7 @@ func TestGetVGSByLabels(t *testing.T) {
 
 // failingClient is a dummy client that fails on List
 type failingClient struct {
-	crclient.Client
+	crclient.WithWatch
 }
 
 func (f *failingClient) List(ctx context.Context, list crclient.ObjectList, opts ...crclient.ListOption) error {
@@ -2193,7 +2195,7 @@ func TestPVCRequestSize(t *testing.T) {
 // cleaned up via CleanupClients at backup completion), we verify that the pvcPodCache
 // is properly initialized and reused across calls.
 func TestGetOrCreateVolumeHelper(t *testing.T) {
-	client := velerotest.NewFakeControllerRuntimeClient(t)
+	client := velerotest.NewFakeControllerRuntimeWatchClient(t)
 	action := &pvcBackupItemAction{
 		log:      velerotest.NewLogger(),
 		crClient: client,

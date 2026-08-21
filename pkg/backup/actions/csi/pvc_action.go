@@ -74,7 +74,7 @@ const (
 // pvcBackupItemAction is a backup item action plugin for Velero.
 type pvcBackupItemAction struct {
 	log      logrus.FieldLogger
-	crClient crclient.Client
+	crClient crclient.WithWatch
 
 	// pvcPodCache provides lazy per-namespace caching of PVC-to-Pod mappings.
 	// Since plugin instances are unique per backup (created via newPluginManager and
@@ -698,7 +698,7 @@ func cancelDataUpload(
 
 func NewPvcBackupItemAction(f veleroclient.Factory) plugincommon.HandlerInitializer {
 	return func(logger logrus.FieldLogger) (any, error) {
-		crClient, err := f.KubebuilderClient()
+		crClient, err := f.KubebuilderWatchClient()
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}

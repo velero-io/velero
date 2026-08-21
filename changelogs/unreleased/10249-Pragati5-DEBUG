@@ -1,0 +1,1 @@
+Replace CSI snapshot handle early frequent polling with Kubernetes watch when available, reducing apiserver GET traffic while preserving VSS timeout behavior.
