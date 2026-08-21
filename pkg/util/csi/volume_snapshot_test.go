@@ -1766,6 +1766,34 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		},
 	}
 
+	errNoMessageVsc := "err-no-message-vsc"
+	vscWithErrorNoMessage := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: errNoMessageVsc,
+		},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			VolumeSnapshotRef: corev1api.ObjectReference{
+				Name:       "vol-snap-1",
+				APIVersion: snapshotv1api.SchemeGroupVersion.String(),
+			},
+		},
+		Status: &snapshotv1api.VolumeSnapshotContentStatus{
+			SnapshotHandle: nil,
+			// Error is set while Message is left nil. Both are optional in the
+			// CSI API, so the error-reporting paths must not dereference Message.
+			Error: &snapshotv1api.VolumeSnapshotError{Message: nil},
+		},
+	}
+	vsForErrorNoMessageVsc := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vs-for-err-no-message",
+			Namespace: "default",
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			BoundVolumeSnapshotContentName: &errNoMessageVsc,
+		},
+	}
+
 	objs := []runtime.Object{
 		vscObj,
 		validVS,
@@ -1776,6 +1804,8 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		vsForNilStatusVsc,
 		vscWithNilStatusField,
 		vsForNilStatusFieldVsc,
+		vscWithErrorNoMessage,
+		vsForErrorNoMessageVsc,
 	}
 	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 	testCases := []struct {
@@ -1809,6 +1839,12 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 					BoundVolumeSnapshotContentName: &nilStatusVsc,
 				},
 			},
+		},
+		{
+			name:        "waitEnabled should return an error rather than panic when the volumesnapshotcontent has an error without a message",
+			volSnap:     vsForErrorNoMessageVsc,
+			exepctedVSC: nil,
+			expectError: true,
 		},
 	}
 
