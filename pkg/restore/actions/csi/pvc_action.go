@@ -597,14 +597,19 @@ func (p *pvcRestoreItemAction) prepareForInplaceRestore(ctx context.Context, log
 		return nil, errors.New("ExistingVolumeDataPolicy is in-place restore, but the existing PVC is not bound.")
 	}
 
-	// set the "selected-node" annotation to target PVC to make sure the target pod is scheduled to the same node
+	// Capture the "selected-node" annotation from the existing PVC before it is deleted below,
+	// and carry it on the target PVC via a Velero-internal carrier annotation. The restore
+	// engine translates the carrier back to the Kubernetes "selected-node" annotation after
+	// all RestoreItemActions have run, so the recreated target PVC keeps the same scheduling
+	// constraint regardless of the order in which RestoreItemActions execute (the generic PVC
+	// RIA unconditionally strips the Kubernetes annotation).
 	selectedNode, exists := existingPVC.Annotations[kube.KubeAnnSelectedNode]
 	if exists {
-		logger.Infof("Setting %q annotation to %q for target PVC to keep the same selected node as the existing PVC", kube.KubeAnnSelectedNode, existingPVC.Annotations[kube.KubeAnnSelectedNode])
+		logger.Infof("Carrying %q annotation with value %q for target PVC to keep the same selected node as the existing PVC", kube.KubeAnnSelectedNode, selectedNode)
 		if targetPVC.Annotations == nil {
 			targetPVC.Annotations = map[string]string{}
 		}
-		targetPVC.Annotations[kube.KubeAnnSelectedNode] = selectedNode
+		targetPVC.Annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation] = selectedNode
 	}
 
 	var err error

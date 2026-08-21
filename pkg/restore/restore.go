@@ -1623,6 +1623,19 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		return warnings, errs, itemExists
 	}
 
+	// Strip any pre-existing Velero-internal in-place restore carrier annotation coming from
+	// the backup metadata before RestoreItemActions run. The carrier is only trusted when it
+	// is set by a RestoreItemAction (the PVC CSI RIA) during this restore; a stale carrier
+	// baked into the backup must not be translated into the Kubernetes "selected-node"
+	// annotation, which could pin a newly provisioned PVC to a stale node.
+	if annotations := obj.GetAnnotations(); annotations != nil {
+		if _, present := annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]; present {
+			restoreLogger.Infof("Removing pre-existing %q annotation from backup metadata", velerov1api.InplaceRestoreSelectedNodeAnnotation)
+			delete(annotations, velerov1api.InplaceRestoreSelectedNodeAnnotation)
+			obj.SetAnnotations(annotations)
+		}
+	}
+
 	restoreLogger.Infof("restore status includes excludes: %+v", ctx.resourceStatusIncludesExcludes)
 
 	for _, action := range ctx.getApplicableActions(groupResource, namespace) {
@@ -1752,6 +1765,23 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			errs.Add(namespace, errors.Wrapf(err, "error verifying additional items are ready to use"))
 		} else if !available {
 			errs.Add(namespace, fmt.Errorf("additional items for %s are not ready to use", resourceID))
+		}
+	}
+
+	// Translate the Velero-internal carrier annotation (set by the PVC CSI RestoreItemAction
+	// during an in-place volume data restore) back to the Kubernetes "selected-node" annotation.
+	// This runs after all RestoreItemActions so the result does not depend on the order in which
+	// the actions executed: the generic PVC RIA unconditionally strips the Kubernetes annotation,
+	// while the carrier annotation passes through untouched. The carrier itself is always
+	// stripped so it never lands on the cluster.
+	if annotations := obj.GetAnnotations(); annotations != nil {
+		if selectedNode, present := annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]; present {
+			if selectedNode != "" {
+				restoreLogger.Infof("Restoring %q annotation with value %q from in-place restore carrier annotation", kube.KubeAnnSelectedNode, selectedNode)
+				annotations[kube.KubeAnnSelectedNode] = selectedNode
+			}
+			delete(annotations, velerov1api.InplaceRestoreSelectedNodeAnnotation)
+			obj.SetAnnotations(annotations)
 		}
 	}
 

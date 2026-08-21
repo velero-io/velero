@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -594,6 +595,128 @@ func TestExecute(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrepareForInplaceRestoreSelectedNode verifies that prepareForInplaceRestore captures
+// the selected-node annotation from the existing PVC into the Velero-internal carrier
+// annotation (not the Kubernetes annotation) on the target PVC, before deleting the PVC.
+func TestPrepareForInplaceRestoreSelectedNode(t *testing.T) {
+	tests := []struct {
+		name              string
+		existingPVC       *corev1api.PersistentVolumeClaim
+		expectedCarrier   string
+		expectCarrierSet  bool
+		expectKubeAnnoSet bool
+	}{
+		{
+			name: "existing PVC with selected-node sets carrier annotation only",
+			existingPVC: builder.ForPersistentVolumeClaim("ns-1", "pvc-1").
+				ObjectMeta(builder.WithAnnotations(AnnSelectedNode, "node-1")).
+				VolumeName("pv-1").
+				Phase(corev1api.ClaimBound).Result(),
+			expectedCarrier:   "node-1",
+			expectCarrierSet:  true,
+			expectKubeAnnoSet: false,
+		},
+		{
+			name: "existing PVC without selected-node sets neither annotation",
+			existingPVC: builder.ForPersistentVolumeClaim("ns-1", "pvc-1").
+				VolumeName("pv-1").
+				Phase(corev1api.ClaimBound).Result(),
+			expectCarrierSet:  false,
+			expectKubeAnnoSet: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pv := builder.ForPersistentVolume("pv-1").Result()
+			kubeClient := fake.NewSimpleClientset(tc.existingPVC, pv)
+			pvcRIA := pvcRestoreItemAction{
+				log:        logrus.New(),
+				crClient:   velerotest.NewFakeControllerRuntimeClient(t, pv),
+				kubeClient: kubeClient,
+			}
+
+			targetPVC := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result()
+			returnedPV, err := pvcRIA.prepareForInplaceRestore(
+				t.Context(), logrus.New().WithField("test", tc.name),
+				targetPVC, tc.existingPVC, time.Minute)
+			require.NoError(t, err)
+			require.Equal(t, "pv-1", returnedPV.Name)
+
+			carrier, carrierOK := targetPVC.Annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]
+			require.Equal(t, tc.expectCarrierSet, carrierOK)
+			if tc.expectCarrierSet {
+				require.Equal(t, tc.expectedCarrier, carrier)
+			}
+			_, kubeAnnoOK := targetPVC.Annotations[AnnSelectedNode]
+			require.Equal(t, tc.expectKubeAnnoSet, kubeAnnoOK)
+		})
+	}
+}
+
+// TestExecuteInplaceRestore exercises the public Execute() entry for an in-place restore
+// with an existing PVC: the carrier annotation must be emitted on the returned item, the
+// Kubernetes selected-node annotation must not be set by this RIA, the existing PVC must be
+// deleted, and a DataDownload with the in-place restoreType must be created.
+func TestExecuteInplaceRestore(t *testing.T) {
+	existingPVC := builder.ForPersistentVolumeClaim("velero", "testPVC").
+		ObjectMeta(builder.WithAnnotations(AnnSelectedNode, "node-1")).
+		VolumeName("testPV").
+		Phase(corev1api.ClaimBound).Result()
+	existingPV := builder.ForPersistentVolume("testPV").Result()
+	backup := builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result()
+	restore := builder.ForRestore("velero", "testRestore").Backup("testBackup").
+		ObjectMeta(builder.WithUID("uid")).ExistingVolumeDataPolicy("full").Result()
+	pvcFromBackup := builder.ForPersistentVolumeClaim("velero", "testPVC").
+		ObjectMeta(builder.WithAnnotations(
+			velerov1api.VolumeSnapshotLabel, "vsName",
+			velerov1api.DataUploadNameAnnotation, "velero/testDU",
+		)).Result()
+	dataUploadResult := builder.ForConfigMap("velero", "testCM").Data("uid", "{}").
+		ObjectMeta(builder.WithLabels(
+			velerov1api.RestoreUIDLabel, "uid",
+			velerov1api.PVCNamespaceNameLabel, "velero.testPVC",
+			velerov1api.ResourceUsageLabel, label.GetValidName(string(velerov1api.VeleroResourceUsageDataUploadResult)),
+		)).Result()
+
+	pvcRIA := pvcRestoreItemAction{
+		log:        logrus.New(),
+		crClient:   velerotest.NewFakeControllerRuntimeClient(t, existingPVC, existingPV, backup, dataUploadResult),
+		kubeClient: fake.NewSimpleClientset(existingPVC, existingPV),
+	}
+
+	pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup.DeepCopy())
+	require.NoError(t, err)
+	pvcFromBackupMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup)
+	require.NoError(t, err)
+
+	output, err := pvcRIA.Execute(&velero.RestoreItemActionExecuteInput{
+		Item:           &unstructured.Unstructured{Object: pvcMap},
+		ItemFromBackup: &unstructured.Unstructured{Object: pvcFromBackupMap},
+		Restore:        restore,
+	})
+	require.NoError(t, err)
+
+	updatedPVC := new(corev1api.PersistentVolumeClaim)
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(
+		output.UpdatedItem.UnstructuredContent(), updatedPVC))
+
+	// Carrier annotation carries the captured value; the Kubernetes annotation is not set by this RIA.
+	require.Equal(t, "node-1", updatedPVC.Annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation])
+	require.NotContains(t, updatedPVC.Annotations, AnnSelectedNode)
+
+	// The existing PVC is deleted so the exposer can bind a temporary PVC to the PV.
+	_, err = pvcRIA.kubeClient.CoreV1().PersistentVolumeClaims("velero").Get(t.Context(), "testPVC", metav1.GetOptions{})
+	require.True(t, apierrors.IsNotFound(err))
+
+	// A DataDownload with the in-place restoreType referencing the existing PV is created.
+	dataDownloadList := new(velerov2alpha1.DataDownloadList)
+	require.NoError(t, pvcRIA.crClient.List(t.Context(), dataDownloadList, &crclient.ListOptions{}))
+	require.Len(t, dataDownloadList.Items, 1)
+	require.Equal(t, "full", dataDownloadList.Items[0].Spec.RestoreType)
+	require.Equal(t, "testPV", dataDownloadList.Items[0].Spec.TargetVolume.PV)
 }
 
 func TestPVCAppliesTo(t *testing.T) {
