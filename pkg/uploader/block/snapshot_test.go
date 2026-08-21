@@ -21,16 +21,19 @@ package block
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/vmware-tanzu/velero/pkg/cbtservice"
+	cbtservicemocks "github.com/vmware-tanzu/velero/pkg/cbtservice/mocks"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	udmrepomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
@@ -273,6 +276,176 @@ func TestSnapshotSource(t *testing.T) {
 			mockBlkup.AssertExpectations(t)
 		})
 	}
+}
+
+// TestSnapshotSourceKeepsParentOnCBTFailure pins the behavior that a CBT failure must not
+// discard an already-resolved repository parent. The bitmap and the parent object come from
+// two independent sources: the bitmap from the CBT service, the parent from the repository's
+// own snapshot manifests (validated separately by getParentBackupInfo). Dropping the parent
+// when only the bitmap source failed costs the run its dedup base on top of forcing a
+// whole-device read, turning one failure into two.
+func TestSnapshotSourceKeepsParentOnCBTFailure(t *testing.T) {
+	const volumeID = "vol-123"
+	const parentObject = udmrepo.ID("parent-obj")
+
+	snapshotTags := map[string]string{
+		uploader.SnapshotRequesterTag: "test-requester",
+		uploader.SnapshotUploaderTag:  uploader.BlockType,
+	}
+
+	mockRepo := udmrepomocks.NewBackupRepo(t)
+	mockRepo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-parent")).
+		Return(udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-obj"},
+			Tags: map[string]string{
+				uploader.CBTChangeIDTag:       "cid-abc",
+				uploader.CBTVolumeIDTag:       volumeID,
+				uploader.SnapshotRequesterTag: "test-requester",
+				uploader.SnapshotUploaderTag:  uploader.BlockType,
+			},
+		}, nil)
+	mockRepo.On("ReadMetadata", mock.Anything, udmrepo.ID("root-obj")).
+		Return(&udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{{ID: parentObject}},
+		}, nil)
+	mockRepo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-new"), nil)
+	mockRepo.On("Flush", mock.Anything).Return(nil)
+
+	// Both CBT tiers fail, so the bitmap degrades all the way to full.
+	svcMock := new(cbtservicemocks.Service)
+	svcMock.On("GetChangedBlocks", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("delta unavailable"))
+	svcMock.On("GetAllocatedBlocks", mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("allocated unavailable"))
+
+	mockBlkup := &mockUploader{}
+	mockBlkup.On("Backup", mock.Anything, parentObject, mock.Anything, mock.Anything).
+		Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(512), nil)
+
+	snapID, size, err := snapshotSource(
+		context.Background(), mockRepo, mockBlkup,
+		sourceInfo{realSource: "/test/vol", size: 1024},
+		false, "snap-parent",
+		cbtservice.SourceInfo{Snapshot: "snap-cbt", ChangeID: "cid-new", VolumeID: volumeID}, svcMock,
+		snapshotTags, map[string]string{},
+		testLog(), "Block Uploader",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "snap-new", snapID)
+	assert.Equal(t, int64(512), size)
+
+	// The assertion that matters: Backup was invoked with the resolved parent, not "".
+	mockBlkup.AssertExpectations(t)
+	svcMock.AssertExpectations(t)
+}
+
+// TestSnapshotSourceDropsParentOnAllocatedTier pins the counterpart of the test above.
+// When the delta query fails and the bitmap falls back to *allocated* blocks, the parent
+// MUST be dropped: the uploader writes only bitmap blocks and lets every other offset
+// resolve to the parent object, so a block written in the parent and discarded since would
+// be inherited back rather than reading as a hole. Full mode makes unwritten ranges holes.
+func TestSnapshotSourceDropsParentOnAllocatedTier(t *testing.T) {
+	const volumeID = "vol-123"
+
+	snapshotTags := map[string]string{
+		uploader.SnapshotRequesterTag: "test-requester",
+		uploader.SnapshotUploaderTag:  uploader.BlockType,
+	}
+
+	mockRepo := udmrepomocks.NewBackupRepo(t)
+	mockRepo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-parent")).
+		Return(udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-obj"},
+			Tags: map[string]string{
+				uploader.CBTChangeIDTag:       "cid-abc",
+				uploader.CBTVolumeIDTag:       volumeID,
+				uploader.SnapshotRequesterTag: "test-requester",
+				uploader.SnapshotUploaderTag:  uploader.BlockType,
+			},
+		}, nil)
+	mockRepo.On("ReadMetadata", mock.Anything, udmrepo.ID("root-obj")).
+		Return(&udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{{ID: udmrepo.ID("parent-obj")}},
+		}, nil)
+	mockRepo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-new"), nil)
+	mockRepo.On("Flush", mock.Anything).Return(nil)
+
+	// Delta fails, allocated succeeds -> TierAllocated.
+	svcMock := new(cbtservicemocks.Service)
+	svcMock.On("GetChangedBlocks", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("delta unavailable"))
+	svcMock.On("GetAllocatedBlocks", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	mockBlkup := &mockUploader{}
+	mockBlkup.On("Backup", mock.Anything, udmrepo.ID(""), mock.Anything, mock.Anything).
+		Return(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root"}}, int64(512), nil)
+
+	_, _, err := snapshotSource(
+		context.Background(), mockRepo, mockBlkup,
+		sourceInfo{realSource: "/test/vol", size: 1024},
+		false, "snap-parent",
+		cbtservice.SourceInfo{Snapshot: "snap-cbt", ChangeID: "cid-new", VolumeID: volumeID}, svcMock,
+		snapshotTags, map[string]string{},
+		testLog(), "Block Uploader",
+	)
+	require.NoError(t, err)
+
+	// The assertion that matters: Backup was invoked with an empty parent, forcing full mode.
+	mockBlkup.AssertExpectations(t)
+	svcMock.AssertExpectations(t)
+}
+
+// TestGetParentBackupInfoLogsDiscoveredParentID pins that the parent-selection messages
+// name the snapshot they are about. On the discovery branch the parentSnapshot parameter
+// is empty by definition, so logging it there emits "Using parent snapshot , start time ..."
+// - a decision logged without the identifier needed to act on it.
+func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
+	const volumeID = "vol-123"
+	const realSource = "/test/source"
+	const rootObj = "root-obj-42"
+
+	snapshotTags := map[string]string{
+		uploader.SnapshotRequesterTag: "test-requester",
+		uploader.SnapshotUploaderTag:  uploader.BlockType,
+	}
+
+	logger, hook := logrustest.NewNullLogger()
+	logger.SetLevel(logrus.DebugLevel)
+
+	repo := udmrepomocks.NewBackupRepo(t)
+	repo.On("ListSnapshot", mock.Anything, realSource).
+		Return([]udmrepo.Snapshot{{
+			RootObject: udmrepo.ObjectMetadata{ID: rootObj},
+			Tags: map[string]string{
+				uploader.CBTChangeIDTag:       "cid-abc",
+				uploader.CBTVolumeIDTag:       volumeID,
+				uploader.SnapshotRequesterTag: "test-requester",
+				uploader.SnapshotUploaderTag:  uploader.BlockType,
+			},
+		}}, nil)
+	repo.On("ReadMetadata", mock.Anything, udmrepo.ID(rootObj)).
+		Return(&udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{{ID: udmrepo.ID("parent-obj")}},
+		}, nil)
+
+	info := getParentBackupInfo(
+		context.Background(), repo,
+		false, "", // no explicit parent -> discovery branch
+		volumeID, realSource, snapshotTags, logger,
+	)
+
+	require.Equal(t, udmrepo.ID("parent-obj"), info.parentObject)
+
+	var found bool
+	for _, entry := range hook.AllEntries() {
+		if strings.HasPrefix(entry.Message, "Using parent snapshot ") {
+			found = true
+			assert.Contains(t, entry.Message, rootObj,
+				"parent-selection message must name the discovered snapshot, got %q", entry.Message)
+		}
+	}
+	require.True(t, found, "expected a \"Using parent snapshot\" message")
 }
 
 func TestGetParentBackupInfo(t *testing.T) {
