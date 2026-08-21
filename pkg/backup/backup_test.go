@@ -5474,10 +5474,26 @@ func TestBackupNamespaces(t *testing.T) {
 				),
 			},
 			want: []string{
-				"resources/namespaces/cluster/ns-1.json",
-				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
 				"resources/namespaces/cluster/ns-3.json",
 				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
+			},
+		},
+		{
+			name: "excluded namespace whose labels match the LabelSelector",
+			backup: defaultBackup().
+				IncludedNamespaces("*").
+				ExcludedNamespaces("ns-2").
+				LabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}}).
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).ObjectMeta(builder.WithLabels("a", "b")).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).ObjectMeta(builder.WithLabels("a", "b")).Result(),
+				),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
 			},
 		},
 		{
