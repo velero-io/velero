@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -45,7 +46,21 @@ func NewCreateCommand(f client.Factory, use string) *cobra.Command {
 	c := &cobra.Command{
 		Use:   use + " NAME",
 		Short: "Create a backup",
-		Args:  cobra.MaximumNArgs(1),
+		Args: func(c *cobra.Command, args []string) error {
+			if err := cobra.MaximumNArgs(1)(c, args); err != nil {
+				return err
+			}
+			fromSchedule, _ := c.Flags().GetString("from-schedule")
+			if fromSchedule == "" && len(args) == 0 {
+				return fmt.Errorf("a backup name is required, unless you are creating based on a schedule")
+			}
+			if len(args) == 1 {
+				if errs := validation.IsDNS1123Subdomain(args[0]); len(errs) > 0 {
+					return fmt.Errorf("invalid backup name %q: %s", args[0], strings.Join(errs, "; "))
+				}
+			}
+			return nil
+		},
 		Run: func(c *cobra.Command, args []string) {
 			cmd.CheckError(o.Complete(args, f))
 			cmd.CheckError(o.Validate(c, args, f))
@@ -191,11 +206,27 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 		return err
 	}
 
-	// Ensure that unless FromSchedule is set, args contains a backup name
-	if o.FromSchedule == "" && len(args) != 1 {
+	// Ensure that unless FromSchedule is set, a backup name is required
+	if o.FromSchedule == "" && o.Name == "" {
 		return fmt.Errorf("a backup name is required, unless you are creating based on a schedule")
 	}
-
+	// Validate the backup name format whenever a name is provided
+	if o.Name != "" {
+		if errs := validation.IsDNS1123Subdomain(o.Name); len(errs) > 0 {
+			return fmt.Errorf("invalid backup name %q: %s", o.Name, strings.Join(errs, "; "))
+		}
+	}
+	// When a backup name will be generated from the schedule (i.e. FromSchedule
+	// is set and no explicit name was given), ensure the schedule name leaves
+	// enough room for the generated timestamp suffix ("-" + 14-digit timestamp,
+	// 15 characters total) within the DNS1123 subdomain length limit.
+	if o.FromSchedule != "" && o.Name == "" {
+		const timestampSuffixLen = 15 // "-" + "20060102150405"
+		maxScheduleNameLen := validation.DNS1123SubdomainMaxLength - timestampSuffixLen
+		if len(o.FromSchedule) > maxScheduleNameLen {
+			return fmt.Errorf("schedule name %q is too long: must be %d characters or fewer to leave room for the generated timestamp suffix", o.FromSchedule, maxScheduleNameLen)
+		}
+	}
 	errs := collections.ValidateNamespaceIncludesExcludes(o.IncludeNamespaces, o.ExcludeNamespaces)
 	if len(errs) > 0 {
 		return kubeerrs.NewAggregate(errs)
