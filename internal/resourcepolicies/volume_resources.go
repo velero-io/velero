@@ -49,6 +49,9 @@ type capacity struct {
 type structuredVolume struct {
 	capacity       resource.Quantity
 	storageClass   string
+	pvName         string
+	podVolumeName  string
+	pvcName        string
 	nfs            *nFSVolumeSource
 	csi            *csiVolumeSource
 	volumeType     SupportedVolume
@@ -61,6 +64,7 @@ type structuredVolume struct {
 func (s *structuredVolume) parsePV(pv *corev1api.PersistentVolume) {
 	s.capacity = *pv.Spec.Capacity.Storage()
 	s.storageClass = pv.Spec.StorageClassName
+	s.pvName = pv.Name
 	nfs := pv.Spec.NFS
 	if nfs != nil {
 		s.nfs = &nFSVolumeSource{Server: nfs.Server, Path: nfs.Path}
@@ -76,6 +80,7 @@ func (s *structuredVolume) parsePV(pv *corev1api.PersistentVolume) {
 
 func (s *structuredVolume) parsePVC(pvc *corev1api.PersistentVolumeClaim) {
 	if pvc != nil {
+		s.pvcName = pvc.Name
 		if len(pvc.GetLabels()) > 0 {
 			s.pvcLabels = pvc.Labels
 		}
@@ -93,6 +98,7 @@ func (s *structuredVolume) parsePVC(pvc *corev1api.PersistentVolumeClaim) {
 }
 
 func (s *structuredVolume) parsePodVolume(vol *corev1api.Volume) {
+	s.podVolumeName = vol.Name
 	nfs := vol.NFS
 	if nfs != nil {
 		s.nfs = &nFSVolumeSource{Server: nfs.Server, Path: nfs.Path}
@@ -212,6 +218,38 @@ func (s *storageClassCondition) match(v *structuredVolume) bool {
 
 	for _, sc := range s.storageClass {
 		if v.storageClass == sc {
+			return true
+		}
+	}
+
+	return false
+}
+
+type volumeNameCondition struct {
+	volumeNames []string
+}
+
+func (v *volumeNameCondition) match(s *structuredVolume) bool {
+	if len(v.volumeNames) == 0 {
+		return true
+	}
+
+	candidates := make([]string, 0, 3)
+	if s.pvName != "" {
+		candidates = append(candidates, s.pvName)
+	}
+	if s.podVolumeName != "" {
+		candidates = append(candidates, s.podVolumeName)
+	}
+	if s.pvcName != "" {
+		candidates = append(candidates, s.pvcName)
+	}
+	if len(candidates) == 0 {
+		return false
+	}
+
+	for _, name := range v.volumeNames {
+		if slices.Contains(candidates, name) {
 			return true
 		}
 	}

@@ -44,6 +44,7 @@ type nFSVolumeSource struct {
 type volumeConditions struct {
 	Capacity       string            `yaml:"capacity,omitempty"`
 	StorageClass   []string          `yaml:"storageClass,omitempty"`
+	VolumeName     []string          `yaml:"volumeName,omitempty"`
 	NFS            *nFSVolumeSource  `yaml:"nfs,omitempty"`
 	CSI            *csiVolumeSource  `yaml:"csi,omitempty"`
 	VolumeTypes    []SupportedVolume `yaml:"volumeTypes,omitempty"`
@@ -66,6 +67,11 @@ func (c *capacityCondition) validate() error {
 }
 
 func (s *storageClassCondition) validate() error {
+	// validate by yamlv3
+	return nil
+}
+
+func (v *volumeNameCondition) validate() error {
 	// validate by yamlv3
 	return nil
 }
