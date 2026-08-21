@@ -1343,7 +1343,10 @@ func TestRestoreItems(t *testing.T) {
 				AddItems("secrets", builder.ForSecret("ns-1", "sa-1").Data(map[string][]byte{"key-1": []byte("value-1")}).Result()).
 				Done(),
 			apiResources: []*test.APIResource{
-				test.Secrets(builder.ForSecret("ns-1", "sa-1").Data(map[string][]byte{"foo": []byte("bar")}).Result()),
+				withVerbs(
+					test.Secrets(builder.ForSecret("ns-1", "sa-1").Data(map[string][]byte{"foo": []byte("bar")}).Result()),
+					"list", "create", "get", "delete", "watch",
+				),
 			},
 			disableInformer: false,
 			want: []*test.APIResource{
@@ -4321,6 +4324,14 @@ func (cr *createRecorder) reactor() func(kubetesting.Action) (bool, runtime.Obje
 
 func defaultRestore() *builder.RestoreBuilder {
 	return builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Backup("backup-1")
+}
+
+// withVerbs overrides the discovery verbs reported for an APIResource,
+// e.g. to exercise the dynamic informer cache path for resources whose
+// API serves the watch verb.
+func withVerbs(r *test.APIResource, verbs ...string) *test.APIResource {
+	r.Verbs = verbs
+	return r
 }
 
 // assertAPIContents asserts that the dynamic client on the provided harness contains
