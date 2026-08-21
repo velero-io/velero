@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -183,6 +184,10 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 
 	if config.ClientPageSize < 0 {
 		return nil, errors.New("client-page-size must not be negative")
+	}
+
+	if config.ClientPageBufferSize < 0 || config.ClientPageBufferSize > math.MaxInt32 {
+		return nil, errors.Errorf("client-page-buffer-size must be between 0 and %d", math.MaxInt32)
 	}
 
 	kubeClient, err := f.KubeClient()
@@ -650,6 +655,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.config.PodVolumeOperationTimeout,
 			s.config.DefaultVolumesToFsBackup,
 			s.config.ClientPageSize,
+			s.config.ClientPageBufferSize,
 			s.config.UploaderType,
 			newPluginManager,
 			backupStoreGetter,
@@ -736,6 +742,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.config.PodVolumeOperationTimeout,
 			s.config.DefaultVolumesToFsBackup,
 			s.config.ClientPageSize,
+			s.config.ClientPageBufferSize,
 			s.config.UploaderType,
 			newPluginManager,
 			backupStoreGetter,

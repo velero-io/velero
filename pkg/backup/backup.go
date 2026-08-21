@@ -123,6 +123,7 @@ type kubernetesBackupper struct {
 	podVolumeTimeout          time.Duration
 	defaultVolumesToFsBackup  bool
 	clientPageSize            int
+	clientPageBufferSize      int
 	uploaderType              string
 	pluginManager             func(logrus.FieldLogger) clientmgmt.Manager
 	backupStoreGetter         persistence.ObjectBackupStoreGetter
@@ -152,6 +153,7 @@ func NewKubernetesBackupper(
 	podVolumeTimeout time.Duration,
 	defaultVolumesToFsBackup bool,
 	clientPageSize int,
+	clientPageBufferSize int,
 	uploaderType string,
 	pluginManager func(logrus.FieldLogger) clientmgmt.Manager,
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
@@ -165,6 +167,7 @@ func NewKubernetesBackupper(
 		podVolumeTimeout:          podVolumeTimeout,
 		defaultVolumesToFsBackup:  defaultVolumesToFsBackup,
 		clientPageSize:            clientPageSize,
+		clientPageBufferSize:      clientPageBufferSize,
 		uploaderType:              uploaderType,
 		pluginManager:             pluginManager,
 		backupStoreGetter:         backupStoreGetter,
@@ -461,6 +464,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		cohabitatingResources: cohabitatingResources(),
 		dir:                   tempDir,
 		pageSize:              kb.clientPageSize,
+		pageBufferSize:        kb.clientPageBufferSize,
 	}
 
 	items := collector.getAllItems()
@@ -1135,6 +1139,7 @@ func (kb *kubernetesBackupper) FinalizeBackup(
 		cohabitatingResources: cohabitatingResources(),
 		dir:                   tempDir,
 		pageSize:              kb.clientPageSize,
+		pageBufferSize:        kb.clientPageBufferSize,
 	}
 
 	// Get item list from itemoperation.BackupOperation.Spec.PostOperationItems
