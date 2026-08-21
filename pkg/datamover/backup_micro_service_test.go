@@ -32,6 +32,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -444,4 +445,90 @@ func TestRunCancelableDataPath(t *testing.T) {
 	}
 
 	cancel()
+}
+
+func TestRunCancelableDataPathParentSnapshot(t *testing.T) {
+	dataUploadName := "fake-data-upload"
+
+	tests := []struct {
+		name                   string
+		parentSnapshot         string
+		expectedParentSnapshot string
+		expectedForceFull      bool
+	}{
+		{
+			name:                   "empty lets the data mover search for a parent",
+			parentSnapshot:         "",
+			expectedParentSnapshot: "",
+			expectedForceFull:      false,
+		},
+		{
+			name:                   "auto lets the data mover search for a parent",
+			parentSnapshot:         veleroshared.ParentSnapshotAuto,
+			expectedParentSnapshot: "",
+			expectedForceFull:      false,
+		},
+		{
+			name:                   "none forces a full backup",
+			parentSnapshot:         veleroshared.ParentSnapshotNone,
+			expectedParentSnapshot: "",
+			expectedForceFull:      true,
+		},
+		{
+			name:                   "a specific snapshot ID is passed through unchanged",
+			parentSnapshot:         "fake-parent-snapshot-id",
+			expectedParentSnapshot: "fake-parent-snapshot-id",
+			expectedForceFull:      false,
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	velerov2alpha1api.AddToScheme(scheme)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			duInProgress := builder.ForDataUpload(velerov1api.DefaultNamespace, dataUploadName).
+				Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+				CSISnapshot(&velerov2alpha1api.CSISnapshotSpec{VolumeSnapshot: "fake-snapshot"}).
+				Result()
+			duInProgress.Spec.ParentSnapshot = test.parentSnapshot
+
+			fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).
+				WithRuntimeObjects(duInProgress).Build()
+
+			bs := &BackupMicroService{
+				namespace:      velerov1api.DefaultNamespace,
+				dataUploadName: dataUploadName,
+				ctx:            t.Context(),
+				client:         fakeClient,
+				dataPathMgr:    datapath.NewManager(1),
+				eventRecorder:  &backupMsTestHelper{},
+				resultSignal:   make(chan dataPathResult),
+				logger:         velerotest.NewLogger(),
+			}
+
+			var startParam *datapath.BackupStartParam
+			datapath.VGDPCreator = func(string, string, kbclient.Client, string, datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
+				fsBR := datapathmockes.NewAsyncBR(t)
+				fsBR.On("Init", mock.Anything, mock.Anything).Return(nil)
+				fsBR.On("StartBackup", mock.Anything, mock.Anything, mock.Anything).
+					Run(func(args mock.Arguments) {
+						startParam = args.Get(2).(*datapath.BackupStartParam)
+					}).Return(nil)
+				return fsBR
+			}
+
+			go func() {
+				time.Sleep(time.Millisecond * 500)
+				bs.resultSignal <- dataPathResult{result: "fake-succeed-result"}
+			}()
+
+			_, err := bs.RunCancelableDataPath(t.Context())
+			require.NoError(t, err)
+
+			require.NotNil(t, startParam)
+			assert.Equal(t, test.expectedParentSnapshot, startParam.ParentSnapshot)
+			assert.Equal(t, test.expectedForceFull, startParam.ForceFull)
+		})
+	}
 }
