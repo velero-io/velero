@@ -1,0 +1,1 @@
+Fixed a bug where deleteOrphanedBackups could incorrectly delete backups from other namespaces when multiple Velero instances share the same backup storage location name.
