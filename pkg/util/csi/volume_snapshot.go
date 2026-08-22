@@ -563,6 +563,30 @@ func SetVolumeSnapshotContentDeletionPolicy(
 	return vsc, crClient.Patch(ctx, vsc, crclient.MergeFrom(originVSC))
 }
 
+// findVolumeSnapshotContentByRef looks up a VolumeSnapshotContent whose
+// Spec.VolumeSnapshotRef points to the given VolumeSnapshot. This is used as
+// a fallback when the VolumeSnapshot's Status.BoundVolumeSnapshotContentName
+// has not yet been populated by the CSI snapshot controller, since
+// Spec.VolumeSnapshotRef is set on the VolumeSnapshotContent as soon as it is
+// created, before the VolumeSnapshot's status is updated.
+func findVolumeSnapshotContentByRef(
+	ctx context.Context,
+	volSnap *snapshotv1api.VolumeSnapshot,
+	crClient crclient.Client,
+) (*snapshotv1api.VolumeSnapshotContent, error) {
+	vscList := new(snapshotv1api.VolumeSnapshotContentList)
+	if err := crClient.List(ctx, vscList); err != nil {
+		return nil, err
+	}
+	for i := range vscList.Items {
+		ref := vscList.Items[i].Spec.VolumeSnapshotRef
+		if ref.Name == volSnap.Name && ref.Namespace == volSnap.Namespace {
+			return &vscList.Items[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // CleanupVolumeSnapshot deletes the VolumeSnapshot and the associated VolumeSnapshotContent.  It will make sure the
 // physical snapshot is also deleted.
 func CleanupVolumeSnapshot(
@@ -582,13 +606,28 @@ func CleanupVolumeSnapshot(
 		log.Debugf("Failed to get volumesnapshot %s/%s", volSnap.Namespace, volSnap.Name)
 		return
 	}
-
+	vscName := ""
 	if vs.Status != nil && vs.Status.BoundVolumeSnapshotContentName != nil {
+		vscName = *vs.Status.BoundVolumeSnapshotContentName
+	} else {
+		// The VolumeSnapshot may not have been bound to a VolumeSnapshotContent yet
+		// (e.g. cleanup runs immediately after a downstream failure, before the CSI
+		// snapshot controller has updated status). Fall back to looking up the
+		// VolumeSnapshotContent by its VolumeSnapshotRef so it isn't orphaned.
+		vsc, err := findVolumeSnapshotContentByRef(ctx, vs, crClient)
+		if err != nil {
+			log.Debugf("Failed to look up VolumeSnapshotContent for volumesnapshot %s/%s: %v",
+				vs.Namespace, vs.Name, err)
+		} else if vsc != nil {
+			vscName = vsc.Name
+		}
+	}
+	if vscName != "" {
 		// we patch the DeletionPolicy of the VolumeSnapshotContent to set it to Delete.
 		// This ensures that the volume snapshot in the storage provider is also deleted.
 		_, err := SetVolumeSnapshotContentDeletionPolicy(
 			ctx,
-			*vs.Status.BoundVolumeSnapshotContentName,
+			vscName,
 			crClient,
 			snapshotv1api.VolumeSnapshotContentDelete,
 		)
