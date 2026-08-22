@@ -269,6 +269,17 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	io.BackupStorageConfig = flag.NewMap()
 	io.BackupStorageConfig.Set(veleroCfg.BSLConfig)
 
+	// CACertFile is the CA bundle used to verify TLS connections to the object
+	// store. It is passed through to `velero install --cacert`, which stores it
+	// in the BSL's spec.objectStorage.caCert.
+	if veleroCfg.CACertFile != "" {
+		realPath, err := filepath.Abs(veleroCfg.CACertFile)
+		if err != nil {
+			return nil, err
+		}
+		io.CACertFile = realPath
+	}
+
 	io.VolumeSnapshotConfig = flag.NewMap()
 	io.VolumeSnapshotConfig.Set(veleroCfg.VSLConfig)
 
@@ -651,8 +662,43 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	prefix,
 	config,
 	secretName,
-	secretKey string,
+	secretKey,
+	caCertFile string,
 ) error {
+	args := createBackupLocationArgs(
+		veleroNamespace,
+		name,
+		objectStoreProvider,
+		bucket,
+		prefix,
+		config,
+		secretName,
+		secretKey,
+		caCertFile,
+	)
+
+	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
+		return err
+	}
+
+	return CheckBSL(ctx, veleroNamespace, name)
+}
+
+// createBackupLocationArgs builds the argument list for
+// `velero backup-location create`. It is separated from
+// VeleroCreateBackupLocation so that the argument construction can be verified
+// without invoking the Velero CLI.
+func createBackupLocationArgs(
+	veleroNamespace,
+	name,
+	objectStoreProvider,
+	bucket,
+	prefix,
+	config,
+	secretName,
+	secretKey,
+	caCertFile string,
+) []string {
 	args := []string{
 		"--namespace", veleroNamespace,
 		"create", "backup-location", name,
@@ -668,15 +714,15 @@ func VeleroCreateBackupLocation(ctx context.Context,
 		args = append(args, "--config", config)
 	}
 
+	if caCertFile != "" {
+		args = append(args, "--cacert", caCertFile)
+	}
+
 	if secretName != "" && secretKey != "" {
 		args = append(args, "--credential", fmt.Sprintf("%s=%s", secretName, secretKey))
 	}
 
-	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
-		return err
-	}
-
-	return CheckBSL(ctx, veleroNamespace, name)
+	return args
 }
 
 func VeleroVersion(ctx context.Context, veleroCLI, veleroNamespace string) error {

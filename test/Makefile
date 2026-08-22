@@ -96,6 +96,10 @@ STANDBY_CLS_SERVICE_ACCOUNT_NAME ?=
 BSL_BUCKET ?=
 BSL_PREFIX ?=
 BSL_CONFIG ?=
+# Path to a PEM certificate bundle used to verify TLS connections to the object
+# store. Required when the object store (e.g. MinIO) serves HTTPS with a
+# certificate that is not signed by a publicly trusted CA.
+BSL_CA_CERT_FILE ?=
 VSL_CONFIG ?=
 CLOUD_PROVIDER ?=
 STANDBY_CLUSTER_CLOUD_PROVIDER ?=
@@ -118,6 +122,7 @@ ADDITIONAL_CREDS_FILE ?=
 ADDITIONAL_BSL_BUCKET ?=
 ADDITIONAL_BSL_PREFIX ?=
 ADDITIONAL_BSL_CONFIG ?=
+ADDITIONAL_BSL_CA_CERT_FILE ?=
 
 FEATURES ?=
 DEBUG_VELERO_POD_RESTART ?= false
@@ -215,6 +220,7 @@ run-e2e: ginkgo
 		--additional-bsl-bucket=$(ADDITIONAL_BSL_BUCKET) \
 		--additional-bsl-prefix=$(ADDITIONAL_BSL_PREFIX) \
 		--additional-bsl-config=$(ADDITIONAL_BSL_CONFIG) \
+		--additional-bsl-ca-cert-file=$(ADDITIONAL_BSL_CA_CERT_FILE) \
 		--default-cluster-context=$(DEFAULT_CLUSTER) \
 		--standby-cluster-context=$(STANDBY_CLUSTER) \
 		--snapshot-move-data=$(SNAPSHOT_MOVE_DATA) \
@@ -232,7 +238,8 @@ run-e2e: ginkgo
 		--image-registry-proxy=$(IMAGE_REGISTRY_PROXY) \
 		--worker-os=$(WORKER_OS) \
 		--pod-labels=$(POD_LABELS) \
-		--sa-annotations=$(SA_ANNOTATIONS)
+		--sa-annotations=$(SA_ANNOTATIONS) \
+		--bsl-ca-cert-file=$(BSL_CA_CERT_FILE)
 
 .PHONY: run-perf
 run-perf: ginkgo

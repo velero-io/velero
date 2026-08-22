@@ -96,6 +96,7 @@ type VeleroConfig struct {
 	AdditionalBSLPrefix               string
 	AdditionalBSLConfig               string
 	AdditionalBSLCredentials          string
+	AdditionalBSLCACertFile           string
 	RegistryCredentialFile            string
 	RestoreHelperImage                string
 	UpgradeFromVeleroVersion          string
