@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
+	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/persistence"
@@ -330,8 +332,12 @@ func (b *backupSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(b)
 }
 
-// deleteOrphanedBackups deletes backup objects (CRDs) from Kubernetes that have the specified location
-// and a phase of Completed, but no corresponding backup in object storage.
+// deleteOrphanedBackups creates DeleteBackupRequests for backup objects (CRDs) from
+// Kubernetes that have the specified location and a phase of Completed or
+// PartiallyFailed, but no corresponding backup in object storage. Routing the
+// deletion through a DeleteBackupRequest instead of deleting the Backup CR
+// directly ensures the deletion controller performs provider snapshot cleanup
+// rather than silently orphaning cloud snapshots.
 func (b *backupSyncReconciler) deleteOrphanedBackups(ctx context.Context, locationName string, backupStoreBackups sets.Set[string], log logrus.FieldLogger) {
 	var backupList velerov1api.BackupList
 	listOption := client.ListOptions{
@@ -355,10 +361,46 @@ func (b *backupSyncReconciler) deleteOrphanedBackups(ctx context.Context, locati
 			continue
 		}
 
-		if err := b.client.Delete(ctx, &backupList.Items[i], &client.DeleteOptions{}); err != nil {
-			log.WithError(errors.WithStack(err)).Error("Error deleting orphaned backup from cluster")
+		// If there's an existing pending deletion request for this backup, don't
+		// create another one.
+		pending, err := b.hasPendingDeleteBackupRequest(ctx, &backupList.Items[i])
+		if err != nil {
+			log.WithError(errors.WithStack(err)).Error("Error listing delete backup requests for orphaned backup")
+			continue
+		}
+		if pending {
+			log.Info("Orphaned backup already has a pending deletion request")
+			continue
+		}
+
+		log.Info("Creating delete backup request for orphaned backup")
+		ndbr := pkgbackup.NewDeleteBackupRequest(backup.Name, string(backup.UID))
+		ndbr.SetNamespace(backup.Namespace)
+		if err := veleroclient.CreateRetryGenerateName(b.client, ctx, ndbr); err != nil {
+			log.WithError(errors.WithStack(err)).Error("Error creating delete backup request for orphaned backup")
 		}
 	}
+}
+
+// hasPendingDeleteBackupRequest returns true if a DeleteBackupRequest for the
+// backup exists in the New, InProgress, or empty (not-yet-set) phase.
+func (b *backupSyncReconciler) hasPendingDeleteBackupRequest(ctx context.Context, backup *velerov1api.Backup) (bool, error) {
+	dbrs := &velerov1api.DeleteBackupRequestList{}
+	selector := client.MatchingLabels{
+		velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
+		velerov1api.BackupUIDLabel:  string(backup.UID),
+	}
+	if err := b.client.List(ctx, dbrs, selector); err != nil {
+		return false, err
+	}
+
+	for _, dbr := range dbrs.Items {
+		switch dbr.Status.Phase {
+		case "", velerov1api.DeleteBackupRequestPhaseNew, velerov1api.DeleteBackupRequestPhaseInProgress:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // backupSyncSourceOrderFunc returns a new slice with the default backup location first (if it exists),
