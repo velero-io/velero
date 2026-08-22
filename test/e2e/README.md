@@ -147,6 +147,12 @@ Start kind cluster
 kind create cluster
 ```
 
+Install the CSI snapshot stack. The kind StorageClass uses the csi-driver-host-path
+provisioner, so PVCs stay unbound without it.
+``` bash
+./hack/install-csi-hostpath.sh
+```
+
 ``` bash
 BSL_PREFIX=<PREFIX_UNDER_BUCKET> \
 BSL_BUCKET=<BUCKET_FOR_E2E_TEST_BACKUP> \
@@ -155,6 +161,8 @@ CLOUD_PROVIDER=kind \
 OBJECT_STORE_PROVIDER=aws \
 make test-e2e
 ```
+
+To run the CSI snapshot tests, add `FEATURES=EnableCSI`.
 
 Stop kind cluster
 ``` bash

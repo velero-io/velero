@@ -89,6 +89,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      csi-matrix: ${{ steps.set-matrix.outputs.csi-matrix }}
     steps:
       - name: Set k8s versions
         id: set-matrix
@@ -98,13 +99,27 @@ jobs:
         # and removes older patches of the same minor version
         # awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}'
         run: |
+          K8S_VERSIONS=$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -v -E "alpha|beta" | grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]')
+
           echo "matrix={\
-            \"k8s\":$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -v -E "alpha|beta" | grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]'),\
+            \"k8s\":${K8S_VERSIONS},\
             \"labels\":[\
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
+            ]}" >> $GITHUB_OUTPUT
+
+          CSI_K8S_MIN=1034
+          CSI_K8S_MAX=1035
+          CSI_K8S=$(echo "${K8S_VERSIONS}" | jq -c --argjson min "$CSI_K8S_MIN" --argjson max "$CSI_K8S_MAX" '
+            [ .[] | select((split(".") | (.[0]|tonumber) * 1000 + (.[1]|tonumber)) as $v
+                           | $v >= $min and $v <= $max) ]
+            | sort_by(split(".") | map(tonumber)) | reverse | .[0:2]')
+          echo "csi-matrix={\
+            \"k8s\":${CSI_K8S},\
+            \"labels\":[\
+              \"BackupVolumeInfo && (CSISnapshot || CSIDataMover)\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
@@ -198,4 +213,102 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: DebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
+          path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
+
+  run-csi-e2e-test:
+    needs:
+      - build
+      - setup-test-matrix
+      - get-go-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.setup-test-matrix.outputs.csi-matrix)}}
+      fail-fast: false
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ needs.get-go-version.outputs.version }}
+
+      - name: Fetch built MinIO Image
+        uses: actions/cache@v6
+        id: minio-cache
+        with:
+          path: ./minio-image.tar
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
+      - name: Load MinIO Image
+        run: |
+          echo "Loading MinIO image..."
+          docker load < ./minio-image.tar
+      - name: Install MinIO
+        run: |
+          docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: "kind"
+          version: "v0.32.0"
+          node_image: "kindest/node:v${{ matrix.k8s }}"
+
+      - name: Install kubectl
+        run: |
+          curl -fLO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: Install CSI snapshot stack
+        run: ./hack/install-csi-hostpath.sh
+        timeout-minutes: 10
+
+      - name: Fetch built CLI
+        id: cli-cache
+        uses: actions/cache@v6
+        with:
+          path: ./_output/bin/linux/amd64/velero
+          key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Fetch built Image
+        id: image-cache
+        uses: actions/cache@v6
+        with:
+          path: ./velero.tar
+          key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Load Velero Image
+        run:
+          kind load image-archive velero.tar
+      - name: Run CSI E2E test
+        run: |
+          cat << EOF > /tmp/credential
+          [default]
+          aws_access_key_id=minio
+          aws_secret_access_key=minio123
+          EOF
+
+          git init -q /tmp/kibishii
+          git -C /tmp/kibishii remote add origin https://github.com/vmware-tanzu-experiments/distributed-data-generator.git
+          git -C /tmp/kibishii fetch --depth 1 origin "${KIBISHII_COMMIT}"
+          git -C /tmp/kibishii checkout -q "${KIBISHII_COMMIT}"
+
+          GOPATH=~/go \
+              CLOUD_PROVIDER=kind \
+              OBJECT_STORE_PROVIDER=aws \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              CREDS_FILE=/tmp/credential \
+              BSL_BUCKET=bucket \
+              ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_CREDS_FILE=/tmp/credential \
+              ADDITIONAL_BSL_BUCKET=additional-bucket \
+              VELERO_IMAGE=velero:pr-test-linux-amd64 \
+              PLUGINS=velero/velero-plugin-for-aws:latest \
+              FEATURES=EnableCSI \
+              GINKGO_LABELS="${{ matrix.labels }}" \
+              KIBISHII_DIRECTORY=/tmp/kibishii/kubernetes/yaml/ \
+              make -C test/ run-e2e
+        timeout-minutes: 30
+      - name: Upload debug bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: CSI-DebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
           path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
