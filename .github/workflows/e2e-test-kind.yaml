@@ -104,7 +104,8 @@ jobs:
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
-              \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
+              \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\", \
+              \"BSL && ReadOnly\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
