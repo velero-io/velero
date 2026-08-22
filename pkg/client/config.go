@@ -110,7 +110,16 @@ func (c VeleroConfig) Features() []string {
 		return []string{}
 	}
 
-	return strings.Split(features, ",")
+	parts := strings.Split(features, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func (c VeleroConfig) Colorized() bool {
