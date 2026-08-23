@@ -2179,3 +2179,107 @@ func TestGetVSCForVS(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupVolumeSnapshot(t *testing.T) {
+	retainVSCName := "retain-vsc"
+
+	testCases := []struct {
+		name          string
+		volSnap       *snapshotv1api.VolumeSnapshot
+		objs          []runtime.Object
+		expectDeleted bool
+		// name of the VolumeSnapshotContent expected to have been patched to
+		// DeletionPolicy=Delete; empty when no VSC should be touched.
+		expectedVSC string
+	}{
+		{
+			name: "should be a no-op if the VolumeSnapshot no longer exists",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "does-not-exist",
+					Namespace: "velero",
+				},
+			},
+			objs:          []runtime.Object{},
+			expectDeleted: false,
+		},
+		{
+			name: "should delete a VolumeSnapshot with no bound VolumeSnapshotContent",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-no-vsc",
+					Namespace: "velero",
+				},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vs-no-vsc",
+						Namespace: "velero",
+					},
+				},
+			},
+			expectDeleted: true,
+		},
+		{
+			name: "should patch bound VSC DeletionPolicy to Delete and delete the VolumeSnapshot",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-with-vsc",
+					Namespace: "velero",
+				},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vs-with-vsc",
+						Namespace: "velero",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &retainVSCName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "retain-vsc",
+					},
+					Spec: snapshotv1api.VolumeSnapshotContentSpec{
+						DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+					},
+				},
+			},
+			expectDeleted: true,
+			expectedVSC:   "retain-vsc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
+
+			CleanupVolumeSnapshot(t.Context(), tc.volSnap, fakeClient, velerotest.NewLogger())
+
+			actual := new(snapshotv1api.VolumeSnapshot)
+			err := fakeClient.Get(
+				t.Context(),
+				crclient.ObjectKey{Name: tc.volSnap.Name, Namespace: tc.volSnap.Namespace},
+				actual,
+			)
+
+			if tc.expectDeleted {
+				assert.True(t, apierrors.IsNotFound(err), "expected VolumeSnapshot to be deleted")
+			}
+
+			if tc.expectedVSC != "" {
+				actualVSC := new(snapshotv1api.VolumeSnapshotContent)
+				err := fakeClient.Get(
+					t.Context(),
+					crclient.ObjectKey{Name: tc.expectedVSC},
+					actualVSC,
+				)
+				require.NoError(t, err)
+				assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, actualVSC.Spec.DeletionPolicy)
+			}
+		})
+	}
+}
