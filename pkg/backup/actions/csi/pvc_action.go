@@ -1234,7 +1234,7 @@ func setPVCRequestSizeToVSRestoreSize(
 	logger logrus.FieldLogger,
 ) {
 	if vsc.Status.RestoreSize != nil {
-		logger.Debugf("Patching PVC request size to fit the volumesnapshot restore size %d", vsc.Status.RestoreSize)
+		logger.Debugf("Patching PVC request size to fit the volumesnapshot restore size %d", *vsc.Status.RestoreSize)
 		restoreSize := *resource.NewQuantity(*vsc.Status.RestoreSize, resource.BinarySI)
 
 		// It is possible that the volume provider allocated a larger

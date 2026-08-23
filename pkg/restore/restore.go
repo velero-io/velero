@@ -2843,7 +2843,7 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 				}
 
 				if skipItem {
-					ctx.log.Infof("restore orSelector labels did not match, skipping restore of item: %s", skipItem, item)
+					ctx.log.Infof("restore orSelector labels did not match, skipping restore of item: %s", item)
 					continue
 				}
 			}

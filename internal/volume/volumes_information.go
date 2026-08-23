@@ -36,6 +36,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/features"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/vmware-tanzu/velero/pkg/util/stringptr"
 )
 
 type Method string
@@ -494,7 +495,8 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace, volumeSnapshot.Spec.Source.PersistentVolumeClaimName)
+			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace,
+				stringptr.GetString(volumeSnapshot.Spec.Source.PersistentVolumeClaimName))
 			continue
 		}
 	}

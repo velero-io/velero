@@ -419,7 +419,7 @@ func getInitContainerFromAnnotation(podName string, annotations map[string]strin
 		return nil
 	}
 	if command == "" {
-		log.Infof("RestoreHook init container for pod %s is using container's default entrypoint", podName, containerImage)
+		log.Infof("RestoreHook init container for pod %s is using the default entrypoint of image %s", podName, containerImage)
 	}
 	if containerName == "" {
 		uid, err := uuid.NewRandom()
