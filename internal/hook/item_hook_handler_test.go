@@ -1287,6 +1287,25 @@ func TestGetInitContainerFromAnnotations(t *testing.T) {
 				podRestoreHookInitContainerCommandAnnotationKey: "[foobarbaz",
 			},
 		},
+		{
+			name:      "should use the image's default entrypoint when the command annotation is empty",
+			expectNil: false,
+			expected:  builder.ForContainer("restore-init1", "busy-box").Result(),
+			inputAnnotations: map[string]string{
+				podRestoreHookInitContainerImageAnnotationKey:   "busy-box",
+				podRestoreHookInitContainerNameAnnotationKey:    "restore-init",
+				podRestoreHookInitContainerCommandAnnotationKey: "",
+			},
+		},
+		{
+			name:      "should use the image's default entrypoint when the command annotation is missing",
+			expectNil: false,
+			expected:  builder.ForContainer("restore-init1", "busy-box").Result(),
+			inputAnnotations: map[string]string{
+				podRestoreHookInitContainerImageAnnotationKey: "busy-box",
+				podRestoreHookInitContainerNameAnnotationKey:  "restore-init",
+			},
+		},
 	}
 
 	for _, tc := range testCases {

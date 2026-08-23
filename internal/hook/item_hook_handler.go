@@ -365,6 +365,12 @@ func getPodExecHookFromAnnotations(annotations map[string]string, phase HookPhas
 
 func parseStringToCommand(commandValue string) []string {
 	var command []string
+	// An empty command means the container image's own entrypoint should be used.
+	// Callers that require a command already return early; getInitContainerFromAnnotation
+	// deliberately allows this case, so return nil rather than indexing an empty string.
+	if commandValue == "" {
+		return nil
+	}
 	// check for json array
 	if commandValue[0] == '[' {
 		if err := json.Unmarshal([]byte(commandValue), &command); err != nil {
