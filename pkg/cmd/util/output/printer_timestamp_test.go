@@ -76,6 +76,26 @@ func TestPrintBackupWithoutStartTimestamp(t *testing.T) {
 	assert.Equal(t, string(velerov1api.BackupPhaseFailedValidation), rows[0].Cells[1])
 }
 
+func TestPrintBackupExpiresForStalledNewBackup(t *testing.T) {
+	created := metav1.NewTime(time.Now().Add(-20 * 24 * time.Hour))
+	backup := &velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "clusterstate-20210128123759",
+			CreationTimestamp: created,
+		},
+		Spec: velerov1api.BackupSpec{
+			TTL: metav1.Duration{Duration: 10 * 24 * time.Hour},
+		},
+		Status: velerov1api.BackupStatus{
+			Phase: velerov1api.BackupPhaseNew,
+		},
+	}
+
+	rows := printBackup(backup)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "n/a", rows[0].Cells[5], "stalled New backup should not show expiration in the past")
+}
+
 func TestPrintBackupWithStartTimestamp(t *testing.T) {
 	started := metav1.NewTime(time.Date(2026, 8, 8, 21, 6, 28, 0, time.UTC))
 	backup := &velerov1api.Backup{

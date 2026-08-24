@@ -90,8 +90,12 @@ func printBackup(backup *velerov1api.Backup) []metav1.TableRow {
 	if backup.Status.Expiration != nil {
 		expiration = backup.Status.Expiration.Time
 	}
-	if expiration.IsZero() && backup.Spec.TTL.Duration > 0 {
-		expiration = backup.CreationTimestamp.Add(backup.Spec.TTL.Duration)
+	// Only estimate expiration from TTL after the backup has started. Backups
+	// stalled in New have no Status.Expiration yet; using CreationTimestamp
+	// would incorrectly show them as already expired (issue #3555).
+	if expiration.IsZero() && backup.Spec.TTL.Duration > 0 &&
+		backup.Status.StartTimestamp != nil && !backup.Status.StartTimestamp.Time.IsZero() {
+		expiration = backup.Status.StartTimestamp.Time.Add(backup.Spec.TTL.Duration)
 	}
 
 	status := string(backup.Status.Phase)

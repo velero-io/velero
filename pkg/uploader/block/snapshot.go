@@ -149,6 +149,12 @@ func snapshotSource(
 
 func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull bool, parentSnapshot string, volumeID string, realSource string, snapshotTags map[string]string, log logrus.FieldLogger) parentBackupInfo {
 	var previous *udmrepo.Snapshot
+
+	// parentID names whichever snapshot ended up being the parent. On the discovery
+	// branch the parentSnapshot parameter is empty by definition, so logging it there
+	// produces messages that describe a decision without naming the object it was about.
+	parentID := parentSnapshot
+
 	if !forceFull {
 		if parentSnapshot != "" {
 			snap, err := rep.GetSnapshot(ctx, udmrepo.ID(parentSnapshot))
@@ -166,6 +172,7 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 				log.WithError(err).Warn("Failed to search previous snapshot, fallback to full backup")
 			} else {
 				previous = &snap
+				parentID = string(snap.RootObject.ID)
 				log.Infof("Using previous snapshot %s", snap.RootObject.ID)
 			}
 		}
@@ -176,21 +183,21 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 	parentInfo := parentBackupInfo{}
 	if previous != nil {
 		if previous.Tags == nil {
-			log.Warnf("No tag from parent snapshot %s, fallback to full backup", parentSnapshot)
+			log.Warnf("No tag from parent snapshot %s, fallback to full backup", parentID)
 		} else if previous.Tags[uploader.CBTChangeIDTag] == "" {
-			log.Warnf("No ChangeID tag from parent snapshot %s, fallback to full backup", parentSnapshot)
+			log.Warnf("No ChangeID tag from parent snapshot %s, fallback to full backup", parentID)
 		} else if previous.Tags[uploader.CBTVolumeIDTag] == "" {
-			log.Warnf("No VolumeID tag from parent snapshot %s, fallback to full backup", parentSnapshot)
+			log.Warnf("No VolumeID tag from parent snapshot %s, fallback to full backup", parentID)
 		} else if previous.Tags[uploader.CBTVolumeIDTag] != volumeID {
-			log.Warnf("VolumeID %s from parent snapshot %s is not expected as %s, fallback to full backup", previous.Tags[uploader.CBTVolumeIDTag], parentSnapshot, volumeID)
+			log.Warnf("VolumeID %s from parent snapshot %s is not expected as %s, fallback to full backup", previous.Tags[uploader.CBTVolumeIDTag], parentID, volumeID)
 		} else if obj, err := loadObjectFromSnapshot(ctx, rep, previous); err != nil {
-			log.WithError(err).Warnf("Failed to load object from parent snapshot %s, fallback to full backup", parentSnapshot)
+			log.WithError(err).Warnf("Failed to load object from parent snapshot %s, fallback to full backup", parentID)
 		} else {
 			parentInfo.parentObject = obj
 			parentInfo.changeID = previous.Tags[uploader.CBTChangeIDTag]
 			parentInfo.volumeID = previous.Tags[uploader.CBTVolumeIDTag]
 
-			log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", parentSnapshot, previous.StartTime, previous.EndTime, previous.Description)
+			log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", parentID, previous.StartTime, previous.EndTime, previous.Description)
 		}
 	}
 

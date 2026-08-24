@@ -713,7 +713,7 @@ func WaitUntilVSCHandleIsReady(
 			if vsc.Status != nil &&
 				vsc.Status.Error != nil {
 				log.Warnf("VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
+					vsc.Name, stringptr.GetString(vsc.Status.Error.Message))
 			}
 			return false, nil
 		}
@@ -764,10 +764,10 @@ func WaitUntilVSCHandleIsReady(
 				vsc.Status.Error != nil {
 				log.Errorf(
 					"Timed out awaiting reconciliation of VolumeSnapshot, VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
+					vsc.Name, stringptr.GetString(vsc.Status.Error.Message))
 				return nil,
 					errors.Errorf("CSI got timed out with error: %v",
-						*vsc.Status.Error.Message)
+						stringptr.GetString(vsc.Status.Error.Message))
 			} else {
 				log.Errorf(
 					"Timed out awaiting reconciliation of volumesnapshot %s/%s",

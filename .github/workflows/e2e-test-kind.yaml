@@ -94,12 +94,14 @@ jobs:
         id: set-matrix
         # everything excluding older tags. limits needs to be high enough to cover all latest versions
         # and test labels
-        # grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" filters for v1.25 to v9.99
+        # grep -E "^v[1-9]\.(2[5-9]|[3-9][0-9])\.[0-9]+$" filters for well-formed v1.25.x to v9.99.x
+        # GA releases only, so a pre-release tag like v1.37.0-rc.1 can't reach the
+        # awk step below and be misparsed as a patch release (e.g. "1.37.1")
         # and removes older patches of the same minor version
         # awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}'
         run: |
           echo "matrix={\
-            \"k8s\":$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -v -E "alpha|beta" | grep -E "v[1-9]\.(2[5-9]|[3-9][0-9])" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]'),\
+            \"k8s\":$(wget -q -O - "https://hub.docker.com/v2/namespaces/kindest/repositories/node/tags?page_size=50" | grep -o '"name": *"[^"]*' | grep -o '[^"]*$' | grep -E "^v[1-9]\.(2[5-9]|[3-9][0-9])\.[0-9]+$" | awk -F. '{if(!a[$1"."$2]++)print $1"."$2"."$NF}' | sort -r | sed s/v//g | jq -R -c -s 'split("\n")[:-1]'),\
             \"labels\":[\
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
               \"ResourceFiltering && !FSBackup\", \
