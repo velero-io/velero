@@ -463,7 +463,7 @@ func getRepoPassword(secretStore credentials.SecretStore) (string, error) {
 		return "", errors.New("invalid credentials interface")
 	}
 
-	rawPass, err := secretStore.Get(repokey.RepoKeySelector())
+	rawPass, err := secretStore.Get(context.TODO(), repokey.RepoKeySelector())
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}
@@ -512,7 +512,7 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 	delete(config, repoconfig.CredentialsFileKey)
 
 	if backupLocation.Spec.Credential != nil {
-		config[repoconfig.CredentialsFileKey], err = credentialsFileStore.Path(backupLocation.Spec.Credential)
+		config[repoconfig.CredentialsFileKey], err = credentialsFileStore.Path(context.TODO(), backupLocation.Spec.Credential)
 		if err != nil {
 			return map[string]string{}, errors.Wrap(err, "error get credential file in bsl")
 		}
@@ -620,7 +620,7 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 
 		// Try CACertRef first (new method), then fall back to CACert (deprecated)
 		if backupLocation.Spec.ObjectStorage.CACertRef != nil {
-			caCertString, err := credGetter.FromSecret.Get(backupLocation.Spec.ObjectStorage.CACertRef)
+			caCertString, err := credGetter.FromSecret.Get(context.TODO(), backupLocation.Spec.ObjectStorage.CACertRef)
 			if err != nil {
 				return nil, errors.Wrap(err, "error getting CA certificate from secret")
 			}
