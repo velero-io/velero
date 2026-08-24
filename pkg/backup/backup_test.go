@@ -2931,7 +2931,6 @@ func (*fakeVolumeSnapshotter) DeleteSnapshot(snapshotID string) error {
 // looking at the backup request's VolumeSnapshots field. This test uses the fakeVolumeSnapshotter
 // struct in place of real volume snapshotters.
 func TestBackupWithSnapshots(t *testing.T) {
-	// TODO: add more verification for skippedPVTracker
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
 	defer itemBlockPool.Stop()
 	tests := []struct {
@@ -2941,6 +2940,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 		apiResources      []*test.APIResource
 		snapshotterGetter volumeSnapshotterGetter
 		want              []*volume.Snapshot
+		wantSkippedPVs    []SkippedPV
 	}{
 		{
 			name: "persistent volume with no zone annotation creates a snapshot",
@@ -2977,6 +2977,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 		{
 			name: "persistent volume with deprecated zone annotation creates a snapshot",
@@ -2991,7 +2992,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("failure-domain.beta.kubernetes.io/zone", "zone-1")).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels(corev1api.LabelFailureDomainBetaZone, "zone-1")).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3014,6 +3015,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 		{
 			name: "persistent volume with GA zone annotation creates a snapshot",
@@ -3028,7 +3030,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "zone-1")).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels(corev1api.LabelTopologyZone, "zone-1")).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3051,6 +3053,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 		{
 			name: "persistent volume with both GA and deprecated zone annotation creates a snapshot and should use the GA",
@@ -3065,7 +3068,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{"failure-domain.beta.kubernetes.io/zone": "zone-1-deprecated", "topology.kubernetes.io/zone": "zone-1-ga"})).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{corev1api.LabelFailureDomainBetaZone: "zone-1-deprecated", corev1api.LabelTopologyZone: "zone-1-ga"})).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3088,6 +3091,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 		{
 			name: "error returned from CreateSnapshot results in a failed snapshot",
@@ -3123,6 +3127,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 		{
 			name: "backup with SnapshotVolumes=false does not create any snapshots",
@@ -3144,6 +3149,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter).WithVolume("pv-1", "vol-1", "", "type-1", 100, false),
 			},
 			want: nil,
+			wantSkippedPVs: []SkippedPV{
+				{
+					Name: "pv-1",
+					Reasons: []PVSkipReason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "not satisfy the criteria for VolumePolicy or the legacy snapshot way",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "backup with no volume snapshot locations does not create any snapshots",
@@ -3162,6 +3178,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter).WithVolume("pv-1", "vol-1", "", "type-1", 100, false),
 			},
 			want: nil,
+			wantSkippedPVs: []SkippedPV{
+				{
+					Name: "pv-1",
+					Reasons: []PVSkipReason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "backup with no volume snapshotters does not create any snapshots",
@@ -3181,6 +3208,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{},
 			want:              nil,
+			wantSkippedPVs: []SkippedPV{
+				{
+					Name: "pv-1",
+					Reasons: []PVSkipReason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "unsupported persistent volume type does not create any snapshots",
@@ -3202,6 +3240,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter),
 			},
 			want: nil,
+			wantSkippedPVs: []SkippedPV{
+				{
+					Name: "pv-1",
+					Reasons: []PVSkipReason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "when there are multiple volumes, snapshot locations, and snapshotters, volumes are matched to the right snapshotters",
@@ -3255,6 +3304,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedPVs: []SkippedPV{},
 		},
 	}
 
@@ -3273,6 +3323,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.want, tc.req.VolumeSnapshots.Get())
+			assert.Equal(t, tc.wantSkippedPVs, tc.req.SkippedPVTracker.Summary())
 		})
 	}
 }

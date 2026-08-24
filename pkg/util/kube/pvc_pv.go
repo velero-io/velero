@@ -153,6 +153,12 @@ func EnsureDeletePVC(ctx context.Context, pvcGetter corev1client.CoreV1Interface
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the PVC has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure pvc %s is deleted", pvcName)
+			}
 			return errors.Errorf("timeout to assure pvc %s is deleted, finalizers in pvc %v", pvcName, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to ensure pvc deleted for %s", pvcName)
@@ -189,6 +195,12 @@ func EnsureDeletePV(ctx context.Context, pvGetter corev1client.CoreV1Interface, 
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the PV has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure pv %s is deleted", pvName)
+			}
 			return errors.Errorf("timeout to assure pv %s is deleted, finalizers in pv %v", pvName, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to ensure pv deleted for %s", pvName)

@@ -96,6 +96,13 @@ spec:
                 description: Node is the name of the node that the Pod is running
                   on.
                 type: string
+              parentSnapshot:
+                description: |-
+                  ParentSnapshot specifies the parent snapshot that current backup is based on.
+                  If its value is "" or "auto", the data mover finds the recent backup of the same volume as parent.
+                  If its value is "none", the data mover will do a full backup
+                  If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
+                type: string
               pod:
                 description: Pod is a reference to the pod containing the volume to
                   be backed up.

@@ -392,7 +392,7 @@ var _ = Describe(
 	APIGroupVersionsTest,
 )
 var _ = Describe(
-	"CRD of apiextentions v1beta1 should be B/R successfully from cluster(k8s version < 1.22) to cluster(k8s version >= 1.22)",
+	"CRD of apiextensions v1beta1 should be B/R successfully from cluster(k8s version < 1.22) to cluster(k8s version >= 1.22)",
 	Label("APIGroup", "APIExtensions", "SKIP_KIND"),
 	APIExtensionsVersionsTest,
 )

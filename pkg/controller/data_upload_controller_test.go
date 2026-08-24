@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -672,7 +673,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledDataUpload[test.du.Name] = test.sportTime.Time
+				r.cancelledDataUpload.Store(test.du.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -752,9 +753,15 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledDataUpload, test.du.Name)
+				_, ok := r.cancelledDataUpload.Load(test.du.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledDataUpload)
+				empty := true
+				r.cancelledDataUpload.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isDataUploadInFinalState(&du) || du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
@@ -1560,4 +1567,51 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 			assert.Equal(t, tt.want.annotations, csiParam.HostingPodAnnotations)
 		})
 	}
+}
+
+type dataUploadSequenceClock struct {
+	*testclocks.FakeClock
+	mu sync.Mutex
+}
+
+func (c *dataUploadSequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestDataUploadCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	du := dataUploadBuilder().Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result()
+
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	err = r.client.Create(ctx, du)
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledDataUpload.Store(du.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.Clock = &dataUploadSequenceClock{FakeClock: testclocks.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: du.Name, Namespace: du.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledDataUpload.Load(du.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

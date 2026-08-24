@@ -134,7 +134,11 @@ func (bp *blockProvider) RunBackup(
 
 	snapshotInfo, _, err := blockBackupFunc(ctx, blkUploader, bp.bkRepo, path, realSource, cbtParam.Source, forceFull, parentSnapshot, cbtParam.Service, uploaderCfg, tags, log)
 
-	if err == block.ErrCanceled {
+	// errors.Is, not ==: the sentinel is wrapped twice on its way here, by
+	// block/uploader.go ("error backing up bdev %s") and again by
+	// block/snapshot.go ("Failed to run uploader backup for si %v"), so an
+	// equality check never matches and cancellation gets reported as a failure.
+	if errors.Is(err, block.ErrCanceled) {
 		log.Warn("Block backup is canceled")
 		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, ErrorCanceled
 	}
@@ -176,7 +180,8 @@ func (bp *blockProvider) RunRestore(
 
 	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, uploaderCfg, log)
 
-	if err == block.ErrCanceled {
+	// errors.Is, not ==: see the equivalent comment on the backup path above.
+	if errors.Is(err, block.ErrCanceled) {
 		log.Warn("Block restore is canceled")
 		return 0, ErrorCanceled
 	}

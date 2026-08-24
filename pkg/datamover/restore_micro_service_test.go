@@ -291,7 +291,7 @@ func TestRunCancelableRestore(t *testing.T) {
 			kubeClientObj:    []runtime.Object{ddInProgress},
 			dataPathStarted:  true,
 			expectedEventMsg: fmt.Sprintf("Data path for %s stopped", dataDownloadName),
-			expectedErr:      "timed out waiting for fs restore to complete",
+			expectedErr:      "timed out waiting for restore to complete",
 		},
 		{
 			name:            "data path returns error",

@@ -56,7 +56,7 @@ type DownloadTarget struct {
 }
 
 // DownloadRequestPhase represents the lifecycle phase of a DownloadRequest.
-// +kubebuilder:validation:Enum=New;Processed
+// +kubebuilder:validation:Enum=New;Processed;Failed
 type DownloadRequestPhase string
 
 const (
@@ -68,6 +68,12 @@ const (
 	// into Status.DownloadURL. The controller signs the key by convention and does not
 	// check that the object is present, so this phase does not imply the file exists.
 	DownloadRequestPhaseProcessed DownloadRequestPhase = "Processed"
+
+	// DownloadRequestPhaseFailed means the controller will not sign a URL for this request
+	// and no retry will change that. Status.Message carries the reason. A caller waiting on
+	// Status.DownloadURL should stop when it sees this phase rather than poll until its own
+	// timeout, which would report a storage problem that is not the cause.
+	DownloadRequestPhaseFailed DownloadRequestPhase = "Failed"
 )
 
 // DownloadRequestStatus is the current status of a DownloadRequest.
@@ -89,6 +95,10 @@ type DownloadRequestStatus struct {
 	// +optional
 	// +nullable
 	Expiration *metav1.Time `json:"expiration,omitempty"`
+
+	// Message explains a Failed phase. It is empty in every other phase.
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client,
@@ -99,6 +109,10 @@ type DownloadRequestStatus struct {
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
 // +kubebuilder:resource:shortName=dreq
+// +kubebuilder:printcolumn:name="Target Kind",type="string",JSONPath=".spec.target.kind",description="The type of file to download"
+// +kubebuilder:printcolumn:name="Target Name",type="string",JSONPath=".spec.target.name",description="The name of the resource the file is associated with"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="The status of the download request"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // DownloadRequest is a request to download an artifact from backup object storage, such as a backup
 // log file.

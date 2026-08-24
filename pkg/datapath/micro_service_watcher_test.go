@@ -120,6 +120,7 @@ type startWatchFake struct {
 	redirectErr        error
 	complete           bool
 	failed             bool
+	failedErr          error
 	canceled           bool
 	progress           int
 }
@@ -142,6 +143,7 @@ func (sw *startWatchFake) OnCompleted(ctx context.Context, namespace string, tas
 
 func (sw *startWatchFake) OnFailed(ctx context.Context, namespace string, task string, err error) {
 	sw.failed = true
+	sw.failedErr = err
 }
 
 func (sw *startWatchFake) OnCancelled(ctx context.Context, namespace string, task string) {
@@ -175,6 +177,7 @@ func TestStartWatch(t *testing.T) {
 		expectComplete       bool
 		expectCancel         bool
 		expectFail           bool
+		expectFailMsg        string
 		expectProgress       int
 	}{
 		{
@@ -370,6 +373,27 @@ func TestStartWatch(t *testing.T) {
 			expectTerminateEvent: true,
 			expectCancel:         true,
 		},
+		{
+			name:          "evicted",
+			thisPod:       "fak-pod-1",
+			thisContainer: "fake-container-1",
+			insertPod:     builder.ForPod("velero", "fake-pod-1").Phase(corev1api.PodFailed).Result(),
+			insertEventsBefore: []insertEvent{
+				{
+					event: &corev1api.Event{Reason: EventReasonStarted},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonEvicted, Message: "fake-evicted-message"},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonStopped},
+				},
+			},
+			expectStartEvent:     true,
+			expectTerminateEvent: true,
+			expectFail:           true,
+			expectFailMsg:        "data path pod was evicted, message: fake-evicted-message",
+		},
 	}
 
 	for _, test := range tests {
@@ -437,11 +461,14 @@ func TestStartWatch(t *testing.T) {
 
 			ms.wgWatcher.Wait()
 
-			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent)
-			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent)
+			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent.Load())
+			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent.Load())
 			assert.Equal(t, test.expectComplete, sw.complete)
 			assert.Equal(t, test.expectCancel, sw.canceled)
 			assert.Equal(t, test.expectFail, sw.failed)
+			if test.expectFailMsg != "" {
+				require.EqualError(t, sw.failedErr, test.expectFailMsg)
+			}
 			assert.Equal(t, test.expectProgress, sw.progress)
 
 			cancel()

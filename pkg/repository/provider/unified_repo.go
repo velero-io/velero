@@ -501,10 +501,15 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 		return map[string]string{}, errors.New("invalid storage provider")
 	}
 
-	config := backupLocation.Spec.Config
-	if config == nil {
-		config = map[string]string{}
+	config := make(map[string]string)
+	if backupLocation.Spec.Config != nil {
+		for k, v := range backupLocation.Spec.Config {
+			config[k] = v
+		}
 	}
+
+	// Delete any user-provided credentialsFile to prevent path traversal vulnerabilities
+	delete(config, repoconfig.CredentialsFileKey)
 
 	if backupLocation.Spec.Credential != nil {
 		config[repoconfig.CredentialsFileKey], err = credentialsFileStore.Path(backupLocation.Spec.Credential)
@@ -549,10 +554,15 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 		return map[string]string{}, errors.New("invalid storage provider")
 	}
 
-	config := backupLocation.Spec.Config
-	if config == nil {
-		config = map[string]string{}
+	config := make(map[string]string)
+	if backupLocation.Spec.Config != nil {
+		for k, v := range backupLocation.Spec.Config {
+			config[k] = v
+		}
 	}
+
+	// Delete any user-provided credentialsFile to prevent path traversal vulnerabilities
+	delete(config, repoconfig.CredentialsFileKey)
 
 	bucket := strings.Trim(config["bucket"], "/")
 	prefix := strings.Trim(config["prefix"], "/")

@@ -62,7 +62,7 @@ var LoadAffinities func() = TestFunc(&NodeAgentConfigTestCase{
 			{
 				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"kubernetes.io/arch": "amd64",
+						corev1api.LabelArchStable: "amd64",
 					},
 				},
 				StorageClass: test.StorageClassName2,

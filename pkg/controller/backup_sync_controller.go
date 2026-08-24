@@ -164,17 +164,37 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			continue
 		}
 
-		if backup.Status.Phase == velerov1api.BackupPhaseWaitingForPluginOperations ||
-			backup.Status.Phase == velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed ||
-			backup.Status.Phase == velerov1api.BackupPhaseFinalizing ||
-			backup.Status.Phase == velerov1api.BackupPhaseFinalizingPartiallyFailed {
+		// Only sync backup metadata that has reached a phase Velero itself writes to
+		// object storage. Anything else (including an empty or New phase) would be
+		// created in the cluster as a backup that still looks pending, which the backup
+		// queue controller would then pick up and run as if it were a newly requested
+		// backup.
+		switch backup.Status.Phase {
+		case velerov1api.BackupPhaseCompleted,
+			velerov1api.BackupPhasePartiallyFailed,
+			velerov1api.BackupPhaseFailed:
+			// finished backups are synced as-is
+		case velerov1api.BackupPhaseWaitingForPluginOperations,
+			velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed,
+			velerov1api.BackupPhaseFinalizing,
+			velerov1api.BackupPhaseFinalizingPartiallyFailed:
 			if backup.Status.Expiration == nil || backup.Status.Expiration.After(time.Now()) {
 				log.Debugf("Skipping non-expired incomplete backup %v", backup.Name)
 				continue
 			}
 			log.Debugf("%v Backup is past expiration, syncing for garbage collection", backup.Status.Phase)
 			backup.Status.Phase = velerov1api.BackupPhasePartiallyFailed
+		default:
+			log.Infof("Skipping backup %v, phase %q in the backup store is not a phase that can be synced", backup.Name, backup.Status.Phase)
+			continue
 		}
+
+		// A synced backup is a record of a backup that already ran somewhere else, not
+		// a backup to run here. Hooks are only read while a backup is being executed,
+		// so they have no consumer for a synced backup and are dropped rather than
+		// stored as an executable payload.
+		backup.Spec.Hooks = velerov1api.BackupHooks{}
+
 		backup.Namespace = b.namespace
 		backup.ResourceVersion = ""
 

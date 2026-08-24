@@ -482,6 +482,10 @@ func TestWaitRestoreExecHook(t *testing.T) {
 	hookFailed, hookErr := true, fmt.Errorf("hook failed")
 	hookTracker3.Add(restoreName3, podNs, podName, container, source, hookName, hook.PhasePre, 0)
 
+	hookTracker4 := hook.NewMultiHookTracker()
+	restoreName4 := "restore4"
+	hookTracker4.Add(restoreName4, "ns", "pod", "con1", "s1", "h1", hook.PhasePre, 0)
+
 	tests := []struct {
 		name                   string
 		hookTracker            *hook.MultiHookTracker
@@ -497,6 +501,8 @@ func TestWaitRestoreExecHook(t *testing.T) {
 		hookName               string
 		hookFailed             bool
 		hookErr                error
+		resourceTimeout        time.Duration
+		expectTimeoutErr       bool
 	}{
 		{
 			name:                   "no restore exec hooks",
@@ -530,6 +536,16 @@ func TestWaitRestoreExecHook(t *testing.T) {
 			hookFailed:             hookFailed,
 			hookErr:                hookErr,
 		},
+		{
+			name:                   "hook never recorded should timeout instead of hanging",
+			hookTracker:            hookTracker4,
+			restore:                builder.ForRestore(velerov1api.DefaultNamespace, restoreName4).Result(),
+			expectedHooksAttempted: 0,
+			expectedHooksFailed:    0,
+			expectedHookErrs:       1,
+			resourceTimeout:        3 * time.Second,
+			expectTimeoutErr:       true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -542,6 +558,7 @@ func TestWaitRestoreExecHook(t *testing.T) {
 			crClient:         fakeClient,
 			restore:          tc.restore,
 			multiHookTracker: tc.hookTracker,
+			resourceTimeout:  tc.resourceTimeout,
 		}
 		require.NoError(t, ctx.crClient.Create(t.Context(), tc.restore))
 
@@ -553,6 +570,10 @@ func TestWaitRestoreExecHook(t *testing.T) {
 		}
 
 		errs := ctx.WaitRestoreExecHook()
+		if tc.expectTimeoutErr {
+			assert.NotEmpty(t, errs.Namespaces, "expected timeout error but got none")
+			continue
+		}
 		assert.Len(t, errs.Namespaces, tc.expectedHookErrs)
 
 		updated := &velerov1api.Restore{}
@@ -676,11 +697,11 @@ func TestNeedPatch(t *testing.T) {
 		{
 			name: "same label key different values",
 			newPV: builder.ForPersistentVolume("pv1").
-				ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "us-west-2a")).
+				ObjectMeta(builder.WithLabels(corev1api.LabelTopologyZone, "us-west-2a")).
 				ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result(),
 			pvInfo: &volume.PVInfo{
 				ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
-				Labels:        map[string]string{"topology.kubernetes.io/zone": "us-east-1a"},
+				Labels:        map[string]string{corev1api.LabelTopologyZone: "us-east-1a"},
 			},
 			expected: false,
 		},

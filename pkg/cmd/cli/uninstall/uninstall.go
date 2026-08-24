@@ -57,13 +57,11 @@ var resToDelete = []kbclient.ObjectList{}
 
 // uninstallOptions collects all the options for uninstalling Velero from a Kubernetes cluster.
 type uninstallOptions struct {
-	wait  bool // deprecated
 	force bool
 }
 
 // BindFlags adds command line values to the options struct.
 func (o *uninstallOptions) BindFlags(flags *pflag.FlagSet) {
-	flags.BoolVar(&o.wait, "wait", o.wait, "Wait for Velero uninstall to be ready. Optional. Deprecated.")
 	flags.BoolVar(&o.force, "force", o.force, "Forces the Velero uninstall. Optional.")
 }
 
@@ -81,10 +79,6 @@ Use '--force' to skip the prompt confirming if you want to uninstall Velero.
 		`,
 		Example: ` # velero uninstall --namespace staging`,
 		Run: func(c *cobra.Command, args []string) {
-			if o.wait {
-				fmt.Println("Warning: the \"--wait\" option is deprecated and will be removed in a future release. The uninstall command always waits for the uninstall to complete.")
-			}
-
 			// Confirm if not asked to force-skip confirmation
 			if !o.force {
 				fmt.Println("You are about to uninstall Velero.")

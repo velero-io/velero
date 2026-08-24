@@ -41,6 +41,29 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
+func TestFindBackendStore(t *testing.T) {
+	// findBackendStore should return a unique instance on each call
+	// so that concurrently executing controllers do not overwrite each other's credentials/options.
+	t.Run("returns distinct instances", func(t *testing.T) {
+		store1 := findBackendStore(udmrepo.StorageTypeS3)
+		require.NotNil(t, store1)
+
+		store2 := findBackendStore(udmrepo.StorageTypeS3)
+		require.NotNil(t, store2)
+
+		// The pointers to the wrapper struct must be different
+		assert.NotSame(t, store1, store2, "findBackendStore should return different kopiaBackendStore instances")
+
+		// The pointers to the actual underlying store must be different
+		assert.NotSame(t, store1.store, store2.store, "findBackendStore should return different backend.Store instances")
+	})
+
+	t.Run("returns nil for unknown storage type", func(t *testing.T) {
+		store := findBackendStore("unknown-type")
+		assert.Nil(t, store)
+	})
+}
+
 type comparableError struct {
 	message string
 }
@@ -133,11 +156,11 @@ func TestCreateBackupRepo(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := velerotest.NewLogger()
-			backendStores = []kopiaBackendStore{
-				{udmrepo.StorageTypeAzure, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeFs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeGcs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeS3, "fake store", tc.backendStore},
+			backendStores = []kopiaBackendStoreFactory{
+				{udmrepo.StorageTypeAzure, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeFs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeGcs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeS3, "fake store", func() backend.Store { return tc.backendStore }},
 			}
 
 			if tc.backendStore != nil {
@@ -219,11 +242,11 @@ func TestConnectBackupRepo(t *testing.T) {
 	logger := velerotest.NewLogger()
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			backendStores = []kopiaBackendStore{
-				{udmrepo.StorageTypeAzure, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeFs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeGcs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeS3, "fake store", tc.backendStore},
+			backendStores = []kopiaBackendStoreFactory{
+				{udmrepo.StorageTypeAzure, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeFs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeGcs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeS3, "fake store", func() backend.Store { return tc.backendStore }},
 			}
 
 			if tc.backendStore != nil {
@@ -441,11 +464,11 @@ func TestGetRepositoryStatus(t *testing.T) {
 	logger := velerotest.NewLogger()
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			backendStores = []kopiaBackendStore{
-				{udmrepo.StorageTypeAzure, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeFs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeGcs, "fake store", tc.backendStore},
-				{udmrepo.StorageTypeS3, "fake store", tc.backendStore},
+			backendStores = []kopiaBackendStoreFactory{
+				{udmrepo.StorageTypeAzure, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeFs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeGcs, "fake store", func() backend.Store { return tc.backendStore }},
+				{udmrepo.StorageTypeS3, "fake store", func() backend.Store { return tc.backendStore }},
 			}
 
 			if tc.backendStore != nil {

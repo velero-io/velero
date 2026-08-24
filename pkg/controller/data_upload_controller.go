@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -81,7 +82,7 @@ type DataUploadReconciler struct {
 	podResources                   corev1api.ResourceRequirements
 	preparingTimeout               time.Duration
 	metrics                        *metrics.ServerMetrics
-	cancelledDataUpload            map[string]time.Time
+	cancelledDataUpload            sync.Map
 	dataMovePriorityClass          string
 	podLabels                      map[string]string
 	podAnnotations                 map[string]string
@@ -130,7 +131,6 @@ func NewDataUploadReconciler(
 		podResources:                   podResources,
 		preparingTimeout:               preparingTimeout,
 		metrics:                        metrics,
-		cancelledDataUpload:            make(map[string]time.Time),
 		dataMovePriorityClass:          dataMovePriorityClass,
 		podLabels:                      podLabels,
 		podAnnotations:                 podAnnotations,
@@ -143,6 +143,7 @@ func NewDataUploadReconciler(
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumerclaims,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;create;delete
 
 func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.logger.WithFields(logrus.Fields{
@@ -207,7 +208,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 	} else {
-		delete(r.cancelledDataUpload, du.Name)
+		r.cancelledDataUpload.Delete(du.Name)
 
 		// put the finalizer remove action here for all cr will goes to the final status, we could check finalizer and do remove action in final status
 		// instead of intermediate state.
@@ -232,9 +233,9 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if du.Spec.Cancel {
-		if spotted, found := r.cancelledDataUpload[du.Name]; !found {
-			r.cancelledDataUpload[du.Name] = r.Clock.Now()
-		} else {
+		v, loaded := r.cancelledDataUpload.LoadOrStore(du.Name, r.Clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
 				delay = cancelDelayInProgress
@@ -243,7 +244,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if time.Since(spotted) > delay {
 				log.Infof("Data upload %s is canceled in Phase %s but not handled in reasonable time", du.GetName(), du.Status.Phase)
 				if r.tryCancelDataUpload(ctx, du, "") {
-					delete(r.cancelledDataUpload, du.Name)
+					r.cancelledDataUpload.Delete(du.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -577,7 +578,7 @@ func (r *DataUploadReconciler) OnDataUploadCancelled(ctx context.Context, namesp
 		log.WithError(err).Error("error updating DataUpload status")
 	} else {
 		r.metrics.RegisterDataUploadCancel(r.nodeName)
-		delete(r.cancelledDataUpload, du.Name)
+		r.cancelledDataUpload.Delete(du.Name)
 	}
 }
 

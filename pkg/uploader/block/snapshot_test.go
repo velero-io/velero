@@ -21,11 +21,13 @@ package block
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -273,6 +275,58 @@ func TestSnapshotSource(t *testing.T) {
 			mockBlkup.AssertExpectations(t)
 		})
 	}
+}
+
+// TestGetParentBackupInfoLogsDiscoveredParentID pins that the parent-selection messages
+// name the snapshot they are about. On the discovery branch the parentSnapshot parameter
+// is empty by definition, so logging it there emits "Using parent snapshot , start time ..."
+// - a decision logged without the identifier needed to act on it.
+func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
+	const volumeID = "vol-123"
+	const realSource = "/test/source"
+	const rootObj = "root-obj-42"
+
+	snapshotTags := map[string]string{
+		uploader.SnapshotRequesterTag: "test-requester",
+		uploader.SnapshotUploaderTag:  uploader.BlockType,
+	}
+
+	logger, hook := logrustest.NewNullLogger()
+	logger.SetLevel(logrus.DebugLevel)
+
+	repo := udmrepomocks.NewBackupRepo(t)
+	repo.On("ListSnapshot", mock.Anything, realSource).
+		Return([]udmrepo.Snapshot{{
+			RootObject: udmrepo.ObjectMetadata{ID: rootObj},
+			Tags: map[string]string{
+				uploader.CBTChangeIDTag:       "cid-abc",
+				uploader.CBTVolumeIDTag:       volumeID,
+				uploader.SnapshotRequesterTag: "test-requester",
+				uploader.SnapshotUploaderTag:  uploader.BlockType,
+			},
+		}}, nil)
+	repo.On("ReadMetadata", mock.Anything, udmrepo.ID(rootObj)).
+		Return(&udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{{ID: udmrepo.ID("parent-obj")}},
+		}, nil)
+
+	info := getParentBackupInfo(
+		context.Background(), repo,
+		false, "", // no explicit parent -> discovery branch
+		volumeID, realSource, snapshotTags, logger,
+	)
+
+	require.Equal(t, udmrepo.ID("parent-obj"), info.parentObject)
+
+	var found bool
+	for _, entry := range hook.AllEntries() {
+		if strings.HasPrefix(entry.Message, "Using parent snapshot ") {
+			found = true
+			assert.Contains(t, entry.Message, rootObj,
+				"parent-selection message must name the discovered snapshot, got %q", entry.Message)
+		}
+	}
+	require.True(t, found, "expected a \"Using parent snapshot\" message")
 }
 
 func TestGetParentBackupInfo(t *testing.T) {

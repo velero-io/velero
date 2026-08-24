@@ -202,7 +202,7 @@ func TestWaitVolumeSnapshotReady(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
 			vs, err := WaitVolumeSnapshotReady(t.Context(), fakeClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond, velerotest.NewLogger())
-			if err != nil {
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestGetVolumeSnapshotContentForVolumeSnapshot(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
 			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(context.TODO(), test.snapshotObj, fakeClient.SnapshotV1())
-			if err != nil {
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -378,6 +378,29 @@ func TestEnsureDeleteVS(t *testing.T) {
 			err: "timeout to assure VolumeSnapshot fake-vs is deleted, finalizers in VS []",
 		},
 		{
+			name:      "wait timeout before the VS is ever retrieved",
+			vsName:    "fake-vs",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{vsObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure VolumeSnapshot fake-vs is deleted",
+		},
+		{
 			name:      "success",
 			vsName:    "fake-vs",
 			namespace: "fake-ns",
@@ -394,7 +417,7 @@ func TestEnsureDeleteVS(t *testing.T) {
 			}
 
 			err := EnsureDeleteVS(t.Context(), fakeSnapshotClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond)
-			if err != nil {
+			if test.err != "" {
 				assert.EqualError(t, err, test.err)
 			} else {
 				assert.NoError(t, err)
@@ -487,6 +510,28 @@ func TestEnsureDeleteVSC(t *testing.T) {
 				},
 			},
 			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted, finalizers in VSC []",
+		},
+		{
+			name:      "wait timeout before the VSC is ever retrieved",
+			vscName:   "fake-vsc",
+			clientObj: []runtime.Object{vscObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted",
 		},
 		{
 			name:      "success",
@@ -1721,6 +1766,34 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		},
 	}
 
+	errNoMessageVsc := "err-no-message-vsc"
+	vscWithErrorNoMessage := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: errNoMessageVsc,
+		},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			VolumeSnapshotRef: corev1api.ObjectReference{
+				Name:       "vol-snap-1",
+				APIVersion: snapshotv1api.SchemeGroupVersion.String(),
+			},
+		},
+		Status: &snapshotv1api.VolumeSnapshotContentStatus{
+			SnapshotHandle: nil,
+			// Error is set while Message is left nil. Both are optional in the
+			// CSI API, so the error-reporting paths must not dereference Message.
+			Error: &snapshotv1api.VolumeSnapshotError{Message: nil},
+		},
+	}
+	vsForErrorNoMessageVsc := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vs-for-err-no-message",
+			Namespace: "default",
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			BoundVolumeSnapshotContentName: &errNoMessageVsc,
+		},
+	}
+
 	objs := []runtime.Object{
 		vscObj,
 		validVS,
@@ -1731,6 +1804,8 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		vsForNilStatusVsc,
 		vscWithNilStatusField,
 		vsForNilStatusFieldVsc,
+		vscWithErrorNoMessage,
+		vsForErrorNoMessageVsc,
 	}
 	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 	testCases := []struct {
@@ -1764,6 +1839,12 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 					BoundVolumeSnapshotContentName: &nilStatusVsc,
 				},
 			},
+		},
+		{
+			name:        "waitEnabled should return an error rather than panic when the volumesnapshotcontent has an error without a message",
+			volSnap:     vsForErrorNoMessageVsc,
+			exepctedVSC: nil,
+			expectError: true,
 		},
 	}
 

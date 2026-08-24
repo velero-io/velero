@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -89,7 +90,6 @@ func NewPodVolumeBackupReconciler(
 		preparingTimeout:      preparingTimeout,
 		resourceTimeout:       resourceTimeout,
 		exposer:               exposer.NewPodVolumeExposer(kubeClient, logger),
-		cancelledPVB:          make(map[string]time.Time),
 		dataMovePriorityClass: dataMovePriorityClass,
 		privileged:            privileged,
 		podLabels:             podLabels,
@@ -112,7 +112,7 @@ type PodVolumeBackupReconciler struct {
 	vgdpCounter           *exposer.VgdpCounter
 	preparingTimeout      time.Duration
 	resourceTimeout       time.Duration
-	cancelledPVB          map[string]time.Time
+	cancelledPVB          sync.Map
 	dataMovePriorityClass string
 	privileged            bool
 	podLabels             map[string]string
@@ -183,7 +183,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			}
 		}
 	} else {
-		delete(r.cancelledPVB, pvb.Name)
+		r.cancelledPVB.Delete(pvb.Name)
 
 		if controllerutil.ContainsFinalizer(pvb, PodVolumeFinalizer) {
 			if err := UpdatePVBWithRetry(ctx, r.client, req.NamespacedName, log, func(pvb *velerov1api.PodVolumeBackup) bool {
@@ -204,9 +204,9 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if pvb.Spec.Cancel {
-		if spotted, found := r.cancelledPVB[pvb.Name]; !found {
-			r.cancelledPVB[pvb.Name] = r.clock.Now()
-		} else {
+		v, loaded := r.cancelledPVB.LoadOrStore(pvb.Name, r.clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseInProgress {
 				delay = cancelDelayInProgress
@@ -215,7 +215,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			if time.Since(spotted) > delay {
 				log.Infof("PVB %s is canceled in Phase %s but not handled in reasonable time", pvb.GetName(), pvb.Status.Phase)
 				if r.tryCancelPodVolumeBackup(ctx, pvb, "") {
-					delete(r.cancelledPVB, pvb.Name)
+					r.cancelledPVB.Delete(pvb.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -620,7 +620,7 @@ func (r *PodVolumeBackupReconciler) OnDataPathCancelled(ctx context.Context, nam
 	}); err != nil {
 		log.WithError(err).Error("error updating PVB status on cancel")
 	} else {
-		delete(r.cancelledPVB, pvb.Name)
+		r.cancelledPVB.Delete(pvb.Name)
 	}
 }
 

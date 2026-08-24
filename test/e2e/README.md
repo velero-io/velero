@@ -28,7 +28,7 @@ These are the current set of limitations with the E2E tests.
 1. Flag `-install-velero` is for purpose of having tests on an existed Velero instance, but by default `-install-velero` is set to true, because it's mandatory for some of cases to testing on specific version of Velero, such as upgrade and migration tests. In upgrade tests, we must install a specific old version and then upgrade it to  the target version, multiple installations is involved here, also migration tests have the same situation with upgrade tests, therefore if you're going to test against an existed Velero instance, make sure to skip upgrade and migration tests from a single E2E test execution.
 1. To improve E2E test execution efficiency, E2E tests will skip re-installation between test cases except for those which need a fresh Velero installation like upgrade , migration and some other test cases. When starting a E2E test execution which setting flag `-install-velero` with the default value(true), there will be a Velero installation at the beginning, then test cases will be run in random order, and test cases behavior is as below: 
     1. If the scheduled test case is upgrade (or other cases needs a fresh Velero installation), then upgrade test will uninstall the current Velero instance at the beginning and uninstall the tested Velero instance in the end to avoid unexpected installation parameters for the following test cases. 
-    1. If the scheduled test case is the normal one,  it will check the existence of Velero instance, if no one there then start a new standard instaillation, otherwise proceeding test steps.
+    1. If the scheduled test case is the normal one,  it will check the existence of Velero instance, if no one there then start a new standard installation, otherwise proceeding test steps.
 
 
 ## 3. Configuration for E2E tests
@@ -113,10 +113,10 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `MIGRATE_FROM_VELERO_VERSION `: `-migrate-from-velero-version`. Optional.
 1. `ADDITIONAL_BSL_PLUGINS `: `-additional-bsl-plugins`. Optional.
 1. `ADDITIONAL_OBJECT_STORE_PROVIDER`: `-additional-bsl-object-store-provider`. Optional.
-1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-bucket`. Optional.
-1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-prefix`. Optional.
-1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-config`. Optional.
-1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-bucket`. Optional.
+1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-prefix`. Optional.
+1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-config`. Optional.
 1. `FEATURES`: `-features`. Optional.
 1. `REGISTRY_CREDENTIAL_FILE`: `-registry-credential-file`. Optional.
 1. `KIBISHII_DIRECTORY`: `-kibishii-directory`. Optional.
@@ -127,14 +127,14 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `SNAPSHOT_MOVE_DATA`: `-snapshot-move-data`. Optional.
 1. `DATA_MOVER_plugin`: `-data-mover-plugin`. Optional.
 1. `STANDBY_CLUSTER_CLOUD_PROVIDER`: `-standby-cluster-cloud-provider`. Optional.
-1. `STANDBY_CLUSTER_PLUGINS`: `-dstandby-cluster-plugins`. Optional.
+1. `STANDBY_CLUSTER_PLUGINS`: `-standby-cluster-plugins`. Optional.
 1. `STANDBY_CLUSTER_OBJECT_STORE_PROVIDER`: `-standby-cluster-object-store-provider`. Optional.
 1. `INSTALL_VELERO `: `-install-velero`. Optional.
 1. `DEBUG_VELERO_POD_RESTART`: `-debug-velero-pod-restart`. Optional.
 1. `FAIL_FAST`: `--fail-fast`. Optional.
 1. `HAS_VSPHERE_PLUGIN`: `--has-vsphere-plugin`. Optional.
 1. `WORKER_OS`: `--worker-os`. Optional.
-1. `IMAGE_REGISTRY_PROXY`: `--image-registry-proxy.` Optional.
+1. `IMAGE_REGISTRY_PROXY`: `--image-registry-proxy` Optional.
 
 ### Examples
 
@@ -270,7 +270,7 @@ OBJECT_STORE_PROVIDER=aws \
 CREDS_FILE=<AWS_CREDENTIAL_FILE> \ 
 BSL_CONFIG=region=<AWS_REGION> \ 
 BSL_BUCKET=<S3_BUCKET> \ 
-BSL_PREFIX=<S3_BUCKET_PREFIC> \ 
+BSL_PREFIX=<S3_BUCKET_PREFIX> \ 
 VSL_CONFIG=region=<AWS_REGION> \ 
 SNAPSHOT_MOVE_DATA=true \ 
 STANDBY_CLUSTER_CLOUD_PROVIDER=aws \ 
@@ -369,7 +369,7 @@ there're some tests need to be run in a single execution or pipeline with specif
 Following pipelines should cover all E2E tests along with proper filters:
 
 1. **CSI pipeline:** As we can see lots of labels in E2E test code, there're many snapshot-labeled test scripts. To cover CSI scenario, a pipeline with CSI enabled should be a good choice, otherwise, we will double all the snapshot cases for CSI scenario, it's very time-wasting. By providing `FEATURES=EnableCSI` and  `PLUGINS=<provider-plugin-images>`, a CSI pipeline is ready for testing.
-1. **Data mover pipeline:** Data mover scenario is the same scenario with migaration test except the restriction of migaration between different providers, so it better to separated it out from other pipelines. Please refer the example in previous.
+1. **Data mover pipeline:** Data mover scenario is the same scenario with migration test except the restriction of migration between different providers, so it better to separated it out from other pipelines. Please refer the example in previous.
 1. **File system backup pipeline:** Set `UPLOADER_TYPE` to `kopia` for all file system backup test cases;
 1. **Long time pipeline:** Long time cases should be group into one pipeline, currently these test cases with labels `Scale`, `Schedule` or `TTL` can be group into a pipeline, and make sure to skip them off in any other pipelines.
     
@@ -381,7 +381,7 @@ Following pipelines should cover all E2E tests along with proper filters:
 When adding a test, aim to instantiate an API client only once at the beginning of the test. There is a constructor `newTestClient` that facilitates the configuration and instantiation of clients. Also, please use the `kubebuilder` runtime controller client for any new test, as we will phase out usage of `client-go` API clients.
 
 ## 8. TestCase frame related
-TestCase frame provide a serials of interface to concatenate one complete e2e test. it's makes the testing be concise and explicit.
+TestCase frame provide a series of interfaces to concatenate one complete e2e test. it makes the testing be concise and explicit.
 
 ### VeleroBackupRestoreTest interface 
 VeleroBackupRestoreTest interface provided a standard workflow of backup and restore, which makes the whole testing process clearer and code reusability.

@@ -813,6 +813,87 @@ func TestRestoreResourceFiltering(t *testing.T) {
 	}
 }
 
+func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
+	tests := []struct {
+		name         string
+		restore      *velerov1api.Restore
+		backup       *velerov1api.Backup
+		apiResources []*test.APIResource
+		tarball      io.Reader
+		want         map[*test.APIResource][]string
+		expectError  bool
+	}{
+		{
+			name:    "resourceMustHave item in velero namespace is restored",
+			restore: defaultRestore().IncludedNamespaces("velero").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("datauploads.velero.io",
+					builder.ForDataUpload("velero", "du-1").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.DataUploads(),
+			},
+			want: map[*test.APIResource][]string{
+				test.DataUploads(): {"velero/du-1"},
+			},
+			expectError: false,
+		},
+		{
+			name:    "resourceMustHave item outside velero namespace is rejected and produces error",
+			restore: defaultRestore().IncludedNamespaces("app-foo").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("datauploads.velero.io",
+					builder.ForDataUpload("attacker-ns", "du-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.DataUploads(),
+			},
+			want: map[*test.APIResource][]string{
+				test.DataUploads(): {},
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+
+			for _, r := range tc.apiResources {
+				h.DiscoveryClient.WithAPIResource(r)
+			}
+			require.NoError(t, h.restorer.discoveryHelper.Refresh())
+
+			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), tc.restore, h.restorer.kbClient, h.log)
+			require.NoError(t, err)
+
+			data := &Request{
+				Log:          h.log,
+				Restore:      tc.restore,
+				Backup:       tc.backup,
+				BackupReader: tc.tarball,
+				ResPolicies:  resPolicies,
+			}
+			_, errs := h.restorer.Restore(
+				data,
+				nil,
+				nil,
+			)
+
+			if tc.expectError {
+				assert.False(t, errs.IsEmpty(), "expected errors but got empty")
+			} else {
+				assert.True(t, errs.IsEmpty(), "expected no errors but got %v", errs)
+			}
+			assertAPIContents(t, h, tc.want)
+		})
+	}
+}
+
 // TestRestoreNamespaceMapping runs restores with namespace mappings specified,
 // and verifies that the set of items created in the API are in the correct
 // namespaces. Validation is done by looking at the namespaces/names of the items

@@ -187,6 +187,12 @@ func EnsureDeleteVS(ctx context.Context, snapshotClient snapshotter.SnapshotV1In
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the VS has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure VolumeSnapshot %s is deleted", vsName)
+			}
 			return errors.Errorf("timeout to assure VolumeSnapshot %s is deleted, finalizers in VS %v", vsName, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to assure VolumeSnapshot is deleted, %s", vsName)
@@ -246,6 +252,12 @@ func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1I
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the VSC has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted", vscName)
+			}
 			return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted, finalizers in VSC %v", vscName, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to assure VolumeSnapshotContent is deleted, %s", vscName)
@@ -701,7 +713,7 @@ func WaitUntilVSCHandleIsReady(
 			if vsc.Status != nil &&
 				vsc.Status.Error != nil {
 				log.Warnf("VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
+					vsc.Name, stringptr.GetString(vsc.Status.Error.Message))
 			}
 			return false, nil
 		}
@@ -752,10 +764,10 @@ func WaitUntilVSCHandleIsReady(
 				vsc.Status.Error != nil {
 				log.Errorf(
 					"Timed out awaiting reconciliation of VolumeSnapshot, VolumeSnapshotContent %s has error: %v",
-					vsc.Name, *vsc.Status.Error.Message)
+					vsc.Name, stringptr.GetString(vsc.Status.Error.Message))
 				return nil,
 					errors.Errorf("CSI got timed out with error: %v",
-						*vsc.Status.Error.Message)
+						stringptr.GetString(vsc.Status.Error.Message))
 			} else {
 				log.Errorf(
 					"Timed out awaiting reconciliation of volumesnapshot %s/%s",

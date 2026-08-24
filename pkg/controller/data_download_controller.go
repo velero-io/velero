@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -74,7 +75,7 @@ type DataDownloadReconciler struct {
 	podResources          corev1api.ResourceRequirements
 	preparingTimeout      time.Duration
 	metrics               *metrics.ServerMetrics
-	cancelledDataDownload map[string]time.Time
+	cancelledDataDownload sync.Map
 	dataMovePriorityClass string
 	repoConfigMgr         repository.ConfigManager
 	podLabels             map[string]string
@@ -118,7 +119,6 @@ func NewDataDownloadReconciler(
 		podResources:          podResources,
 		preparingTimeout:      preparingTimeout,
 		metrics:               metrics,
-		cancelledDataDownload: make(map[string]time.Time),
 		dataMovePriorityClass: dataMovePriorityClass,
 		repoConfigMgr:         repoConfigMgr,
 		podLabels:             podLabels,
@@ -131,6 +131,7 @@ func NewDataDownloadReconciler(
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumerclaims,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;create;delete
 
 func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.logger.WithFields(logrus.Fields{
@@ -198,7 +199,7 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 		}
 	} else {
-		delete(r.cancelledDataDownload, dd.Name)
+		r.cancelledDataDownload.Delete(dd.Name)
 
 		// put the finalizer remove action here for all cr will goes to the final status, we could check finalizer and do remove action in final status
 		// instead of intermediate state.
@@ -223,9 +224,9 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if dd.Spec.Cancel {
-		if spotted, found := r.cancelledDataDownload[dd.Name]; !found {
-			r.cancelledDataDownload[dd.Name] = r.Clock.Now()
-		} else {
+		v, loaded := r.cancelledDataDownload.LoadOrStore(dd.Name, r.Clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if dd.Status.Phase == velerov2alpha1api.DataDownloadPhaseInProgress {
 				delay = cancelDelayInProgress
@@ -234,7 +235,7 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			if time.Since(spotted) > delay {
 				log.Infof("Data download %s is canceled in Phase %s but not handled in rasonable time", dd.GetName(), dd.Status.Phase)
 				if r.tryCancelDataDownload(ctx, dd, "") {
-					delete(r.cancelledDataDownload, dd.Name)
+					r.cancelledDataDownload.Delete(dd.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -556,7 +557,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		log.WithError(err).Error("error updating data download status")
 	} else {
 		r.metrics.RegisterDataDownloadCancel(r.nodeName)
-		delete(r.cancelledDataDownload, dd.Name)
+		r.cancelledDataDownload.Delete(dd.Name)
 	}
 }
 

@@ -348,6 +348,21 @@ By default, only one backup is processed in the `InProgress` phase at a time. Th
 
 Enabling parallel backups can provide a significant performance benefit for backups which contain a large number of Kubernetes resources or ones which contain a large number of smaller volumes. Backups dominated by large volumes will not see as much benefit, since the majority of time for those backups is spent waiting for the async phase to complete. A larger `concurrent-backups` configuration may require additional memory and CPU resources for the velero container.
 
+## Limiting Resource Backup Data Cache Size
+For Kubernetes resource data (non volume data), for some operations like Restores or Backup Deletions, etc., Velero uses local cache (in the root file system of the cluster node) to download and extract the data from the backup storage location, Velero sets a limit for the cache size. If the cache size exceeds the limit, the specific operation would fail.  
+By default Velero sets the limit as 16GB, if your backup data is large, you can change the Velero server parameter `max-backup-extraction-size`. Here is an example to set the limit to 32GB:
+
+```yaml
+containers:
+  - name: velero
+    image: velero/velero:latest
+    command:
+      - /velero
+    args:
+      - server
+      - --max-backup-extraction-size=32768
+```
+
 ## Additional options
 
 Run `velero install --help` or see the [Helm chart documentation](https://vmware-tanzu.github.io/helm-charts/) for the full set of installation options.

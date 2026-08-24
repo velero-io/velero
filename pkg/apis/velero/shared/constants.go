@@ -17,6 +17,6 @@ limitations under the License.
 package shared
 
 const (
-	DataUploadParentSnapshotNone = "none"
-	DataUploadParentSnapshotAuto = "auto"
+	ParentSnapshotNone = "none"
+	ParentSnapshotAuto = "auto"
 )

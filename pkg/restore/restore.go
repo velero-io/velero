@@ -1004,6 +1004,19 @@ func (ctx *restoreContext) processSelectedResource(
 					targetNS = namespace
 				}
 			}
+
+			// Make sure the resource in the "resourceMustHave" set will always be created in the namespace where velero is installed.
+			if ctx.resourceMustHave.Has(groupResource.String()) && targetNS != "" && targetNS != ctx.restore.Namespace {
+				err := fmt.Errorf("resource %s/%s is must-have per velero internal setting, and is namespace-scoped, but its target namespace %q is not Velero's namespace %q", groupResource.String(), selectedItem.name, targetNS, ctx.restore.Namespace)
+				ctx.log.WithFields(logrus.Fields{
+					"resource":        groupResource.String(),
+					"name":            selectedItem.name,
+					"targetNamespace": targetNS,
+					"veleroNamespace": ctx.restore.Namespace,
+				}).Error(err.Error())
+				errs.Add(targetNS, err)
+				continue
+			}
 			// If we don't know whether this namespace exists yet, attempt to create
 			// it in order to ensure it exists. Try to get it from the backup tarball
 			// (in order to get any backed-up metadata), but if we don't find it there,
@@ -2072,10 +2085,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			return warnings, errs, itemExists
 		}
 
-		// Do not create podvolumerestore when current restore excludes pv/pvc
-		if ctx.resourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()) &&
-			ctx.resourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumes.String()) &&
-			len(podvolume.GetVolumeBackupsForPod(ctx.podVolumeBackups, pod, originalNamespace)) > 0 {
+		if len(podvolume.GetVolumeBackupsForPod(ctx.podVolumeBackups, pod, originalNamespace)) > 0 {
 			restorePodVolumeBackups(ctx, createdObj, originalNamespace)
 		}
 	}

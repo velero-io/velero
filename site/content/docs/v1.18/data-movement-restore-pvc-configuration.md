@@ -12,6 +12,10 @@ Velero introduces a new section in the node agent configuration ConfigMap (the n
 
 - `ignoreDelayBinding`: If this flag is set, the data movement restore will ignore the delay binding requirements from `WaitForFirstConsumer` mode, create the restore pod and provision the volume associated to an arbitrary node. When multiple volume restores happen in parallel, the restore pods will be spread evenly to all the nodes.
 
+- `secretNames`: a list of secret names to copy from the target (restore) namespace to the Velero namespace before the restorePVC is created, and delete after the DataDownload completes. This is needed for CSI drivers that require namespace-scoped secrets to provision the volume, for example ODF/ceph-csi encrypted volumes that fetch a KMS token secret (`ceph-csi-kms-token`) from the PVC's namespace. Without this, the restorePVC created in the Velero namespace fails to provision because the secret only exists in the target namespace.
+
+- `configMapNames`: a list of configmap names to copy from the target (restore) namespace to the Velero namespace before the restorePVC is created, and delete after the DataDownload completes. This is needed for CSI drivers that require namespace-scoped configmaps to provision the volume, for example a tenant-specific ceph-csi KMS connection override configmap (`ceph-csi-kms-config`).
+
 
 The users can specify the ConfigMap name during velero installation by CLI:
 `velero install --node-agent-configmap=<ConfigMap-Name>`
@@ -20,10 +24,14 @@ A sample of `restorePVC` config as part of the ConfigMap would look like:
 ```json
 {
     "restorePVC": {
-        "ignoreDelayBinding": true
+        "ignoreDelayBinding": true,
+        "secretNames": ["ceph-csi-kms-token"],
+        "configMapNames": ["ceph-csi-kms-config"]
     }
 }
 ```
+
+**Note on encrypted volumes:** unlike `backupPVC` (which is keyed per source storage class), `restorePVC` is a single config that applies to all restore PVCs. The copied secrets/configmaps are labeled `velero.io/backup-pvc-secret=<DataDownload UID>` and deleted when the DataDownload completes (or on failure).
 
 **Note:** 
 - If `ignoreDelayBinding` is set, the restored volume is provisioned in the storage areas associated to an arbitrary node, if the restored pod cannot be scheduled to that node, e.g., because of topology constraints, the data mover restore still completes, but the workload is not usable since the restored pod cannot mount the restored volume

@@ -84,7 +84,7 @@ func CreatePod(
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{common.WorkerOSWindows},
 									Operator: corev1api.NodeSelectorOpIn,
 								},

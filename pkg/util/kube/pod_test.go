@@ -107,6 +107,29 @@ func TestEnsureDeletePod(t *testing.T) {
 			err: "timeout to assure pod fake-pod is deleted, finalizers in pod []",
 		},
 		{
+			name:      "wait timeout before the pod is ever retrieved",
+			podName:   "fake-pod",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{podObjectWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "pods",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "pods",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure pod fake-pod is deleted",
+		},
+		{
 			name:      "wait fail",
 			podName:   "fake-pod",
 			namespace: "fake-ns",
@@ -1374,7 +1397,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/arch",
+								Key:      corev1api.LabelArchStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"amd64"},
 							},
@@ -1386,7 +1409,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"Linux"},
 							},
@@ -1399,7 +1422,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"Linux"},
 						},
@@ -1414,7 +1437,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"Linux"},
 							},
@@ -1425,7 +1448,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/arch",
+								Key:      corev1api.LabelArchStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"amd64"},
 							},
@@ -1436,7 +1459,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"Windows"},
 							},
@@ -1449,7 +1472,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"Linux"},
 						},
@@ -1475,7 +1498,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"Linux"},
 							},
@@ -1487,7 +1510,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/arch",
+								Key:      corev1api.LabelArchStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"amd64"},
 							},
@@ -1501,7 +1524,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"Linux"},
 						},
@@ -1517,7 +1540,7 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 					NodeSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "kubernetes.io/arch",
+								Key:      corev1api.LabelArchStable,
 								Operator: metav1.LabelSelectorOpIn,
 								Values:   []string{"amd64"},
 							},
@@ -1542,6 +1565,85 @@ func TestGetLoadAffinityByStorageClass(t *testing.T) {
 			result := GetLoadAffinityByStorageClass(test.affinityList, test.scName, velerotest.NewLogger())
 
 			assert.Equal(t, test.expectedAffinity, result)
+		})
+	}
+}
+
+func TestGetLoadAffinityByStorageClassReturnsCopy(t *testing.T) {
+	newAffinityList := func() []*LoadAffinity {
+		return []*LoadAffinity{
+			{
+				NodeSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"pool": "backup"},
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      corev1api.LabelArchStable,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"amd64"},
+						},
+					},
+				},
+			},
+			{
+				NodeSelector: metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      corev1api.LabelArchStable,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"arm64"},
+						},
+					},
+				},
+				StorageClass: "storage-class-01",
+			},
+		}
+	}
+
+	tests := []struct {
+		name   string
+		scName string
+	}{
+		{
+			name:   "global affinity",
+			scName: "no-such-storage-class",
+		},
+		{
+			name:   "affinity matched by StorageClass",
+			scName: "storage-class-01",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			affinityList := newAffinityList()
+
+			// Simulate the exposers, which append an OS related term to the returned
+			// affinity on every expose call. The source list must not be affected.
+			for range 3 {
+				result := GetLoadAffinityByStorageClass(affinityList, test.scName, velerotest.NewLogger())
+				require.NotNil(t, result)
+
+				result.NodeSelector.MatchExpressions = append(result.NodeSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+					Key:      NodeOSLabel,
+					Operator: metav1.LabelSelectorOpNotIn,
+					Values:   []string{NodeOSWindows},
+				})
+
+				assert.Len(t, result.NodeSelector.MatchExpressions, 2)
+			}
+
+			assert.Equal(t, newAffinityList(), affinityList)
+
+			// The other fields must be copied as well.
+			result := GetLoadAffinityByStorageClass(affinityList, test.scName, velerotest.NewLogger())
+			require.NotNil(t, result)
+			result.StorageClass = "modified"
+			result.NodeSelector.MatchExpressions[0].Values[0] = "modified"
+			if result.NodeSelector.MatchLabels != nil {
+				result.NodeSelector.MatchLabels["pool"] = "modified"
+			}
+
+			assert.Equal(t, newAffinityList(), affinityList)
 		})
 	}
 }

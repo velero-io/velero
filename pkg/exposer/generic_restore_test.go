@@ -34,6 +34,7 @@ import (
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
@@ -351,6 +352,88 @@ func TestRestoreExpose(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRestoreExpose_SecretCopy(t *testing.T) {
+	scName := "fake-sc"
+	restore := &velerov1.Restore{
+		TypeMeta:   metav1.TypeMeta{APIVersion: velerov1.SchemeGroupVersion.String(), Kind: "Restore"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: velerov1.DefaultNamespace, Name: "fake-restore", UID: "fake-uid"},
+	}
+	ownerObject := corev1api.ObjectReference{
+		Kind:       restore.Kind,
+		Namespace:  restore.Namespace,
+		Name:       restore.Name,
+		UID:        restore.UID,
+		APIVersion: restore.APIVersion,
+	}
+	targetPVCObj := &corev1api.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "fake-target-pvc"},
+		Spec:       corev1api.PersistentVolumeClaimSpec{StorageClassName: &scName},
+	}
+	storageClass := &storagev1api.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fake-sc"}}
+	daemonSet := &appsv1api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+		TypeMeta:   metav1.TypeMeta{Kind: "DaemonSet", APIVersion: appsv1api.SchemeGroupVersion.String()},
+		Spec: appsv1api.DaemonSetSpec{
+			Template: corev1api.PodTemplateSpec{
+				Spec: corev1api.PodSpec{Containers: []corev1api.Container{{Image: "fake-image"}}},
+			},
+		},
+	}
+
+	t.Run("copies secret and configmap from target namespace", func(t *testing.T) {
+		srcSecret := &corev1api.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "kms-token", Namespace: "fake-ns"},
+			Data:       map[string][]byte{"token": []byte("vault-token")},
+			Type:       corev1api.SecretTypeOpaque,
+		}
+		srcCM := &corev1api.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "kms-config", Namespace: "fake-ns"},
+			Data:       map[string]string{"vaultAddress": "https://vault.example.com"},
+		}
+		fakeKubeClient := fake.NewSimpleClientset(targetPVCObj, storageClass, daemonSet, srcSecret, srcCM)
+		exposer := genericRestoreExposer{kubeClient: fakeKubeClient, log: velerotest.NewLogger()}
+
+		err := exposer.Expose(t.Context(), ownerObject, GenericRestoreExposeParam{
+			TargetPVCName:    "fake-target-pvc",
+			TargetNamespace:  "fake-ns",
+			HostingPodLabels: map[string]string{},
+			Resources:        corev1api.ResourceRequirements{},
+			ExposeTimeout:    time.Millisecond,
+			RestorePVCConfig: velerotypes.RestorePVC{
+				SecretNames:    []string{"kms-token"},
+				ConfigMapNames: []string{"kms-config"},
+			},
+		})
+		require.NoError(t, err)
+
+		copiedSecret, err := fakeKubeClient.CoreV1().Secrets(ownerObject.Namespace).Get(t.Context(), "kms-token", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, []byte("vault-token"), copiedSecret.Data["token"])
+		assert.Equal(t, string(ownerObject.UID), copiedSecret.Labels[BackupPVCSecretLabel])
+
+		copiedCM, err := fakeKubeClient.CoreV1().ConfigMaps(ownerObject.Namespace).Get(t.Context(), "kms-config", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "https://vault.example.com", copiedCM.Data["vaultAddress"])
+		assert.Equal(t, string(ownerObject.UID), copiedCM.Labels[BackupPVCSecretLabel])
+	})
+
+	t.Run("returns error when source secret missing", func(t *testing.T) {
+		fakeKubeClient := fake.NewSimpleClientset(targetPVCObj, storageClass, daemonSet)
+		exposer := genericRestoreExposer{kubeClient: fakeKubeClient, log: velerotest.NewLogger()}
+
+		err := exposer.Expose(t.Context(), ownerObject, GenericRestoreExposeParam{
+			TargetPVCName:    "fake-target-pvc",
+			TargetNamespace:  "fake-ns",
+			HostingPodLabels: map[string]string{},
+			Resources:        corev1api.ResourceRequirements{},
+			ExposeTimeout:    time.Millisecond,
+			RestorePVCConfig: velerotypes.RestorePVC{SecretNames: []string{"missing-secret"}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "error copying secret")
+	})
 }
 
 func TestRebindVolume(t *testing.T) {
@@ -1330,12 +1413,13 @@ func TestCreateRestorePod(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		kubeClientObj []runtime.Object
-		selectedNode  string
-		affinity      *kube.LoadAffinity
-		nodeOS        string
-		expectedPod   *corev1api.Pod
+		name                 string
+		kubeClientObj        []runtime.Object
+		selectedNode         string
+		affinity             *kube.LoadAffinity
+		nodeOS               string
+		expectedPod          *corev1api.Pod
+		expectedNodeSelector map[string]string
 	}{
 		{
 			name:          "linux",
@@ -1345,7 +1429,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"linux"},
 						},
@@ -1363,7 +1447,7 @@ func TestCreateRestorePod(t *testing.T) {
 				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      "kubernetes.io/os",
+							Key:      corev1api.LabelOSStable,
 							Operator: metav1.LabelSelectorOpIn,
 							Values:   []string{"windows"},
 						},
@@ -1372,6 +1456,29 @@ func TestCreateRestorePod(t *testing.T) {
 				StorageClass: scName,
 			},
 			nodeOS: "windows",
+		},
+		{
+			// A selected node is pinned through the node selector, and the
+			// affinity from the node-agent config is ignored.
+			name:          "selected node",
+			kubeClientObj: []runtime.Object{daemonSet, daemonSetWin, targetPVCObj},
+			selectedNode:  "fake-selected-node",
+			affinity: &kube.LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      corev1api.LabelOSStable,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"linux"},
+						},
+					},
+				},
+				StorageClass: scName,
+			},
+			nodeOS: "linux",
+			expectedNodeSelector: map[string]string{
+				corev1api.LabelHostname: "fake-selected-node",
+			},
 		},
 	}
 
@@ -1406,6 +1513,9 @@ func TestCreateRestorePod(t *testing.T) {
 			require.NoError(t, err)
 			if test.expectedPod != nil {
 				assert.Equal(t, test.expectedPod, pod)
+			}
+			if test.expectedNodeSelector != nil {
+				assert.Equal(t, test.expectedNodeSelector, pod.Spec.NodeSelector)
 			}
 		})
 	}

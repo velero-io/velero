@@ -196,6 +196,36 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		}
 	}
 
+	// Copy secrets and configmaps from the target namespace to the Velero namespace if configured.
+	// These are needed by CSI drivers that require namespace-scoped resources for volume
+	// provisioning of the restorePVC (e.g., encrypted volumes with KMS tokens and tenant Vault configs).
+	copyLabels := map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)}
+	for _, secretName := range param.RestorePVCConfig.SecretNames {
+		if copyErr := kube.CopySecret(ctx, e.kubeClient.CoreV1(), secretName,
+			param.TargetNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
+			err = errors.Wrapf(copyErr, "error copying secret %s from %s to %s",
+				secretName, param.TargetNamespace, ownerObject.Namespace)
+			return err
+		}
+	}
+	for _, cmName := range param.RestorePVCConfig.ConfigMapNames {
+		if copyErr := kube.CopyConfigMap(ctx, e.kubeClient.CoreV1(), cmName,
+			param.TargetNamespace, ownerObject.Namespace, copyLabels, curLog); copyErr != nil {
+			err = errors.Wrapf(copyErr, "error copying configmap %s from %s to %s",
+				cmName, param.TargetNamespace, ownerObject.Namespace)
+			return err
+		}
+	}
+
+	defer func() {
+		if err != nil {
+			kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
+				BackupPVCSecretLabel, string(ownerObject.UID), curLog)
+			kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
+				BackupPVCSecretLabel, string(ownerObject.UID), curLog)
+		}
+	}()
+
 	restorePVC, err := e.createRestorePVC(ctx, ownerObject, targetPVC, selectedNode, param.DataMover)
 	if err != nil {
 		return errors.Wrap(err, "error to create restore pvc")
@@ -397,6 +427,11 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 	kube.DeletePodIfAny(ctx, e.kubeClient.CoreV1(), restorePodName, ownerObject.Namespace, e.log)
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), restorePVCName, ownerObject.Namespace, 0, e.log)
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), cachePVCName, ownerObject.Namespace, 0, e.log)
+
+	kube.DeleteSecretsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
+	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
+		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 }
 
 func (e *genericRestoreExposer) RebindVolume(ctx context.Context, ownerObject corev1api.ObjectReference, param GenericRestoreRebindVolumeParam) error {
@@ -620,7 +655,7 @@ func (e *genericRestoreExposer) createRestorePod(
 	nodeSelector := map[string]string{}
 	if selectedNode != "" {
 		affinity = nil
-		nodeSelector["kubernetes.io/hostname"] = selectedNode
+		nodeSelector[corev1api.LabelHostname] = selectedNode
 		e.log.Infof("Selected node for restore pod. Ignore affinity from the node-agent config.")
 	}
 
@@ -762,7 +797,7 @@ func (e *genericRestoreExposer) createRestorePod(
 			TopologySpreadConstraints: []corev1api.TopologySpreadConstraint{
 				{
 					MaxSkew:           1,
-					TopologyKey:       "kubernetes.io/hostname",
+					TopologyKey:       corev1api.LabelHostname,
 					WhenUnsatisfiable: corev1api.ScheduleAnyway,
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{

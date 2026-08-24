@@ -17,6 +17,7 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -686,6 +687,30 @@ func TestEnsureDeletePVC(t *testing.T) {
 				},
 			},
 			err: "timeout to assure pvc fake-pvc is deleted, finalizers in pvc []",
+		},
+		{
+			name:      "wait timeout before the pvc is ever retrieved",
+			pvcName:   "fake-pvc",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{pvcObjectWithFinalizer},
+			timeout:   time.Millisecond,
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, pvcObject, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "persistentvolumeclaims",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "timeout to assure pvc fake-pvc is deleted",
 		},
 	}
 
@@ -1729,7 +1754,7 @@ func TestDiagnosePV(t *testing.T) {
 func TestGetPVCAttachingNodeOS(t *testing.T) {
 	storageClass := "fake-storage-class"
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
 
 	pvcObj := &corev1api.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2059,6 +2084,13 @@ func TestEnsureDeletePV(t *testing.T) {
 		},
 	}
 
+	pvObjWithFinalizer := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "fake-pv",
+			Finalizers: []string{"fake-finalizer-1", "fake-finalizer-2"},
+		},
+	}
+
 	tests := []struct {
 		name          string
 		pvName        string
@@ -2133,6 +2165,29 @@ func TestEnsureDeletePV(t *testing.T) {
 				},
 			},
 			expectedErr: "timeout to assure pv fake-pv is deleted, finalizers in pv []",
+		},
+		{
+			name:          "wait timeout before the pv is ever retrieved",
+			pvName:        "fake-pv",
+			timeout:       time.Millisecond,
+			kubeClientObj: []runtime.Object{pvObjWithFinalizer},
+			kubeReactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "persistentvolumes",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			expectedErr: "timeout to assure pv fake-pv is deleted",
 		},
 	}
 

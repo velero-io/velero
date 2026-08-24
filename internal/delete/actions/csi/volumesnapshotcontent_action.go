@@ -86,7 +86,7 @@ func (p *volumeSnapshotContentDeleteItemAction) Execute(
 	// This handles legacy (pre-1.15) backups where the original VSC
 	// with DeletionPolicy=Retain still exists in the cluster.
 	originalVSCName := snapCont.Name
-	if cleaned := p.tryDeleteOriginalVSC(context.TODO(), originalVSCName); cleaned {
+	if cleaned := p.tryDeleteOriginalVSC(context.TODO(), originalVSCName, input.Backup.Name); cleaned {
 		p.log.Infof("Successfully deleted original VolumeSnapshotContent %s from cluster, skipping temp VSC creation", originalVSCName)
 		return nil
 	}
@@ -149,10 +149,11 @@ func (p *volumeSnapshotContentDeleteItemAction) Execute(
 // the cluster (legacy pre-1.15 backups). It patches the DeletionPolicy to
 // Delete so the CSI driver also removes the cloud snapshot, then deletes
 // the VSC object itself.
-// Returns true if the original VSC was found and deletion was initiated.
+// Returns true if the original VSC was found, carries the backup label, and deletion was initiated.
 func (p *volumeSnapshotContentDeleteItemAction) tryDeleteOriginalVSC(
 	ctx context.Context,
 	vscName string,
+	backupName string,
 ) bool {
 	existing := new(snapshotv1api.VolumeSnapshotContent)
 	if err := p.crClient.Get(ctx, crclient.ObjectKey{Name: vscName}, existing); err != nil {
@@ -161,6 +162,15 @@ func (p *volumeSnapshotContentDeleteItemAction) tryDeleteOriginalVSC(
 		} else {
 			p.log.WithError(err).Warnf("Error looking up original VolumeSnapshotContent %s, will use temp VSC flow", vscName)
 		}
+		return false
+	}
+
+	if !kubeutil.HasBackupLabel(&existing.ObjectMeta, backupName) {
+		p.log.Warnf(
+			"Original VolumeSnapshotContent %s in cluster does not belong to backup %s, skipping direct deletion",
+			vscName,
+			backupName,
+		)
 		return false
 	}
 
