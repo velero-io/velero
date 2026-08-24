@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
 type featureFlagSet struct {
@@ -71,13 +73,5 @@ func NewFeatureFlagSet(flags ...string) {
 // normalizeFeatureNames trims whitespace and drops empty entries so values
 // like "EnableCSI, EnableAPIGroupVersions" enable the intended features.
 func normalizeFeatureNames(names ...string) []string {
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
+	return util.SplitAndTrimCSV(strings.Join(names, ","))
 }

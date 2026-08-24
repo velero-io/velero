@@ -18,6 +18,8 @@ package flag
 
 import (
 	"strings"
+
+	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
 // StringArray is a Cobra-compatible named type for defining a
@@ -40,16 +42,7 @@ func (sa *StringArray) String() string {
 // the results to the receiver. It returns an error if
 // the string is not parseable.
 func (sa *StringArray) Set(s string) error {
-	parts := strings.Split(s, ",")
-	out := make(StringArray, 0, len(parts))
-	for _, part := range parts {
-		item := strings.TrimSpace(part)
-		if item == "" {
-			continue
-		}
-		out = append(out, item)
-	}
-	*sa = out
+	*sa = StringArray(util.SplitAndTrimCSV(s))
 	return nil
 }
 

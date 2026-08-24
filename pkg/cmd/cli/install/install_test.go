@@ -263,10 +263,3 @@ func TestNewCommandRunClosureOrder(t *testing.T) {
 	// looks up the ConfigMap in targetNS (succeeds), Run returns early via DryRun.
 	require.NoError(t, c.Execute())
 }
-
-func TestSplitAndTrimCSV(t *testing.T) {
-	require.Equal(t, []string{"EnableCSI", "EnableAPIGroupVersions"}, splitAndTrimCSV("EnableCSI, EnableAPIGroupVersions, "))
-	require.Equal(t, []string{"EnableCSI"}, splitAndTrimCSV("EnableCSI"))
-	require.Empty(t, splitAndTrimCSV(""))
-	require.Empty(t, splitAndTrimCSV(" , , "))
-}
