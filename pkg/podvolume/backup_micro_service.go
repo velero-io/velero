@@ -193,12 +193,17 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 
 	tags := map[string]string{}
 
-	// Modify the ParentSnapshot to "" and ForceFull to true when ParentSnapshot is "none".
+	// "none" requests a full backup. "auto" requests that the data mover finds the most
+	// recent backup of the same volume as parent, which is what an empty ParentSnapshot
+	// already does, so both map to "".
 	parentSnapshot := pvb.Spec.ParentSnapshot
 	forceFull := false
-	if pvb.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
+	switch pvb.Spec.ParentSnapshot {
+	case veleroshared.ParentSnapshotNone:
 		parentSnapshot = ""
 		forceFull = true
+	case veleroshared.ParentSnapshotAuto:
+		parentSnapshot = ""
 	}
 
 	if err := fsBackup.StartBackup(r.sourceTargetPath, pvb.Spec.UploaderSettings, &datapath.BackupStartParam{

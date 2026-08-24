@@ -1,0 +1,1 @@
+Fix e2e kind test matrix generation misparsing kindest/node pre-release tags (e.g. v1.37.0-rc.1) as bogus patch versions
