@@ -35,6 +35,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
+	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
 )
 
 func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
@@ -329,6 +330,7 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
 				fakeClient,
 				tc.defaultVolumesToFSBackup,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
@@ -345,11 +347,23 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot(t *testing.T) {
 	}
 }
 
+type mockPVCInclusionTracker struct {
+	isPVCIncluded func(namespace, pvcName string) bool
+}
+
+func (m *mockPVCInclusionTracker) IsPVCIncluded(namespace, pvcName string) bool {
+	if m.isPVCIncluded == nil {
+		return false
+	}
+	return m.isPVCIncluded(namespace, pvcName)
+}
+
 func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 	testCases := []struct {
 		name             string
 		vol              corev1api.Volume
 		backupExcludePVC bool
+		isPVCIncluded    func(pvcName string) bool
 		shouldInclude    bool
 	}{
 		{
@@ -446,6 +460,38 @@ func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 			shouldInclude:    false,
 		},
 		{
+			name: "volume has pvc, backupExcludePVC is true, but isPVCIncluded returns true so include",
+			vol: corev1api.Volume{
+				Name: "sample-volume",
+				VolumeSource: corev1api.VolumeSource{
+					PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+						ClaimName: "sample-pvc",
+					},
+				},
+			},
+			backupExcludePVC: true,
+			isPVCIncluded: func(pvcName string) bool {
+				return pvcName == "sample-pvc"
+			},
+			shouldInclude: true,
+		},
+		{
+			name: "volume has pvc, backupExcludePVC is false, isPVCIncluded returns false, but globally included so include",
+			vol: corev1api.Volume{
+				Name: "sample-volume",
+				VolumeSource: corev1api.VolumeSource{
+					PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+						ClaimName: "sample-pvc",
+					},
+				},
+			},
+			backupExcludePVC: false,
+			isPVCIncluded: func(pvcName string) bool {
+				return false
+			},
+			shouldInclude: true,
+		},
+		{
 			name: "volume name has prefix default-token so do not include",
 			vol: corev1api.Volume{
 				Name: "default-token-vol-name",
@@ -480,13 +526,23 @@ func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to build policy with error %v", err)
 			}
-			vh := &volumeHelperImpl{
-				volumePolicy:     p,
-				snapshotVolumes:  ptr.To(true),
-				logger:           velerotest.NewLogger(),
-				backupExcludePVC: tc.backupExcludePVC,
+			var tracker vhutil.PVCInclusionTracker
+			if tc.isPVCIncluded != nil {
+				tracker = &mockPVCInclusionTracker{
+					isPVCIncluded: func(ns, pvcName string) bool {
+						return tc.isPVCIncluded(pvcName)
+					},
+				}
 			}
-			actualShouldInclude := vh.shouldIncludeVolumeInBackup(tc.vol)
+			vh := &volumeHelperImpl{
+				volumePolicy:        p,
+				snapshotVolumes:     ptr.To(true),
+				logger:              velerotest.NewLogger(),
+				backupExcludePVC:    tc.backupExcludePVC,
+				pvcInclusionTracker: tracker,
+			}
+			pod := corev1api.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+			actualShouldInclude := vh.shouldIncludeVolumeInBackup(tc.vol, pod)
 			assert.Equalf(t, actualShouldInclude, tc.shouldInclude, "Want shouldInclude as %v; Got actualShouldInclude as %v", tc.shouldInclude, actualShouldInclude)
 		})
 	}
@@ -694,6 +750,7 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup(t *testing.T) {
 				fakeClient,
 				tc.defaultVolumesToFSBackup,
 				false,
+				nil,
 			)
 
 			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod)
@@ -889,6 +946,7 @@ func TestVolumeHelperImplWithCache_ShouldPerformSnapshot(t *testing.T) {
 				tc.defaultVolumesToFSBackup,
 				false,
 				namespaces,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -1041,6 +1099,7 @@ func TestVolumeHelperImplWithCache_ShouldPerformFSBackup(t *testing.T) {
 				tc.defaultVolumesToFSBackup,
 				false,
 				namespaces,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -1166,6 +1225,7 @@ volumePolicies:
 				fakeClient,
 				logrus.StandardLogger(),
 				cache,
+				nil,
 			)
 
 			if tc.expectError {
@@ -1221,7 +1281,7 @@ func TestNewVolumeHelperImplWithCache_UsesCache(t *testing.T) {
 		},
 	}
 
-	vh, err := NewVolumeHelperImplWithCache(backup, fakeClient, logrus.StandardLogger(), cache)
+	vh, err := NewVolumeHelperImplWithCache(backup, fakeClient, logrus.StandardLogger(), cache, nil)
 	require.NoError(t, err)
 
 	// Convert PV to unstructured
@@ -1353,6 +1413,7 @@ func TestVolumeHelperImpl_ShouldPerformSnapshot_UnboundPVC(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputPVC)
@@ -1530,6 +1591,7 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup_UnboundPVC(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod)
@@ -1669,6 +1731,7 @@ func TestGetDataMoverFromActionParameters(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
@@ -1794,6 +1857,7 @@ func TestGetActionParameters(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
@@ -1980,6 +2044,7 @@ func TestShouldPerformCustomAction(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
@@ -2102,6 +2167,7 @@ func TestGetPVAndMatchAction(t *testing.T) {
 				fakeClient,
 				false,
 				false,
+				nil,
 			)
 
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)

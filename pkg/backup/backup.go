@@ -485,6 +485,8 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		return err
 	}
 
+	pvcInclusionTracker := NewPVCInclusionTracker(backupRequest.MustIncludeAdditionalItemPVCs, backupRequest.BackedUpItems)
+
 	volumeHelperImpl, err := volumehelper.NewVolumeHelperImplWithNamespaces(
 		backupRequest.ResPolicies,
 		backupRequest.Spec.SnapshotVolumes,
@@ -493,6 +495,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		boolptr.IsSetToTrue(backupRequest.Spec.DefaultVolumesToFsBackup),
 		!backupRequest.ResourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()),
 		namespaces,
+		pvcInclusionTracker,
 	)
 	if err != nil {
 		log.WithError(err).Error("Failed to build PVC-to-Pod cache for volume policy lookups")

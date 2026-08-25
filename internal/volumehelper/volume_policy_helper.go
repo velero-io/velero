@@ -37,7 +37,8 @@ type volumeHelperImpl struct {
 	backupExcludePVC bool
 	// pvcPodCache provides cached PVC to Pod mappings for improved performance.
 	// When there are many PVCs and pods, using this cache avoids O(N*M) lookups.
-	pvcPodCache *podvolumeutil.PVCPodCache
+	pvcPodCache         *podvolumeutil.PVCPodCache
+	pvcInclusionTracker vhutil.PVCInclusionTracker
 }
 
 // NewVolumeHelperImpl creates a VolumeHelper without PVC-to-Pod caching.
@@ -52,6 +53,7 @@ func NewVolumeHelperImpl(
 	client crclient.Client,
 	defaultVolumesToFSBackup bool,
 	backupExcludePVC bool,
+	pvcInclusionTracker vhutil.PVCInclusionTracker,
 ) vhutil.VolumeHelper {
 	// Pass nil namespaces - no cache will be built, so this never fails.
 	// This is used by plugins that don't need the cache optimization.
@@ -63,6 +65,7 @@ func NewVolumeHelperImpl(
 		defaultVolumesToFSBackup,
 		backupExcludePVC,
 		nil,
+		pvcInclusionTracker,
 	)
 	return vh
 }
@@ -80,6 +83,7 @@ func NewVolumeHelperImplWithNamespaces(
 	defaultVolumesToFSBackup bool,
 	backupExcludePVC bool,
 	namespaces []string,
+	pvcInclusionTracker vhutil.PVCInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
 	var pvcPodCache *podvolumeutil.PVCPodCache
 	if len(namespaces) > 0 {
@@ -98,6 +102,7 @@ func NewVolumeHelperImplWithNamespaces(
 		defaultVolumesToFSBackup: defaultVolumesToFSBackup,
 		backupExcludePVC:         backupExcludePVC,
 		pvcPodCache:              pvcPodCache,
+		pvcInclusionTracker:      pvcInclusionTracker,
 	}, nil
 }
 
@@ -109,6 +114,7 @@ func NewVolumeHelperImplWithCache(
 	client crclient.Client,
 	logger logrus.FieldLogger,
 	pvcPodCache *podvolumeutil.PVCPodCache,
+	pvcInclusionTracker vhutil.PVCInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
 	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(backup, client, logger)
 	if err != nil {
@@ -123,6 +129,7 @@ func NewVolumeHelperImplWithCache(
 		defaultVolumesToFSBackup: boolptr.IsSetToTrue(backup.Spec.DefaultVolumesToFsBackup),
 		backupExcludePVC:         boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData),
 		pvcPodCache:              pvcPodCache,
+		pvcInclusionTracker:      pvcInclusionTracker,
 	}, nil
 }
 
@@ -260,7 +267,7 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 }
 
 func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod) (bool, error) {
-	if !v.shouldIncludeVolumeInBackup(volume) {
+	if !v.shouldIncludeVolumeInBackup(volume, pod) {
 		v.logger.Debugf("skip fs-backup action for pod %s's volume %s, due to not pass volume check.", pod.Namespace+"/"+pod.Name, volume.Name)
 		return false, nil
 	}
@@ -442,7 +449,7 @@ func (v *volumeHelperImpl) GetSnapshotClass(obj runtime.Unstructured, groupResou
 	return action.GetSnapshotClass()
 }
 
-func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume) bool {
+func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume, pod corev1api.Pod) bool {
 	includeVolumeInBackup := true
 	// cannot backup hostpath volumes as they are not mounted into /var/lib/kubelet/pods
 	// and therefore not accessible to the node agent daemon set.
@@ -465,8 +472,12 @@ func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume) boo
 	if vol.DownwardAPI != nil {
 		includeVolumeInBackup = false
 	}
-	if vol.PersistentVolumeClaim != nil && v.backupExcludePVC {
-		includeVolumeInBackup = false
+	if vol.PersistentVolumeClaim != nil {
+		if v.backupExcludePVC {
+			if v.pvcInclusionTracker == nil || !v.pvcInclusionTracker.IsPVCIncluded(pod.Namespace, vol.PersistentVolumeClaim.ClaimName) {
+				includeVolumeInBackup = false
+			}
+		}
 	}
 	// don't include volumes that mount the default service account token.
 	if strings.HasPrefix(vol.Name, "default-token") {

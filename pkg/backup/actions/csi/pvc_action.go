@@ -136,6 +136,7 @@ func (p *pvcBackupItemAction) getVolumeHelperWithCache(backup *velerov1api.Backu
 		p.crClient,
 		p.log,
 		p.pvcPodCache,
+		nil,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create VolumeHelper")

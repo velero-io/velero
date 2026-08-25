@@ -22,6 +22,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// PVCInclusionTracker provides read-only checks for whether a PVC is included in the backup.
+type PVCInclusionTracker interface {
+	IsPVCIncluded(namespace, pvcName string) bool
+}
+
 type VolumeHelper interface {
 	ShouldPerformSnapshot(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, error)
 	ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod) (bool, error)
