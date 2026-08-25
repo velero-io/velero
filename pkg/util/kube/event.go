@@ -95,7 +95,8 @@ func (er *eventRecorder) Event(object runtime.Object, warning bool, reason strin
 	}
 
 	if len(a) > 0 {
-		er.recorder.Eventf(object, eventType, reason, message, a...)
+		msgFmt := message
+		er.recorder.Eventf(object, eventType, reason, msgFmt, a...)
 	} else {
 		er.recorder.Event(object, eventType, reason, message)
 	}
