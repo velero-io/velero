@@ -243,7 +243,7 @@ func TestGetPassword(t *testing.T) {
 		{
 			name: "valid credentials interface",
 			credGetterFunc: func(ss *mocks.SecretStore, selector *corev1api.SecretKeySelector) {
-				ss.On("Get", selector).Return("test", nil)
+				ss.On("Get", mock.Anything, selector).Return("test", nil)
 			},
 			expectError:  false,
 			expectedPass: "test",
@@ -257,7 +257,7 @@ func TestGetPassword(t *testing.T) {
 		{
 			name: "ErrorGettingPassword",
 			credGetterFunc: func(ss *mocks.SecretStore, selector *corev1api.SecretKeySelector) {
-				ss.On("Get", selector).Return("", errors.New("error getting password"))
+				ss.On("Get", mock.Anything, selector).Return("", errors.New("error getting password"))
 			},
 			expectError:  true,
 			expectedPass: "",
@@ -330,7 +330,7 @@ func TestNewKopiaUploaderProvider(t *testing.T) {
 			name: "Success",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", nil)
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", nil)
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
@@ -345,7 +345,7 @@ func TestNewKopiaUploaderProvider(t *testing.T) {
 			name: "Error to get repo options",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", errors.New("failed to get password"))
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", errors.New("failed to get password"))
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
@@ -360,7 +360,7 @@ func TestNewKopiaUploaderProvider(t *testing.T) {
 			name: "Error open repository service",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", nil)
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", nil)
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
