@@ -706,12 +706,21 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 		emptyFSBR       bool
 		isGetErr        bool
 		rebindVolumeErr bool
+		expectedPhase   velerov2alpha1api.DataDownloadPhase
 	}{
 		{
 			name:            "Data download complete",
 			emptyFSBR:       false,
 			isGetErr:        false,
 			rebindVolumeErr: false,
+			expectedPhase:   velerov2alpha1api.DataDownloadPhaseCompleted,
+		},
+		{
+			name:            "Rebind volume fails",
+			emptyFSBR:       false,
+			isGetErr:        false,
+			rebindVolumeErr: true,
+			expectedPhase:   velerov2alpha1api.DataDownloadPhaseFailed,
 		},
 	}
 
@@ -732,7 +741,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 			}()
 
 			require.NoError(t, err)
-			dd := dataDownloadBuilder().Result()
+			dd := dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
 			namespace := dd.Namespace
 			ddName := dd.Name
 			// Add the DataDownload object to the fake client
@@ -745,7 +754,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 				assert.True(t, updatedDD.Status.CompletionTimestamp.IsZero())
 			} else {
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: ddName, Namespace: namespace}, updatedDD))
-				assert.Equal(t, velerov2alpha1api.DataDownloadPhaseCompleted, updatedDD.Status.Phase)
+				assert.Equal(t, test.expectedPhase, updatedDD.Status.Phase)
 				assert.False(t, updatedDD.Status.CompletionTimestamp.IsZero())
 			}
 		})
