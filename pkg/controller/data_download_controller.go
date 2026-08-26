@@ -484,6 +484,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	})
 	if err != nil {
 		log.WithError(err).Error("Failed to rebind PV to target PVC on completion")
+		_, _ = r.errorOut(ctx, &dd, err, "error to rebind PV to target PVC", log)
 		return
 	}
 
