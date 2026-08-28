@@ -165,3 +165,15 @@ func (d *DataDownloadBuilder) AcceptedTimestamp(acceptedTimestamp *metav1.Time) 
 	d.object.Status.AcceptedTimestamp = acceptedTimestamp
 	return d
 }
+
+// Finalizers sets the DataDownload's Finalizers.
+func (d *DataDownloadBuilder) Finalizers(finalizers []string) *DataDownloadBuilder {
+	d.object.Finalizers = finalizers
+	return d
+}
+
+// Message sets the DataDownload's Message.
+func (d *DataDownloadBuilder) Message(msg string) *DataDownloadBuilder {
+	d.object.Status.Message = msg
+	return d
+}

@@ -168,3 +168,15 @@ func (d *DataUploadBuilder) AcceptedTimestamp(acceptedTimestamp *metav1.Time) *D
 	d.object.Status.AcceptedTimestamp = acceptedTimestamp
 	return d
 }
+
+// Finalizers sets the DataUpload's Finalizers.
+func (d *DataUploadBuilder) Finalizers(finalizers []string) *DataUploadBuilder {
+	d.object.Finalizers = finalizers
+	return d
+}
+
+// Message sets the DataUpload's Message.
+func (d *DataUploadBuilder) Message(msg string) *DataUploadBuilder {
+	d.object.Status.Message = msg
+	return d
+}

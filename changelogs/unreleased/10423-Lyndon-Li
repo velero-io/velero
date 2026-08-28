@@ -1,0 +1,1 @@
+Fix issue #8534, refactor dm controllers to tolerate cancel request in more cases, e.g., node restart, node drain
