@@ -246,6 +246,16 @@ Velero does not set ephemeral-storage limits during installation. Limits and req
 
 Plugins will use ephemeral-storage. There needs to be a sufficient requests and limit set to account for plugins and the additional ephemeral-storage used to maintain credentials and cache space for datamovers. Object storage plugins will fit comfortably into an allocation of 100MB of ephemeral-storage.
 
+## Configure the graceful shutdown timeout
+
+When the `velero` server pod is terminated (for example, during a node drain or scale-down), it has until `terminationGracePeriodSeconds` before Kubernetes force-kills it. By default, `velero server` derives its internal shutdown grace period automatically from the pod's own `terminationGracePeriodSeconds`, minus a small safety buffer, so in-flight backup/restore reconciles get as much time as the pod itself is allowed before being cut off.
+
+- `--graceful-shutdown-timeout` overrides the derived value explicitly. It must be a positive duration (for example `45m`); an explicit `0` or negative value is rejected at startup.
+- `--graceful-shutdown-safety-buffer` controls the buffer subtracted from `terminationGracePeriodSeconds` when deriving the timeout automatically. It defaults to 10 seconds.
+- If the pod's `terminationGracePeriodSeconds` can't be determined (for example, the `POD_NAME` environment variable isn't set, or the value derived after subtracting the safety buffer isn't positive), `velero server` logs a warning and falls back to a 30 second timeout, matching its historical default.
+
+**NOTE:** This does not, by itself, address [#9036](https://github.com/vmware-tanzu/velero/issues/9036): if a *replacement* pod starts while the old pod is still terminating, it can still mark an in-flight backup/restore as `Failed` on startup. Raising the current pod's shutdown timeout only helps the current pod finish its own in-flight work before it's killed.
+
 ## Configure more than one storage location for backups or volume snapshots
 
 Velero supports any number of backup storage locations and volume snapshot locations. For more details, see [about locations](locations.md).

@@ -19,6 +19,7 @@ package server
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -283,6 +285,74 @@ func Test_namespaceExists(t *testing.T) {
 
 	// namespace exists
 	assert.NoError(t, server.namespaceExists("velero"))
+}
+
+func TestResolveGracefulShutdownTimeout(t *testing.T) {
+	logger := velerotest.NewLogger()
+	namespace := "velero"
+
+	tests := []struct {
+		name     string
+		cfg      *config.Config
+		podName  string
+		pod      *corev1api.Pod
+		expected time.Duration
+	}{
+		{
+			name:     "explicit flag wins",
+			cfg:      &config.Config{GracefulShutdownTimeout: 45 * time.Minute, GracefulShutdownSafetyBuffer: 10 * time.Second},
+			expected: 45 * time.Minute,
+		},
+		{
+			name:    "derives from pod spec",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(3600))},
+			},
+			expected: 3600*time.Second - 10*time.Second,
+		},
+		{
+			name:     "POD_NAME unset falls back to default",
+			cfg:      &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			expected: defaultGracefulShutdownTimeout,
+		},
+		{
+			name:    "terminationGracePeriodSeconds unset falls back to default",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+			},
+			expected: defaultGracefulShutdownTimeout,
+		},
+		{
+			name:    "underflowed derived value falls back to default",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(5))},
+			},
+			expected: defaultGracefulShutdownTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("POD_NAME", tt.podName)
+
+			objs := []runtime.Object{}
+			if tt.pod != nil {
+				objs = append(objs, tt.pod)
+			}
+			kubeClient := kubefake.NewSimpleClientset(objs...)
+
+			actual := resolveGracefulShutdownTimeout(t.Context(), kubeClient, namespace, tt.cfg, logger)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
 }
 
 func Test_veleroResourcesExist(t *testing.T) {
