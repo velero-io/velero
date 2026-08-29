@@ -36,6 +36,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/features"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/vmware-tanzu/velero/pkg/util/stringptr"
 )
 
 type Method string
@@ -174,8 +175,11 @@ type SnapshotDataMovementInfo struct {
 	// Moved snapshot data size.
 	Size int64 `json:"size"`
 
-	// Moved snapshot incremental size.
-	IncrementalSize int64 `json:"incrementalSize,omitempty"`
+	// Moved snapshot incremental size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure (including backups taken before this was
+	// recorded); a pointer to 0 means it transferred nothing, which is the ideal
+	// incremental and must stay distinguishable from "unknown".
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
 
 	// The DataUpload's Status.Phase value
 	Phase velerov2alpha1.DataUploadPhase
@@ -224,8 +228,9 @@ type PodVolumeInfo struct {
 	// The snapshot corresponding volume size.
 	Size int64 `json:"size,omitempty"`
 
-	// The incremental snapshot size.
-	IncrementalSize int64 `json:"incrementalSize,omitempty"`
+	// The incremental snapshot size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure; a pointer to 0 means it transferred nothing.
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
 
 	// The type of the uploader that uploads the data. The valid values are `kopia` and `restic`.
 	UploaderType string `json:"uploaderType"`
@@ -494,7 +499,8 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace, volumeSnapshot.Spec.Source.PersistentVolumeClaimName)
+			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace,
+				stringptr.GetString(volumeSnapshot.Spec.Source.PersistentVolumeClaimName))
 			continue
 		}
 	}

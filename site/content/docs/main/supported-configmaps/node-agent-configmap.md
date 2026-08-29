@@ -299,6 +299,7 @@ For detailed information, see [BackupPVC Configuration for Data Movement Backup]
 - **`spcNoRelabeling`**: This is a boolean value. If set to true, then `pod.Spec.SecurityContext.SELinuxOptions.Type` will be set to `spc_t`. From the SELinux point of view, this will be considered a `Super Privileged Container` which means that selinux enforcement will be disabled and volume relabeling will not occur. This field is ignored if `readOnly` is `false`.
 - **`secretNames`**: List of secret names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped secrets to provision the volume, e.g. ODF/ceph-csi encrypted volumes (`ceph-csi-kms-token`).
 - **`configMapNames`**: List of configmap names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped configmaps to provision the volume, e.g. a tenant ceph-csi KMS config (`ceph-csi-kms-config`).
+- **`readWriteOncePod`**: This is a boolean value. If set to `true`, then `ReadWriteOncePod` will be the only value set to the backupPVC's access modes, so the kubelet labels the volume at mount time instead of relabeling every file. Requires a CSI driver with `seLinuxMount: true` and a storage class that supports `ReadWriteOncePod` PVCs from a snapshot. This field is ignored if `readOnly` is `true`.
 
 **Use Cases:**
 - Use read-only volumes for faster snapshot-to-volume conversion
@@ -309,6 +310,7 @@ For detailed information, see [BackupPVC Configuration for Data Movement Backup]
 **Important Notes:**
 - Ensure specified storage classes exist and support required access modes
 - In SELinux environments, always set `spcNoRelabeling: true` when using `readOnly: true`
+- In SELinux environments where the storage does not support `ReadOnlyMany`, use `readWriteOncePod: true` instead; it is ignored when `readOnly: true` is also set
 - Failures result in DataUpload CR staying in `Accepted` phase until timeout (30m default)
 
 #### Storage Class Mapping

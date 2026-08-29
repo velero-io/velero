@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/sirupsen/logrus"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -83,28 +82,30 @@ func KbClientIsRunningInNode(ctx context.Context, namespace string, nodeName str
 }
 
 // IsReady checks whether the node-agent daemonset has at least one ready pod
-// by inspecting the DaemonSet status. It only checks the daemonset for node
-// OS types that are present in the cluster, following the same pattern as
-// server.checkNodeAgent.
-func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client, log logrus.FieldLogger) error {
-	if kube.WithLinuxNode(ctx, crClient, log) {
-		ds := new(appsv1api.DaemonSet)
-		if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonSet}, ds); err != nil {
+// by inspecting the DaemonSet status.
+func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) error {
+	dsLinux := new(appsv1api.DaemonSet)
+	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonSet}, dsLinux); err != nil {
+		dsLinux = nil
+		if !apierrors.IsNotFound(err) {
 			return errors.Wrap(err, "failed to get linux node-agent daemonset")
-		}
-		if ds.Status.NumberReady > 0 {
-			return nil
 		}
 	}
 
-	if kube.WithWindowsNode(ctx, crClient, log) {
-		ds := new(appsv1api.DaemonSet)
-		if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, ds); err != nil {
+	dsWindows := new(appsv1api.DaemonSet)
+	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, dsWindows); err != nil {
+		dsWindows = nil
+		if !apierrors.IsNotFound(err) {
 			return errors.Wrap(err, "failed to get windows node-agent daemonset")
 		}
-		if ds.Status.NumberReady > 0 {
-			return nil
-		}
+	}
+
+	if dsLinux != nil && dsLinux.Status.NumberReady > 0 {
+		return nil
+	}
+
+	if dsWindows != nil && dsWindows.Status.NumberReady > 0 {
+		return nil
 	}
 
 	return errors.New("node-agent is not ready: no ready pods found")

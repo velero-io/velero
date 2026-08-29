@@ -86,6 +86,11 @@ func (in *DataDownloadList) DeepCopyObject() runtime.Object {
 func (in *DataDownloadSpec) DeepCopyInto(out *DataDownloadSpec) {
 	*out = *in
 	out.TargetVolume = in.TargetVolume
+	if in.CSISnapshot != nil {
+		in, out := &in.CSISnapshot, &out.CSISnapshot
+		*out = new(CSISnapshotSpec)
+		**out = **in
+	}
 	if in.DataMoverConfig != nil {
 		in, out := &in.DataMoverConfig, &out.DataMoverConfig
 		*out = make(map[string]string, len(*in))
@@ -270,6 +275,11 @@ func (in *DataUploadStatus) DeepCopyInto(out *DataUploadStatus) {
 		*out = (*in).DeepCopy()
 	}
 	out.Progress = in.Progress
+	if in.IncrementalBytes != nil {
+		in, out := &in.IncrementalBytes, &out.IncrementalBytes
+		*out = new(int64)
+		**out = **in
+	}
 	if in.AcceptedTimestamp != nil {
 		in, out := &in.AcceptedTimestamp, &out.AcceptedTimestamp
 		*out = (*in).DeepCopy()

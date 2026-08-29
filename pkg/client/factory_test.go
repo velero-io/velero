@@ -64,6 +64,45 @@ func TestFactory(t *testing.T) {
 
 	os.Unsetenv("VELERO_NAMESPACE")
 
+	// namespace-mode=auto should resolve the namespace from the current kubeconfig context.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context"}))
+	assert.Equal(t, "chisel-ns", f.Namespace())
+
+	// namespace-mode=auto should track kubecontext changes dynamically.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "queen-anne-context"}))
+	assert.Equal(t, "saw-ns", f.Namespace())
+
+	// An explicit --namespace flag overrides namespace-mode=auto.
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context", "--namespace", s}))
+	assert.Equal(t, s, f.Namespace())
+
+	// VELERO_NAMESPACE overrides namespace-mode=auto.
+	t.Run("VELERO_NAMESPACE overrides namespace-mode=auto", func(t *testing.T) {
+		t.Setenv("VELERO_NAMESPACE", "env-velero")
+		f := NewFactory("velero", VeleroConfig{ConfigKeyNamespaceMode: NamespaceModeAuto})
+		flags := new(flag.FlagSet)
+		f.BindFlags(flags)
+		require.NoError(t, flags.Parse([]string{"--kubeconfig", "kubeconfig", "--kubecontext", "federal-context"}))
+		assert.Equal(t, "env-velero", f.Namespace())
+	})
+
+	// namespace-mode=auto falls back to the stored/default namespace when the kubeconfig
+	// namespace can't be resolved (e.g. the kubeconfig file doesn't exist).
+	f = NewFactory("velero", VeleroConfig{ConfigKeyNamespace: "stored-ns", ConfigKeyNamespaceMode: NamespaceModeAuto})
+	flags = new(flag.FlagSet)
+	f.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--kubeconfig", "nonexistent-kubeconfig"}))
+	assert.Equal(t, "stored-ns", f.Namespace())
+
 	tests := []struct {
 		name         string
 		kubeconfig   string

@@ -1055,6 +1055,11 @@ func (in *PodVolumeBackupStatus) DeepCopyInto(out *PodVolumeBackupStatus) {
 		*out = (*in).DeepCopy()
 	}
 	out.Progress = in.Progress
+	if in.IncrementalBytes != nil {
+		in, out := &in.IncrementalBytes, &out.IncrementalBytes
+		*out = new(int64)
+		**out = **in
+	}
 	if in.AcceptedTimestamp != nil {
 		in, out := &in.AcceptedTimestamp, &out.AcceptedTimestamp
 		*out = (*in).DeepCopy()
@@ -1763,6 +1768,11 @@ func (in *UploaderConfigForRestore) DeepCopyInto(out *UploaderConfigForRestore) 
 	*out = *in
 	if in.WriteSparseFiles != nil {
 		in, out := &in.WriteSparseFiles, &out.WriteSparseFiles
+		*out = new(bool)
+		**out = **in
+	}
+	if in.DeleteExtraFiles != nil {
+		in, out := &in.DeleteExtraFiles, &out.DeleteExtraFiles
 		*out = new(bool)
 		**out = **in
 	}

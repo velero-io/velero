@@ -16,8 +16,9 @@ You can follow the work we do via our [GitHub milestones](https://github.com/vel
 * Join our Kubernetes Slack channel and talk to over 800 other community members: [#velero-users](https://kubernetes.slack.com/messages/velero-users)
 * Join the Velero community meetings 
 Bi-weekly  community meeting alternating every week between Beijing Friendly timezone and EST/Europe Friendly Timezone  
-  * Beijing/US friendly - we start at 8am Beijing Time(bound to CST) / 8pm EDT(7pm EST) / 5pm PDT(4pm PST) / 2am CEST(1am CET) - [Convert to your time zone](https://dateful.com/convert/beijing-china?t=8am)  - [Zoom Link](https://broadcom.zoom.us/j/93945566592?pwd=rovF20vuI73kR6v67QBMpQuJOtM6sr.1&jst=2)
-  * US/Europe friendly - we start at 10am ET(bound to ET) / 7am PT / 3pm CET / 10pm(11pm) CST - [Convert to your time zone](https://dateful.com/convert/est-edt-eastern-time?t=10)  - [Google meet link](https://meet.google.com/dyr-djtj-sko) 
+  * Beijing/US friendly - we start at 8am Beijing Time(bound to CST) / 8pm EDT(7pm EST) / 5pm PDT(4pm PST) / 2am CEST(1am CET) - [Convert to your time zone](https://dateful.com/convert/beijing-china?t=8am)  - [Zoom Link](https://zoom-lfx.platform.linuxfoundation.org/meeting/98821524848?password=579eadc1-f4aa-45aa-93c6-f7ea69d73b1a)
+  * US/Europe friendly - we start at 10am ET(bound to ET) / 7am PT / 3pm CET / 10pm(11pm) CST - [Convert to your time zone](https://dateful.com/convert/est-edt-eastern-time?t=10)  - [Zoom Link](https://zoom-lfx.platform.linuxfoundation.org/meeting/95078224949?password=5f97cd2a-b140-4ede-add8-26a0816a8606)
+* [Project meeting calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/velero?view=week) ([subscribe via iCal](https://webcal.prod.itx.linuxfoundation.org/lfx/lfpdCDzBbgNRCLpey8))
 * Read and comment on the [meeting notes](https://hackmd.io/fCDVjqGuTG23CoOWQpoEVg)
 * See previous community meetings on our [YouTube Channel](https://www.youtube.com/playlist?list=PL7bmigfV0EqQRysvqvqOtRNk4L5S7uqwM)
 * Have a question to discuss in the community meeting? Please add it to our [Q&A Discussion board](https://github.com/velero-io/velero/discussions/categories/community-support-q-a)

@@ -1,0 +1,1 @@
+Add `velero client config set namespace-mode=auto` to make operational commands resolve their default namespace from the current kubeconfig context on every invocation

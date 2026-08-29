@@ -149,6 +149,9 @@ func TestCreateRestorePodWithPriorityClass(t *testing.T) {
 				nil, // affinity
 				tc.expectedPriorityClass,
 				nil,
+				"", // volumeSnapshotNamespace
+				"", // volumeID
+				nil,
 			)
 
 			require.NoError(t, err, tc.description)
@@ -228,6 +231,9 @@ func TestCreateRestorePodWithMissingConfigMap(t *testing.T) {
 		kube.NodeOSLinux,
 		nil, // affinity
 		"",  // empty priority class since config map is missing
+		nil,
+		"", // volumeSnapshotNamespace
+		"", // volumeID
 		nil,
 	)
 

@@ -163,6 +163,8 @@ func (bp *blockProvider) RunRestore(
 	ctx context.Context,
 	snapshotID string,
 	volumePath string,
+	incremental bool,
+	cbtParam CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
 	updater uploader.ProgressUpdater) (int64, error) {
@@ -178,7 +180,7 @@ func (bp *blockProvider) RunRestore(
 
 	blkUploader := block.NewUploader(ctx, bp.bkRepo, updater, log)
 
-	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, uploaderCfg, log)
+	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, incremental, cbtParam.Source, cbtParam.Service, uploaderCfg, log)
 
 	// errors.Is, not ==: see the equivalent comment on the backup path above.
 	if errors.Is(err, block.ErrCanceled) {

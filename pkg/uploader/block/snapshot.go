@@ -205,18 +205,44 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 }
 
 // Restore restore specific sourcePath with given snapshotID and update progress
-func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
+func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
 	log.Info("Start to restore...")
 
 	snapshot, err := rep.GetSnapshot(ctx, udmrepo.ID(snapshotID))
 	if err != nil {
 		return 0, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
 	}
+	log.Infof("Restore from snapshot %s, incremental %v, cbt source %v, description %s, created time %v, tags %v", snapshotID, incremental, cbtSource, snapshot.Description, snapshot.EndTime, snapshot.Tags)
 
-	log.Infof("Restore from snapshot %s, description %s, created time %v, tags %v", snapshotID, snapshot.Description, snapshot.EndTime, snapshot.Tags)
+	var volumeSnapshot, changeID, volumeID string
+	if incremental {
+		if snapshot.Tags == nil {
+			log.Warnf("No tag from snapshot %s, fallback to full restore", snapshotID)
+			incremental = false
+		} else if snapshot.Tags[uploader.CBTChangeIDTag] == "" {
+			log.Warnf("No ChangeID tag from snapshot %s, fallback to full restore", snapshotID)
+			incremental = false
+		} else if snapshot.Tags[uploader.CBTVolumeIDTag] == "" {
+			log.Warnf("No VolumeID tag from snapshot %s, fallback to full restore", snapshotID)
+			incremental = false
+		} else if snapshot.Tags[uploader.CBTVolumeIDTag] != cbtSource.VolumeID {
+			log.Warnf("VolumeID %s from snapshot %s is not expected as %s, fallback to full restore", snapshot.Tags[uploader.CBTVolumeIDTag], snapshotID, cbtSource.VolumeID)
+			incremental = false
+		} else {
+			volumeSnapshot = cbtSource.Snapshot
+			changeID = snapshot.Tags[uploader.CBTChangeIDTag]
+			volumeID = snapshot.Tags[uploader.CBTVolumeIDTag]
+		}
+	}
 
-	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), "", "", "")
-	bitmap.SetFull()
+	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), volumeSnapshot, changeID, volumeID)
+	if incremental {
+		if err = cbt.SetBitmapOrFull(ctx, cbtService, bitmap); err != nil {
+			log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to full restore", cbtSource)
+		}
+	} else {
+		bitmap.SetFull()
+	}
 
 	destPath, err := filepath.Abs(dest)
 	if err != nil {

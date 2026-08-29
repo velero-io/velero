@@ -212,7 +212,9 @@ Users must manage the lifecycle of their workloads before starting the restore. 
 When performing an in-place restore, Velero deletes the existing target PVC and recreates it. For StorageClasses using the `WaitForFirstConsumer` volume binding mode, this recreation resets the scheduling lifecycle. Even though Velero adds a selector to the PVC spec to ensure it binds exclusively to the original PV, a scheduling issue can still occur. If the target PVC loses its node affinity, the Kubernetes Scheduler might schedule the recreated business Pod to a different availability zone. Because the original PV is physically constrained to its original zone, the Pod will fail to mount the volume and remain stuck in the `ContainerCreating` state with an attachment error.
 
 **Solution**:
-During the PVC Restore Item Action (RIA), Velero must extract the `volume.kubernetes.io/selected-node` annotation from the original PVC. When Velero recreates the target PVC, it must inject this annotation back into the PVC spec. 
+During the PVC CSI Restore Item Action (RIA), right before deleting the existing PVC, Velero extracts the `volume.kubernetes.io/selected-node` annotation from that PVC and carries it on the PVC to be restored via a Velero-internal carrier annotation (`restore.velero.io/inplace-restore-selected-node`). After all Restore Item Actions have run, the restore engine translates the carrier back to the `volume.kubernetes.io/selected-node` annotation and strips the carrier so it never lands on the cluster.
+
+A carrier annotation is used instead of the Kubernetes annotation directly because the generic PVC RIA unconditionally strips the `selected-node` annotation during restore, and the execution order of Restore Item Actions is not a documented contract. With the carrier, the behavior is independent of the RIA execution order: the Kubernetes annotation is stripped by default on every path (including when the target PVC does not exist and Velero falls back to provisioning a new PVC), and preservation only happens when the PVC CSI RIA explicitly captured a value from the existing PVC.
 By preserving the `selected-node` annotation, the Kubernetes Scheduler is forced to schedule the recreated business Pod to the original node/zone, ensuring it successfully mounts the restored PV.
 
 ### Namespace Mapping
@@ -260,10 +262,8 @@ This section outlines the step-by-step control path and data path workflows for 
 
 **Control Path**  
 
-PVC RIA:
-- Preserve the `volume.kubernetes.io/selected-node` annotation to ensure correct scheduling during target PVC recreation.
-
 PVC CSI RIA:
+- Capture the `volume.kubernetes.io/selected-node` annotation from the existing PVC into the Velero-internal carrier annotation before deleting the PVC, so the restore engine can re-apply it to the recreated target PVC (see [Handling Cross-Zone Scheduling](#handling-cross-zone-scheduling-waitforfirstconsumer)).
 - Create a snapshot of the existing `PVC` to serve as the baseline for CBT delta calculations.
 - Patch the existing PV's reclaim policy to `Retain`.
 - Delete the existing PVC.
@@ -308,10 +308,8 @@ The workflow is identical to the **In-place Incremental Restore for CSI Snapshot
 
 **Control Path**  
 
-PVC RIA:
-- Preserve the `volume.kubernetes.io/selected-node` annotation to ensure correct scheduling during target PVC recreation.
-
 PVC CSI RIA:
+- Capture the `volume.kubernetes.io/selected-node` annotation from the existing PVC into the Velero-internal carrier annotation before deleting the PVC, so the restore engine can re-apply it to the recreated target PVC (see [Handling Cross-Zone Scheduling](#handling-cross-zone-scheduling-waitforfirstconsumer)).
 - Create a snapshot of the existing `PVC` to serve as the baseline for CBT delta calculations.
 - Patch the existing `PV` to set its `persistentVolumeReclaimPolicy` to `Retain`.
 - Delete the existing `PVC`.
