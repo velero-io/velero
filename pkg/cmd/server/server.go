@@ -475,11 +475,24 @@ func resolveGracefulShutdownTimeout(
 		return defaultGracefulShutdownTimeout
 	}
 
+	if terminationGracePeriod <= defaultGracefulShutdownTimeout {
+		// Subtracting the safety buffer here would shrink the timeout below today's
+		// hardcoded default for installs that never set terminationGracePeriodSeconds
+		// (Kubernetes itself defaults it to 30s), which would be a behavior change (NFR2).
+		return defaultGracefulShutdownTimeout
+	}
+
 	derived := terminationGracePeriod - cfg.GracefulShutdownSafetyBuffer
 	if derived <= 0 {
 		logger.Warnf("Derived graceful shutdown timeout (%s terminationGracePeriodSeconds - %s safety buffer) is not positive, falling back to the default graceful shutdown timeout of %s", terminationGracePeriod, cfg.GracefulShutdownSafetyBuffer, defaultGracefulShutdownTimeout)
 		return defaultGracefulShutdownTimeout
 	}
+
+	logger.WithFields(logrus.Fields{
+		"gracefulShutdownTimeout": derived,
+		"terminationGracePeriod":  terminationGracePeriod,
+		"safetyBuffer":            cfg.GracefulShutdownSafetyBuffer,
+	}).Info("Resolved graceful shutdown timeout")
 
 	return derived
 }

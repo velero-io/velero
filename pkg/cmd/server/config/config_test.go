@@ -66,6 +66,16 @@ func TestGracefulShutdownTimeoutFlag(t *testing.T) {
 	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
 	config.BindFlags(flags)
 	require.Error(t, flags.Parse([]string{"--graceful-shutdown-timeout", "-5m"}))
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	require.Error(t, flags.Parse([]string{"--graceful-shutdown-timeout", "not-a-duration"}))
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	assert.Equal(t, "duration", flags.Lookup("graceful-shutdown-timeout").Value.Type())
 }
 
 func TestGracefulShutdownSafetyBufferFlag(t *testing.T) {
@@ -76,4 +86,25 @@ func TestGracefulShutdownSafetyBufferFlag(t *testing.T) {
 	config.BindFlags(flags)
 	require.NoError(t, flags.Parse([]string{"--graceful-shutdown-safety-buffer", "30s"}))
 	assert.Equal(t, 30*time.Second, config.GracefulShutdownSafetyBuffer)
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	require.Error(t, flags.Parse([]string{"--graceful-shutdown-safety-buffer", "-5m"}))
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	require.NoError(t, flags.Parse([]string{"--graceful-shutdown-safety-buffer", "0s"}))
+	assert.Zero(t, config.GracefulShutdownSafetyBuffer)
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	require.Error(t, flags.Parse([]string{"--graceful-shutdown-safety-buffer", "not-a-duration"}))
+
+	config = GetDefaultConfig()
+	flags = pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.BindFlags(flags)
+	assert.Equal(t, "duration", flags.Lookup("graceful-shutdown-safety-buffer").Value.Type())
 }

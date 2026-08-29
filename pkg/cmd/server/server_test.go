@@ -329,11 +329,24 @@ func TestResolveGracefulShutdownTimeout(t *testing.T) {
 		},
 		{
 			name:    "underflowed derived value falls back to default",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 90 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+				// terminationGracePeriod (60s) is above the kubernetes default (30s), so the
+				// NFR2 short-circuit doesn't apply, but the 90s safety buffer still underflows
+				// the derived value, exercising the derived<=0 fallback branch.
+				Spec: corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(60))},
+			},
+			expected: defaultGracefulShutdownTimeout,
+		},
+		{
+			name:    "terminationGracePeriodSeconds at the kubernetes default does not shrink below it (NFR2)",
 			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
 			podName: "velero-abc123",
 			pod: &corev1api.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
-				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(5))},
+				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(30))},
 			},
 			expected: defaultGracefulShutdownTimeout,
 		},

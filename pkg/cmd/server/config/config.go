@@ -240,6 +240,33 @@ func (f *gracefulShutdownTimeoutValue) Type() string {
 	return "duration"
 }
 
+// gracefulShutdownSafetyBufferValue is a pflag.Value for --graceful-shutdown-safety-buffer. Its
+// Set() rejects a negative explicit value, which would otherwise inflate the derived graceful
+// shutdown timeout beyond the pod's own terminationGracePeriodSeconds.
+type gracefulShutdownSafetyBufferValue struct {
+	duration *time.Duration
+}
+
+func (f *gracefulShutdownSafetyBufferValue) String() string {
+	return f.duration.String()
+}
+
+func (f *gracefulShutdownSafetyBufferValue) Set(val string) error {
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return err
+	}
+	if d < 0 {
+		return errors.New("--graceful-shutdown-safety-buffer must not be negative")
+	}
+	*f.duration = d
+	return nil
+}
+
+func (f *gracefulShutdownSafetyBufferValue) Type() string {
+	return "duration"
+}
+
 func GetDefaultConfig() *Config {
 	config := &Config{
 		PluginDir:                      "/plugins",
@@ -356,10 +383,9 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"graceful-shutdown-timeout",
 		"How long the server waits for in-flight controller work to finish before force-exiting on shutdown. If unset (default), derived automatically from the pod's terminationGracePeriodSeconds minus --graceful-shutdown-safety-buffer.",
 	)
-	flags.DurationVar(
-		&c.GracefulShutdownSafetyBuffer,
+	flags.Var(
+		&gracefulShutdownSafetyBufferValue{duration: &c.GracefulShutdownSafetyBuffer},
 		"graceful-shutdown-safety-buffer",
-		c.GracefulShutdownSafetyBuffer,
 		"Buffer subtracted from the pod's terminationGracePeriodSeconds when auto-deriving --graceful-shutdown-timeout. Default is 10 seconds.",
 	)
 }
