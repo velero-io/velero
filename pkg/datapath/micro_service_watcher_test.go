@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	kubeclientfake "k8s.io/client-go/kubernetes/fake"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -507,6 +508,42 @@ func TestGetResultFromMessage(t *testing.T) {
 						ByPath:  "fake-path-1",
 						VolMode: uploader.PersistentVolumeBlock,
 					},
+				},
+			},
+		},
+		{
+			// An old data mover (release-1.17 and earlier) predates IncrementalBytes and
+			// never writes the key at all -- this pins that its absence unmarshals to nil
+			// ("not measured"), not a zero value.
+			name:     "old mover message omits incrementalBytes -> nil",
+			taskType: TaskTypeBackup,
+			message:  "{\"snapshotID\":\"fake-snapshot-id\",\"emptySnapshot\":false,\"source\":{\"byPath\":\"fake-path-1\",\"volumeMode\":\"Block\"}}",
+			expectResult: Result{
+				Backup: BackupResult{
+					SnapshotID: "fake-snapshot-id",
+					Source: AccessPoint{
+						ByPath:  "fake-path-1",
+						VolMode: uploader.PersistentVolumeBlock,
+					},
+					IncrementalBytes: nil,
+				},
+			},
+		},
+		{
+			// A current mover reports a genuine zero explicitly -- this pins that the key
+			// being present with value 0 unmarshals to a non-nil pointer to 0 ("measured
+			// zero"), distinguishing it from the omitted-key case above.
+			name:     "current mover reports measured zero incrementalBytes -> non-nil zero",
+			taskType: TaskTypeBackup,
+			message:  "{\"snapshotID\":\"fake-snapshot-id\",\"emptySnapshot\":false,\"source\":{\"byPath\":\"fake-path-1\",\"volumeMode\":\"Block\"},\"incrementalBytes\":0}",
+			expectResult: Result{
+				Backup: BackupResult{
+					SnapshotID: "fake-snapshot-id",
+					Source: AccessPoint{
+						ByPath:  "fake-path-1",
+						VolMode: uploader.PersistentVolumeBlock,
+					},
+					IncrementalBytes: ptr.To(int64(0)),
 				},
 			},
 		},

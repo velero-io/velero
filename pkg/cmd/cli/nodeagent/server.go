@@ -27,6 +27,7 @@ import (
 
 	"github.com/bombsimon/logrusr/v3"
 	"github.com/cockroachdb/errors"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	snapshotv1client "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -172,6 +173,10 @@ func newNodeAgentServer(logger logrus.FieldLogger, factory client.Factory, confi
 		return nil, err
 	}
 	if err := storagev1api.AddToScheme(scheme); err != nil {
+		cancelFunc()
+		return nil, err
+	}
+	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
@@ -484,6 +489,7 @@ func (s *nodeAgentServer) run() {
 		s.repoConfigMgr,
 		podLabels,
 		podAnnotations,
+		csiSnapshotMetadataServiceConfigs,
 	)
 
 	if err := dataDownloadReconciler.SetupWithManager(s.mgr); err != nil {

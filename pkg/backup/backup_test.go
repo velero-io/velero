@@ -43,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -5681,7 +5682,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
 						Size:             1000,
-						IncrementalSize:  500,
+						IncrementalSize:  ptr.To(int64(500)),
 						Phase:            velerov2alpha1.DataUploadPhaseFailed,
 					},
 				},
@@ -5721,7 +5722,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
 						Size:             1000,
-						IncrementalSize:  500,
+						IncrementalSize:  ptr.To(int64(500)),
 						Phase:            velerov2alpha1.DataUploadPhaseCompleted,
 					},
 				},

@@ -110,6 +110,10 @@ spec:
                     description: VolumeSnapshot is the name of the volume snapshot
                       to be backed up
                     type: string
+                  volumeSnapshotNamespace:
+                    description: VolumeSnapshotNamespace is the namespece of the volume
+                      snapshot to be backed up
+                    type: string
                 required:
                 - storageClass
                 - volumeSnapshot
@@ -192,8 +196,12 @@ spec:
                 nullable: true
                 type: object
               incrementalBytes:
-                description: IncrementalBytes holds the number of bytes new or changed
-                  since the last backup
+                description: |-
+                  IncrementalBytes holds the number of bytes new or changed since the last backup.
+                  A nil value means the uploader did not report a figure; a pointer to 0 means it
+                  reported zero, i.e. nothing changed and nothing was transferred. The two are
+                  distinct: erasing a measured zero makes a perfect incremental indistinguishable
+                  from a full transfer in every downstream report.
                 format: int64
                 type: integer
               message:

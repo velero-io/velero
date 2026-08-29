@@ -467,9 +467,13 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 
 		dataMovement["uploaderType"] = info.SnapshotDataMovementInfo.UploaderType
 		dataMovement["result"] = string(info.Result)
-		if info.SnapshotDataMovementInfo.Size > 0 || info.SnapshotDataMovementInfo.IncrementalSize > 0 {
+		if info.SnapshotDataMovementInfo.Size > 0 {
 			dataMovement["size"] = info.SnapshotDataMovementInfo.Size
-			dataMovement["incrementalSize"] = info.SnapshotDataMovementInfo.IncrementalSize
+		}
+		// Emit whenever measured, including zero - a zero-delta incremental transferred
+		// nothing, and that has to be reportable rather than absent.
+		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
+			dataMovement["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
 		}
 
 		snapshotDetail["dataMovement"] = dataMovement

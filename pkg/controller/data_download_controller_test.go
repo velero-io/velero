@@ -64,7 +64,6 @@ func dataDownloadBuilder() *builder.DataDownloadBuilder {
 		BackupStorageLocation("bsl-loc").
 		DataMover("velero").
 		SnapshotID("test-snapshot-id").TargetVolume(velerov2alpha1api.TargetVolumeSpec{
-		PV:        "test-pv",
 		PVC:       "test-pvc",
 		Namespace: "test-ns",
 	})
@@ -151,6 +150,7 @@ func initDataDownloadReconcilerWithError(t *testing.T, objects []any, needError 
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // snapshotMetadataServiceConfigs
 	), nil
 }
 
@@ -186,6 +186,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 		dd                       *velerov2alpha1api.DataDownload
 		notCreateDD              bool
 		targetPVC                *corev1api.PersistentVolumeClaim
+		targetPV                 *corev1api.PersistentVolume
 		dataMgr                  *datapath.Manager
 		needErrs                 []bool
 		needCreateFSBR           bool
@@ -197,6 +198,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 		isPeekExposeErr          bool
 		isNilExposer             bool
 		notNilExpose             bool
+		mockExpose               bool
 		notMockCleanUp           bool
 		mockInit                 bool
 		mockInitErr              error
@@ -355,6 +357,16 @@ func TestDataDownloadReconcile(t *testing.T) {
 			expected:  dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Result(),
 		},
 		{
+			name:           "dd succeeds for accepted with target PV set",
+			dd:             dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).TargetVolume(velerov2alpha1api.TargetVolumeSpec{PVC: "test-pvc", Namespace: "test-ns", PV: "test-pv"}).Result(),
+			targetPVC:      builder.ForPersistentVolumeClaim("test-ns", "test-pvc").StorageClass("sc").Result(),
+			targetPV:       builder.ForPersistentVolume("test-pv").Result(),
+			expected:       dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).TargetVolume(velerov2alpha1api.TargetVolumeSpec{PVC: "test-pvc", Namespace: "test-ns", PV: "test-pv"}).Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Result(),
+			mockExpose:     true,
+			notMockCleanUp: true,
+			notNilExpose:   true,
+		},
+		{
 			name:     "prepare timeout on accepted",
 			dd:       dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Finalizers([]string{DataUploadDownloadFinalizer}).AcceptedTimestamp(&metav1.Time{Time: time.Now().Add(-time.Minute * 30)}).Result(),
 			expected: dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseFailed).Finalizers([]string{DataUploadDownloadFinalizer}).Phase(velerov2alpha1api.DataDownloadPhaseFailed).Message("timeout on preparing data download").Result(),
@@ -490,6 +502,10 @@ func TestDataDownloadReconcile(t *testing.T) {
 				objects = append(objects, test.targetPVC)
 			}
 
+			if test.targetPV != nil {
+				objects = append(objects, test.targetPV)
+			}
+
 			r, err := initDataDownloadReconciler(t, objects, test.needErrs...)
 			require.NoError(t, err)
 
@@ -546,7 +562,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 				return asyncBR
 			}
 
-			if test.isExposeErr || test.isGetExposeErr || test.isGetExposeNil || test.isPeekExposeErr || test.isNilExposer || test.notNilExpose {
+			if test.isExposeErr || test.isGetExposeErr || test.isGetExposeNil || test.isPeekExposeErr || test.isNilExposer || test.notNilExpose || test.mockExpose {
 				if test.isNilExposer {
 					r.restoreExposer = nil
 				} else {
@@ -554,6 +570,8 @@ func TestDataDownloadReconcile(t *testing.T) {
 						ep := exposermockes.NewGenericRestoreExposer(t)
 						if test.isExposeErr {
 							ep.On("Expose", mock.Anything, mock.Anything, mock.Anything).Return(errors.New("Error to expose restore exposer"))
+						} else if test.mockExpose {
+							ep.On("Expose", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 						} else if test.notNilExpose {
 							hostingPod := builder.ForPod("test-ns", "test-name").Volumes(&corev1api.Volume{Name: "test-pvc"}).Result()
 							hostingPod.ObjectMeta.SetUID("test-uid")
@@ -568,7 +586,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 						}
 
 						if !test.notMockCleanUp {
-							ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+							ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 						}
 						return ep
 					}()
@@ -727,7 +745,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 				} else {
 					ep.On("RebindVolume", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				}
-				ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+				ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 				return ep
 			}()
 
@@ -1105,7 +1123,8 @@ func (dt *ddResumeTestHelper) RebindVolume(context.Context, corev1api.ObjectRefe
 	return nil
 }
 
-func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference) {}
+func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference, *exposer.GenericRestoreCleanUpParam) {
+}
 
 func (dt *ddResumeTestHelper) newMicroServiceBRWatcher(kbclient.Client, kubernetes.Interface, manager.Manager, string, string, string, string, string, string,
 	datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
@@ -1328,6 +1347,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 	baseDataDownload := dataDownloadBuilder().Result()
 	baseDataDownload.Namespace = velerov1api.DefaultNamespace
+	baseDataDownload.Spec.TargetVolume.PV = "pv-1"
 	baseDataDownload.Spec.OperationTimeout = metav1.Duration{Duration: time.Minute * 10}
 	baseDataDownload.Spec.SnapshotSize = 5368709120 // 5Gi
 
@@ -1427,6 +1447,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
@@ -1437,6 +1458,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 			// Core fields
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PVC, got.TargetPVCName)
+			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PV, got.TargetPVName)
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.Namespace, got.TargetNamespace)
 			assert.Equal(t, baseDataDownload.Spec.DataMover, got.DataMover)
 

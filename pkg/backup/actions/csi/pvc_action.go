@@ -351,7 +351,7 @@ func (p *pvcBackupItemAction) Execute(
 	// created but never processed (the DataUpload controller runs inside node-agent),
 	// causing the backup to hang until itemOperationTimeout expires.
 	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) && datamover.IsBuiltInDataMover(backup.Spec.DataMover) {
-		if err := nodeagent.IsReady(ctx, backup.Namespace, p.crClient, p.log); err != nil {
+		if err := nodeagent.IsReady(ctx, backup.Namespace, p.crClient); err != nil {
 			p.log.WithError(err).Error("cannot perform snapshot data movement without running node-agent pods")
 			return nil, nil, "", nil, errors.Wrap(err, "CSI PVC BIA cannot proceed: node-agent is not ready for snapshot data movement")
 		}
@@ -1234,7 +1234,7 @@ func setPVCRequestSizeToVSRestoreSize(
 	logger logrus.FieldLogger,
 ) {
 	if vsc.Status.RestoreSize != nil {
-		logger.Debugf("Patching PVC request size to fit the volumesnapshot restore size %d", vsc.Status.RestoreSize)
+		logger.Debugf("Patching PVC request size to fit the volumesnapshot restore size %d", *vsc.Status.RestoreSize)
 		restoreSize := *resource.NewQuantity(*vsc.Status.RestoreSize, resource.BinarySI)
 
 		// It is possible that the volume provider allocated a larger

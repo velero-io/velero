@@ -60,6 +60,19 @@ branches.
   space-delimited: `/backport release-1.17 release-1.18`.  The label causes the
   backport to run automatically when the PR merges.
 - **After merge:** the same comment immediately creates the backport PR.
+- **Shorthand:** a bare version like `/backport 1.17` is automatically expanded
+  to `release-1.17`; this works generically for any `X.Y` version.
+- **Changelog filename:** the cherry-picked commit(s) carry over the source
+  PR's `changelogs/unreleased/<source_pr>-<user>` file. The workflow
+  automatically renames it to `<backport_pr>-<user>` on the backport branch so
+  `hack/changelog-check.sh` passes and release notes cite the correct PR.
+- **Changelog-not-required:** if the source PR is labeled
+  `kind/changelog-not-required`, that label is copied to the backport PR so
+  it isn't flagged as missing a changelog.
+- **DCO signoff:** every commit on a backport branch is re-signed with the
+  bot's `Signed-off-by` trailer (`git rebase --signoff`), including
+  cherry-picked commits from the original author, so the DCO check always
+  passes on backport PRs.
 - Only repository **owners, members, and collaborators** may trigger these commands.
 
 ## General coding guidelines

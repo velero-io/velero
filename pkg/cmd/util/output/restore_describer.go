@@ -417,7 +417,7 @@ func describePodVolumeRestores(d *Describer, restores []velerov1api.PodVolumeRes
 		restoresByPod := new(volumesByPod)
 
 		for _, restore := range restoresByPhase[phase] {
-			restoresByPod.Add(restore.Spec.Pod.Namespace, restore.Spec.Pod.Name, restore.Spec.Volume, phase, restore.Status.Progress, 0)
+			restoresByPod.Add(restore.Spec.Pod.Namespace, restore.Spec.Pod.Name, restore.Spec.Volume, phase, restore.Status.Progress, nil)
 		}
 
 		d.Printf("\t%s:\n", phase)

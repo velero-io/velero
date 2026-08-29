@@ -16,6 +16,26 @@ name: Backport merged pull request
 # In both cases multiple target branches can be space-delimited in a comment:
 #   /backport release-1.17 release-1.18
 #
+# As a shorthand, a bare release version (e.g. `1.17`) is automatically
+# expanded to the corresponding `release-1.17` branch, so `/backport 1.17`
+# and `/backport release-1.17` are equivalent. This works generically for
+# any `X.Y` version, e.g. `/backport 1.18 1.19`.
+#
+# The cherry-picked commit(s) carry over the original PR's changelog file
+# (changelogs/unreleased/<source_pr>-<user>), which no longer matches the
+# backport PR's own number. After the backport PR is created, its changelog
+# file is automatically renamed to <backport_pr>-<user> so that
+# hack/changelog-check.sh passes and release notes cite the correct PR.
+#
+# If the source PR is labeled `kind/changelog-not-required` (i.e. it has no
+# changelog file), that label is copied to the backport PR so it isn't
+# flagged as missing a changelog either.
+#
+# Every commit on a backport branch (the cherry-picked commit(s), even from
+# the original author, plus the changelog rename commit) is re-signed with
+# the bot's Signed-off-by trailer via `git rebase --signoff`, so the DCO
+# check always passes regardless of whether the original commit had one.
+#
 # See: https://github.com/velero-io/velero/issues/9603
 
 on:
@@ -89,6 +109,10 @@ jobs:
           fi
 
           for branch in $branches; do
+            # Shorthand: a bare version like "1.17" expands to "release-1.17".
+            if [[ "$branch" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              branch="release-${branch}"
+            fi
             label="backport ${branch}"
             echo "Applying label: '${label}'"
             # Create the label if it does not exist yet (idempotent).
@@ -141,18 +165,31 @@ jobs:
           # (may be empty, falls back to labels).
           line=$(printf '%s' "$COMMENT_BODY" | head -n1 | tr -d '\r')
           branches=$(printf '%s' "$line" | sed -E 's#^/(backport|cherrypick)[[:space:]]*##')
-          echo "branches=${branches}" >> "$GITHUB_OUTPUT"
+
+          normalized=""
+          for branch in $branches; do
+            # Shorthand: a bare version like "1.17" expands to "release-1.17".
+            if [[ "$branch" =~ ^[0-9]+\.[0-9]+$ ]]; then
+              branch="release-${branch}"
+            fi
+            normalized="${normalized}${normalized:+ }${branch}"
+          done
+          echo "branches=${normalized}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Create backport pull requests
+        id: backport
         # Pin to commit SHA: workflow has contents/pull-requests write.
         uses: korthout/backport-action@2e830a1d0b8269505846ddd407a70876913ad1f8 # v4.6.0
         with:
           # Labels like `backport release-1.17` select the target branch.
           label_pattern: '^backport ([^ ]+)$'
+          # Carry over `kind/changelog-not-required` from the source PR so
+          # backport PRs of changelog-exempt changes aren't flagged as missing one.
+          copy_labels_pattern: '^kind/changelog-not-required$'
           # Prefer draft PRs with conflict markers over failing the job silently.
           experimental: |
             {
@@ -161,3 +198,63 @@ jobs:
           # Empty when triggered by merge labels; set when `/backport` or `/cherrypick` includes branches.
           target_branches: ${{ steps.parse.outputs.branches }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename changelog file(s) and ensure DCO signoff
+        # The cherry-picked commit(s) still carry the source PR's changelog
+        # filename (e.g. changelogs/unreleased/9795-kaovilai), which no
+        # longer matches the new backport PR's number. Rename it on each
+        # created backport branch so hack/changelog-check.sh passes and the
+        # release notes cite the correct PR.
+        #
+        # Also ensure every commit on the backport branch passes the DCO
+        # check by re-signing it with the bot's Signed-off-by trailer via
+        # `git rebase --signoff`. This covers the cherry-picked commits
+        # (even when the original author's commit had no trailer) as well
+        # as the changelog rename commit added above; it preserves any
+        # existing Signed-off-by trailers rather than replacing them.
+        if: steps.backport.outputs.created_pull_numbers != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SOURCE_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          CREATED_PR_NUMBERS: ${{ steps.backport.outputs.created_pull_numbers }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          shopt -s nullglob
+          for new_pr in $CREATED_PR_NUMBERS; do
+            if [ "$new_pr" = "$SOURCE_PR_NUMBER" ]; then
+              continue
+            fi
+
+            branch=$(gh pr view "$new_pr" --repo "$REPO" --json headRefName -q .headRefName)
+            base_branch=$(gh pr view "$new_pr" --repo "$REPO" --json baseRefName -q .baseRefName)
+            git fetch origin "$branch" "$base_branch"
+            git checkout -B "$branch" "origin/${branch}"
+
+            files=(changelogs/unreleased/"${SOURCE_PR_NUMBER}"-*)
+            if [ ${#files[@]} -gt 0 ]; then
+              for old_file in "${files[@]}"; do
+                suffix=$(basename "$old_file" | sed -E "s/^${SOURCE_PR_NUMBER}-//")
+                new_file="changelogs/unreleased/${new_pr}-${suffix}"
+                if [ "$old_file" != "$new_file" ]; then
+                  git mv "$old_file" "$new_file"
+                fi
+              done
+              if ! git diff --cached --quiet; then
+                git commit -m "Rename changelog to match backport PR #${new_pr}"
+              fi
+            else
+              echo "No changelog file for PR ${SOURCE_PR_NUMBER} found on ${branch}; skipping rename."
+            fi
+
+            # Add the bot's Signed-off-by trailer to every commit ahead of
+            # the target branch (cherry-picked commits + the rename commit).
+            if ! git rebase --signoff "origin/${base_branch}"; then
+              echo "::error::git rebase --signoff failed for PR #${new_pr} on branch ${branch}; aborting rebase, branch left unchanged." >&2
+              git rebase --abort
+              exit 1
+            fi
+            git push --force-with-lease origin "HEAD:${branch}"
+          done
