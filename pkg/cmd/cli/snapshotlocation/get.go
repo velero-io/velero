@@ -1,5 +1,5 @@
 /*
-Copyright 2018 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,7 +50,10 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 					locations.Items = append(locations.Items, *location)
 				}
 			} else {
-				err = client.List(context.TODO(), locations, &kbclient.ListOptions{Namespace: f.Namespace()})
+				err = client.List(context.TODO(), locations, &kbclient.ListOptions{
+					Namespace: f.Namespace(),
+					Raw:       &listOptions,
+				})
 				cmd.CheckError(err)
 			}
 			_, err = output.PrintWithFormat(c, locations)
