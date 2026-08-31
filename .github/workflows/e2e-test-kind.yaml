@@ -153,7 +153,7 @@ jobs:
           echo "matrix={\
             \"k8s\":${k8s_json},\
             \"labels\":[\
-              \"Basic && (ClusterResource || NodePort || StorageClass)\", \
+              \"Basic && (ClusterResource || NodePort || StorageClass || Hooks)\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\

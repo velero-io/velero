@@ -767,13 +767,10 @@ func (ctx *restoreContext) execute() (results.Result, results.Result) {
 		return warnings, errs
 	}
 
-	// TODO: Remove outer feature flag check to make this feature a default in Velero.
-	if features.IsEnabled(velerov1api.APIGroupVersionsFeatureFlag) {
-		if ctx.backup.Status.FormatVersion >= "1.1.0" {
-			if err := ctx.chooseAPIVersionsToRestore(); err != nil {
-				errs.AddVeleroError(errors.Wrap(err, "choosing API version to restore"))
-				return warnings, errs
-			}
+	if ctx.backup.Status.FormatVersion >= "1.1.0" {
+		if err := ctx.chooseAPIVersionsToRestore(); err != nil {
+			errs.AddVeleroError(errors.Wrap(err, "choosing API version to restore"))
+			return warnings, errs
 		}
 	}
 
@@ -2707,15 +2704,14 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 	}
 
 	resourceForPath := resource
-	// If the APIGroupVersionsFeatureFlag is enabled, the item path will be
+	// The item path will be
 	// updated to include the API group version that was chosen for restore. For
 	// example, for "horizontalpodautoscalers.autoscaling", if v2beta1 is chosen
 	// to be restored, then "horizontalpodautoscalers.autoscaling/v2beta1" will
 	// be part of item path. Different versions would only have been stored
 	// if the APIGroupVersionsFeatureFlag was enabled during backup. The
 	// chosenGrpVersToRestore map would only be populated if
-	// APIGroupVersionsFeatureFlag was enabled for restore and the minimum
-	// required backup format version has been met.
+	// the minimum required backup format version has been met.
 	cgv, ok := ctx.chosenGrpVersToRestore[resource]
 	if ok {
 		resourceForPath = filepath.Join(resource, cgv.Dir)
