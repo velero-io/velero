@@ -24,7 +24,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/vmware-tanzu/velero/pkg/builder"
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
@@ -59,4 +62,43 @@ func TestNewGetCommand(t *testing.T) {
 		return
 	}
 	t.Fatalf("process ran with err %v, want snapshot location get to fail for non-existent VSL", err)
+}
+
+func TestNewGetCommand_SelectorFiltersVSLs(t *testing.T) {
+	f := &factorymocks.Factory{}
+	client := velerotest.NewFakeControllerRuntimeClient(t)
+
+	vslLabeled := builder.ForVolumeSnapshotLocation(cmdtest.VeleroNameSpace, "vsl-labeled").
+		ObjectMeta(builder.WithLabels("env", "test")).
+		Result()
+	err := client.Create(t.Context(), vslLabeled, &kbclient.CreateOptions{})
+	require.NoError(t, err)
+
+	vslUnlabeled := builder.ForVolumeSnapshotLocation(cmdtest.VeleroNameSpace, "vsl-unlabeled").
+		Result()
+	err = client.Create(t.Context(), vslUnlabeled, &kbclient.CreateOptions{})
+	require.NoError(t, err)
+
+	f.On("KubebuilderClient").Return(client, nil)
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+
+	// get command with selector
+	c := NewGetCommand(f, "velero snapshot-location get")
+	c.SetArgs([]string{"--selector", "env=test"})
+	err = c.Execute()
+	require.NoError(t, err)
+
+	if os.Getenv(cmdtest.CaptureFlag) == "1" {
+		return
+	}
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], []string{"-test.run=TestNewGetCommand_SelectorFiltersVSLs"}...)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=1", cmdtest.CaptureFlag))
+	stdout, _, err := veleroexec.RunCommand(cmd)
+	require.NoError(t, err)
+
+	// assert that the labeled VSL is returned
+	assert.Contains(t, stdout, "vsl-labeled")
+	// assert that the unlabeled VSL is not returned
+	assert.NotContains(t, stdout, "vsl-unlabeled")
 }

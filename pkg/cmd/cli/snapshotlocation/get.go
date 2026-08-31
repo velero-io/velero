@@ -1,5 +1,5 @@
 /*
-Copyright the Velero contributors.
+Copyright 2018 the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -50,9 +51,11 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 					locations.Items = append(locations.Items, *location)
 				}
 			} else {
+				parsedSelector, err := labels.Parse(listOptions.LabelSelector)
+				cmd.CheckError(err)
 				err = client.List(context.TODO(), locations, &kbclient.ListOptions{
-					Namespace: f.Namespace(),
-					Raw:       &listOptions,
+					LabelSelector: parsedSelector,
+					Namespace:     f.Namespace(),
 				})
 				cmd.CheckError(err)
 			}
