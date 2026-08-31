@@ -1,0 +1,1 @@
+Re-process InProgress DeleteBackupRequests instead of skipping them when the final status patch fails
