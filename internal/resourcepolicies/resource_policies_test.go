@@ -84,6 +84,42 @@ func TestLoadResourcePolicies(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "error format of volumeName",
+			yamlData: `version: v1
+	volumePolicies:
+	- conditions:
+		capacity: "0,100Gi"
+		volumeName: pv-1
+	  action:
+		type: skip`,
+			wantErr: true,
+		},
+		{
+			name: "error format of volumeName (list with non-string)",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      volumeName:
+        - 123
+    action:
+      type: skip
+`,
+			wantErr: true,
+		},
+		{
+			name: "supported format volumeName",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      volumeName:
+        - pv-1
+        - data
+    action:
+      type: skip
+`,
+			wantErr: false,
+		},
+		{
 			name: "error format of csi",
 			yamlData: `version: v1
 	volumePolicies:
@@ -1781,6 +1817,58 @@ volumePolicies:
 				},
 			},
 			skip: true,
+		},
+		{
+			name: "volume name matching - PV name should snapshot",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+    volumeName:
+      - pv-1
+  action:
+    type: snapshot`,
+			vol: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pv-1",
+				},
+			},
+			podVol: nil,
+			pvc:    nil,
+			skip:   false,
+		},
+		{
+			name: "volume name matching - pod volume name should snapshot",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+    volumeName:
+      - data
+  action:
+    type: snapshot`,
+			vol: nil,
+			podVol: &corev1api.Volume{
+				Name: "data",
+			},
+			pvc:  nil,
+			skip: false,
+		},
+		{
+			name: "volume name matching - unmatched name should not snapshot",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+    volumeName:
+      - pv-1
+  action:
+    type: snapshot`,
+			vol: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pv-2",
+				},
+			},
+			podVol: nil,
+			pvc:    nil,
+			skip:   false,
 		},
 	}
 	for _, tc := range testCases {

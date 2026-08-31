@@ -299,6 +299,11 @@ func unmarshalResourcePolicies(yamlData *string) (*ResourcePolicies, error) {
 				return nil, err
 			}
 		}
+		if raw, ok := vp.Conditions["volumeName"]; ok {
+			if err := validateStringSliceCondition("volumeName", raw); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return resPolicies, nil
 }
@@ -332,6 +337,9 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 		volP.action = vp.Action
 		volP.conditions = append(volP.conditions, &capacityCondition{capacity: *volCap})
 		volP.conditions = append(volP.conditions, &storageClassCondition{storageClass: con.StorageClass})
+		if len(con.VolumeName) > 0 {
+			volP.conditions = append(volP.conditions, &volumeNameCondition{volumeNames: con.VolumeName})
+		}
 		volP.conditions = append(volP.conditions, &nfsCondition{nfs: con.NFS})
 		volP.conditions = append(volP.conditions, &csiCondition{csi: con.CSI})
 		volP.conditions = append(volP.conditions, &volumeTypeCondition{volumeTypes: con.VolumeTypes})
