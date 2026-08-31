@@ -71,7 +71,7 @@ const (
 	DefaultItemBlockWorkerCount = 1
 	DefaultConcurrentBackups    = 1
 
-	defaultGracefulShutdownSafetyBuffer = 10 * time.Second
+	defaultGracefulShutdownSafetyBuffer = 2 * time.Second
 )
 
 var (
@@ -381,11 +381,11 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 	flags.Var(
 		&gracefulShutdownTimeoutValue{duration: &c.GracefulShutdownTimeout},
 		"graceful-shutdown-timeout",
-		"How long the server waits for in-flight controller work to finish before force-exiting on shutdown. If unset (default), derived automatically from the pod's terminationGracePeriodSeconds minus --graceful-shutdown-safety-buffer.",
+		"How long the server waits for in-flight controller work to finish before force-exiting on shutdown. If unset (default), derived automatically from the pod's terminationGracePeriodSeconds minus --graceful-shutdown-safety-buffer. Not validated against terminationGracePeriodSeconds: a value equal to or greater than it will be cut short by Kubernetes force-killing the pod first.",
 	)
 	flags.Var(
 		&gracefulShutdownSafetyBufferValue{duration: &c.GracefulShutdownSafetyBuffer},
 		"graceful-shutdown-safety-buffer",
-		"Buffer subtracted from the pod's terminationGracePeriodSeconds when auto-deriving --graceful-shutdown-timeout. Default is 10 seconds.",
+		"Buffer subtracted from the pod's terminationGracePeriodSeconds when auto-deriving --graceful-shutdown-timeout. Default is 2 seconds. If the pod defines a preStop hook, size this to also cover the hook's maximum duration, since the hook and the manager's shutdown share the same terminationGracePeriodSeconds budget.",
 	)
 }

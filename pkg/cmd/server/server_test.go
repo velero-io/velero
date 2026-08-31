@@ -328,27 +328,52 @@ func TestResolveGracefulShutdownTimeout(t *testing.T) {
 			expected: defaultGracefulShutdownTimeout,
 		},
 		{
-			name:    "underflowed derived value falls back to default",
+			name:    "underflowed derived value falls back to terminationGracePeriodSeconds itself, preserving an operator-raised grace period",
 			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 90 * time.Second},
 			podName: "velero-abc123",
 			pod: &corev1api.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
-				// terminationGracePeriod (60s) is above the kubernetes default (30s), so the
-				// NFR2 short-circuit doesn't apply, but the 90s safety buffer still underflows
-				// the derived value, exercising the derived<=0 fallback branch.
+				// The 90s safety buffer underflows this 60s grace period. Falling back to
+				// the 30s default here would discard the 60s the operator explicitly
+				// configured to give backups/restores more time to finish.
 				Spec: corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(60))},
 			},
-			expected: defaultGracefulShutdownTimeout,
+			expected: 60 * time.Second,
 		},
 		{
-			name:    "terminationGracePeriodSeconds at the kubernetes default does not shrink below it (NFR2)",
-			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			name:    "terminationGracePeriodSeconds at the kubernetes default still has the buffer subtracted",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 2 * time.Second},
 			podName: "velero-abc123",
 			pod: &corev1api.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
 				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(30))},
 			},
-			expected: defaultGracefulShutdownTimeout,
+			// The formula is uniform: no special-casing for terminationGracePeriodSeconds
+			// matching Kubernetes' own default, so the resolved timeout stays strictly
+			// below it.
+			expected: 28 * time.Second,
+		},
+		{
+			name:    "terminationGracePeriodSeconds below the kubernetes default derives normally",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+				Spec:       corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(20))},
+			},
+			expected: 10 * time.Second,
+		},
+		{
+			name:    "terminationGracePeriodSeconds shorter than the safety buffer falls back to itself, not the default",
+			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
+			podName: "velero-abc123",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "velero-abc123", Namespace: namespace},
+				// The 10s safety buffer underflows this 5s grace period; falling back to
+				// the 30s default here would exceed the pod's own grace period.
+				Spec: corev1api.PodSpec{TerminationGracePeriodSeconds: ptr.To(int64(5))},
+			},
+			expected: 5 * time.Second,
 		},
 	}
 

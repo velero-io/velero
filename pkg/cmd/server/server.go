@@ -475,17 +475,15 @@ func resolveGracefulShutdownTimeout(
 		return defaultGracefulShutdownTimeout
 	}
 
-	if terminationGracePeriod <= defaultGracefulShutdownTimeout {
-		// Subtracting the safety buffer here would shrink the timeout below today's
-		// hardcoded default for installs that never set terminationGracePeriodSeconds
-		// (Kubernetes itself defaults it to 30s), which would be a behavior change (NFR2).
-		return defaultGracefulShutdownTimeout
-	}
-
 	derived := terminationGracePeriod - cfg.GracefulShutdownSafetyBuffer
 	if derived <= 0 {
-		logger.Warnf("Derived graceful shutdown timeout (%s terminationGracePeriodSeconds - %s safety buffer) is not positive, falling back to the default graceful shutdown timeout of %s", terminationGracePeriod, cfg.GracefulShutdownSafetyBuffer, defaultGracefulShutdownTimeout)
-		return defaultGracefulShutdownTimeout
+		// The configured safety buffer doesn't fit within terminationGracePeriodSeconds.
+		// Fall back to the pod's own grace period as-is (zero margin) rather than a flat
+		// default: that preserves as much of the operator's configured
+		// terminationGracePeriodSeconds as possible, and it still never exceeds what
+		// Kubernetes will actually allow before force-killing the pod.
+		logger.Warnf("Derived graceful shutdown timeout (%s terminationGracePeriodSeconds - %s safety buffer) is not positive, falling back to terminationGracePeriodSeconds (%s) with no safety margin", terminationGracePeriod, cfg.GracefulShutdownSafetyBuffer, terminationGracePeriod)
+		return terminationGracePeriod
 	}
 
 	logger.WithFields(logrus.Fields{

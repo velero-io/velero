@@ -80,7 +80,7 @@ func TestGracefulShutdownTimeoutFlag(t *testing.T) {
 
 func TestGracefulShutdownSafetyBufferFlag(t *testing.T) {
 	config := GetDefaultConfig()
-	assert.Equal(t, 10*time.Second, config.GracefulShutdownSafetyBuffer)
+	assert.Equal(t, 2*time.Second, config.GracefulShutdownSafetyBuffer)
 
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	config.BindFlags(flags)
