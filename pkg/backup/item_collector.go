@@ -501,6 +501,49 @@ func (r *itemCollector) getResourceItems(
 		for i := range unstructuredItems {
 			item := &unstructuredItems[i]
 
+			// Apply namespace inclusion/exclusion and fine-grained filter policies in-memory.
+			if item.GetNamespace() != "" {
+				if r.backupRequest.NamespaceIncludesExcludes != nil &&
+					!r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(item.GetNamespace()) {
+					log.Debugf("Skipping resource %s in namespace %s: namespace excluded",
+						gr, item.GetNamespace())
+					continue
+				}
+
+				if nsFilter := r.backupRequest.GetNamespaceFilter(item.GetNamespace()); nsFilter != nil {
+					rf := nsFilter.ResourceFilterMap[gr.String()]
+					if rf == nil {
+						rf = nsFilter.CatchAllFilter
+					}
+					if rf == nil {
+						log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
+							gr, item.GetNamespace())
+						continue
+					}
+
+					// In-memory label selector checks for fine-grained filters
+					if rf.LabelSelector != nil && !rf.LabelSelector.Matches(labels.Set(item.GetLabels())) {
+						log.Debugf("Skipping resource %s in namespace %s: does not match labelSelector",
+							gr, item.GetNamespace())
+						continue
+					}
+					if len(rf.OrLabelSelectors) > 0 {
+						matched := false
+						for _, s := range rf.OrLabelSelectors {
+							if s.Matches(labels.Set(item.GetLabels())) {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							log.Debugf("Skipping resource %s in namespace %s: does not match orLabelSelectors",
+								gr, item.GetNamespace())
+							continue
+						}
+					}
+				}
+			}
+
 			path, err := r.writeToFile(item)
 			if err != nil {
 				log.WithError(err).Error("Error writing item to file")
