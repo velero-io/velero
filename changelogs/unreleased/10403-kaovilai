@@ -1,0 +1,1 @@
+Check both node-agent daemonsets before returning a non-NotFound lookup error in IsReady, so a transient error fetching one daemonset no longer masks the other daemonset being ready

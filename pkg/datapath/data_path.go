@@ -250,7 +250,7 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			dp.wgDataPath.Done()
 		}()
 
-		totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental,
+		incrementalBytes, totalBytes, err := dp.uploaderProv.RunRestore(dp.ctx, snapshotID, target.ByPath, restoreParam.Incremental,
 			provider.CBTParam{
 				Source: cbtservice.SourceInfo{
 					Snapshot: restoreParam.VolumeSnapshotName,
@@ -268,7 +268,7 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 			}
 			dp.callbacks.OnFailed(context.Background(), dp.namespace, dp.jobName, dataPathErr)
 		} else {
-			dp.callbacks.OnCompleted(context.Background(), dp.namespace, dp.jobName, Result{Restore: RestoreResult{Target: target, TotalBytes: totalBytes}})
+			dp.callbacks.OnCompleted(context.Background(), dp.namespace, dp.jobName, Result{Restore: RestoreResult{Target: target, TotalBytes: totalBytes, IncrementalBytes: incrementalBytes}})
 		}
 	}()
 

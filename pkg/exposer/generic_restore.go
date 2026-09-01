@@ -252,6 +252,31 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 		}
 	}()
 
+	// Get volumeID before creating the restore pod because the existingPV may be deleted when creating the PVC if the volume policy is different
+	var volumeID string
+	if param.CSI != nil && param.CSI.Snapshot != nil {
+		vs := &snapshotv1api.VolumeSnapshot{}
+		if err := e.ctrlClient.Get(ctx, client.ObjectKey{
+			Namespace: param.CSI.Snapshot.VolumeSnapshotNamespace,
+			Name:      param.CSI.Snapshot.VolumeSnapshot,
+		}, vs); err != nil {
+			return errors.Wrapf(err, "error to get volume snapshot %s/%s", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot)
+		}
+
+		vsc, err := csi.GetVSCForVS(ctx, vs, e.ctrlClient)
+		if err != nil {
+			return errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
+		}
+
+		var cbtInfo csi.CBTInfo
+		cbtInfo, err = csi.GetCBTInfo(ctx, e.kubeClient, e.log, vs, vsc, param.TargetPVName)
+		if err != nil {
+			return errors.Wrap(err, "error to get CBT info")
+		}
+		curLog.Debugf("CBT info: %+v", cbtInfo)
+		volumeID = cbtInfo.VolumeID
+	}
+
 	curLog.Info("Creating restore PVC")
 
 	var targetPV *corev1api.PersistentVolume
@@ -281,29 +306,6 @@ func (e *genericRestoreExposer) Expose(ctx context.Context, ownerObject corev1ap
 	}()
 
 	curLog.Info("Creating restore pod")
-	var volumeID string
-	if param.CSI != nil && param.CSI.Snapshot != nil {
-		vs := &snapshotv1api.VolumeSnapshot{}
-		if err := e.ctrlClient.Get(ctx, client.ObjectKey{
-			Namespace: param.CSI.Snapshot.VolumeSnapshotNamespace,
-			Name:      param.CSI.Snapshot.VolumeSnapshot,
-		}, vs); err != nil {
-			return errors.Wrapf(err, "error to get volume snapshot %s/%s", param.CSI.Snapshot.VolumeSnapshotNamespace, param.CSI.Snapshot.VolumeSnapshot)
-		}
-
-		vsc, err := csi.GetVSCForVS(ctx, vs, e.ctrlClient)
-		if err != nil {
-			return errors.Wrapf(err, "error to get volume snapshot content for volume snapshot %s/%s", vs.Namespace, vs.Name)
-		}
-
-		var cbtInfo csi.CBTInfo
-		cbtInfo, err = csi.GetCBTInfo(ctx, e.kubeClient, e.log, vs, vsc, param.TargetPVName)
-		if err != nil {
-			return errors.Wrap(err, "error to get CBT info")
-		}
-		curLog.Debugf("CBT info: %+v", cbtInfo)
-		volumeID = cbtInfo.VolumeID
-	}
 	var csiSnapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
 	if param.CSI != nil {
 		csiSnapshotMetadataServiceConfigs = param.CSI.SnapshotMetadataServiceConfigs
@@ -1004,7 +1006,7 @@ func (e *genericRestoreExposer) createRestorePVC(ctx context.Context, ownerObjec
 				Spec: *targetPV.Spec.DeepCopy(),
 			}
 			tmpPV.Spec.VolumeMode = restorePVC.Spec.VolumeMode
-			e.log.Infof("the volume mode is different, creating temporary PV %s with volume mode %s", tmpPV.Name, tmpPV.Spec.VolumeMode)
+			e.log.Infof("the volume mode is different, creating temporary PV %s with volume mode %v", tmpPV.Name, tmpPV.Spec.VolumeMode)
 			tmpPV, err = e.kubeClient.CoreV1().PersistentVolumes().Create(ctx, tmpPV, metav1.CreateOptions{})
 			if err != nil {
 				return nil, errors.Wrapf(err, "fail to create the temporary PV %s", volumeName)

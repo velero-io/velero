@@ -148,7 +148,7 @@ require (
 	github.com/kcp-dev/kcp/cli v0.27.1 // indirect
 	github.com/kcp-dev/kcp/sdk v0.27.1 // indirect
 	github.com/kcp-dev/logicalcluster/v3 v3.0.5 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/crc32 v1.3.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect

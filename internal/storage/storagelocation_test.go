@@ -173,3 +173,79 @@ func TestListBackupStorageLocations(t *testing.T) {
 		})
 	}
 }
+
+func TestGetDefaultBackupStorageLocations(t *testing.T) {
+	tests := []struct {
+		name             string
+		locations        *velerov1api.BackupStorageLocationList
+		expectedDefaults []string
+		expectedErr      bool
+	}{
+		{
+			name: "no default locations",
+			locations: &velerov1api.BackupStorageLocationList{
+				Items: []velerov1api.BackupStorageLocation{
+					*builder.ForBackupStorageLocation("ns-1", "loc-1").Default(false).Result(),
+					*builder.ForBackupStorageLocation("ns-1", "loc-2").Default(false).Result(),
+				},
+			},
+			expectedDefaults: nil,
+			expectedErr:      false,
+		},
+		{
+			name: "one default location",
+			locations: &velerov1api.BackupStorageLocationList{
+				Items: []velerov1api.BackupStorageLocation{
+					*builder.ForBackupStorageLocation("ns-1", "loc-1").Default(false).Result(),
+					*builder.ForBackupStorageLocation("ns-1", "loc-2").Default(true).Result(),
+				},
+			},
+			expectedDefaults: []string{"loc-2"},
+			expectedErr:      false,
+		},
+		{
+			name: "multiple default locations",
+			locations: &velerov1api.BackupStorageLocationList{
+				Items: []velerov1api.BackupStorageLocation{
+					*builder.ForBackupStorageLocation("ns-1", "loc-1").Default(true).Result(),
+					*builder.ForBackupStorageLocation("ns-1", "loc-2").Default(true).Result(),
+					*builder.ForBackupStorageLocation("ns-1", "loc-3").Default(false).Result(),
+				},
+			},
+			expectedDefaults: []string{"loc-1", "loc-2"},
+			expectedErr:      false,
+		},
+		{
+			name:             "empty locations list",
+			locations:        &velerov1api.BackupStorageLocationList{},
+			expectedDefaults: nil,
+			expectedErr:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			client := fake.NewClientBuilder().WithScheme(util.VeleroScheme).WithRuntimeObjects(tt.locations).Build()
+
+			defaults, err := GetDefaultBackupStorageLocations(t.Context(), client, "ns-1")
+			if tt.expectedErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+
+				var defaultNames []string
+				for _, loc := range defaults.Items {
+					defaultNames = append(defaultNames, loc.Name)
+				}
+
+				if tt.expectedDefaults == nil {
+					g.Expect(defaultNames).To(BeEmpty())
+				} else {
+					g.Expect(defaultNames).To(ConsistOf(tt.expectedDefaults))
+				}
+			}
+		})
+	}
+}

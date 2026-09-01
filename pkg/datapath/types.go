@@ -43,8 +43,9 @@ type BackupResult struct {
 
 // RestoreResult represents the result of a restore
 type RestoreResult struct {
-	Target     AccessPoint `json:"target,omitempty"`
-	TotalBytes int64       `json:"totalBytes,omitempty"`
+	Target           AccessPoint `json:"target,omitempty"`
+	TotalBytes       int64       `json:"totalBytes,omitempty"`
+	IncrementalBytes int64       `json:"incrementalBytes,omitempty"`
 }
 
 // Callbacks defines the collection of callbacks during backup/restore

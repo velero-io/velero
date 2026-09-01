@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clocks "k8s.io/utils/clock"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -837,6 +838,7 @@ func (r *PodVolumeRestoreReconciler) OnDataPathCompleted(ctx context.Context, na
 
 		pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseCompleted
 		pvr.Status.CompletionTimestamp = &metav1.Time{Time: r.clock.Now()}
+		pvr.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
 
 		delete(pvr.Labels, exposer.ExposeOnGoingLabel)
 

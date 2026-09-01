@@ -102,7 +102,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 		{
 			name:        "marshal fail",
 			marshalErr:  errors.New("fake-marshal-error"),
-			expectedErr: "Failed to marshal restore result {{ } 0}: fake-marshal-error",
+			expectedErr: "Failed to marshal restore result {{ } 0 0}: fake-marshal-error",
 		},
 		{
 			name:                "succeed",

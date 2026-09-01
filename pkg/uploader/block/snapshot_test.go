@@ -842,7 +842,7 @@ func TestRestore(t *testing.T) {
 				cbtSvc = tc.cbtService(t)
 			}
 
-			size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", tc.incremental, tc.cbtSource, cbtSvc, map[string]string{}, testLog())
+			_, size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", tc.incremental, tc.cbtSource, cbtSvc, map[string]string{}, testLog())
 
 			if tc.expectedErrStr != "" {
 				require.Error(t, err)

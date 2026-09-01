@@ -412,8 +412,8 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 	t.Run("restore", func(t *testing.T) {
 		orig := blockRestoreFunc
 		defer func() { blockRestoreFunc = orig }()
-		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ bool, _ cbtservice.SourceInfo, _ cbtservice.Service, _ map[string]string, _ logrus.FieldLogger) (int64, error) {
-			return 0, errors.Wrap(block.ErrCanceled, "error restoring bdev")
+		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ bool, _ cbtservice.SourceInfo, _ cbtservice.Service, _ map[string]string, _ logrus.FieldLogger) (int64, int64, error) {
+			return 0, 0, errors.Wrap(block.ErrCanceled, "error restoring bdev")
 		}
 
 		bp := &blockProvider{
@@ -422,7 +422,7 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 			log:           logrus.New(),
 		}
 
-		_, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda", false, CBTParam{},
+		_, _, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda", false, CBTParam{},
 			uploader.PersistentVolumeBlock, map[string]string{}, &blockMockProgressUpdater{})
 
 		require.ErrorIs(t, err, ErrorCanceled)
@@ -496,10 +496,10 @@ func TestBlockProviderRunRestore(t *testing.T) {
 			var capturedSnapshotID string
 			var capturedVolumePath string
 
-			blockRestoreFunc = func(ctx context.Context, blkUp block.Uploader, rep udmrepo.BackupRepo, snapshotID string, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, error) {
+			blockRestoreFunc = func(ctx context.Context, blkUp block.Uploader, rep udmrepo.BackupRepo, snapshotID string, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, int64, error) {
 				capturedSnapshotID = snapshotID
 				capturedVolumePath = dest
-				return tc.mockRestoreSize, tc.mockRestoreErr
+				return tc.mockRestoreSize, tc.mockRestoreSize, tc.mockRestoreErr
 			}
 
 			bp := &blockProvider{
@@ -507,7 +507,7 @@ func TestBlockProviderRunRestore(t *testing.T) {
 				log:    logrus.New(),
 			}
 
-			size, err := bp.RunRestore(
+			_, size, err := bp.RunRestore(
 				t.Context(),
 				tc.snapshotID,
 				tc.volumePath,

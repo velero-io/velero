@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -501,6 +502,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 		}
 
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseCompleted
+		dd.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
