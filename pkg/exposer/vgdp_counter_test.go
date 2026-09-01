@@ -1,7 +1,11 @@
 package exposer
 
 import (
+	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,23 +23,23 @@ import (
 func TestIsConstrained(t *testing.T) {
 	tests := []struct {
 		name          string
-		counter       VgdpCounter
+		counter       *VgdpCounter
 		kubeClientObj []client.Object
 		getErr        bool
 		expected      bool
 	}{
 		{
 			name:     "no change, constrained",
-			counter:  VgdpCounter{},
+			counter:  &VgdpCounter{},
 			expected: true,
 		},
 		{
 			name:    "no change, not constrained",
-			counter: VgdpCounter{allowedQueueLength: 1},
+			counter: &VgdpCounter{allowedQueueLength: 1},
 		},
 		{
 			name: "change in du, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				duState:            dynamicQueueLength{0, 1},
 			},
@@ -43,7 +47,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in du, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				duState:            dynamicQueueLength{0, 1},
 			},
@@ -54,7 +58,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 			},
@@ -62,7 +66,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 			},
@@ -73,7 +77,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvb, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvbState:           dynamicQueueLength{0, 1},
 			},
@@ -81,7 +85,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvb, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvbState:           dynamicQueueLength{0, 1},
 			},
@@ -92,7 +96,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvr, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvrState:           dynamicQueueLength{0, 1},
 			},
@@ -100,7 +104,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvr, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvrState:           dynamicQueueLength{0, 1},
 			},
@@ -111,7 +115,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in du, pvb, not constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 3,
 				duState:            dynamicQueueLength{0, 1},
 				pvbState:           dynamicQueueLength{0, 1},
@@ -123,7 +127,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, pvr, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 				pvrState:           dynamicQueueLength{0, 1},
@@ -177,4 +181,77 @@ func TestIsConstrained(t *testing.T) {
 			}
 		})
 	}
+}
+
+// listProbeClient records whether more than one List call is ever in flight at
+// the same time, so a test can tell serialized callers from concurrent ones
+// without relying on the race detector.
+type listProbeClient struct {
+	client.Client
+
+	inFlight atomic.Int32
+	maxSeen  atomic.Int32
+}
+
+func (c *listProbeClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	inFlight := c.inFlight.Add(1)
+
+	for {
+		maxSeen := c.maxSeen.Load()
+		if inFlight <= maxSeen || c.maxSeen.CompareAndSwap(maxSeen, inFlight) {
+			break
+		}
+	}
+
+	// widen the window so overlapping callers are observed reliably
+	time.Sleep(time.Millisecond * 20)
+
+	err := c.Client.List(ctx, list, opts...)
+
+	c.inFlight.Add(-1)
+
+	return err
+}
+
+// The node-agent shares one VgdpCounter across the DataUpload, DataDownload,
+// PodVolumeBackup and PodVolumeRestore controllers, each of which calls
+// IsConstrained from its own goroutine. The cache states it updates must not be
+// read and written by two of them at once.
+func TestIsConstrainedConcurrent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	require.NoError(t, velerov2alpha1api.AddToScheme(scheme))
+
+	probe := &listProbeClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			builder.ForDataUpload("velero", "du-1").Labels(map[string]string{ExposeOnGoingLabel: "true"}).Result(),
+		).Build(),
+	}
+
+	counter := &VgdpCounter{
+		client:             probe,
+		allowedQueueLength: 100,
+	}
+
+	log := velerotest.NewLogger()
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for range 10 {
+				// stand in for the informer handlers, so every call re-lists
+				atomic.AddUint64(&counter.duState.changeID, 1)
+
+				counter.IsConstrained(t.Context(), log)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, int32(1), probe.maxSeen.Load(), "IsConstrained ran concurrently on a shared counter")
 }

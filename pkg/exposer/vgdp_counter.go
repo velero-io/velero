@@ -2,6 +2,7 @@ package exposer
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
@@ -31,6 +32,9 @@ type VgdpCounter struct {
 	pvbState dynamicQueueLength
 	pvrState dynamicQueueLength
 
+	// cacheLock guards the cache states below, which are read and updated by
+	// IsConstrained from the goroutine of every controller sharing this counter
+	cacheLock     sync.Mutex
 	duCacheState  dynamicQueueLength
 	ddCacheState  dynamicQueueLength
 	pvbCacheState dynamicQueueLength
@@ -164,6 +168,9 @@ func (w *VgdpCounter) initListeners(ctx context.Context, mgr manager.Manager) er
 }
 
 func (w *VgdpCounter) IsConstrained(ctx context.Context, log logrus.FieldLogger) bool {
+	w.cacheLock.Lock()
+	defer w.cacheLock.Unlock()
+
 	id := atomic.LoadUint64(&w.duState.changeID)
 	if id != w.duCacheState.changeID {
 		duList := &velerov2alpha1api.DataUploadList{}

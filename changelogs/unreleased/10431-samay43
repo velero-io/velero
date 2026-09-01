@@ -1,0 +1,1 @@
+Fix a data race on the VGDP counter's cached queue lengths, which are updated by every node-agent controller that shares the counter
