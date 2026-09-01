@@ -1,0 +1,1 @@
+Clean up the exposed environment and record a warning on the DataDownload when RebindVolume fails on completion, instead of leaving it stranded in InProgress until the item operation timeout marks it Canceled

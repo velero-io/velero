@@ -724,12 +724,20 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 		emptyFSBR       bool
 		isGetErr        bool
 		rebindVolumeErr bool
+		expectedMessage string
 	}{
 		{
 			name:            "Data download complete",
 			emptyFSBR:       false,
 			isGetErr:        false,
 			rebindVolumeErr: false,
+		},
+		{
+			name:            "Rebind volume fails",
+			emptyFSBR:       false,
+			isGetErr:        false,
+			rebindVolumeErr: true,
+			expectedMessage: "Warning: data was restored but failed to rebind the restored PV to target PVC test-ns/test-pvc, so the target volume may not contain the restored data: Error to rebind volume",
 		},
 	}
 
@@ -750,7 +758,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 			}()
 
 			require.NoError(t, err)
-			dd := dataDownloadBuilder().Result()
+			dd := dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
 			namespace := dd.Namespace
 			ddName := dd.Name
 			// Add the DataDownload object to the fake client
@@ -765,6 +773,7 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: ddName, Namespace: namespace}, updatedDD))
 				assert.Equal(t, velerov2alpha1api.DataDownloadPhaseCompleted, updatedDD.Status.Phase)
 				assert.False(t, updatedDD.Status.CompletionTimestamp.IsZero())
+				assert.Equal(t, test.expectedMessage, updatedDD.Status.Message)
 			}
 		})
 	}

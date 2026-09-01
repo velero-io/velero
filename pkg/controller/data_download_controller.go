@@ -480,15 +480,17 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	objRef := getDataDownloadOwnerObject(&dd)
-	err := r.restoreExposer.RebindVolume(ctx, objRef, exposer.GenericRestoreRebindVolumeParam{
+	rebindErr := r.restoreExposer.RebindVolume(ctx, objRef, exposer.GenericRestoreRebindVolumeParam{
 		TargetPVCName:    dd.Spec.TargetVolume.PVC,
 		TargetNamespace:  dd.Spec.TargetVolume.Namespace,
 		OperationTimeout: dd.Spec.OperationTimeout.Duration,
 		TargetFSType:     dd.Spec.TargetVolume.FSType,
 	})
-	if err != nil {
-		log.WithError(err).Error("Failed to rebind PV to target PVC on completion")
-		return
+	if rebindErr != nil {
+		// The data has been restored at this point, so the DataDownload is still completed.
+		// Carry the rebind failure in the status message so that users are notified that the
+		// target volume may not be usable.
+		log.WithError(rebindErr).Error("Failed to rebind PV to target PVC on completion")
 	}
 
 	log.Info("Cleaning up exposed environment")
@@ -504,6 +506,10 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseCompleted
 		dd.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
+		if rebindErr != nil {
+			dd.Status.Message = fmt.Sprintf("Warning: data was restored but failed to rebind the restored PV to target PVC %s/%s, so the target volume may not contain the restored data: %v",
+				dd.Spec.TargetVolume.Namespace, dd.Spec.TargetVolume.PVC, rebindErr)
+		}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
 
