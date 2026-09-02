@@ -124,6 +124,7 @@ func (r *BackupMicroService) Init() error {
 					r.cancelDataUpload(newDu)
 				}
 			},
+			DeleteFunc: r.handleDataUploadDelete,
 		},
 	)
 
@@ -326,6 +327,46 @@ func (r *BackupMicroService) closeDataPath(ctx context.Context, duName string) {
 	}
 
 	r.dataPathMgr.RemoveAsyncBR(duName)
+}
+
+// handleDataUploadDelete reacts to the DataUpload being deleted directly (e.g. its finalizer
+// was force-removed) instead of going through the normal Spec.Cancel flow, so the running data
+// path is still canceled and the pod doesn't keep running orphaned from its CR.
+//
+// Known trade-off: this adds a second, independent trigger for cancelDataUpload alongside the
+// existing Spec.Cancel-driven UpdateFunc. In the narrow case where both fire for the same
+// DataUpload before its data path was ever created (dataPathMgr never got an entry, so
+// cancelDataUpload takes its fsBackup==nil branch both times), the second call's blocking send
+// on resultSignal will have no reader left and block until this pod process exits, which happens
+// within moments via Shutdown()/funcExitWithMessage regardless. This is a same-process,
+// sub-second goroutine leak with no effect on the operation's outcome or on node-agent's own
+// cleanup (which watches the actual pod's phase, not this channel) - not worth guarding against
+// given the complexity a guard would add versus this bounded, effectively unobservable impact.
+func (r *BackupMicroService) handleDataUploadDelete(obj any) {
+	du, ok := obj.(*velerov2alpha1api.DataUpload)
+	if !ok {
+		tombstone, ok := obj.(cachetool.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+
+		du, ok = tombstone.Obj.(*velerov2alpha1api.DataUpload)
+		if !ok {
+			return
+		}
+	}
+
+	if du.Name != r.dataUploadName {
+		return
+	}
+
+	if du.Status.Phase != velerov2alpha1api.DataUploadPhaseInProgress {
+		return
+	}
+
+	r.logger.WithField("dataupload", du.Name).Warn("DataUpload is deleted before its data path completed, canceling")
+
+	r.cancelDataUpload(du)
 }
 
 func (r *BackupMicroService) cancelDataUpload(du *velerov2alpha1api.DataUpload) {
