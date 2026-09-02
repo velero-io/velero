@@ -6284,3 +6284,9 @@ func TestGetNamespaceFilter_CacheBypass(t *testing.T) {
 	// but the cache should return our cachedFilter.
 	assert.Same(t, cachedFilter, req.GetNamespaceFilter("cached-ns"))
 }
+
+func TestNewKubernetesBackupper(t *testing.T) {
+	b, err := NewKubernetesBackupper(nil, nil, nil, nil, nil, 0, false, 100, 10, "", nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+}

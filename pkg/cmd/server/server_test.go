@@ -220,7 +220,7 @@ func Test_newServer(t *testing.T) {
 	}, logger)
 	require.Error(t, err)
 
-	// invalid clientBclientPageSizeurst
+	// invalid clientPageSize
 	factory.On("SetClientQPS", mock.Anything).Return().
 		On("SetClientBurst", mock.Anything).Return()
 	_, err = newServer(factory, &config.Config{
@@ -228,6 +228,16 @@ func Test_newServer(t *testing.T) {
 		ClientQPS:      1,
 		ClientBurst:    1,
 		ClientPageSize: -1,
+	}, logger)
+	require.Error(t, err)
+
+	// invalid clientPageBufferSize (negative)
+	_, err = newServer(factory, &config.Config{
+		UploaderType:         uploader.KopiaType,
+		ClientQPS:            1,
+		ClientBurst:          1,
+		ClientPageSize:       100,
+		ClientPageBufferSize: -1,
 	}, logger)
 	require.Error(t, err)
 

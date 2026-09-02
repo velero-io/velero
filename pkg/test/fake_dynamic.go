@@ -51,6 +51,9 @@ var _ client.Dynamic = &FakeDynamicClient{}
 
 func (c *FakeDynamicClient) List(options metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 	args := c.Called(options)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*unstructured.UnstructuredList), args.Error(1)
 }
 

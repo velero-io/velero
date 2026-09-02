@@ -34,9 +34,10 @@ const (
 	DefaultResourceTimeout = defaultResourceTerminatingTimeout
 
 	// server's client default qps and burst
-	defaultClientQPS      float32 = 100.0
-	defaultClientBurst    int     = 100
-	defaultClientPageSize int     = 500
+	defaultClientQPS            float32 = 100.0
+	defaultClientBurst          int     = 100
+	defaultClientPageSize       int     = 500
+	defaultClientPageBufferSize int     = 10
 
 	defaultProfilerAddress = "localhost:6060"
 
@@ -169,6 +170,7 @@ type Config struct {
 	ClientQPS                           float32
 	ClientBurst                         int
 	ClientPageSize                      int
+	ClientPageBufferSize                int
 	ProfilerAddress                     string
 	LogLevel                            *logging.LevelFlag
 	LogFormat                           *logging.FormatFlag
@@ -209,6 +211,7 @@ func GetDefaultConfig() *Config {
 		ClientQPS:                      defaultClientQPS,
 		ClientBurst:                    defaultClientBurst,
 		ClientPageSize:                 defaultClientPageSize,
+		ClientPageBufferSize:           defaultClientPageBufferSize,
 		ProfilerAddress:                defaultProfilerAddress,
 		ResourceTerminatingTimeout:     defaultResourceTerminatingTimeout,
 		LogLevel:                       logging.LogLevelFlag(logrus.InfoLevel),
@@ -242,6 +245,7 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 	flags.Float32Var(&c.ClientQPS, "client-qps", c.ClientQPS, "Maximum number of requests per second by the server to the Kubernetes API once the burst limit has been reached.")
 	flags.IntVar(&c.ClientBurst, "client-burst", c.ClientBurst, "Maximum number of requests by the server to the Kubernetes API in a short period of time.")
 	flags.IntVar(&c.ClientPageSize, "client-page-size", c.ClientPageSize, "Page size of requests by the server to the Kubernetes API when listing objects during a backup. Set to 0 to disable paging.")
+	flags.IntVar(&c.ClientPageBufferSize, "client-page-buffer-size", c.ClientPageBufferSize, "Number of pages to buffer concurrently when listing resources during a backup. Higher values use more memory but may improve throughput. Default is 10.")
 	flags.StringVar(&c.ProfilerAddress, "profiler-address", c.ProfilerAddress, "The address to expose the pprof profiler.")
 	flags.DurationVar(&c.ResourceTerminatingTimeout, "terminating-resource-timeout", c.ResourceTerminatingTimeout, "How long to wait on persistent volumes and namespaces to terminate during a restore before timing out.")
 	flags.DurationVar(&c.DefaultBackupTTL, "default-backup-ttl", c.DefaultBackupTTL, "How long to wait by default before backups can be garbage collected.")

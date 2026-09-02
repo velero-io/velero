@@ -157,6 +157,8 @@ By default, Velero will paginate the LIST API call for each resource type in the
 
 Depending on the cluster's scale, tuning the page size can improve backup performance. You can experiment with higher values, noting their impact on the relevant `apiserver_request_duration_seconds_*` metrics from the Kubernetes apiserver.
 
+You can also configure the number of pages to buffer concurrently by setting the `--client-page-buffer-size` flag (default 10). Higher values use more memory but may improve throughput in large environments, provided the Velero server has sufficient memory.
+
 Pagination can be entirely disabled by setting `--client-page-size` to `0`. This will request all items in a single unpaginated LIST call.
 
 ## Deleting Backups

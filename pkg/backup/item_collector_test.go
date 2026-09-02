@@ -17,6 +17,7 @@ limitations under the License.
 package backup
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -465,4 +467,178 @@ func TestGetOrderedResourcesForTypeTrimsSpaces(t *testing.T) {
 		{namespace: "ns1", name: "pod1", orderedResource: true},
 		{namespace: "ns1", name: "pod3"},
 	}, sorted)
+}
+
+func TestListItemsForLabel(t *testing.T) {
+	makePod := func(name string) unstructured.Unstructured {
+		return unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      name,
+					"namespace": "default",
+				},
+			},
+		}
+	}
+
+	pod1 := makePod("pod1")
+	pod2 := makePod("pod2")
+	pod3 := makePod("pod3")
+	pod4 := makePod("pod4")
+	pod5 := makePod("pod5")
+	existingPod := makePod("existing")
+
+	t.Run("multiple pages collected exactly once using configured page size", func(t *testing.T) {
+		dc := &test.FakeDynamicClient{}
+		// Page 1: Limit=2, continue="" -> returns [pod1, pod2], continue="c1"
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: ""}).
+			Return(&unstructured.UnstructuredList{
+				Object: map[string]any{
+					"metadata": map[string]any{"continue": "c1"},
+				},
+				Items: []unstructured.Unstructured{pod1, pod2},
+			}, nil).Once()
+
+		// Page 2: Limit=2, continue="c1" -> returns [pod3, pod4], continue="c2"
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: "c1"}).
+			Return(&unstructured.UnstructuredList{
+				Object: map[string]any{
+					"metadata": map[string]any{"continue": "c2"},
+				},
+				Items: []unstructured.Unstructured{pod3, pod4},
+			}, nil).Once()
+
+		// Page 3: Limit=2, continue="c2" -> returns [pod5], continue=""
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: "c2"}).
+			Return(&unstructured.UnstructuredList{
+				Items: []unstructured.Unstructured{pod5},
+			}, nil).Once()
+
+		collector := &itemCollector{
+			pageSize:       2,
+			pageBufferSize: 5,
+			log:            test.NewLogger(),
+		}
+
+		res, err := collector.listItemsForLabel(nil, "app=foo", dc)
+		require.NoError(t, err)
+		assert.Equal(t, []unstructured.Unstructured{pod1, pod2, pod3, pod4, pod5}, res)
+		dc.AssertExpectations(t)
+	})
+
+	t.Run("error from later page is propagated and partial items are discarded", func(t *testing.T) {
+		dc := &test.FakeDynamicClient{}
+		// Page 1 succeeds
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: ""}).
+			Return(&unstructured.UnstructuredList{
+				Object: map[string]any{
+					"metadata": map[string]any{"continue": "c1"},
+				},
+				Items: []unstructured.Unstructured{pod1, pod2},
+			}, nil).Once()
+
+		// Page 2 returns an error
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: "c1"}).
+			Return((*unstructured.UnstructuredList)(nil), errors.New("network error on page 2")).Once()
+
+		collector := &itemCollector{
+			pageSize:       2,
+			pageBufferSize: 5,
+			log:            test.NewLogger(),
+		}
+
+		res, err := collector.listItemsForLabel([]unstructured.Unstructured{existingPod}, "app=foo", dc)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "network error on page 2")
+		// Verify partial items from page 1 were not retained and existingPod was preserved
+		assert.Equal(t, []unstructured.Unstructured{existingPod}, res)
+		dc.AssertExpectations(t)
+	})
+
+	t.Run("continuation token expiration recovers with full list without duplicating items", func(t *testing.T) {
+		dc := &test.FakeDynamicClient{}
+		// Page 1 succeeds with continue token
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: ""}).
+			Return(&unstructured.UnstructuredList{
+				Object: map[string]any{
+					"metadata": map[string]any{"continue": "expired-token"},
+				},
+				Items: []unstructured.Unstructured{pod1, pod2},
+			}, nil).Once()
+
+		// Page 2 fails with ResourceExpired error
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: "expired-token"}).
+			Return((*unstructured.UnstructuredList)(nil), apierrors.NewResourceExpired("too old")).Once()
+
+		// Fallback unpaginated full list succeeds
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo"}).
+			Return(&unstructured.UnstructuredList{
+				Items: []unstructured.Unstructured{pod1, pod2, pod3, pod4},
+			}, nil).Once()
+
+		collector := &itemCollector{
+			pageSize:       2,
+			pageBufferSize: 5,
+			log:            test.NewLogger(),
+		}
+
+		res, err := collector.listItemsForLabel([]unstructured.Unstructured{existingPod}, "app=foo", dc)
+		require.NoError(t, err)
+		// Should contain existingPod and all 4 pods from full list exactly once
+		assert.Equal(t, []unstructured.Unstructured{existingPod, pod1, pod2, pod3, pod4}, res)
+		dc.AssertExpectations(t)
+	})
+
+	t.Run("continuation token expiration fallback error is propagated", func(t *testing.T) {
+		dc := &test.FakeDynamicClient{}
+		// Page 1 succeeds
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: ""}).
+			Return(&unstructured.UnstructuredList{
+				Object: map[string]any{
+					"metadata": map[string]any{"continue": "expired-token"},
+				},
+				Items: []unstructured.Unstructured{pod1, pod2},
+			}, nil).Once()
+
+		// Page 2 fails with ResourceExpired error
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo", Limit: 2, Continue: "expired-token"}).
+			Return((*unstructured.UnstructuredList)(nil), apierrors.NewResourceExpired("too old")).Once()
+
+		// Fallback fails
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo"}).
+			Return((*unstructured.UnstructuredList)(nil), errors.New("unrecoverable error")).Once()
+
+		collector := &itemCollector{
+			pageSize:       2,
+			pageBufferSize: 5,
+			log:            test.NewLogger(),
+		}
+
+		res, err := collector.listItemsForLabel([]unstructured.Unstructured{existingPod}, "app=foo", dc)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unrecoverable error")
+		assert.Equal(t, []unstructured.Unstructured{existingPod}, res)
+		dc.AssertExpectations(t)
+	})
+
+	t.Run("unpaginated listing when pageSize is 0", func(t *testing.T) {
+		dc := &test.FakeDynamicClient{}
+		dc.On("List", metav1.ListOptions{LabelSelector: "app=foo"}).
+			Return(&unstructured.UnstructuredList{
+				Items: []unstructured.Unstructured{pod1, pod2},
+			}, nil).Once()
+
+		collector := &itemCollector{
+			pageSize:       0,
+			pageBufferSize: 10,
+			log:            test.NewLogger(),
+		}
+
+		res, err := collector.listItemsForLabel([]unstructured.Unstructured{existingPod}, "app=foo", dc)
+		require.NoError(t, err)
+		assert.Equal(t, []unstructured.Unstructured{existingPod, pod1, pod2}, res)
+		dc.AssertExpectations(t)
+	})
 }
