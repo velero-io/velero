@@ -478,12 +478,15 @@ func (r *itemCollector) getResourceItems(
 		namespacesToList = []string{""}
 	}
 
+	grString := gr.String()
+	hasNamespacedPolicies := len(r.backupRequest.NamespacedFilterMap) > 0
+
 	var items []*kubernetesResource
 
 	for _, namespace := range namespacesToList {
 		// Check per-namespace resource type filter from ResourcePolicy
 		if nsFilter := r.backupRequest.GetNamespaceFilter(namespace); nsFilter != nil {
-			_, hasSpecific := nsFilter.ResourceFilterMap[gr.String()]
+			_, hasSpecific := nsFilter.ResourceFilterMap[grString]
 			if !hasSpecific && nsFilter.CatchAllFilter == nil {
 				log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
 					gr, namespace)
@@ -497,48 +500,62 @@ func (r *itemCollector) getResourceItems(
 			continue
 		}
 
+		var lastNS string
+		var lastNSFilter *ResolvedNamespaceFilter
+
 		// Collect items in included Namespaces
 		for i := range unstructuredItems {
 			item := &unstructuredItems[i]
+			itemNS := item.GetNamespace()
 
-			// Apply namespace inclusion/exclusion and fine-grained filter policies in-memory.
-			if item.GetNamespace() != "" {
+			// Apply namespace inclusion/exclusion and fine-grained filter policies in-memory for cluster-wide queries.
+			if itemNS != "" && namespace == "" {
 				if r.backupRequest.NamespaceIncludesExcludes != nil &&
-					!r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(item.GetNamespace()) {
+					!r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(itemNS) {
 					log.Debugf("Skipping resource %s in namespace %s: namespace excluded",
-						gr, item.GetNamespace())
+						gr, itemNS)
 					continue
 				}
 
-				if nsFilter := r.backupRequest.GetNamespaceFilter(item.GetNamespace()); nsFilter != nil {
-					rf := nsFilter.ResourceFilterMap[gr.String()]
-					if rf == nil {
-						rf = nsFilter.CatchAllFilter
-					}
-					if rf == nil {
-						log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
-							gr, item.GetNamespace())
-						continue
+				if hasNamespacedPolicies {
+					if itemNS != lastNS {
+						lastNS = itemNS
+						lastNSFilter = r.backupRequest.GetNamespaceFilter(itemNS)
 					}
 
-					// In-memory label selector checks for fine-grained filters
-					if rf.LabelSelector != nil && !rf.LabelSelector.Matches(labels.Set(item.GetLabels())) {
-						log.Debugf("Skipping resource %s in namespace %s: does not match labelSelector",
-							gr, item.GetNamespace())
-						continue
-					}
-					if len(rf.OrLabelSelectors) > 0 {
-						matched := false
-						for _, s := range rf.OrLabelSelectors {
-							if s.Matches(labels.Set(item.GetLabels())) {
-								matched = true
-								break
-							}
+					if lastNSFilter != nil {
+						rf := lastNSFilter.ResourceFilterMap[grString]
+						if rf == nil {
+							rf = lastNSFilter.CatchAllFilter
 						}
-						if !matched {
-							log.Debugf("Skipping resource %s in namespace %s: does not match orLabelSelectors",
-								gr, item.GetNamespace())
+						if rf == nil {
+							log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
+								gr, itemNS)
 							continue
+						}
+
+						// In-memory label selector checks for fine-grained filters
+						if rf.LabelSelector != nil || len(rf.OrLabelSelectors) > 0 {
+							itemLabels := labels.Set(item.GetLabels())
+							if rf.LabelSelector != nil && !rf.LabelSelector.Matches(itemLabels) {
+								log.Debugf("Skipping resource %s in namespace %s: does not match labelSelector",
+									gr, itemNS)
+								continue
+							}
+							if len(rf.OrLabelSelectors) > 0 {
+								matched := false
+								for _, s := range rf.OrLabelSelectors {
+									if s.Matches(itemLabels) {
+										matched = true
+										break
+									}
+								}
+								if !matched {
+									log.Debugf("Skipping resource %s in namespace %s: does not match orLabelSelectors",
+										gr, itemNS)
+									continue
+								}
+							}
 						}
 					}
 				}

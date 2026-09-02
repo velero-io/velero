@@ -605,16 +605,6 @@ func TestGetResourceItems_NamespacedFilterPolicies_ClusterWideListing(t *testing
 }
 
 func TestGetResourceItems_NamespacedFilterPolicies_SpecificNamespaces(t *testing.T) {
-	prodSA := unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "ServiceAccount",
-			"metadata": map[string]any{
-				"name":      "default",
-				"namespace": "production",
-			},
-		},
-	}
 	defaultSA := unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -662,5 +652,4 @@ func TestGetResourceItems_NamespacedFilterPolicies_SpecificNamespaces(t *testing
 	require.Len(t, saItems, 1)
 	assert.Equal(t, "default", saItems[0].namespace)
 	assert.Equal(t, "default", saItems[0].name)
-	_ = prodSA
 }
