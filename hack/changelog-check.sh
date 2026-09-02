@@ -28,6 +28,22 @@ CHANGELOG_PATH='changelogs/unreleased'
 # GITHUB_REF is something like "refs/pull/:prNumber/merge"
 pr_number=$(echo $GITHUB_REF | cut -d / -f 3)
 
+# Some kinds of pull requests do not require a changelog entry. Rather than
+# relying on the (frozen) event payload, query the PR's current labels so the
+# check reflects the latest state. This makes re-runs and labels added after
+# the initial run behave correctly.
+EXEMPT_LABELS=("kind/changelog-not-required" "Design" "Website" "Documentation")
+
+if command -v gh > /dev/null 2>&1; then
+    current_labels=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" --jq '.labels[].name' 2>/dev/null || true)
+    for label in "${EXEMPT_LABELS[@]}"; do
+        if grep -Fxq "$label" <<< "$current_labels"; then
+            echo "PR ${pr_number} has the '${label}' label; changelog not required."
+            exit 0
+        fi
+    done
+fi
+
 change_log_file="${CHANGELOG_PATH}/${pr_number}-*"
 
 if ls ${change_log_file} 1> /dev/null 2>&1; then
