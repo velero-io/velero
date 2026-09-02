@@ -1,0 +1,1 @@
+Fix issue #10444, the NODE column in kubectl get podvolumebackups was always empty because the print column read .status.node, which PodVolumeBackup does not define; it now reads .spec.node where the node is actually recorded
