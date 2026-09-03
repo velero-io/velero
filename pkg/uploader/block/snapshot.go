@@ -225,6 +225,9 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 		} else if snapshot.Tags[uploader.CBTVolumeIDTag] == "" {
 			log.Warnf("No VolumeID tag from snapshot %s, fallback to full restore", snapshotID)
 			incremental = false
+		} else if cbtSource.VolumeID == "" {
+			log.Warnf("No VolumeID in cbt source %v, fallback to full restore", cbtSource)
+			incremental = false
 		} else if snapshot.Tags[uploader.CBTVolumeIDTag] != cbtSource.VolumeID {
 			log.Warnf("VolumeID %s from snapshot %s is not expected as %s, fallback to full restore", snapshot.Tags[uploader.CBTVolumeIDTag], snapshotID, cbtSource.VolumeID)
 			incremental = false

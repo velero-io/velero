@@ -152,6 +152,7 @@ func TestCreateRestorePodWithPriorityClass(t *testing.T) {
 				"", // volumeSnapshotNamespace
 				"", // volumeID
 				nil,
+				nil, // volumeTopology
 			)
 
 			require.NoError(t, err, tc.description)
@@ -235,6 +236,7 @@ func TestCreateRestorePodWithMissingConfigMap(t *testing.T) {
 		"", // volumeSnapshotNamespace
 		"", // volumeID
 		nil,
+		nil, // volumeTopology
 	)
 
 	// Should succeed even when config map is missing

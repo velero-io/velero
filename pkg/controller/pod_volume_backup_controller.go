@@ -784,10 +784,9 @@ func UpdatePVBStatusToFailed(ctx context.Context, c client.Client, pvb *velerov1
 				pvb.Status.SnapshotID = dataPathError.GetSnapshotID()
 			}
 			if len(strings.TrimSpace(msg)) == 0 {
-				pvb.Status.Message = errOut.Error()
-			} else {
-				pvb.Status.Message = errors.WithMessage(errOut, msg).Error()
+				msg = "pod volume backup failed"
 			}
+			pvb.Status.Message = errors.WithMessage(errOut, msg).Error()
 			if pvb.Status.StartTimestamp.IsZero() {
 				pvb.Status.StartTimestamp = &metav1.Time{Time: time}
 			}

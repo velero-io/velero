@@ -767,6 +767,27 @@ func TestRestore(t *testing.T) {
 			expectedSize: 4096,
 		},
 		{
+			name:        "incremental restore fallback - empty cbtSource VolumeID",
+			incremental: true,
+			cbtSource:   cbtservice.SourceInfo{Snapshot: "snap-cbt", VolumeID: ""},
+			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
+				snapWithTags := udmrepo.Snapshot{
+					Tags: map[string]string{
+						uploader.CBTChangeIDTag: "cid-1",
+						uploader.CBTVolumeIDTag: "vol-1",
+					},
+				}
+				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-001")).Return(snapWithTags, nil)
+				blkup.On("Restore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(int64(4096), int64(4096), nil)
+			},
+			setupOpenDev: func(t *testing.T) *os.File {
+				t.Helper()
+				return tempFile(t, "")
+			},
+			expectedSize: 4096,
+		},
+		{
 			name:        "incremental restore fallback - VolumeID mismatch",
 			incremental: true,
 			cbtSource:   cbtservice.SourceInfo{VolumeID: "vol-actual"},
