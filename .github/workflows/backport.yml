@@ -37,12 +37,34 @@ name: Backport merged pull request
 # check always passes regardless of whether the original commit had one.
 #
 # See: https://github.com/velero-io/velero/issues/9603
+#
+# Requires "Allow GitHub Actions to create and approve pull requests" enabled
+# under Settings > Actions > General for THIS repo (org-locked as of writing;
+# only an org owner can toggle it). Tracked: velero-io/velero#9603.
+# Without it, korthout/backport-action's PR-creation call fails even though
+# this workflow requests pull-requests: write.
+#
+# Callers must grant contents: write, issues: write, and pull-requests: write
+# in their own job-level permissions (see the label-for-backport and backport
+# jobs below for what each scope is for) — a caller's permissions cap what
+# this called workflow's jobs can request, regardless of what's declared here.
+#
+# Also callable as a reusable workflow (`uses:
+# velero-io/velero/.github/workflows/backport.yml@main`) from other velero-io
+# repos — see velero-plugin-for-aws/gcp/microsoft-azure. Callers must trigger
+# with `pull_request_target: types: [closed]` and/or `issue_comment: types:
+# [created]` — these are the only two event/type combinations the jobs below
+# check via `if:`; any other trigger event just no-ops. The same "Allow
+# GitHub Actions to create and approve pull requests" setting must be enabled
+# on the CALLING repo too, since GITHUB_TOKEN's permission gate is evaluated
+# in the caller's context, not here.
 
 on:
   pull_request_target:
     types: [closed]
   issue_comment:
     types: [created]
+  workflow_call:
 
 permissions: {}
 
@@ -73,7 +95,6 @@ jobs:
     name: Label PR for deferred backport
     # Run only when an authorized command is posted on an *open* (unmerged) PR.
     if: >
-      github.repository == 'velero-io/velero' &&
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != '' &&
       github.event.issue.state == 'open' &&
@@ -128,7 +149,6 @@ jobs:
     # recursive triggers. The bot does not post /backport commands, so startsWith
     # already blocks recursion; the id check is defense in depth.
     if: >
-      github.repository == 'velero-io/velero' &&
       (
         (
           github.event_name == 'pull_request_target' &&
