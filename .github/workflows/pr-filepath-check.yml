@@ -3,6 +3,7 @@ on: [pull_request]
 jobs:
 
   filepath-check:
+    if: github.repository == 'velero-io/velero'
     name: Check for invalid characters in file paths
     runs-on: ubuntu-latest
     steps:
