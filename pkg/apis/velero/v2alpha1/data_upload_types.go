@@ -97,6 +97,10 @@ type CSISnapshotSpec struct {
 	// Driver is the driver used by the VolumeSnapshotContent
 	// +optional
 	Driver string `json:"driver,omitempty"`
+
+	// CleanUp indicates request to clean up the volume snapshot after the backup/restore is completed.
+	// +optional
+	CleanUp bool `json:"cleanUp,omitempty"`
 }
 
 // DataUploadPhase represents the lifecycle phase of a DataUpload.
