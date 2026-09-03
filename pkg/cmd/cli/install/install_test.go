@@ -233,6 +233,36 @@ func TestValidateConfigMapsUseFactoryNamespace(t *testing.T) {
 	}
 }
 
+func TestImagePullPolicyFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset falls back to the image tag", want: ""},
+		{name: "valid value", args: []string{"--image-pull-policy", "Never"}, want: "Never"},
+		{name: "invalid value", args: []string{"--image-pull-policy", "sometimes"}, wantErr: true},
+		{name: "wrong case", args: []string{"--image-pull-policy", "always"}, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := NewInstallOptions()
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			o.BindFlags(flags)
+
+			err := flags.Parse(tc.args)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, o.ImagePullPolicy.String())
+		})
+	}
+}
+
 // TestNewCommandRunClosureOrder covers the Run closure in NewCommand (the lines that were
 // reordered by the fix: Complete → Validate → Run).
 //
