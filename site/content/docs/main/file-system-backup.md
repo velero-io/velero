@@ -79,6 +79,16 @@ You can update the secret with your own password encoded as base64 prior to the 
 data:
   repository-password: <custom-password>
 ```
+
+You can also define `BackupStorageLocation` specific repository password by setting `repositoryPasswordSecretRef` in its `spec` section pointing to a secret in the same namespace, like this:
+
+```yaml
+spec:
+  repositoryPasswordSecretRef:
+    name: my-bsl-secret
+    key: my-repository-password
+```
+
 Backup repository is created during the first execution of backup targeting to it after installing Velero with node agent. If you update the secret password after the first
 backup which created the backup repository, then Velero will not be able to connect with the older backups.
 
