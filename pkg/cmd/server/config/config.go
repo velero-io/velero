@@ -189,6 +189,7 @@ type Config struct {
 	GlobalBackupVolumePoliciesConfigMap string
 	DefaultResourceModifierConfigMap    string
 	MaxBackupExtractionSize             int
+	CRDSchemaCheck                      *flag.Enum
 }
 
 func GetDefaultConfig() *Config {
@@ -222,6 +223,7 @@ func GetDefaultConfig() *Config {
 		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
 		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
 		ConcurrentBackups:              DefaultConcurrentBackups,
+		CRDSchemaCheck:                 flag.NewEnum("warn", "warn", "strict", "skip"),
 	}
 
 	return config
@@ -300,5 +302,10 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"max-backup-extraction-size",
 		c.MaxBackupExtractionSize,
 		"Maximum size of a backup extraction in megabytes. If not set, default value (16GB) will be used.",
+	)
+	flags.Var(
+		c.CRDSchemaCheck,
+		"crd-schema-check",
+		fmt.Sprintf("CRD schema validation mode during server startup. Valid values are %s.", strings.Join(c.CRDSchemaCheck.AllowedValues(), ", ")),
 	)
 }
