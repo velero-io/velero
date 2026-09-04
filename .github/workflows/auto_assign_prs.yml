@@ -6,8 +6,12 @@ name: "Auto Assign Author"
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
-  # Watch for submitted reviews so we can re-request a second CODEOWNERS
-  # review once only one maintainer has approved.
+  # Watch for submitted reviews so we can record the PR number for the
+  # privileged re-request-review workflow (see re_request_review.yml).
+  # NOTE: For fork-originated PRs the GITHUB_TOKEN on pull_request_review is
+  # read-only even when pull-requests: write is declared, so the actual
+  # requestReviewers API call is delegated to a workflow_run workflow that
+  # receives a write token regardless of fork status.
   pull_request_review:
     types: [submitted]
 
@@ -29,61 +33,22 @@ jobs:
   # `.github/CODEOWNERS` automatically requests review from the
   # velero-io/maintainer team, but that request is cleared as soon as a
   # single member of the team submits a review. Since we require a minimum
-  # of 2 reviewers (see `number_of_reviewers` in auto-assignees.yml), this
-  # re-requests a review from the maintainer team whenever a PR still has
-  # fewer than the required number of approvals, so a second CODEOWNERS
-  # reviewer gets pinged.
-  re-request-review:
+  # of 2 reviewers (see `number_of_reviewers` in auto-assignees.yml), record
+  # the PR number here so the privileged re_request_review.yml workflow can
+  # safely re-request a review from the maintainer team.
+  record-pr-number:
     if: github.repository == 'velero-io/velero' && github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
     runs-on: ubuntu-latest
     steps:
-      - name: Re-request review from maintainers if more approvals are needed
-        uses: actions/github-script@v9
+      - name: Save PR number to artifact
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p /tmp/pr
+          # Write only the numeric PR number; the privileged workflow validates this.
+          printf '%s' "${PR_NUMBER}" > /tmp/pr/number
+      - name: Upload PR number artifact
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const requiredApprovals = 2;
-            const maintainerTeam = 'maintainer';
-            const { owner, repo } = context.repo;
-            const pull_number = context.payload.pull_request.number;
-
-            const { data: reviews } = await github.rest.pulls.listReviews({
-              owner,
-              repo,
-              pull_number,
-            });
-
-            // Count distinct users whose most recent review is an approval.
-            // The Reviews API does not guarantee chronological order, so
-            // sort by submission time before folding into the map.
-            const sortedReviews = [...reviews].sort(
-              (a, b) => new Date(a.submitted_at) - new Date(b.submitted_at)
-            );
-            const latestReviewByUser = new Map();
-            for (const review of sortedReviews) {
-              latestReviewByUser.set(review.user.login, review.state);
-            }
-            const approvedReviewers = [...latestReviewByUser.entries()].filter(
-              ([, state]) => state === 'APPROVED'
-            );
-
-            if (approvedReviewers.length >= requiredApprovals) {
-              console.log(
-                `PR already has ${approvedReviewers.length} approvals, no need to re-request review.`
-              );
-              return;
-            }
-
-            console.log(
-              `PR has ${approvedReviewers.length}/${requiredApprovals} approvals, re-requesting review from @${owner}/${maintainerTeam}.`
-            );
-
-            try {
-              await github.rest.pulls.requestReviewers({
-                owner,
-                repo,
-                pull_number,
-                team_reviewers: [maintainerTeam],
-              });
-            } catch (error) {
-              core.warning(`Failed to re-request review from maintainers: ${error.message}`);
-            }
+          name: pr-number
+          path: /tmp/pr/number
