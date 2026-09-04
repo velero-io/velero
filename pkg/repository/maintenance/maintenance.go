@@ -43,6 +43,7 @@ import (
 	velerolabel "github.com/vmware-tanzu/velero/pkg/label"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
+	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
 	veleroutil "github.com/vmware-tanzu/velero/pkg/util/velero"
@@ -665,6 +666,15 @@ func buildJob(
 			Namespace: repo.Namespace,
 			Labels: map[string]string{
 				RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: velerov1api.SchemeGroupVersion.String(),
+					Kind:       "BackupRepository",
+					Name:       repo.Name,
+					UID:        repo.UID,
+					Controller: boolptr.True(),
+				},
 			},
 		},
 		Spec: batchv1api.JobSpec{

@@ -1499,6 +1499,7 @@ func TestBuildJob(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: "velero",
 				Name:      "test-123",
+				UID:       "test-uid-123",
 			},
 			Spec: velerov1api.BackupRepositorySpec{
 				VolumeNamespace: "test-123",
@@ -1556,6 +1557,16 @@ func TestBuildJob(t *testing.T) {
 				assert.Contains(t, job.Name, tc.expectedJobName)
 				assert.Equal(t, param.BackupRepo.Namespace, job.Namespace)
 				assert.Equal(t, param.BackupRepo.Name, job.Labels[RepositoryNameLabel])
+
+				assert.Equal(t, []metav1.OwnerReference{
+					{
+						APIVersion: velerov1api.SchemeGroupVersion.String(),
+						Kind:       "BackupRepository",
+						Name:       param.BackupRepo.Name,
+						UID:        param.BackupRepo.UID,
+						Controller: boolptr.True(),
+					},
+				}, job.OwnerReferences)
 
 				assert.Equal(t, param.BackupRepo.Name, job.Spec.Template.ObjectMeta.Labels[RepositoryNameLabel])
 
