@@ -1,6 +1,7 @@
 ![100]
 
 [![Build Status][1]][2] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3811/badge)](https://bestpractices.coreinfrastructure.org/projects/3811)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/velero-io/velero/badge)](https://scorecard.dev/viewer/?uri=github.com/velero-io/velero)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/velero-io/velero)](https://github.com/velero-io/velero/releases)
 [![GitHub stars](https://img.shields.io/github/stars/velero-io/velero)](https://github.com/velero-io/velero/stargazers)
 [![Docker Pulls](https://img.shields.io/docker/pulls/velero/velero.svg)](https://hub.docker.com/r/velero/velero)
