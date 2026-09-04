@@ -730,7 +730,7 @@ func (r *PodVolumeBackupReconciler) findPVBForPod(ctx context.Context, podObj cl
 			log.WithError(err).Warn("Failed to update PVB, prepare will halt for this PVB")
 			return []reconcile.Request{}
 		}
-	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
+	} else if unrecoverable, reason := kube.IsPodUnrecoverable(ctx, r.kubeClient, pod, log); unrecoverable {
 		err := UpdatePVBWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
 			func(pvb *velerov1api.PodVolumeBackup) bool {
 				if pvb.Spec.Cancel {

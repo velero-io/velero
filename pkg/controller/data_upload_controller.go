@@ -735,7 +735,7 @@ func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj 
 			log.WithError(err).Warn("failed to update dataupload, prepare will halt for this dataupload")
 			return []reconcile.Request{}
 		}
-	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable { // let the abnormal backup pod failed early
+	} else if unrecoverable, reason := kube.IsPodUnrecoverable(ctx, r.kubeClient, pod, log); unrecoverable { // let the abnormal backup pod failed early
 		err := UpdateDataUploadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, r.logger.WithField("dataupload", du.Name),
 			func(dataUpload *velerov2alpha1api.DataUpload) bool {
 				if dataUpload.Spec.Cancel {
