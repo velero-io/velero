@@ -204,7 +204,7 @@ func TestIsPodRunning(t *testing.T) {
 					Phase: "fake-phase",
 				},
 			},
-			err: "pod is not in the expected status, name=fake-pod, namespace=fake-ns, phase=fake-phase: pod is not running",
+			err: "pod is not in the expected status, name=fake-pod, namespace=fake-ns, phase=fake-phase: pod is not running. phase: fake-phase, reason: , message: ",
 		},
 		{
 			name: "pod is being deleted",
@@ -289,7 +289,7 @@ func TestIsPodScheduled(t *testing.T) {
 					Phase: "fake-phase",
 				},
 			},
-			err: "pod is not in the expected status, name=fake-pod, namespace=fake-ns, phase=fake-phase: pod is not running or pending",
+			err: "pod is not in the expected status, name=fake-pod, namespace=fake-ns, phase=fake-phase: pod is not running or pending. phase: fake-phase, reason: , message: ",
 		},
 		{
 			name: "pod is being deleted",
