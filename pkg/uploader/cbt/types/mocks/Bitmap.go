@@ -292,3 +292,23 @@ func (_c *Bitmap_VolumeID_Call) RunAndReturn(run func() string) *Bitmap_VolumeID
 	_c.Call.Return(run)
 	return _c
 }
+// SetError provides a mock function for the type Bitmap
+func (_mock *Bitmap) SetError(err error) {
+	_mock.Called(err)
+}
+
+// Error provides a mock function for the type Bitmap
+func (_mock *Bitmap) Error() error {
+	ret := _mock.Called()
+	if len(ret) == 0 {
+		panic("no return value specified for Error")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func() error); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}

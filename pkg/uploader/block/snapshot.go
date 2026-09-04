@@ -110,10 +110,10 @@ func snapshotSource(
 
 	bitmap := cbt.NewBitmap(blockSize, uint64(source.size), cbtSource.Snapshot, parentBackup.changeID, parentBackup.volumeID)
 
-	err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap)
+	err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap, false)
 	if err != nil {
 		parentBackup.parentObject = ""
-		log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to real full backup", cbtSource)
+		log.WithError(err).Warnf("Failed to create CBT with source %v", cbtSource)
 	}
 
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
@@ -218,19 +218,14 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 	if incremental {
 		if snapshot.Tags == nil {
 			log.Warnf("No tag from snapshot %s, fallback to full restore", snapshotID)
-			incremental = false
 		} else if snapshot.Tags[uploader.CBTChangeIDTag] == "" {
 			log.Warnf("No ChangeID tag from snapshot %s, fallback to full restore", snapshotID)
-			incremental = false
 		} else if snapshot.Tags[uploader.CBTVolumeIDTag] == "" {
 			log.Warnf("No VolumeID tag from snapshot %s, fallback to full restore", snapshotID)
-			incremental = false
 		} else if cbtSource.VolumeID == "" {
 			log.Warnf("No VolumeID in cbt source %v, fallback to full restore", cbtSource)
-			incremental = false
 		} else if snapshot.Tags[uploader.CBTVolumeIDTag] != cbtSource.VolumeID {
 			log.Warnf("VolumeID %s from snapshot %s is not expected as %s, fallback to full restore", snapshot.Tags[uploader.CBTVolumeIDTag], snapshotID, cbtSource.VolumeID)
-			incremental = false
 		} else {
 			volumeSnapshot = cbtSource.Snapshot
 			changeID = snapshot.Tags[uploader.CBTChangeIDTag]
@@ -240,8 +235,8 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 
 	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), volumeSnapshot, changeID, volumeID)
 	if incremental {
-		if err = cbt.SetBitmapOrFull(ctx, cbtService, bitmap); err != nil {
-			log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to full restore", cbtSource)
+		if err = cbt.SetBitmapOrFull(ctx, cbtService, bitmap, true); err != nil {
+			log.WithError(err).Warnf("Failed to create CBT with source %v", cbtSource)
 		}
 	} else {
 		bitmap.SetFull()

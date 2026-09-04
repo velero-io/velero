@@ -1471,6 +1471,15 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			pvr:  pvrBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get pvr",
 			pvr:      pvrBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -1498,17 +1507,25 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), pvr))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			r.OnDataPathProgress(ctx, namespace, pvrName, progress)
 			if len(test.needErrs) != 0 && !test.needErrs[0] {
 				updatedPVR := &velerov1api.PodVolumeRestore{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, updatedPVR))
-				assert.Equal(t, test.progress.TotalBytes, updatedPVR.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedPVR.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedPVR.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedPVR.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedPVR.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedPVR.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedPVR.Status.Message, progress.Message)
+				}
 			}
 		})
 	}

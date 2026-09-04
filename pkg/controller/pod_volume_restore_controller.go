@@ -44,7 +44,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	veleroapishared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
@@ -905,7 +904,21 @@ func (r *PodVolumeRestoreReconciler) OnDataPathProgress(ctx context.Context, nam
 	log := r.logger.WithField("PVR", pvrName)
 
 	if err := UpdatePVRWithRetry(ctx, r.client, types.NamespacedName{Namespace: namespace, Name: pvrName}, log, func(pvr *velerov1api.PodVolumeRestore) bool {
-		pvr.Status.Progress = veleroapishared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
+		if progress.TotalBytes != -1 {
+			pvr.Status.Progress.TotalBytes = progress.TotalBytes
+		}
+
+		if progress.BytesDone != -1 {
+			pvr.Status.Progress.BytesDone = progress.BytesDone
+		}
+
+		if progress.Message != "" {
+			message := progress.Message + ";"
+			if !strings.HasSuffix(pvr.Status.Message, message) {
+				pvr.Status.Message += message
+			}
+		}
+
 		return true
 	}); err != nil {
 		log.WithError(err).Error("Failed to update progress")

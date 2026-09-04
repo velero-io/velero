@@ -36,6 +36,7 @@ type bitmapImpl struct {
 	snapshot     string
 	changeID     string
 	volumeID     string
+	cbtError     error
 }
 
 type bitmapIterator struct {
@@ -89,6 +90,14 @@ func (c *bitmapImpl) VolumeID() string {
 	return c.volumeID
 }
 
+func (c *bitmapImpl) SetError(err error) {
+	c.cbtError = err
+}
+
+func (c *bitmapImpl) Error() error {
+	return c.cbtError
+}
+
 func (c *bitmapImpl) Iterator() types.Iterator {
 	if c.bitmap == nil {
 		return nil
@@ -114,4 +123,8 @@ func (c *bitmapIterator) Count() uint64 {
 
 func (c *bitmapIterator) BlockSize() uint {
 	return c.blockSize
+}
+
+func (c *bitmapIterator) Error() error {
+	return c.cbtError
 }

@@ -21,102 +21,148 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	cbtservicemocks "github.com/vmware-tanzu/velero/pkg/cbtservice/mocks"
-	cbtmocks "github.com/vmware-tanzu/velero/pkg/uploader/cbt/types/mocks"
 )
 
 func TestSetBitmapOrFull(t *testing.T) {
+	const mb = 1024 * 1024
 	tests := []struct {
 		name           string
 		nilService     bool
-		setupMocks     func(*cbtservicemocks.Service, *cbtmocks.Bitmap)
+		incOnly        bool
+		snapshotID     string
+		changeID       string
+		setupMocks     func(*cbtservicemocks.Service)
 		expectedErrStr string
+		expectedCount  uint64
+		expectedNext   []uint64
 	}{
 		{
-			name:       "nil service",
-			nilService: true,
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("SetFull").Return()
-			},
-			expectedErrStr: "CBT service is absent",
+			name:           "nil service",
+			nilService:     true,
+			snapshotID:     "snap-1",
+			changeID:       "change-1",
+			setupMocks:     func(svc *cbtservicemocks.Service) {},
+			expectedErrStr: "CBT service is absent, fallback to real full",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
 		},
 		{
-			name: "invalid snapshot",
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("Snapshot").Return("")
-				bmp.On("SetFull").Return()
-			},
-			expectedErrStr: "invalid snapshot",
+			name:           "invalid snapshot",
+			snapshotID:     "",
+			setupMocks:     func(svc *cbtservicemocks.Service) {},
+			expectedErrStr: "invalid snapshot, fallback to real full",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
 		},
 		{
-			name: "allocated blocks success",
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("Snapshot").Return("snap-1")
-				bmp.On("ChangeID").Return("")
+			name:           "invalid changeID",
+			incOnly:        true,
+			snapshotID:     "snap-1",
+			changeID:       "",
+			setupMocks:     func(svc *cbtservicemocks.Service) {},
+			expectedErrStr: "invalid changeID, fallback to real full",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
+		},
+		{
+			name:       "allocated blocks success",
+			snapshotID: "snap-1",
+			changeID:   "",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Run(func(args mock.Arguments) {
+					record := args.Get(2).(func([]cbtservice.Range) error)
+					record([]cbtservice.Range{
+						{Offset: 0, Length: uint64(mb)},
+						{Offset: uint64(2 * mb), Length: uint64(mb)},
+					})
+				}).Return(nil)
+			},
+			expectedCount: 2,
+			expectedNext:  []uint64{0, 2 * mb},
+		},
+		{
+			name:       "allocated blocks error",
+			snapshotID: "snap-1",
+			changeID:   "",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Return(errors.New("mock alloc error"))
+			},
+			expectedErrStr: "error getting allocated blocks from CBT service, fallback to real full: mock alloc error",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
+		},
+		{
+			name:       "changed blocks success",
+			snapshotID: "snap-1",
+			changeID:   "change-1",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Run(func(args mock.Arguments) {
+					record := args.Get(3).(func([]cbtservice.Range) error)
+					record([]cbtservice.Range{
+						{Offset: uint64(mb), Length: uint64(mb)},
+					})
+				}).Return(nil)
+			},
+			expectedCount: 1,
+			expectedNext:  []uint64{mb},
+		},
+		{
+			name:       "changed blocks error with incOnly",
+			incOnly:    true,
+			snapshotID: "snap-1",
+			changeID:   "change-1",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
+			},
+			expectedErrStr: "error getting changed blocks from CBT service, fallback to real full: mock changed error",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
+		},
+		{
+			name:       "both changed blocks error and allocated blocks error",
+			snapshotID: "snap-1",
+			changeID:   "change-1",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
+				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Return(errors.New("mock alloc error"))
+			},
+			expectedErrStr: "error getting both changed and allocated blocks from CBT service, fallback to real full: mock alloc error",
+			expectedCount:  3,
+			expectedNext:   []uint64{0, mb, 2 * mb},
+		},
+		{
+			name:       "changed blocks error fallback to full",
+			snapshotID: "snap-1",
+			changeID:   "change-1",
+			setupMocks: func(svc *cbtservicemocks.Service) {
+				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
 
 				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Run(func(args mock.Arguments) {
 					record := args.Get(2).(func([]cbtservice.Range) error)
 					record([]cbtservice.Range{
-						{Offset: 0, Length: 4096},
-						{Offset: 8192, Length: 4096},
+						{Offset: 0, Length: uint64(mb)},
+						{Offset: uint64(2 * mb), Length: uint64(mb)},
 					})
 				}).Return(nil)
-
-				bmp.On("Set", uint64(0), uint64(4096)).Return()
-				bmp.On("Set", uint64(8192), uint64(4096)).Return()
 			},
-		},
-		{
-			name: "allocated blocks error",
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("Snapshot").Return("snap-1")
-				bmp.On("ChangeID").Return("")
-
-				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Return(errors.New("mock alloc error"))
-				bmp.On("SetFull").Return()
-			},
-			expectedErrStr: "error getting allocated blocks from CBT service: mock alloc error",
-		},
-		{
-			name: "changed blocks success",
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("Snapshot").Return("snap-1")
-				bmp.On("ChangeID").Return("change-1")
-
-				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Run(func(args mock.Arguments) {
-					record := args.Get(3).(func([]cbtservice.Range) error)
-					record([]cbtservice.Range{
-						{Offset: 4096, Length: 4096},
-					})
-				}).Return(nil)
-
-				bmp.On("Set", uint64(4096), uint64(4096)).Return()
-			},
-		},
-		{
-			name: "changed blocks error",
-			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
-				bmp.On("Snapshot").Return("snap-1")
-				bmp.On("ChangeID").Return("change-1")
-
-				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
-				bmp.On("SetFull").Return()
-			},
-			expectedErrStr: "error getting changed blocks from CBT service: mock changed error",
+			expectedErrStr: "error getting changed blocks from CBT service, fallback to full: mock changed error",
+			expectedCount:  2,
+			expectedNext:   []uint64{0, 2 * mb},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svcMock := new(cbtservicemocks.Service)
-			bmpMock := new(cbtmocks.Bitmap)
 
 			if tt.setupMocks != nil {
-				tt.setupMocks(svcMock, bmpMock)
+				tt.setupMocks(svcMock)
 			}
 
 			var svc cbtservice.Service
@@ -124,7 +170,9 @@ func TestSetBitmapOrFull(t *testing.T) {
 				svc = svcMock
 			}
 
-			err := SetBitmapOrFull(context.Background(), svc, bmpMock)
+			bmp := NewBitmap(mb, 3*mb, tt.snapshotID, tt.changeID, "vol-1")
+
+			err := SetBitmapOrFull(context.Background(), svc, bmp, tt.incOnly)
 
 			if tt.expectedErrStr != "" {
 				require.Error(t, err)
@@ -136,7 +184,25 @@ func TestSetBitmapOrFull(t *testing.T) {
 			if !tt.nilService {
 				svcMock.AssertExpectations(t)
 			}
-			bmpMock.AssertExpectations(t)
+
+			iter := bmp.Iterator()
+			require.NotNil(t, iter)
+			assert.Equal(t, tt.expectedCount, iter.Count())
+
+			var actualOffsets []uint64
+			for {
+				offset, hasNext := iter.Next()
+				if !hasNext {
+					break
+				}
+				actualOffsets = append(actualOffsets, offset)
+			}
+
+			if len(tt.expectedNext) > 0 {
+				assert.Equal(t, tt.expectedNext, actualOffsets)
+			} else {
+				assert.Empty(t, actualOffsets)
+			}
 		})
 	}
 }

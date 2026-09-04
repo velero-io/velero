@@ -788,6 +788,15 @@ func TestOnDataDownloadProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			dd:   dataDownloadBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get datadownload",
 			dd:       dataDownloadBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -815,20 +824,28 @@ func TestOnDataDownloadProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), dd))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			// Call the OnDataDownloadProgress function
 			r.OnDataDownloadProgress(ctx, namespace, duName, progress)
 			if len(test.needErrs) != 0 && !test.needErrs[0] {
 				// Get the updated DataDownload object from the fake client
-				updatedDu := &velerov2alpha1api.DataDownload{}
-				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
+				updatedDd := &velerov2alpha1api.DataDownload{}
+				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDd))
 				// Assert that the DataDownload object has been updated with the progress
-				assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedDd.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedDd.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedDd.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedDd.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedDd.Status.Message, progress.Message)
+				}
 			}
 		})
 	}

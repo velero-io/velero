@@ -278,7 +278,11 @@ func (dp *generalDataPath) StartRestore(snapshotID string, target AccessPoint, u
 // UpdateProgress which implement ProgressUpdater interface to update progress status
 func (dp *generalDataPath) UpdateProgress(p *uploader.Progress) {
 	if dp.callbacks.OnProgress != nil {
-		dp.callbacks.OnProgress(context.Background(), dp.namespace, dp.jobName, &uploader.Progress{TotalBytes: p.TotalBytes, BytesDone: p.BytesDone})
+		dp.callbacks.OnProgress(context.Background(), dp.namespace, dp.jobName, &uploader.Progress{
+			TotalBytes: p.TotalBytes,
+			BytesDone:  p.BytesDone,
+			Message:    p.Message,
+		})
 	}
 }
 

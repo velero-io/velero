@@ -810,6 +810,15 @@ func TestOnDataUploadProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			du:   dataUploadBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get dataupload",
 			du:       dataUploadBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -837,10 +846,7 @@ func TestOnDataUploadProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), du))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			// Call the OnDataUploadProgress function
 			r.OnDataUploadProgress(ctx, namespace, duName, progress)
@@ -849,8 +855,19 @@ func TestOnDataUploadProgress(t *testing.T) {
 				updatedDu := &velerov2alpha1api.DataUpload{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
 				// Assert that the DataUpload object has been updated with the progress
-				assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedDu.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedDu.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedDu.Status.Message, progress.Message)
+				}
 			}
 		})
 	}

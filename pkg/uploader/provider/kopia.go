@@ -166,7 +166,7 @@ func (kp *kopiaProvider) RunBackup(
 		uploaderCfg[kopia.UploaderConfigMultipartKey] = "true"
 	}
 
-	snapshotInfo, _, err := kopiaBackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, uploaderCfg, tags, log)
+	snapshotInfo, _, err := kopiaBackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, uploaderCfg, tags, updater, log)
 	if err != nil {
 		snapshotID := ""
 		if snapshotInfo != nil {

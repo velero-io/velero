@@ -35,6 +35,12 @@ type Bitmap interface {
 
 	// Iterator returns the iterator for the CBT Bitmap
 	Iterator() Iterator
+
+	// SetError sets CBT error when preparing this bitmap
+	SetError(error)
+
+	// Error returns the CBT error when preparing this bitmap
+	Error() error
 }
 
 // Iterator defines the methods to iterate the CBT bitmap and query the associated information
@@ -56,4 +62,7 @@ type Iterator interface {
 
 	// Next returns the offset of the next set block and whether it comes to the end of the iteration
 	Next() (uint64, bool)
+
+	// Error returns the CBT error when preparing this bitmap
+	Error() error
 }

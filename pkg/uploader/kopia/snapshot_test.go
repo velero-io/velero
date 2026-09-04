@@ -200,7 +200,7 @@ func TestSnapshotSource(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := injectSnapshotFuncs()
 			MockFuncs(s, tc.args)
-			_, _, err = SnapshotSource(ctx, s.repoWriterMock, s.uploderMock, sourceInfo, rootDir, false, "/", nil, tc.uploaderCfg, log, "TestSnapshotSource")
+			_, _, err = SnapshotSource(ctx, s.repoWriterMock, s.uploderMock, sourceInfo, rootDir, false, "/", nil, tc.uploaderCfg, &fakeProgressUpdater{}, log, "TestSnapshotSource")
 			if tc.notError {
 				assert.NoError(t, err)
 			} else {
@@ -648,9 +648,9 @@ func TestBackup(t *testing.T) {
 			var snapshotInfo *uploader.SnapshotInfo
 			var err error
 			if tc.isEmptyUploader {
-				snapshotInfo, isSnapshotEmpty, err = Backup(t.Context(), nil, s.repoWriterMock, tc.sourcePath, "", tc.forceFull, tc.parentSnapshot, tc.volMode, map[string]string{}, tc.tags, &logrus.Logger{})
+				snapshotInfo, isSnapshotEmpty, err = Backup(t.Context(), nil, s.repoWriterMock, tc.sourcePath, "", tc.forceFull, tc.parentSnapshot, tc.volMode, map[string]string{}, tc.tags, &fakeProgressUpdater{}, &logrus.Logger{})
 			} else {
-				snapshotInfo, isSnapshotEmpty, err = Backup(t.Context(), s.uploderMock, s.repoWriterMock, tc.sourcePath, "", tc.forceFull, tc.parentSnapshot, tc.volMode, map[string]string{}, tc.tags, &logrus.Logger{})
+				snapshotInfo, isSnapshotEmpty, err = Backup(t.Context(), s.uploderMock, s.repoWriterMock, tc.sourcePath, "", tc.forceFull, tc.parentSnapshot, tc.volMode, map[string]string{}, tc.tags, &fakeProgressUpdater{}, &logrus.Logger{})
 			}
 			// Check if the returned error matches the expected error
 			if tc.expectedError != nil {

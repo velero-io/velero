@@ -153,7 +153,8 @@ func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snap
 
 // Backup backup specific sourcePath and update progress
 func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.RepositoryWriter, sourcePath string, realSource string,
-	forceFull bool, parentSnapshot string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, tags map[string]string, log logrus.FieldLogger) (*uploader.SnapshotInfo, bool, error) {
+	forceFull bool, parentSnapshot string, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, tags map[string]string,
+	updater uploader.ProgressUpdater, log logrus.FieldLogger) (*uploader.SnapshotInfo, bool, error) {
 	if fsUploader == nil {
 		return nil, false, errors.New("get empty kopia uploader")
 	}
@@ -189,7 +190,7 @@ func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.Re
 
 	kopiaCtx := kopia.SetupKopiaLog(ctx, log)
 
-	snapID, snapshotSize, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, uploaderCfg, log, "Kopia Uploader")
+	snapID, snapshotSize, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, uploaderCfg, updater, log, "Kopia Uploader")
 	snapshotInfo := &uploader.SnapshotInfo{
 		ID:   snapID,
 		Size: snapshotSize,
@@ -237,6 +238,7 @@ func SnapshotSource(
 	parentSnapshot string,
 	snapshotTags map[string]string,
 	uploaderCfg map[string]string,
+	updater uploader.ProgressUpdater,
 	log logrus.FieldLogger,
 	description string,
 ) (string, int64, error) {
@@ -248,21 +250,29 @@ func SnapshotSource(
 		if parentSnapshot != "" {
 			log.Infof("Using provided parent snapshot %s", parentSnapshot)
 
-			mani, err := loadSnapshotFunc(ctx, rep, manifest.ID(parentSnapshot))
-			if err != nil {
+			if mani, err := loadSnapshotFunc(ctx, rep, manifest.ID(parentSnapshot)); err != nil {
 				log.WithError(err).Warnf("Failed to load previous snapshot %v from kopia, fallback to full backup", parentSnapshot)
+				updater.UpdateProgress(&uploader.Progress{
+					BytesDone:  -1,
+					TotalBytes: -1,
+					Message:    fmt.Sprintf("Failed to load previous snapshot %v, fallback to full backup. Err: %v", parentSnapshot, err),
+				})
 			} else {
 				previous = append(previous, mani)
 			}
 		} else {
 			log.Infof("Searching for parent snapshot")
 
-			pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, snapshotTags, nil, log)
-			if err != nil {
-				return "", 0, errors.Wrapf(err, "Failed to find previous kopia snapshot manifests for si %v", sourceInfo)
+			if pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, snapshotTags, nil, log); err != nil {
+				log.WithError(err).Warnf("Failed to find previous kopia snapshot manifests for si %v, fallback to full backup", sourceInfo)
+				updater.UpdateProgress(&uploader.Progress{
+					BytesDone:  -1,
+					TotalBytes: -1,
+					Message:    fmt.Sprintf("Failed to find previous snapshots, fallback to full backup. Err: %v", err),
+				})
+			} else {
+				previous = pre
 			}
-
-			previous = pre
 		}
 	} else {
 		log.Info("Forcing full snapshot")

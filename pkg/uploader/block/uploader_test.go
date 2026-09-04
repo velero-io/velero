@@ -295,6 +295,8 @@ func TestBlockUploaderBackup(t *testing.T) {
 			var iterator cbt.Iterator
 			if !tc.nilBitmap {
 				iterMock := cbtmocks.NewIterator(t)
+				iterMock.On("Error").Return(nil).Maybe()
+				iterMock.On("Error").Return(nil).Maybe()
 				iterator = iterMock
 
 				backupMode := udmrepo.ObjectDataBackupModeInc
@@ -573,6 +575,7 @@ func TestRestoreData(t *testing.T) {
 		reader := bytes.NewReader(data)
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
@@ -603,6 +606,7 @@ func TestRestoreData(t *testing.T) {
 		reader := &errReader{err: errors.New("read error")}
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
@@ -623,6 +627,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(nil, errors.New("meta not found"))
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 		_, _, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "meta not found")
@@ -680,6 +685,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		}
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
@@ -708,6 +714,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		}
 		dest := destInfo{size: 4194304, path: "/dev/target"}
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 
 		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.Error(t, err)
@@ -732,6 +739,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		}
 		dest := destInfo{size: 512, path: "/dev/small"}
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Error").Return(nil).Maybe()
 
 		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.Error(t, err)
