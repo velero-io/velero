@@ -1,0 +1,1 @@
+Guard nil VolumeSnapshotContent.Status in generateVolumeInfoForCSIVolumeSnapshot to avoid a panic during backup finalization when the snapshot controller has not yet written the content status
