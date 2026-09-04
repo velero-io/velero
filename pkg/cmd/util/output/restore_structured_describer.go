@@ -196,6 +196,13 @@ func describeRestoreSpecInSF(d *StructuredDescriber, spec velerov1api.RestoreSpe
 		specInfo["existingResourcePolicy"] = emptyDisplay
 	}
 
+	// existing volume data policy
+	if spec.ExistingVolumeDataPolicy != "" {
+		specInfo["existingVolumeDataPolicy"] = string(spec.ExistingVolumeDataPolicy)
+	} else {
+		specInfo["existingVolumeDataPolicy"] = emptyDisplay
+	}
+
 	specInfo["itemOperationTimeout"] = spec.ItemOperationTimeout.Duration.String()
 	specInfo["preserveNodePorts"] = BoolPointerString(spec.PreserveNodePorts, "false", "true", "auto")
 
@@ -360,12 +367,22 @@ func describeCSISnapshotsRestoresInSF(d *StructuredDescriber, restoreVolInfo []v
 				}
 				continue
 			}
+			dmInfo := map[string]any{
+				"operationID":  info.SnapshotDataMovementInfo.OperationID,
+				"dataMover":    info.SnapshotDataMovementInfo.DataMover,
+				"uploaderType": info.SnapshotDataMovementInfo.UploaderType,
+			}
+			if info.SnapshotDataMovementInfo.RestoreType != "" {
+				dmInfo["restoreType"] = info.SnapshotDataMovementInfo.RestoreType
+			}
+			if info.SnapshotDataMovementInfo.Size > 0 {
+				dmInfo["size"] = info.SnapshotDataMovementInfo.Size
+			}
+			if info.SnapshotDataMovementInfo.IncrementalSize != nil {
+				dmInfo["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
+			}
 			csiRestores[key] = map[string]any{
-				"dataMovement": map[string]any{
-					"operationID":  info.SnapshotDataMovementInfo.OperationID,
-					"dataMover":    info.SnapshotDataMovementInfo.DataMover,
-					"uploaderType": info.SnapshotDataMovementInfo.UploaderType,
-				},
+				"dataMovement": dmInfo,
 			}
 		} else {
 			csiRestores[key] = map[string]any{

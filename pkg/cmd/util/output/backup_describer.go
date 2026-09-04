@@ -249,6 +249,10 @@ func DescribeBackupSpec(d *Describer, spec velerov1api.BackupSpec) {
 	}
 	d.Printf("Data Mover:\t%s\n", s)
 
+	if string(spec.BackupType) != "" {
+		d.Printf("Backup Type:\t%s\n", spec.BackupType)
+	}
+
 	d.Println()
 	d.Printf("TTL:\t%s\n", spec.TTL.Duration)
 
@@ -746,6 +750,10 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			d.Printf("\t\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
 		}
+		if info.SnapshotDataMovementInfo.ParentSnapshot != "" {
+			d.Printf("\t\t\t\tParent Snapshot: %s\n", info.SnapshotDataMovementInfo.ParentSnapshot)
+		}
+
 		d.Printf("\t\t\t\tResult: %s\n", info.Result)
 	} else {
 		d.Printf("\t\t\tData Movement: %s\n", "included, specify --details for more information")
