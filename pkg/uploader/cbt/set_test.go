@@ -34,6 +34,7 @@ func TestSetBitmapOrFull(t *testing.T) {
 		name           string
 		nilService     bool
 		setupMocks     func(*cbtservicemocks.Service, *cbtmocks.Bitmap)
+		expectedTier   Tier
 		expectedErrStr string
 	}{
 		{
@@ -42,6 +43,7 @@ func TestSetBitmapOrFull(t *testing.T) {
 			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
 				bmp.On("SetFull").Return()
 			},
+			expectedTier:   TierFull,
 			expectedErrStr: "CBT service is absent",
 		},
 		{
@@ -50,6 +52,7 @@ func TestSetBitmapOrFull(t *testing.T) {
 				bmp.On("Snapshot").Return("")
 				bmp.On("SetFull").Return()
 			},
+			expectedTier:   TierFull,
 			expectedErrStr: "invalid snapshot",
 		},
 		{
@@ -69,6 +72,7 @@ func TestSetBitmapOrFull(t *testing.T) {
 				bmp.On("Set", uint64(0), uint64(4096)).Return()
 				bmp.On("Set", uint64(8192), uint64(4096)).Return()
 			},
+			expectedTier: TierAllocated,
 		},
 		{
 			name: "allocated blocks error",
@@ -79,6 +83,7 @@ func TestSetBitmapOrFull(t *testing.T) {
 				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Return(errors.New("mock alloc error"))
 				bmp.On("SetFull").Return()
 			},
+			expectedTier:   TierFull,
 			expectedErrStr: "error getting allocated blocks from CBT service: mock alloc error",
 		},
 		{
@@ -96,17 +101,41 @@ func TestSetBitmapOrFull(t *testing.T) {
 
 				bmp.On("Set", uint64(4096), uint64(4096)).Return()
 			},
+			expectedTier: TierChanged,
 		},
 		{
-			name: "changed blocks error",
+			name: "changed blocks error degrades to allocated blocks",
 			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
 				bmp.On("Snapshot").Return("snap-1")
 				bmp.On("ChangeID").Return("change-1")
 
 				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
+
+				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Run(func(args mock.Arguments) {
+					record := args.Get(2).(func([]cbtservice.Range) error)
+					record([]cbtservice.Range{
+						{Offset: 0, Length: 4096},
+					})
+				}).Return(nil)
+
+				bmp.On("Set", uint64(0), uint64(4096)).Return()
+				// SetFull must NOT be called: the allocated-blocks tier satisfied the request.
+			},
+			expectedTier:   TierAllocated,
+			expectedErrStr: "error getting changed blocks from CBT service: mock changed error",
+		},
+		{
+			name: "changed and allocated blocks both fail",
+			setupMocks: func(svc *cbtservicemocks.Service, bmp *cbtmocks.Bitmap) {
+				bmp.On("Snapshot").Return("snap-1")
+				bmp.On("ChangeID").Return("change-1")
+
+				svc.On("GetChangedBlocks", mock.Anything, "snap-1", "change-1", mock.Anything).Return(errors.New("mock changed error"))
+				svc.On("GetAllocatedBlocks", mock.Anything, "snap-1", mock.Anything).Return(errors.New("mock alloc error"))
 				bmp.On("SetFull").Return()
 			},
-			expectedErrStr: "error getting changed blocks from CBT service: mock changed error",
+			expectedTier:   TierFull,
+			expectedErrStr: "error getting allocated blocks from CBT service after changed blocks failed (mock changed error): mock alloc error",
 		},
 	}
 
@@ -124,7 +153,9 @@ func TestSetBitmapOrFull(t *testing.T) {
 				svc = svcMock
 			}
 
-			err := SetBitmapOrFull(context.Background(), svc, bmpMock)
+			tier, err := SetBitmapOrFull(context.Background(), svc, bmpMock)
+
+			require.Equal(t, tt.expectedTier, tier)
 
 			if tt.expectedErrStr != "" {
 				require.Error(t, err)

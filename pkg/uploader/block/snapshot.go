@@ -89,6 +89,7 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 	return snapshotInfo, false, err
 }
 
+//nolint:unparam // description is part of the function's public contract, not dead weight
 func snapshotSource(
 	ctx context.Context,
 	rep udmrepo.BackupRepo,
@@ -110,10 +111,25 @@ func snapshotSource(
 
 	bitmap := cbt.NewBitmap(blockSize, uint64(source.size), cbtSource.Snapshot, parentBackup.changeID, parentBackup.volumeID)
 
-	err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap)
-	if err != nil {
+	tier, err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap)
+	if tier == cbt.TierAllocated && err != nil {
+		// The bitmap describes blocks that are allocated *now*, not blocks that changed.
+		// The uploader only writes bitmap blocks and lets everything else resolve to the
+		// parent object, so a block that was written in the parent and has since been
+		// discarded would be inherited back from the parent instead of reading as a hole.
+		// Drop the parent so the object is written in full mode, where unwritten ranges
+		// are holes. This is still far cheaper than a whole-device transfer.
 		parentBackup.parentObject = ""
-		log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to real full backup", cbtSource)
+	}
+	// TierFull deliberately leaves parentBackup.parentObject untouched: every block is
+	// dirty, so every block is written and nothing can be inherited, but the parent was
+	// resolved from the repository's own snapshot manifests independently of the CBT
+	// service and remains a correct dedup base.
+	if err != nil {
+		// SetBitmapOrFull's own error already distinguishes allocated-blocks degradation
+		// from a real whole-device fallback; this caller only needs to know something
+		// less than an exact delta was used, not which tier it degraded to.
+		log.WithError(err).Warnf("CBT bitmap degraded for source %v", cbtSource)
 	}
 
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
@@ -240,8 +256,8 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 
 	bitmap := cbt.NewBitmap(blockSize, uint64(snapshot.TotalSize), volumeSnapshot, changeID, volumeID)
 	if incremental {
-		if err = cbt.SetBitmapOrFull(ctx, cbtService, bitmap); err != nil {
-			log.WithError(err).Warnf("Failed to create CBT with source %v, fallback to full restore", cbtSource)
+		if tier, err := cbt.SetBitmapOrFull(ctx, cbtService, bitmap); err != nil {
+			log.WithError(err).Warnf("Failed to create CBT with source %v (tier %v), fallback to full restore", cbtSource, tier)
 		}
 	} else {
 		bitmap.SetFull()
