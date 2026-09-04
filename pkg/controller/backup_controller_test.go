@@ -354,6 +354,191 @@ func TestPrepareBackupRequest_EmptyIncludedNamespacesNormalizedToWildcard(t *tes
 	assert.Equal(t, []string{"*"}, res.Spec.IncludedNamespaces)
 }
 
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_ReplacesWildcardBaseline verifies that
+// when includedNamespacesByLabel is configured and BackupSpec.IncludedNamespaces was left
+// empty (normalized to the ["*"] wildcard), the label-resolved namespace set REPLACES the
+// wildcard baseline rather than being unioned into it - otherwise "all" unioned with anything
+// is still "all", defeating the feature.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_ReplacesWildcardBaseline(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=platform"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+	nsOther := builder.ForNamespace("other-ns").ObjectMeta(builder.WithLabels("team", "infra")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsPlatform, nsOther)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.Equal(t, []string{"platform-ns"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_UnionsWithExplicitIncludes verifies that
+// when BackupSpec.IncludedNamespaces already has explicit names, the label-resolved set is
+// additive (unioned), not a replacement.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_UnionsWithExplicitIncludes(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=platform"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsPlatform)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().IncludedNamespaces("explicit-ns").Result()
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.ElementsMatch(t, []string{"explicit-ns", "platform-ns"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_ZeroMatchesStaysEmpty verifies that a
+// configured includedNamespacesByLabel selector matching zero namespaces today produces an
+// EMPTY included set, not a fall-through to "all namespaces" - this is deliberate fail-safe
+// behavior, not a bug.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_ZeroMatchesStaysEmpty(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=nonexistent"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsOther := builder.ForNamespace("other-ns").ObjectMeta(builder.WithLabels("team", "infra")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsOther)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.Empty(t, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_ExcludedNamespacesByLabel_Subtracted verifies excludedNamespacesByLabel
+// resolves independently and is merged into BackupSpec.ExcludedNamespaces, regardless of whether
+// includedNamespacesByLabel is configured.
+func TestPrepareBackupRequest_ExcludedNamespacesByLabel_Subtracted(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  excludedNamespacesByLabel:
+  - "confidential=true"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsConfidential := builder.ForNamespace("secret-ns").ObjectMeta(builder.WithLabels("confidential", "true")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsConfidential)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	// includedNamespacesByLabel not configured, so baseline stays the wildcard.
+	assert.Equal(t, []string{"*"}, res.Spec.IncludedNamespaces)
+	assert.Equal(t, []string{"secret-ns"}, res.Spec.ExcludedNamespaces)
+}
+
 func Test_prepareBackupRequest_BackupStorageLocation(t *testing.T) {
 	var (
 		defaultBackupTTL      = metav1.Duration{Duration: 24 * 30 * time.Hour}
