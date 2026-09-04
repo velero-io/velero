@@ -43,6 +43,7 @@ import (
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	datamovercli "github.com/vmware-tanzu/velero/pkg/cmd/cli/datamover"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
@@ -2536,4 +2537,33 @@ func TestCleanUp_SecretsAndConfigMaps(t *testing.T) {
 
 	_, err = fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "other-secret", metav1.GetOptions{})
 	assert.NoError(t, err, "unrelated secret should not be deleted")
+}
+
+// TestBackupPodCBTServiceSAFlagMatchesDatamoverBackupFlags pins the contract between the
+// flag createBackupPod emits for the CSI snapshot metadata service's service account and
+// the flag NewBackupCommand actually registers to consume it. These previously drifted
+// (exposer emitted --csi-snapshot-metadata-service-sa, the datamover backup command only
+// registered --cbt-sa-name), so cobra rejected the unknown flag and the data mover pod
+// exited immediately whenever a dedicated CBT service account was configured. This test
+// fails if either side changes the flag name without the other.
+func TestBackupPodCBTServiceSAFlagMatchesDatamoverBackupFlags(t *testing.T) {
+	const saName = "cbt-service-account"
+
+	// The exact line in createBackupPod (pkg/exposer/csi_snapshot.go) that builds this arg:
+	//   args = append(args, fmt.Sprintf("--cbt-sa-name=%s", csiSnapshotMetadataServiceConfigs.SAName))
+	arg := fmt.Sprintf("--cbt-sa-name=%s", saName)
+
+	cmd := datamovercli.NewBackupCommand(nil)
+	err := cmd.ParseFlags([]string{
+		"--volume-path=/dev/vol",
+		"--volume-mode=Filesystem",
+		"--data-upload=du-test",
+		"--resource-timeout=1m",
+		arg,
+	})
+	require.NoError(t, err, "datamover backup command must accept the flag the exposer emits")
+
+	got, err := cmd.Flags().GetString("cbt-sa-name")
+	require.NoError(t, err)
+	assert.Equal(t, saName, got)
 }
