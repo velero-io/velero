@@ -75,6 +75,7 @@ func NewPodVolumeBackupReconciler(
 	privileged bool,
 	podLabels map[string]string,
 	podAnnotations map[string]string,
+	tolerations []corev1api.Toleration,
 ) *PodVolumeBackupReconciler {
 	return &PodVolumeBackupReconciler{
 		client:                client,
@@ -94,6 +95,7 @@ func NewPodVolumeBackupReconciler(
 		privileged:            privileged,
 		podLabels:             podLabels,
 		podAnnotations:        podAnnotations,
+		tolerations:           tolerations,
 	}
 }
 
@@ -117,6 +119,7 @@ type PodVolumeBackupReconciler struct {
 	privileged            bool
 	podLabels             map[string]string
 	podAnnotations        map[string]string
+	tolerations           []corev1api.Toleration
 }
 
 // +kubebuilder:rbac:groups=velero.io,resources=podvolumebackups,verbs=get;list;watch;create;update;patch;delete
@@ -852,15 +855,9 @@ func (r *PodVolumeBackupReconciler) setupExposeParam(pvb *velerov1api.PodVolumeB
 		}
 	}
 
-	hostingPodTolerations := []corev1api.Toleration{}
-	for _, k := range util.ThirdPartyTolerations {
-		if v, err := nodeagent.GetToleration(context.Background(), r.kubeClient, pvb.Namespace, k, nodeOS); err != nil {
-			if err != nodeagent.ErrNodeAgentTolerationNotFound {
-				log.WithError(err).Warnf("Failed to check node-agent toleration, skip adding host pod toleration %s", k)
-			}
-		} else {
-			hostingPodTolerations = append(hostingPodTolerations, *v)
-		}
+	hostingPodTolerations, err := nodeagent.GetTolerations(context.Background(), r.kubeClient, pvb.Namespace, nodeOS, r.tolerations)
+	if err != nil {
+		log.WithError(err).Warn("Failed to get node-agent daemonset tolerations, hosting pod will only get configured tolerations")
 	}
 
 	return exposer.PodVolumeExposeParam{

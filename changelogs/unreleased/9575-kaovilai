@@ -1,0 +1,1 @@
+Add configurable tolerations to the node-agent-configmap for PodVolumeBackup and data mover pods; DaemonSet tolerations matching the existing third-party allowlist (kubernetes.azure.com/scalesetpriority, CriticalAddonsOnly) continue to be inherited automatically and are merged with the configmap value

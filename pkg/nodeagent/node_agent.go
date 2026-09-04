@@ -31,6 +31,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -55,7 +56,6 @@ var (
 	ErrDaemonSetNotFound           = errors.New("daemonset not found")
 	ErrNodeAgentLabelNotFound      = errors.New("node-agent label not found")
 	ErrNodeAgentAnnotationNotFound = errors.New("node-agent annotation not found")
-	ErrNodeAgentTolerationNotFound = errors.New("node-agent toleration not found")
 )
 
 func IsRunningOnLinux(ctx context.Context, kubeClient kubernetes.Interface, namespace string) error {
@@ -249,7 +249,14 @@ func GetAnnotationValue(ctx context.Context, kubeClient kubernetes.Interface, na
 	return val, nil
 }
 
-func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespace string, key string, osType string) (*corev1api.Toleration, error) {
+// GetTolerations returns the tolerations that should be applied to a node-agent-driven
+// hosting pod: the explicitly configured tolerations (typically sourced from the
+// node-agent-configmap), plus any toleration on the node-agent daemonset (linux or
+// windows, based on osType) whose key is in util.ThirdPartyTolerations. The combined
+// list is deduplicated by kube.DeduplicateTolerations. On a daemonset lookup error,
+// configuredTolerations is still returned alongside the error so callers don't lose
+// explicitly configured tolerations to a transient lookup failure.
+func GetTolerations(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string, configuredTolerations []corev1api.Toleration) ([]corev1api.Toleration, error) {
 	dsName := daemonSet
 	if osType == kube.NodeOSWindows {
 		dsName = daemonsetWindows
@@ -257,16 +264,21 @@ func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespa
 
 	ds, err := kubeClient.AppsV1().DaemonSets(namespace).Get(ctx, dsName, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting %s daemonset", dsName)
+		return configuredTolerations, errors.Wrapf(err, "error getting %s daemonset", dsName)
 	}
 
-	for i, t := range ds.Spec.Template.Spec.Tolerations {
-		if t.Key == key {
-			return &ds.Spec.Template.Spec.Tolerations[i], nil
+	merged := make([]corev1api.Toleration, 0, len(configuredTolerations)+len(ds.Spec.Template.Spec.Tolerations))
+	merged = append(merged, configuredTolerations...)
+	for _, t := range ds.Spec.Template.Spec.Tolerations {
+		for _, allowed := range util.ThirdPartyTolerations {
+			if t.Key == allowed {
+				merged = append(merged, t)
+				break
+			}
 		}
 	}
 
-	return nil, ErrNodeAgentTolerationNotFound
+	return kube.DeduplicateTolerations(merged), nil
 }
 
 func GetHostPodPath(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string) (string, error) {

@@ -157,6 +157,7 @@ func initPVBReconcilerWithError(needError ...error) (*PodVolumeBackupReconciler,
 		false, // privileged
 		nil,   // podLabels
 		nil,   // podAnnotations
+		nil,   // tolerations
 	), nil
 }
 
@@ -1300,6 +1301,7 @@ func TestPodVolumeBackupSetupExposeParam(t *testing.T) {
 				true,
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act

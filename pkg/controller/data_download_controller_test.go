@@ -151,6 +151,7 @@ func initDataDownloadReconcilerWithError(t *testing.T, objects []any, needError 
 		nil, // podLabels
 		nil, // podAnnotations
 		nil, // snapshotMetadataServiceConfigs
+		nil, // tolerations
 	), nil
 }
 
@@ -1447,7 +1448,8 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
-				nil,
+				nil, // snapshotMetadataServiceConfigs
+				nil, // tolerations
 			)
 
 			// Act

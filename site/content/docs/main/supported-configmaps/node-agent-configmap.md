@@ -498,6 +498,37 @@ The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVo
 - **Explicit Configuration Required**: If you need both custom annotations and in-tree third-party annotations, explicitly include the in-tree annotations in the `podAnnotations` configuration
 - **In-tree Annotations**: The default in-tree annotations include support for AWS IAM roles
 
+### Tolerations Configuration (`tolerations`)
+
+Add customized tolerations for data mover pods to allow scheduling on nodes with custom taints.
+
+Unlike `podLabels`/`podAnnotations`, `tolerations` does **not** replace Velero's [in-tree third-party toleration allowlist](https://github.com/vmware-tanzu/velero/blob/main/pkg/util/third_party.go). Any toleration on the node-agent DaemonSet whose key is in that allowlist (currently `kubernetes.azure.com/scalesetpriority` and `CriticalAddonsOnly`) is always merged in alongside the tolerations configured here, with duplicates removed.
+
+The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods. This does not affect repository maintenance jobs, which inherit tolerations from the Velero Deployment directly.
+
+#### Configuration Example
+```json
+{
+  "tolerations": [
+    {
+      "key": "dedicated",
+      "operator": "Equal",
+      "value": "backup",
+      "effect": "NoSchedule"
+    }
+  ]
+}
+```
+
+#### Use Cases
+- **Dedicated Backup Node Pools**: Nodes tainted to only run backup/restore workloads
+- **Spot/Preemptible Node Pools**: Additional spot-instance taints beyond the built-in Azure allowlist
+- **Custom Maintenance Taints**: Nodes with `NoExecute` taints applied during maintenance windows
+
+#### Important Notes
+- **Merge, Not Replace**: `tolerations` is merged with (not a replacement for) the in-tree third-party allowlisted tolerations inherited from the node-agent DaemonSet
+- **Deduplication**: Identical tolerations (same key, operator, value, and effect) from either source are only applied once
+
 ## Complete Configuration Example
 Here's a comprehensive example showing how all configuration sections work together:
 
@@ -579,7 +610,15 @@ Here's a comprehensive example showing how all configuration sections work toget
     "vault.hashicorp.com/agent-inject": "true",
     "prometheus.io/scrape": "true",
     "custom.company.com/environment": "production"
-  }
+  },
+  "tolerations": [
+    {
+      "key": "dedicated",
+      "operator": "Equal",
+      "value": "backup",
+      "effect": "NoSchedule"
+    }
+  ]
 }
 ```
 
@@ -596,6 +635,7 @@ This configuration:
 - Enable cache PVC for file system restore
 - The cache threshold is 1GB and use dedicated StorageClass
 - Use customized labels and annotations data mover pods
+- Tolerate the `dedicated=backup:NoSchedule` taint, merged with any allowlisted DaemonSet tolerations
 
 ## Troubleshooting
 

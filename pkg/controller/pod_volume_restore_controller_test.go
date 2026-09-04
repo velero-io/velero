@@ -751,6 +751,7 @@ func initPodVolumeRestoreReconcilerWithError(objects []runtime.Object, cliObj []
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // tolerations
 	), nil
 }
 
@@ -1335,6 +1336,7 @@ func TestPodVolumeRestoreSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
