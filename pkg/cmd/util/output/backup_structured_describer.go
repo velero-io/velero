@@ -83,35 +83,14 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 
 	// describe namespaces
 	namespaceInfo := make(map[string]any)
-	if len(spec.IncludedNamespaces) == 0 {
-		s = "*"
-	} else {
-		s = strings.Join(spec.IncludedNamespaces, ", ")
-	}
-	namespaceInfo["included"] = s
-	if len(spec.ExcludedNamespaces) == 0 {
-		s = emptyDisplay
-	} else {
-		s = strings.Join(spec.ExcludedNamespaces, ", ")
-	}
-	namespaceInfo["excluded"] = s
+	namespaceInfo["included"] = JoinStringWithFallback(spec.IncludedNamespaces, "*")
+	namespaceInfo["excluded"] = JoinStringWithFallback(spec.ExcludedNamespaces, emptyDisplay)
 	backupSpecInfo["namespaces"] = namespaceInfo
 
 	// describe resources
 	resourcesInfo := make(map[string]string)
-	if len(spec.IncludedResources) == 0 {
-		s = "*"
-	} else {
-		s = strings.Join(spec.IncludedResources, ", ")
-	}
-	resourcesInfo["included"] = s
-
-	if len(spec.ExcludedResources) == 0 {
-		s = emptyDisplay
-	} else {
-		s = strings.Join(spec.ExcludedResources, ", ")
-	}
-	resourcesInfo["excluded"] = s
+	resourcesInfo["included"] = JoinStringWithFallback(spec.IncludedResources, "*")
+	resourcesInfo["excluded"] = JoinStringWithFallback(spec.ExcludedResources, emptyDisplay)
 	resourcesInfo["clusterScoped"] = BoolPointerString(spec.IncludeClusterResources, "excluded", "included", "auto")
 	backupSpecInfo["resources"] = resourcesInfo
 
@@ -150,33 +129,13 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 		ResourceDetails := make(map[string]any)
 		var s string
 		namespaceInfo := make(map[string]string)
-		if len(backupResourceHookSpec.IncludedNamespaces) == 0 {
-			s = "*"
-		} else {
-			s = strings.Join(backupResourceHookSpec.IncludedNamespaces, ", ")
-		}
-		namespaceInfo["included"] = s
-		if len(backupResourceHookSpec.ExcludedNamespaces) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(backupResourceHookSpec.ExcludedNamespaces, ", ")
-		}
-		namespaceInfo["excluded"] = s
+		namespaceInfo["included"] = JoinStringWithFallback(backupResourceHookSpec.IncludedNamespaces, "*")
+		namespaceInfo["excluded"] = JoinStringWithFallback(backupResourceHookSpec.ExcludedNamespaces, emptyDisplay)
 		ResourceDetails["namespaces"] = namespaceInfo
 
 		resourcesInfo := make(map[string]string)
-		if len(backupResourceHookSpec.IncludedResources) == 0 {
-			s = "*"
-		} else {
-			s = strings.Join(backupResourceHookSpec.IncludedResources, ", ")
-		}
-		resourcesInfo["included"] = s
-		if len(backupResourceHookSpec.ExcludedResources) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(backupResourceHookSpec.ExcludedResources, ", ")
-		}
-		resourcesInfo["excluded"] = s
+		resourcesInfo["included"] = JoinStringWithFallback(backupResourceHookSpec.IncludedResources, "*")
+		resourcesInfo["excluded"] = JoinStringWithFallback(backupResourceHookSpec.ExcludedResources, emptyDisplay)
 		ResourceDetails["resources"] = resourcesInfo
 
 		s = emptyDisplay

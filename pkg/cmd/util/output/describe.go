@@ -110,6 +110,14 @@ func (d *Describer) DescribeSlice(preindent int, name string, s []string) {
 	}
 }
 
+// JoinStringWithFallback returns a comma-separated string of the slice, or the fallback string if the slice is empty.
+func JoinStringWithFallback(s []string, fallback string) string {
+	if len(s) == 0 {
+		return fallback
+	}
+	return strings.Join(s, ", ")
+}
+
 // BoolPointerString returns the appropriate string based on the bool pointer's value.
 func BoolPointerString(b *bool, falseString, trueString, nilString string) string {
 	if b == nil {
