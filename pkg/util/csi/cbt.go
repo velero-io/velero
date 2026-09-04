@@ -64,6 +64,11 @@ func GetCBTInfo(ctx context.Context, kubeClient kubernetes.Interface, log logrus
 
 		if vsc.Status != nil && vsc.Status.SnapshotHandle != nil {
 			cbtInfo.ChangeID = *vsc.Status.SnapshotHandle
+		} else if vsc.Spec.Source.SnapshotHandle != nil {
+			// The backup VSC is statically provisioned from the source VSC's
+			// snapshot handle; its status is populated asynchronously and may
+			// not be set yet, but the handle is already in the spec.
+			cbtInfo.ChangeID = *vsc.Spec.Source.SnapshotHandle
 		}
 
 		if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
