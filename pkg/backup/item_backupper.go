@@ -244,7 +244,29 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 			// already backed up (this would be in a read-write-many scenario,
 			// where it's been backed up from another pod), since we don't need >1 backup per PVC.
 			for _, volume := range pod.Spec.Volumes {
-				shouldDoFSBackup, err := ib.volumeHelperImpl.ShouldPerformFSBackup(volume, *pod)
+				shouldDoFSBackup, err := ib.volumeHelperImpl.ShouldPerformFSBackup(volume, *pod, func(pvcName string) bool {
+					pvcKey := itemKey{
+						resource:  kuberesource.PersistentVolumeClaims.String(),
+						namespace: pod.Namespace,
+						name:      pvcName,
+					}
+
+					// 1. If the PVC was explicitly forced into the backup by a BIA, it will be backed up.
+					// This check is robust against fine-grained filters because mustInclude overrides them.
+					if ib.backupRequest.MustIncludeAdditionalItemPVCs != nil && ib.backupRequest.MustIncludeAdditionalItemPVCs.Has(pvcKey) {
+						return true
+					}
+
+					// 2. If the PVC was already backed up (e.g. in a scenario where PVCs are processed first), we know it's included.
+					if ib.backupRequest.BackedUpItems.Has(pvcKey) {
+						return true
+					}
+
+					// 3. Otherwise, return false. The global filter check is handled by backupExcludePVC
+					// in shouldIncludeVolumeInBackup.
+					return false
+				})
+
 				if err != nil {
 					backupErrs = append(backupErrs, errors.WithStack(err))
 				}
@@ -479,6 +501,26 @@ func (ib *itemBackupper) executeActions(
 		// we don't want the resource be restored with this annotation.
 		delete(u.GetAnnotations(), velerov1api.MustIncludeAdditionalItemAnnotation)
 		obj = u
+
+		// If the BIA specifies that additional items must be included, we track any PVCs returned as additional items.
+		// This tracking is necessary because the FSB (File System Backup) evaluation for a Pod
+		// happens before its PVCs are processed. By tracking these explicitly included PVCs here,
+		// the FSB logic can correctly determine that the PVC will be backed up and therefore
+		// a PodVolumeBackup should be created.
+		// We track this unconditionally when mustInclude is true, because fine-grained backup filters
+		// might exclude a PVC even if it's globally included, but mustInclude overrides those filters.
+		if mustInclude && ib.backupRequest.MustIncludeAdditionalItemPVCs != nil {
+			for _, additionalItem := range additionalItemIdentifiers {
+				if additionalItem.GroupResource == kuberesource.PersistentVolumeClaims {
+					key := itemKey{
+						resource:  additionalItem.GroupResource.String(),
+						namespace: additionalItem.Namespace,
+						name:      additionalItem.Name,
+					}
+					ib.backupRequest.MustIncludeAdditionalItemPVCs.AddItem(key)
+				}
+			}
+		}
 
 		// If async plugin started async operation, add it to the ItemOperations list
 		// ignore during finalize phase

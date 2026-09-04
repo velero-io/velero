@@ -259,8 +259,8 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 	return false, nil
 }
 
-func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod) (bool, error) {
-	if !v.shouldIncludeVolumeInBackup(volume) {
+func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod, isPVCIncluded func(pvcName string) bool) (bool, error) {
+	if !v.shouldIncludeVolumeInBackup(volume, isPVCIncluded) {
 		v.logger.Debugf("skip fs-backup action for pod %s's volume %s, due to not pass volume check.", pod.Namespace+"/"+pod.Name, volume.Name)
 		return false, nil
 	}
@@ -442,7 +442,7 @@ func (v *volumeHelperImpl) GetSnapshotClass(obj runtime.Unstructured, groupResou
 	return action.GetSnapshotClass()
 }
 
-func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume) bool {
+func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume, isPVCIncluded func(pvcName string) bool) bool {
 	includeVolumeInBackup := true
 	// cannot backup hostpath volumes as they are not mounted into /var/lib/kubelet/pods
 	// and therefore not accessible to the node agent daemon set.
@@ -465,8 +465,12 @@ func (v *volumeHelperImpl) shouldIncludeVolumeInBackup(vol corev1api.Volume) boo
 	if vol.DownwardAPI != nil {
 		includeVolumeInBackup = false
 	}
-	if vol.PersistentVolumeClaim != nil && v.backupExcludePVC {
-		includeVolumeInBackup = false
+	if vol.PersistentVolumeClaim != nil {
+		if v.backupExcludePVC {
+			if isPVCIncluded == nil || !isPVCIncluded(vol.PersistentVolumeClaim.ClaimName) {
+				includeVolumeInBackup = false
+			}
+		}
 	}
 	// don't include volumes that mount the default service account token.
 	if strings.HasPrefix(vol.Name, "default-token") {

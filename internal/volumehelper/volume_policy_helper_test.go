@@ -350,6 +350,7 @@ func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 		name             string
 		vol              corev1api.Volume
 		backupExcludePVC bool
+		isPVCIncluded    func(pvcName string) bool
 		shouldInclude    bool
 	}{
 		{
@@ -446,6 +447,38 @@ func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 			shouldInclude:    false,
 		},
 		{
+			name: "volume has pvc, backupExcludePVC is true, but isPVCIncluded returns true so include",
+			vol: corev1api.Volume{
+				Name: "sample-volume",
+				VolumeSource: corev1api.VolumeSource{
+					PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+						ClaimName: "sample-pvc",
+					},
+				},
+			},
+			backupExcludePVC: true,
+			isPVCIncluded: func(pvcName string) bool {
+				return pvcName == "sample-pvc"
+			},
+			shouldInclude: true,
+		},
+		{
+			name: "volume has pvc, backupExcludePVC is false, isPVCIncluded returns false, but globally included so include",
+			vol: corev1api.Volume{
+				Name: "sample-volume",
+				VolumeSource: corev1api.VolumeSource{
+					PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+						ClaimName: "sample-pvc",
+					},
+				},
+			},
+			backupExcludePVC: false,
+			isPVCIncluded: func(pvcName string) bool {
+				return false
+			},
+			shouldInclude: true,
+		},
+		{
 			name: "volume name has prefix default-token so do not include",
 			vol: corev1api.Volume{
 				Name: "default-token-vol-name",
@@ -486,7 +519,7 @@ func TestVolumeHelperImpl_ShouldIncludeVolumeInBackup(t *testing.T) {
 				logger:           velerotest.NewLogger(),
 				backupExcludePVC: tc.backupExcludePVC,
 			}
-			actualShouldInclude := vh.shouldIncludeVolumeInBackup(tc.vol)
+			actualShouldInclude := vh.shouldIncludeVolumeInBackup(tc.vol, tc.isPVCIncluded)
 			assert.Equalf(t, actualShouldInclude, tc.shouldInclude, "Want shouldInclude as %v; Got actualShouldInclude as %v", tc.shouldInclude, actualShouldInclude)
 		})
 	}
@@ -696,7 +729,7 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup(t *testing.T) {
 				false,
 			)
 
-			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod)
+			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod, nil)
 			if tc.expectedErr {
 				require.Error(t, actualError, "Want error; Got nil error")
 				return
@@ -1044,7 +1077,7 @@ func TestVolumeHelperImplWithCache_ShouldPerformFSBackup(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod)
+			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod, nil)
 			if tc.expectedErr {
 				require.Error(t, actualError)
 				return
@@ -1532,7 +1565,7 @@ func TestVolumeHelperImpl_ShouldPerformFSBackup_UnboundPVC(t *testing.T) {
 				false,
 			)
 
-			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod)
+			actualShouldFSBackup, actualError := vh.ShouldPerformFSBackup(tc.pod.Spec.Volumes[0], *tc.pod, nil)
 			if tc.expectedErr {
 				require.Error(t, actualError, "Want error; Got nil error")
 				return
