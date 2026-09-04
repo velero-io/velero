@@ -408,7 +408,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	// set backup major, minor, and patch version
 	request.Status.FormatVersion = pkgbackup.BackupFormatVersion
 
-	if request.Spec.TTL.Duration == 0 {
+	if request.Spec.TTL.Duration < 0 {
+		// A negative TTL would put Status.Expiration in the past, making the backup
+		// eligible for garbage collection as soon as it is created. The CLI rejects
+		// this, but the spec can also be submitted directly, e.g. via `kubectl apply`.
+		request.Status.ValidationErrors = append(request.Status.ValidationErrors,
+			fmt.Sprintf("invalid TTL %s: TTL must be non-negative", request.Spec.TTL.Duration))
+	} else if request.Spec.TTL.Duration == 0 {
 		// set default backup TTL
 		request.Spec.TTL.Duration = b.defaultBackupTTL
 	}
@@ -436,8 +442,13 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Spec.DataMover = datamover.GetDefaultBuiltInDataMover()
 	}
 
-	// calculate expiration
-	request.Status.Expiration = &metav1.Time{Time: b.clock.Now().Add(request.Spec.TTL.Duration)}
+	// calculate expiration. A negative TTL is left without an expiration: the
+	// garbage collector only looks at Status.Expiration, not at the backup phase, so
+	// computing "now + negative TTL" here would delete the backup that just failed
+	// validation.
+	if request.Spec.TTL.Duration >= 0 {
+		request.Status.Expiration = &metav1.Time{Time: b.clock.Now().Add(request.Spec.TTL.Duration)}
+	}
 
 	// TODO: After we drop the support for backup v1 CR.  Remove this code block after DefaultVolumesToRestic is removed from CRD
 	// For now, for CRs created by old versions, we need to respect the DefaultVolumesToRestic value if it is set true
