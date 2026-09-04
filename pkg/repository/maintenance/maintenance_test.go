@@ -918,6 +918,9 @@ func TestBuildJob(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "velero",
 			Namespace: "velero",
+			Labels: map[string]string{
+				"component": "velero",
+			},
 		},
 		Spec: appsv1api.DeploymentSpec{
 			Template: corev1api.PodTemplateSpec{
@@ -927,7 +930,7 @@ func TestBuildJob(t *testing.T) {
 					},
 					Containers: []corev1api.Container{
 						{
-							Name:  "velero-repo-maintenance-container",
+							Name:  "velero",
 							Image: "velero-image",
 							SecurityContext: &corev1api.SecurityContext{
 								RunAsNonRoot: boolptr.True(),
@@ -1876,6 +1879,9 @@ func TestBuildJobWithPriorityClassName(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "velero",
 					Namespace: "velero",
+					Labels: map[string]string{
+						"component": "velero",
+					},
 				},
 				Spec: appsv1api.DeploymentSpec{
 					Template: corev1api.PodTemplateSpec{
@@ -2167,6 +2173,9 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "velero",
 					Namespace: "velero",
+					Labels: map[string]string{
+						"component": "velero",
+					},
 				},
 				Spec: appsv1api.DeploymentSpec{
 					Template: corev1api.PodTemplateSpec{
