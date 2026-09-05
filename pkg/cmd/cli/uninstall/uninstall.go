@@ -53,8 +53,6 @@ import (
 
 var gracefulDeletionMaximumDuration = 1 * time.Minute
 
-var resToDelete = []kbclient.ObjectList{}
-
 // uninstallOptions collects all the options for uninstalling Velero from a Kubernetes cluster.
 type uninstallOptions struct {
 	force bool
@@ -230,15 +228,16 @@ func deleteResourcesWithFinalizer(ctx context.Context, kbClient kbclient.Client,
 	return deleteResources(ctx, kbClient, namespace)
 }
 
-func checkResources(ctx context.Context, kbClient kbclient.Client) error {
+func checkResources(ctx context.Context, kbClient kbclient.Client) ([]kbclient.ObjectList, error) {
 	checkCRDs := []string{"restores.velero.io", "datauploads.velero.io", "datadownloads.velero.io"}
 	var err error
 	v1crd := &apiextv1.CustomResourceDefinition{}
+	var resToDelete []kbclient.ObjectList
 	for _, crd := range checkCRDs {
 		key := kbclient.ObjectKey{Name: crd}
 		if err = kbClient.Get(ctx, key, v1crd); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return errors.Wrapf(err, "Error getting %s crd", crd)
+				return nil, errors.Wrapf(err, "Error getting %s crd", crd)
 			}
 		} else {
 			// no error with found CRD that we should delete
@@ -254,25 +253,25 @@ func checkResources(ctx context.Context, kbClient kbclient.Client) error {
 			}
 		}
 	}
-	return nil
+	return resToDelete, nil
 }
 
 func deleteResources(ctx context.Context, kbClient kbclient.Client, namespace string) error {
 	// Check if resources crd exists, if it does not exist, return immediately.
-	err := checkResources(ctx, kbClient)
+	resToDelete, err := checkResources(ctx, kbClient)
 	if err != nil {
 		return err
 	}
 
 	// First attempt to gracefully delete all the resources within a specified time frame, If the process exceeds the timeout limit,
 	// it is likely that there may be errors during the finalization of restores. In such cases, we should proceed with forcefully deleting the restores.
-	err = gracefullyDeleteResources(ctx, kbClient, namespace)
+	err = gracefullyDeleteResources(ctx, kbClient, namespace, resToDelete)
 	if err != nil && !wait.Interrupted(err) {
 		return errors.Wrap(err, "Error deleting resources")
 	}
 
 	if wait.Interrupted(err) {
-		err = forcedlyDeleteResources(ctx, kbClient, namespace)
+		err = forcedlyDeleteResources(ctx, kbClient, namespace, resToDelete)
 		if err != nil {
 			return errors.Wrap(err, "Error deleting resources forcedly")
 		}
@@ -281,7 +280,7 @@ func deleteResources(ctx context.Context, kbClient kbclient.Client, namespace st
 	return nil
 }
 
-func gracefullyDeleteResources(ctx context.Context, kbClient kbclient.Client, namespace string) error {
+func gracefullyDeleteResources(ctx context.Context, kbClient kbclient.Client, namespace string, resToDelete []kbclient.ObjectList) error {
 	errorChan := make(chan error)
 
 	var wg sync.WaitGroup
@@ -305,7 +304,7 @@ func gracefullyDeleteResources(ctx context.Context, kbClient kbclient.Client, na
 		}
 	}
 
-	return waitDeletingResources(ctx, kbClient, namespace)
+	return waitDeletingResources(ctx, kbClient, namespace, resToDelete)
 }
 
 func gracefullyDeleteResource(ctx context.Context, kbClient kbclient.Client, namespace string, list kbclient.ObjectList) error {
@@ -343,7 +342,7 @@ func gracefullyDeleteResource(ctx context.Context, kbClient kbclient.Client, nam
 	return nil
 }
 
-func waitDeletingResources(ctx context.Context, kbClient kbclient.Client, namespace string) error {
+func waitDeletingResources(ctx context.Context, kbClient kbclient.Client, namespace string, resToDelete []kbclient.ObjectList) error {
 	// Wait for the deletion of all the restores within a specified time frame
 	err := wait.PollUntilContextTimeout(ctx, time.Second, gracefulDeletionMaximumDuration, true, func(ctx context.Context) (bool, error) {
 		itemsCount := 0
@@ -364,14 +363,14 @@ func waitDeletingResources(ctx context.Context, kbClient kbclient.Client, namesp
 	return err
 }
 
-func forcedlyDeleteResources(ctx context.Context, kbClient kbclient.Client, namespace string) error {
+func forcedlyDeleteResources(ctx context.Context, kbClient kbclient.Client, namespace string, resToDelete []kbclient.ObjectList) error {
 	// Delete velero deployment first in case:
 	// 1. finalizers will be added back by resources related controller after they are removed at next step;
 	// 2. new resources attached with finalizer will be created by controller after we remove all the resources' finalizer at next step;
 	deploy := &appsv1api.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "velero",
-			Name:      namespace,
+			Namespace: namespace,
+			Name:      "velero",
 		},
 	}
 
@@ -401,10 +400,10 @@ func forcedlyDeleteResources(ctx context.Context, kbClient kbclient.Client, name
 	if err != nil {
 		return errors.Wrap(err, "Error deleting velero deployment during force deletion")
 	}
-	return removeResourcesFinalizer(ctx, kbClient, namespace)
+	return removeResourcesFinalizer(ctx, kbClient, namespace, resToDelete)
 }
 
-func removeResourcesFinalizer(ctx context.Context, kbClient kbclient.Client, namespace string) error {
+func removeResourcesFinalizer(ctx context.Context, kbClient kbclient.Client, namespace string, resToDelete []kbclient.ObjectList) error {
 	for i := range resToDelete {
 		if err := removeResourceFinalizer(ctx, kbClient, namespace, resToDelete[i]); err != nil {
 			return err
