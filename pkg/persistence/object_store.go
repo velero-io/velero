@@ -18,6 +18,7 @@ package persistence
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -178,7 +179,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	// Prefer caCertRef (from Secret) over inline caCert (deprecated).
 	if location.Spec.ObjectStorage.CACertRef != nil {
 		if b.secretStore != nil {
-			caCertString, err := b.secretStore.Get(location.Spec.ObjectStorage.CACertRef)
+			caCertString, err := b.secretStore.Get(context.TODO(), location.Spec.ObjectStorage.CACertRef)
 			if err != nil {
 				return nil, errors.Wrap(err, "error getting CA certificate from secret")
 			}
@@ -191,7 +192,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	// If the BSL specifies a credential, fetch its path on disk and pass to
 	// plugin via the config.
 	if location.Spec.Credential != nil {
-		credsFile, err := b.credentialStore.Path(location.Spec.Credential)
+		credsFile, err := b.credentialStore.Path(context.TODO(), location.Spec.Credential)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get credentials")
 		}

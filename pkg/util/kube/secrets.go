@@ -29,9 +29,9 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetSecret(client kbclient.Client, namespace, name string) (*corev1api.Secret, error) {
+func GetSecret(ctx context.Context, client kbclient.Client, namespace, name string) (*corev1api.Secret, error) {
 	secret := &corev1api.Secret{}
-	if err := client.Get(context.TODO(), kbclient.ObjectKey{
+	if err := client.Get(ctx, kbclient.ObjectKey{
 		Namespace: namespace,
 		Name:      name,
 	}, secret); err != nil {
@@ -41,8 +41,8 @@ func GetSecret(client kbclient.Client, namespace, name string) (*corev1api.Secre
 	return secret, nil
 }
 
-func GetSecretKey(client kbclient.Client, namespace string, selector *corev1api.SecretKeySelector) ([]byte, error) {
-	secret, err := GetSecret(client, namespace, selector.Name)
+func GetSecretKey(ctx context.Context, client kbclient.Client, namespace string, selector *corev1api.SecretKeySelector) ([]byte, error) {
+	secret, err := GetSecret(ctx, client, namespace, selector.Name)
 	if err != nil {
 		return nil, err
 	}
