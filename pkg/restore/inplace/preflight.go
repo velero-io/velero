@@ -50,6 +50,10 @@ func CheckPVCNotInUse(
 	pvc *corev1api.PersistentVolumeClaim,
 	restoreUID types.UID,
 ) error {
+	if pvc == nil {
+		return errors.New("pvc cannot be nil")
+	}
+
 	podList := new(corev1api.PodList)
 	if err := cli.List(ctx, podList, &crclient.ListOptions{Namespace: pvc.Namespace}); err != nil {
 		return errors.Wrapf(err, "failed to check whether PVC %s/%s is in use: failed to list pods in namespace %s", pvc.Namespace, pvc.Name, pvc.Namespace)
@@ -139,6 +143,9 @@ func gatedByThisRestore(pod *corev1api.Pod, restoreUID types.UID) bool {
 // bound to a different PV (the documented cross-namespace clone-and-restore
 // workflow), and when the backed-up PV name is unknown.
 func CheckPVCBoundToBackedUpPV(existingPVC *corev1api.PersistentVolumeClaim, backedUpPVName, sourceNamespace string) error {
+	if existingPVC == nil {
+		return errors.New("existing PVC cannot be nil")
+	}
 	if existingPVC.Status.Phase != corev1api.ClaimBound {
 		return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is not bound (phase %s)",
 			existingPVC.Namespace, existingPVC.Name, existingPVC.Status.Phase)
