@@ -331,12 +331,30 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 			progress.Completed = true
 			progress.Updated = now
 		} else if vsc.Status.Error != nil {
+			errorMessage := ""
+			if vsc.Status.Error.Message != nil {
+				errorMessage = *vsc.Status.Error.Message
+			}
+
+			// The snapshot controller records retryable CSI errors on the
+			// VolumeSnapshotContent and requeues it, so an error seen here may
+			// clear on a later attempt. Treat it as terminal only once it has
+			// outlived CSISnapshotTimeout, the same bound the synchronous path
+			// applies while waiting for the handle. A backup created without
+			// that timeout set keeps the previous fail-fast behaviour.
+			timeout := backup.Spec.CSISnapshotTimeout.Duration
+			if timeout > 0 && now.Sub(progress.Started) < timeout {
+				p.log.Warnf("VolumeSnapshotContent %s has a temporary error %s. Snapshot controller will retry later.",
+					vsc.Name, errorMessage)
+
+				return progress, nil
+			}
+
 			progress.Completed = true
 			progress.Updated = now
-			if vsc.Status.Error.Message != nil {
-				progress.Err = *vsc.Status.Error.Message
-			}
-			p.log.Warnf("VolumeSnapshotContent meets an error %s.", progress.Err)
+			progress.Err = errorMessage
+			p.log.Warnf("VolumeSnapshotContent %s meets an error %s that outlived the CSI snapshot timeout %s.",
+				vsc.Name, errorMessage, timeout)
 		}
 	}
 
