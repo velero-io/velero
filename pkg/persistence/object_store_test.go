@@ -195,6 +195,35 @@ func TestListBackups(t *testing.T) {
 			},
 			expectedRes: []string{"backup-1", "backup-2"},
 		},
+		{
+			name: "backup directories without metadata file are excluded",
+			storageData: map[string][]byte{
+				"backups/backup-1/velero-backup.json": []byte("{}"),
+				// backup-2 has only a log file, no metadata - simulates empty directory with suspended versioning
+				"backups/backup-2/backup-2-logs.gz": []byte("log data"),
+			},
+			expectedRes: []string{"backup-1"},
+		},
+		{
+			name: "all backup directories without metadata file returns empty list",
+			storageData: map[string][]byte{
+				// Both backups have only log files, no metadata
+				"backups/backup-1/backup-1-logs.gz": []byte("log data"),
+				"backups/backup-2/backup-2-logs.gz": []byte("log data"),
+			},
+			expectedRes: []string{},
+		},
+		{
+			name:   "backup directories without metadata file are excluded with prefix",
+			prefix: "velero-backups/",
+			storageData: map[string][]byte{
+				"velero-backups/backups/backup-1/velero-backup.json": []byte("{}"),
+				// backup-2 has only a log file, no metadata
+				"velero-backups/backups/backup-2/backup-2-logs.gz":   []byte("log data"),
+				"velero-backups/backups/backup-3/velero-backup.json": []byte("{}"),
+			},
+			expectedRes: []string{"backup-1", "backup-3"},
+		},
 	}
 
 	for _, tc := range tests {
