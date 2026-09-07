@@ -129,6 +129,56 @@ func TestDeploymentIsReady(t *testing.T) {
 	ready, err := DeploymentIsReady(factory, "velero")
 	require.NoError(t, err)
 	assert.True(t, ready)
+
+	// test failing condition
+	deploymentFailing := &appsv1api.Deployment{
+		Status: appsv1api.DeploymentStatus{
+			Conditions: []appsv1api.DeploymentCondition{
+				{
+					Type:    appsv1api.DeploymentReplicaFailure,
+					Status:  corev1api.ConditionTrue,
+					Message: "test failure",
+				},
+			},
+		},
+	}
+	objFailing, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deploymentFailing)
+	require.NoError(t, err)
+
+	dcFailing := &test.FakeDynamicClient{}
+	dcFailing.On("Get", mock.Anything, mock.Anything).Return(&unstructured.Unstructured{Object: objFailing}, nil)
+
+	factoryFailing := &test.FakeDynamicFactory{}
+	factoryFailing.On("ClientForGroupVersionResource", mock.Anything, mock.Anything, mock.Anything).Return(dcFailing, nil)
+
+	readyFailing, errFailing := DeploymentIsReady(factoryFailing, "velero")
+	require.Error(t, errFailing)
+	assert.False(t, readyFailing)
+
+	// test progressing failure condition
+	deploymentProgressing := &appsv1api.Deployment{
+		Status: appsv1api.DeploymentStatus{
+			Conditions: []appsv1api.DeploymentCondition{
+				{
+					Type:    appsv1api.DeploymentProgressing,
+					Status:  corev1api.ConditionFalse,
+					Message: "test progressing false",
+				},
+			},
+		},
+	}
+	objProgressing, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deploymentProgressing)
+	require.NoError(t, err)
+
+	dcProgressing := &test.FakeDynamicClient{}
+	dcProgressing.On("Get", mock.Anything, mock.Anything).Return(&unstructured.Unstructured{Object: objProgressing}, nil)
+
+	factoryProgressing := &test.FakeDynamicFactory{}
+	factoryProgressing.On("ClientForGroupVersionResource", mock.Anything, mock.Anything, mock.Anything).Return(dcProgressing, nil)
+
+	readyProgressing, errProgressing := DeploymentIsReady(factoryProgressing, "velero")
+	require.Error(t, errProgressing)
+	assert.False(t, readyProgressing)
 }
 
 func TestNodeAgentIsReady(t *testing.T) {
