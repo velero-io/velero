@@ -19,18 +19,15 @@ package plugin
 import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	apiextensions "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/datamover"
 
 	dia "github.com/vmware-tanzu/velero/internal/delete/actions/csi"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	bia "github.com/vmware-tanzu/velero/pkg/backup/actions"
 	csibia "github.com/vmware-tanzu/velero/pkg/backup/actions/csi"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	velerodiscovery "github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/features"
 	iba "github.com/vmware-tanzu/velero/pkg/itemblock/actions"
 	veleroplugin "github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	plugincommon "github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -183,14 +180,6 @@ func NewCommand(f client.Factory) *cobra.Command {
 					newServiceAccountItemBlockAction(f),
 				)
 
-			if !features.IsEnabled(velerov1api.APIGroupVersionsFeatureFlag) {
-				// Do not register crd-remap-version BIA if the API Group feature
-				// flag is enabled, so that the v1 CRD can be backed up.
-				pluginServer = pluginServer.RegisterBackupItemAction(
-					"velero.io/crd-remap-version",
-					newRemapCRDVersionAction(f),
-				)
-			}
 			pluginServer.Serve()
 		},
 		FParseErrWhitelist: cobra.FParseErrWhitelist{ // Velero.io word list : ignore
@@ -236,31 +225,6 @@ func newServiceAccountBackupItemAction(f client.Factory) plugincommon.HandlerIni
 		}
 
 		return action, nil
-	}
-}
-
-func newRemapCRDVersionAction(f client.Factory) plugincommon.HandlerInitializer {
-	return func(logger logrus.FieldLogger) (any, error) {
-		config, err := f.ClientConfig()
-		if err != nil {
-			return nil, err
-		}
-
-		client, err := apiextensions.NewForConfig(config)
-		if err != nil {
-			return nil, err
-		}
-
-		discoveryClient, err := f.DiscoveryClient()
-		if err != nil {
-			return nil, err
-		}
-		discoveryHelper, err := velerodiscovery.NewHelper(discoveryClient, logger)
-		if err != nil {
-			return nil, err
-		}
-
-		return bia.NewRemapCRDVersionAction(logger, client.ApiextensionsV1beta1().CustomResourceDefinitions(), discoveryHelper), nil
 	}
 }
 
