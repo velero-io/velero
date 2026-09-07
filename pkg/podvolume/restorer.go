@@ -116,7 +116,15 @@ func newRestorer(
 						log.Errorf("No results channel found for pod %s/%s to send pod volume restore %s/%s on", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name, pvr.Namespace, pvr.Name)
 						return
 					}
-					resChan <- pvr
+
+					// Never block the event handler on a full results buffer: a
+					// duplicate terminal transition (e.g. a manual CR edit) must
+					// not park this goroutine forever, so drop the result instead.
+					select {
+					case resChan <- pvr:
+					default:
+						log.Errorf("Failed to send pod volume restore result for pod %s/%s: results channel is full; dropping the duplicate terminal result", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)
+					}
 				}
 			},
 		},
