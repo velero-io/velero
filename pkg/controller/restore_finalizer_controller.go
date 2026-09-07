@@ -51,6 +51,10 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
 
+// isDefaultStorageClassAnnotation is the standard Kubernetes annotation
+// marking a StorageClass as the cluster default.
+const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
+
 type restoreFinalizerReconciler struct {
 	client.Client
 	namespace         string
@@ -375,11 +379,27 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// failures due to the PVC not being bound, which could cause a timeout and result in a failed restore.
 					if pvc.Status.Phase == corev1api.ClaimPending {
 						// check if storage class used has VolumeBindingMode as WaitForFirstConsumer
-						if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
-							scName := *pvc.Spec.StorageClassName
+						scName := ""
+						if pvc.Spec.StorageClassName != nil {
+							scName = *pvc.Spec.StorageClassName
+						}
+						if scName == "" {
+							// The PVC uses the cluster default storage class (nil/empty
+							// spec.storageClassName); resolve it to check its binding mode.
+							scList := &storagev1api.StorageClassList{}
+							if err = ctx.crClient.List(context.Background(), scList); err != nil {
+								return false, err
+							}
+							for i := range scList.Items {
+								if scList.Items[i].Annotations[isDefaultStorageClassAnnotation] == "true" {
+									scName = scList.Items[i].Name
+									break
+								}
+							}
+						}
+						if scName != "" {
 							sc := &storagev1api.StorageClass{}
 							err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
-
 							if err != nil {
 								return false, err
 							}
