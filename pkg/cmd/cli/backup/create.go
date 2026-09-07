@@ -36,6 +36,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
@@ -416,15 +417,7 @@ func ParseOrderedResources(orderMapStr string) (map[string]string, error) {
 			return nil, fmt.Errorf("invalid OrderedResources '%s'", entry)
 		}
 		kind := strings.TrimSpace(kv[0])
-		orderParts := strings.Split(kv[1], ",")
-		cleaned := make([]string, 0, len(orderParts))
-		for _, part := range orderParts {
-			name := strings.TrimSpace(part)
-			if name == "" {
-				continue
-			}
-			cleaned = append(cleaned, name)
-		}
+		cleaned := util.SplitAndTrimCSV(kv[1])
 		if kind == "" || len(cleaned) == 0 {
 			return nil, fmt.Errorf("invalid OrderedResources '%s'", entry)
 		}

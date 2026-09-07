@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
 type featureFlagSet struct {
@@ -41,12 +43,12 @@ func Enable(names ...string) {
 		NewFeatureFlagSet()
 	}
 
-	featureFlags.set.Insert(names...)
+	featureFlags.set.Insert(normalizeFeatureNames(names...)...)
 }
 
 // Disable removes all feature flags in a given slice from the current feature list.
 func Disable(names ...string) {
-	featureFlags.set.Delete(names...)
+	featureFlags.set.Delete(normalizeFeatureNames(names...)...)
 }
 
 // All returns enabled features as a slice of strings.
@@ -64,6 +66,12 @@ func Serialize() string {
 // It is also useful for selectively controlling flags during tests.
 func NewFeatureFlagSet(flags ...string) {
 	featureFlags = featureFlagSet{
-		set: sets.New[string](flags...),
+		set: sets.New[string](normalizeFeatureNames(flags...)...),
 	}
+}
+
+// normalizeFeatureNames trims whitespace and drops empty entries so values
+// like "EnableCSI, EnableAPIGroupVersions" enable the intended features.
+func normalizeFeatureNames(names ...string) []string {
+	return util.SplitAndTrimCSV(strings.Join(names, ","))
 }
