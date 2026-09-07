@@ -459,6 +459,37 @@ func TestGetStorageVariables(t *testing.T) {
 				"cacheLimitMB": "1000",
 			},
 		},
+		{
+			name: "fs with throttle config",
+			backupLocation: velerov1api.BackupStorageLocation{
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Provider: "velero.io/fs",
+					Config: map[string]string{
+						"fspath": "fake-path",
+						"prefix": "fake-prefix",
+					},
+				},
+			},
+			repoBackend: "fake-repo-type",
+			repoConfig: map[string]string{
+				udmrepo.ThrottleOptionUploadBytes:   "838860800",
+				udmrepo.ThrottleOptionDownloadBytes: "838860800",
+				udmrepo.ThrottleOptionReadOps:       "100",
+				udmrepo.ThrottleOptionWriteOps:      "100",
+				udmrepo.ThrottleOptionListOps:       "50",
+			},
+			expected: map[string]string{
+				"fspath":                "fake-path",
+				"bucket":                "",
+				"prefix":                "fake-prefix/fake-repo-type/",
+				"region":                "",
+				"ThrottleUploadBytes":   "838860800",
+				"ThrottleDownloadBytes": "838860800",
+				"ThrottleReadOPS":       "100",
+				"ThrottleWriteOPS":      "100",
+				"ThrottleListOPS":       "50",
+			},
+		},
 	}
 
 	for _, tc := range testCases {

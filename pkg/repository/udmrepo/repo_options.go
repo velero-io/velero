@@ -68,11 +68,11 @@ const (
 	StoreOptionCacheLimit = "cacheLimitMB"
 	StoreOptionCacheDir   = "cacheDir"
 
-	ThrottleOptionReadOps       = "readOPS"
-	ThrottleOptionWriteOps      = "writeOPS"
-	ThrottleOptionListOps       = "listOPS"
-	ThrottleOptionUploadBytes   = "uploadBytes"
-	ThrottleOptionDownloadBytes = "downloadBytes"
+	ThrottleOptionReadOps       = "ThrottleReadOPS"
+	ThrottleOptionWriteOps      = "ThrottleWriteOPS"
+	ThrottleOptionListOps       = "ThrottleListOPS"
+	ThrottleOptionUploadBytes   = "ThrottleUploadBytes"
+	ThrottleOptionDownloadBytes = "ThrottleDownloadBytes"
 	// FullMaintenanceInterval will overwrite kopia maintenance interval
 	// options are fastGC for 12 hours, eagerGC for 6 hours, normalGC for 24 hours
 	StoreOptionKeyFullMaintenanceInterval                                = "fullMaintenanceInterval"
