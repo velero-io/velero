@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	"context"
+
 	mock "github.com/stretchr/testify/mock"
 	corev1api "k8s.io/api/core/v1"
 )
@@ -13,8 +15,8 @@ type FileStore struct {
 }
 
 // Path provides a mock function with given fields: selector
-func (_m *FileStore) Path(selector *corev1api.SecretKeySelector) (string, error) {
-	ret := _m.Called(selector)
+func (_m *FileStore) Path(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error) {
+	ret := _m.Called(ctx, selector)
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func(*corev1api.SecretKeySelector) string); ok {
