@@ -321,6 +321,9 @@ volumePolicies:
       storageClass:
         - gp2
         - standard
+      volumeName:
+        - data
+        - pv-1
       pvcPhase:
         - Pending
       pvcVolumeMode: Block
@@ -418,6 +421,7 @@ Currently, Velero supports the volume attributes listed below:
   - "5Gi," which means capacity or size matches larger than 5Gi, including value 5Gi
   - "5Gi" which is not supported and will be failed in validating the configuration
 - storageClass: matching volumes those with specified `storageClass`, such as `gp2`, `ebs-sc` in eks
+- volumeName: matching volumes by PersistentVolume name, pod volume name, or PersistentVolumeClaim name
 - volume sources: matching volumes that used specified volume sources. Currently we support nfs or csi backend volume source
 - pvcPhase: matching volumes based on the phase of their associated PVCs (Pending, Bound, Lost)
 - pvcVolumeMode: matching volumes based on the volume mode of their associated PVCs (Filesystem, Block)
@@ -435,6 +439,13 @@ Velero supported conditions and format listed below:
   storageClass:
     - gp2
     - ebs-sc
+  ```
+- volumeName
+  ```yaml
+  # match volume by PV name, pod volume name, or PVC name
+  volumeName:
+    - data
+    - pv-1
   ```
 - volume sources (currently only support below format and attributes)
 1. Specify the volume source name, the name could be `nfs`, `rbd`, `iscsi`, `csi` etc, but Velero only support `nfs` and `csi` currently.
@@ -510,6 +521,36 @@ Velero supported conditions and format listed below:
           pvcLabels:
             environment: production
             app: frontend
+        action:
+          type: skip
+      ```
+
+- volume Name
+
+  This condition filters volumes by name. The condition is specified as a list of names to match. A volume matches if any configured name matches the PersistentVolume name, the pod volume name, or the associated PersistentVolumeClaim name. This is useful for opt-in snapshot behavior similar to the `backup.velero.io/backup-volumes` pod annotation.
+    ```yaml
+    volumeName:
+      - data
+      - pv-1
+    ```
+
+    Some examples:
+  - Snapshot specific pod volumes by name:
+      ```yaml
+      volumePolicies:
+      - conditions:
+          volumeName:
+            - data
+            - logs
+        action:
+          type: snapshot
+      ```
+  - Skip a specific PersistentVolume:
+      ```yaml
+      volumePolicies:
+      - conditions:
+          volumeName:
+            - pv-to-skip
         action:
           type: skip
       ```

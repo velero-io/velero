@@ -239,6 +239,76 @@ func TestStorageClassConditionMatch(t *testing.T) {
 	}
 }
 
+func TestVolumeNameConditionMatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		condition     *volumeNameCondition
+		volume        *structuredVolume
+		expectedMatch bool
+	}{
+		{
+			name:          "match persistent volume name",
+			condition:     &volumeNameCondition{volumeNames: []string{"pv-1"}},
+			volume:        &structuredVolume{pvName: "pv-1"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match pod volume name",
+			condition:     &volumeNameCondition{volumeNames: []string{"data"}},
+			volume:        &structuredVolume{podVolumeName: "data"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match pvc name",
+			condition:     &volumeNameCondition{volumeNames: []string{"pvc-1"}},
+			volume:        &structuredVolume{pvcName: "pvc-1"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match any configured name when multiple names are available",
+			condition:     &volumeNameCondition{volumeNames: []string{"pvc-1"}},
+			volume:        &structuredVolume{pvName: "pv-1", podVolumeName: "data", pvcName: "pvc-1"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match one of multiple configured names",
+			condition:     &volumeNameCondition{volumeNames: []string{"pv-1", "data"}},
+			volume:        &structuredVolume{podVolumeName: "data"},
+			expectedMatch: true,
+		},
+		{
+			name:          "mismatch volume name",
+			condition:     &volumeNameCondition{volumeNames: []string{"pv-1"}},
+			volume:        &structuredVolume{pvName: "pv-2"},
+			expectedMatch: false,
+		},
+		{
+			name:          "empty configured names always match",
+			condition:     &volumeNameCondition{volumeNames: []string{}},
+			volume:        &structuredVolume{pvName: "pv-1"},
+			expectedMatch: true,
+		},
+		{
+			name:          "no available names to match",
+			condition:     &volumeNameCondition{volumeNames: []string{"pv-1"}},
+			volume:        &structuredVolume{},
+			expectedMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match := tt.condition.match(tt.volume)
+			assert.Equal(t, tt.expectedMatch, match)
+		})
+	}
+}
+
+func TestVolumeNameConditionValidate(t *testing.T) {
+	condition := &volumeNameCondition{volumeNames: []string{"pv-1"}}
+	assert.NoError(t, condition.validate())
+}
+
 func TestNFSConditionMatch(t *testing.T) {
 	tests := []struct {
 		name          string

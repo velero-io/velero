@@ -149,6 +149,22 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "error format of volumeName",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{Type: "skip"},
+						Conditions: map[string]any{
+							"capacity":   "0,10Gi",
+							"volumeName": "pv-1",
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "error format of csi",
 			res: &ResourcePolicies{
 				Version: "v1",
@@ -432,6 +448,21 @@ func TestValidate(t *testing.T) {
 								"environment": "production",
 								"app":         "database",
 							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "supported format volume policies with volumeName",
+			res: &ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []VolumePolicy{
+					{
+						Action: Action{Type: "snapshot"},
+						Conditions: map[string]any{
+							"volumeName": []string{"pv-1", "data"},
 						},
 					},
 				},
