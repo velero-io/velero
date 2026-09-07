@@ -424,8 +424,14 @@ func (ib *itemBackupper) executeActions(
 
 		// If the EnableCSI feature is not enabled, but the executing action is from CSI plugin, skip the action.
 		if csiutil.ShouldSkipAction(actionName) {
-			log.Infof("Skip action %s for resource %s:%s/%s, because the CSI feature is not enabled. Feature setting is %s.",
-				actionName, groupResource.String(), metadata.GetNamespace(), metadata.GetName(), features.Serialize())
+			if boolptr.IsSetToTrue(ib.backupRequest.Spec.SnapshotMoveData) {
+				log.Warnf("Skip action %s for resource %s:%s/%s because snapshot-move-data requires the %s feature flag, which is not enabled. Enable it with velero install --features=%s.",
+					actionName, groupResource.String(), metadata.GetNamespace(), metadata.GetName(), velerov1api.CSIFeatureFlag, velerov1api.CSIFeatureFlag)
+				ib.trackSkippedPV(obj, groupResource, csiSnapshotApproach, fmt.Sprintf("snapshot-move-data requires %s feature, which is not enabled", velerov1api.CSIFeatureFlag), log)
+			} else {
+				log.Infof("Skip action %s for resource %s:%s/%s, because the CSI feature is not enabled. Feature setting is %s.",
+					actionName, groupResource.String(), metadata.GetNamespace(), metadata.GetName(), features.Serialize())
+			}
 			continue
 		}
 
@@ -622,11 +628,16 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	// Need to add a mechanism to choose running which plugin for resources.
 	// After that, this warning can be removed.
 	if boolptr.IsSetToTrue(ib.backupRequest.Spec.SnapshotMoveData) {
-		log.Warnf("VolumeSnapshotter plugin doesn't support data movement.")
+		if !features.IsEnabled(velerov1api.CSIFeatureFlag) {
+			log.Warnf("Snapshot-move-data requires the %s feature flag, which is not enabled. CSI volume data will not be moved. Enable it with velero install --features=%s.",
+				velerov1api.CSIFeatureFlag, velerov1api.CSIFeatureFlag)
+		} else {
+			log.Warnf("VolumeSnapshotter plugin doesn't support data movement.")
 
-		if features.IsEnabled(velerov1api.CSIFeatureFlag) && pv.Spec.CSI == nil {
-			log.Warn("Cannot use CSI data mover to handle PV, because PV doesn't contain CSI in spec.",
-				" Fall back to Velero native snapshot.")
+			if pv.Spec.CSI == nil {
+				log.Warn("Cannot use CSI data mover to handle PV, because PV doesn't contain CSI in spec.",
+					" Fall back to Velero native snapshot.")
+			}
 		}
 	}
 
@@ -701,9 +712,15 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	}
 
 	if volumeSnapshotter == nil {
-		// the PV may still has change to be snapshotted by CSI plugin's `PVCBackupItemAction` in PVC backup logic
-		log.Info("Persistent volume is not a supported volume type for Velero-native volumeSnapshotter snapshot, skipping.")
-		ib.backupRequest.SkippedPVTracker.Track(pv.Name, volumeSnapshotApproach, "no applicable volumesnapshotter found")
+		reason := "no applicable volumesnapshotter found"
+		if boolptr.IsSetToTrue(ib.backupRequest.Spec.SnapshotMoveData) && pv.Spec.CSI != nil && !features.IsEnabled(velerov1api.CSIFeatureFlag) {
+			log.Warnf("Persistent volume %s cannot use snapshot-move-data because the %s feature flag is not enabled. Enable it with velero install --features=%s.",
+				pv.Name, velerov1api.CSIFeatureFlag, velerov1api.CSIFeatureFlag)
+			reason = fmt.Sprintf("snapshot-move-data requires %s feature, which is not enabled", velerov1api.CSIFeatureFlag)
+		} else {
+			log.Info("Persistent volume is not a supported volume type for Velero-native volumeSnapshotter snapshot, skipping.")
+		}
+		ib.backupRequest.SkippedPVTracker.Track(pv.Name, volumeSnapshotApproach, reason)
 		return nil
 	}
 
