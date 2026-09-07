@@ -136,9 +136,9 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Since we use the reconciler along with the PeriodicalEnqueueSource, there may be reconciliation triggered by
-	// stale requests.
-	if dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseProcessed ||
-		dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseInProgress {
+	// stale requests. Processed requests are terminal and can be cleaned up once expired. InProgress requests are
+	// re-processed so a failed final status patch does not leave the request stuck until expiry.
+	if dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseProcessed {
 		age := r.clock.Now().Sub(dbr.CreationTimestamp.Time)
 		if age >= deleteBackupRequestMaxAge { // delete the expired request
 			log.Debugf("The request is expired, status: %s, deleting it.", dbr.Status.Phase)
@@ -177,6 +177,33 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		Namespace: dbr.Namespace,
 		Name:      dbr.Spec.BackupName,
 	}, backup); apierrors.IsNotFound(err) {
+		if dbr.Status.Phase == velerov1api.DeleteBackupRequestPhaseInProgress {
+			// The backup was already deleted in a prior reconcile attempt, but the final
+			// status patch may have failed. Treat this as successful completion.
+			log.Info("Backup already deleted, completing DeleteBackupRequest")
+			backupUID := dbr.Labels[velerov1api.BackupUIDLabel]
+			if _, patchErr := r.patchDeleteBackupRequest(ctx, dbr, func(r *velerov1api.DeleteBackupRequest) {
+				r.Status.Phase = velerov1api.DeleteBackupRequestPhaseProcessed
+				r.Status.Errors = nil
+			}); patchErr != nil {
+				return ctrl.Result{}, patchErr
+			}
+			r.metrics.RegisterBackupDeletionSuccess("")
+			if backupUID != "" {
+				labelSelector, selErr := labels.Parse(fmt.Sprintf("%s=%s,%s=%s", velerov1api.BackupNameLabel, label.GetValidName(dbr.Spec.BackupName), velerov1api.BackupUIDLabel, backupUID))
+				if selErr != nil {
+					r.logger.WithError(selErr).WithField("backup", dbr.Spec.BackupName).Error("error creating label selector for the backup for deleting DeleteBackupRequests")
+					return ctrl.Result{}, nil
+				}
+				alldbr := &velerov1api.DeleteBackupRequest{}
+				if delErr := r.DeleteAllOf(ctx, alldbr, client.MatchingLabelsSelector{
+					Selector: labelSelector,
+				}, client.InNamespace(dbr.Namespace)); delErr != nil {
+					r.logger.WithError(delErr).WithField("backup", dbr.Spec.BackupName).Error("error deleting all associated DeleteBackupRequests after successfully deleting the backup")
+				}
+			}
+			return ctrl.Result{}, nil
+		}
 		// Couldn't find backup - update status to Processed and record the not-found error
 		err = r.patchDeleteBackupRequestWithError(ctx, dbr, errors.New("backup not found"))
 		return ctrl.Result{}, err
