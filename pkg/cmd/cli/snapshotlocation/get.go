@@ -21,6 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -50,7 +51,12 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 					locations.Items = append(locations.Items, *location)
 				}
 			} else {
-				err = client.List(context.TODO(), locations, &kbclient.ListOptions{Namespace: f.Namespace()})
+				parsedSelector, err := labels.Parse(listOptions.LabelSelector)
+				cmd.CheckError(err)
+				err = client.List(context.TODO(), locations, &kbclient.ListOptions{
+					LabelSelector: parsedSelector,
+					Namespace:     f.Namespace(),
+				})
 				cmd.CheckError(err)
 			}
 			_, err = output.PrintWithFormat(c, locations)
