@@ -78,7 +78,7 @@ func (p *JSONPatch) Validate() error {
 
 func (c *Conditions) Validate() error {
 	if c.GroupResource == "" {
-		return fmt.Errorf("groupkResource cannot be empty")
+		return fmt.Errorf("groupResource cannot be empty")
 	}
 	return nil
 }
