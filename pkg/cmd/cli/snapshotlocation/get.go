@@ -28,6 +28,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
+	"github.com/vmware-tanzu/velero/pkg/cmd/util/serverconfig"
 )
 
 func NewGetCommand(f client.Factory, use string) *cobra.Command {
@@ -53,7 +54,12 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 				err = client.List(context.TODO(), locations, &kbclient.ListOptions{Namespace: f.Namespace()})
 				cmd.CheckError(err)
 			}
-			_, err = output.PrintWithFormat(c, locations)
+			kubeClient, err := f.KubeClient()
+			cmd.CheckError(err)
+
+			defaultLocations := serverconfig.GetDefaultVolumeSnapshotLocations(context.TODO(), kubeClient, f.Namespace())
+
+			_, err = output.PrintWithFormat(c, locations, output.WithDefaultVolumeSnapshotLocations(defaultLocations))
 			cmd.CheckError(err)
 		},
 	}
