@@ -92,14 +92,14 @@ def get_debug_flag():
 # Set up a local_resource build of the Velero binary. The binary is written to _tiltbuild/velero.
 local_resource(
     "velero_server_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOOS=linux GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOOS=linux GOARCH=amd64 GOBIN=$(pwd)/.go/bin GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
     deps = ["cmd", "internal", "pkg"],
-    ignore = ["pkg/cmd"],
+    ignore = ["pkg/cmd/cli", "pkg/cmd/test"],
 )
 
 local_resource(
     "velero_local_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOOS=' + local_goos + ' GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOBIN=$(pwd)/.go/bin GOOS=' + local_goos  + ' GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
     deps = ["internal", "pkg/cmd"],
 )
 
@@ -236,7 +236,7 @@ def enable_provider(provider):
     # Set up a local_resource build of the plugin binary. The main.go path must be provided via go_main option. The binary is written to _tiltbuild/<NAME>.
     local_resource(
         name + "_plugin",
-        cmd = 'cd ' + context + ';mkdir -p _tiltbuild;PKG=' + context + ' BIN=' + go_main + ' GOOS=linux GOARCH=amd64 OUTPUT_DIR=_tiltbuild ./hack/build.sh',
+        cmd = 'cd ' + context + ';mkdir -p _tiltbuild;if [ -f "./cmd/' + go_main + '" ]; then GOBIN=$(pwd)/.go/bin GOOS=linux GOARCH=amd64 go build -o _tiltbuild/' + plugin_name + ' ./cmd; else GOBIN=$(pwd)/.go/bin GOOS=linux GOARCH=amd64 go build -o _tiltbuild/' + plugin_name + ' .; fi',
         deps = live_reload_deps,
     )
 
