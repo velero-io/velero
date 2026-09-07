@@ -20,13 +20,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"os"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -43,10 +36,11 @@ const (
 	awsKeyIDEnvVar           = "AWS_ACCESS_KEY_ID"
 	awsSecretKeyEnvVar       = "AWS_SECRET_ACCESS_KEY"
 	awsSessTokenEnvVar       = "AWS_SESSION_TOKEN"
-	awsProfileKey            = "profile"
 	awsCredentialsFileEnvVar = "AWS_SHARED_CREDENTIALS_FILE"
 	awsConfigFileEnvVar      = "AWS_CONFIG_FILE"
-	awsDefaultProfile        = "default"
+
+	awsProfileKey     = "profile"
+	awsDefaultProfile = "default"
 )
 
 // GetS3ResticEnvVars gets the environment variables that restic
@@ -79,52 +73,70 @@ func GetS3ResticEnvVars(config map[string]string) (map[string]string, error) {
 }
 
 // GetS3Credentials gets the S3 credential values according to the information
-// of the provided config or the system's environment variables
+// of the provided config or the system's environment variables. In case BSL
+// does not have a credential file configured, it will fall back to using
+// the default credential provider chain of AWS and returning no static credentials
 func GetS3Credentials(config map[string]string) (*aws.Credentials, error) {
-	var opts []func(*awsconfig.LoadOptions) error
-	credentialsFile := config[CredentialsFileKey]
-	if credentialsFile == "" {
-		credentialsFile = os.Getenv(awsCredentialsFileEnvVar)
-	}
-	if credentialsFile != "" {
-		opts = append(opts, awsconfig.WithSharedCredentialsFiles([]string{credentialsFile}),
-			// To support the existing use case where config file is passed
-			// as credentials of a BSL
-			awsconfig.WithSharedConfigFiles([]string{credentialsFile}))
-	}
-	opts = append(opts, awsconfig.WithSharedConfigProfile(config[awsProfileKey]))
+	// If a BSL credential file is specified, we only load this file
+	// and return the credentials to the caller
+	if credentialsFile, ok := config[CredentialsFileKey]; ok {
+		// If we do not find any configuration for an aws profile, we fall back to using
+		// the default profile, as otherwise the shared credential file options will be ignored
+		profile := awsDefaultProfile
+		if _, exists := config[awsProfileKey]; exists {
+			profile = config[awsProfileKey]
+		}
+		cfg, err := awsconfig.LoadSharedConfigProfile(context.Background(), profile, func(options *awsconfig.LoadSharedConfigOptions) {
+			// To support the existing use case where a config
+			// file is passed as credentials of a BSL
+			options.ConfigFiles = []string{credentialsFile}
+			options.CredentialsFiles = []string{credentialsFile}
+		})
+		if err != nil {
+			return nil, err
+		}
 
+		// TODO: Handle expiring tokens
+		if cfg.Credentials.CanExpire {
+			return nil, fmt.Errorf("credentials from bsl credential configuration have to be static")
+		}
+
+		return &cfg.Credentials, nil
+	}
+
+	var opts []func(*awsconfig.LoadOptions) error
+	if awsProfile, ok := config[awsProfileKey]; ok {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(awsProfile))
+	}
+
+	// We want to load the default configuration of the AWS
+	// credential chain, which includes environment variables
+	// and shared profile configurations
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), opts...)
 	if err != nil {
 		return nil, err
 	}
-
-	if credentialsFile != "" && os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" && os.Getenv("AWS_ROLE_ARN") != "" {
-		// Reset the config to use the credentials from the credentials/config file
-		profile := config[awsProfileKey]
-		if profile == "" {
-			profile = awsDefaultProfile
-		}
-		sfp, err := awsconfig.LoadSharedConfigProfile(context.Background(), profile, func(o *awsconfig.LoadSharedConfigOptions) {
-			o.ConfigFiles = []string{credentialsFile}
-			o.CredentialsFiles = []string{credentialsFile}
-		})
-		if err != nil {
-			return nil, fmt.Errorf("error loading config profile '%s': %v", profile, err)
-		}
-		if err := resolveCredsFromProfile(&cfg, &sfp); err != nil {
-			return nil, fmt.Errorf("error resolving creds from profile '%s': %v", profile, err)
-		}
-	}
-
 	creds, err := cfg.Credentials.Retrieve(context.Background())
-
-	return &creds, err
+	if err != nil {
+		return nil, err
+	}
+	// If the credentials are temporary and therefore can expire,
+	// for example, because they are coming from an IAM role, or
+	// from a web identity provider, we do not want to return any static
+	// credentials. As returning static credentials, would result
+	// in any function calling this to have expired credentials.
+	// For expiring credentials, we want to fall back to use
+	// the default aws provider chain, which is responsible
+	// for refreshing the token automatically
+	if creds.CanExpire {
+		return nil, nil
+	}
+	return &creds, nil
 }
 
 // GetAWSBucketRegion returns the AWS region that a bucket is in, or an error
 // if the region cannot be determined.
-// It will use us-east-1 as hinting server and requires config param to use as credentials
+// It will use us-east-1 as a hinting server and requires config param to use as credentials
 func GetAWSBucketRegion(bucket string, config map[string]string) (string, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithCredentialsProvider(
 		aws.CredentialsProviderFunc(
@@ -149,45 +161,4 @@ func GetAWSBucketRegion(bucket string, config map[string]string) (string, error)
 		return "", errors.New("unable to determine bucket's region")
 	}
 	return region, nil
-}
-
-func resolveCredsFromProfile(cfg *aws.Config, sharedConfig *awsconfig.SharedConfig) error {
-	var err error
-	switch {
-	case sharedConfig.Source != nil:
-		// Assume IAM role with credentials source from a different profile.
-		err = resolveCredsFromProfile(cfg, sharedConfig.Source)
-	case sharedConfig.Credentials.HasKeys():
-		// Static Credentials from Shared Config/Credentials file.
-		cfg.Credentials = credentials.StaticCredentialsProvider{
-			Value: sharedConfig.Credentials,
-		}
-	}
-	if err != nil {
-		return err
-	}
-	if len(sharedConfig.RoleARN) > 0 {
-		credsFromAssumeRole(cfg, sharedConfig)
-	}
-	return nil
-}
-
-func credsFromAssumeRole(cfg *aws.Config, sharedCfg *awsconfig.SharedConfig) {
-	optFns := []func(*stscreds.AssumeRoleOptions){
-		func(options *stscreds.AssumeRoleOptions) {
-			options.RoleSessionName = sharedCfg.RoleSessionName
-			if sharedCfg.RoleDurationSeconds != nil {
-				if *sharedCfg.RoleDurationSeconds/time.Minute > 15 {
-					options.Duration = *sharedCfg.RoleDurationSeconds
-				}
-			}
-			if len(sharedCfg.ExternalID) > 0 {
-				options.ExternalID = aws.String(sharedCfg.ExternalID)
-			}
-			if len(sharedCfg.MFASerial) != 0 {
-				options.SerialNumber = aws.String(sharedCfg.MFASerial)
-			}
-		},
-	}
-	cfg.Credentials = stscreds.NewAssumeRoleProvider(sts.NewFromConfig(*cfg), sharedCfg.RoleARN, optFns...)
 }
