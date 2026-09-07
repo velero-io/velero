@@ -62,25 +62,9 @@ func (a *PodAction) Execute(input *velero.RestoreItemActionExecuteInput) (*veler
 	}
 	pod.Spec.Volumes = preservedVolumes
 
-	for i, container := range pod.Spec.Containers {
-		var preservedVolumeMounts []corev1api.VolumeMount
-		for _, mount := range container.VolumeMounts {
-			if !strings.HasPrefix(mount.Name, serviceAccountTokenPrefix) {
-				preservedVolumeMounts = append(preservedVolumeMounts, mount)
-			}
-		}
-		pod.Spec.Containers[i].VolumeMounts = preservedVolumeMounts
-	}
-
-	for i, container := range pod.Spec.InitContainers {
-		var preservedVolumeMounts []corev1api.VolumeMount
-		for _, mount := range container.VolumeMounts {
-			if !strings.HasPrefix(mount.Name, serviceAccountTokenPrefix) {
-				preservedVolumeMounts = append(preservedVolumeMounts, mount)
-			}
-		}
-		pod.Spec.InitContainers[i].VolumeMounts = preservedVolumeMounts
-	}
+	pod.Spec.Containers = filterContainerVolumeMounts(pod.Spec.Containers, serviceAccountTokenPrefix)
+	pod.Spec.InitContainers = filterContainerVolumeMounts(pod.Spec.InitContainers, serviceAccountTokenPrefix)
+	pod.Spec.EphemeralContainers = filterEphemeralContainerVolumeMounts(pod.Spec.EphemeralContainers, serviceAccountTokenPrefix)
 
 	res, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pod)
 	if err != nil {
@@ -93,4 +77,28 @@ func (a *PodAction) Execute(input *velero.RestoreItemActionExecuteInput) (*veler
 			{GroupResource: kuberesource.PriorityClasses, Name: pod.Spec.PriorityClassName}}
 	}
 	return restoreExecuteOutput, nil
+}
+
+func filterVolumeMounts(mounts []corev1api.VolumeMount, prefix string) []corev1api.VolumeMount {
+	var preserved []corev1api.VolumeMount
+	for _, mount := range mounts {
+		if !strings.HasPrefix(mount.Name, prefix) {
+			preserved = append(preserved, mount)
+		}
+	}
+	return preserved
+}
+
+func filterContainerVolumeMounts(containers []corev1api.Container, prefix string) []corev1api.Container {
+	for i, container := range containers {
+		containers[i].VolumeMounts = filterVolumeMounts(container.VolumeMounts, prefix)
+	}
+	return containers
+}
+
+func filterEphemeralContainerVolumeMounts(containers []corev1api.EphemeralContainer, prefix string) []corev1api.EphemeralContainer {
+	for i, container := range containers {
+		containers[i].VolumeMounts = filterVolumeMounts(container.VolumeMounts, prefix)
+	}
+	return containers
 }
