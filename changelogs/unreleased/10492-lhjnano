@@ -1,0 +1,1 @@
+Fix PV patch skip for pending PVCs using the default storage class
