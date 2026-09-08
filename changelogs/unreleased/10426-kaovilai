@@ -1,0 +1,1 @@
+Guard upstream-only GitHub Actions workflows to skip on forks (e.g. openshift/velero)
