@@ -34,6 +34,8 @@ https://velero.io/docs/v1.18/upgrade-to-1.18/
   * Add fine-grained filters for restore via resource policy, introduced resourcePolicy field for restoreSpec, which contains ClusterScopedFilterPolicy and NamespacedFilterPolicy section (#10015, @adam-jian-zhang)
   * Add support for matching PVCs by volume mode and access mode in resource policies, and introduce the `--global-backup-volume-policies-configmap` server flag to merge cluster-wide backup volume policies into every backup. (#10012, @chlins)
   * Add fine-grained filters for backup via resource policy, introduced ClusterScopedFilterPolicy and NamespacedFilterPolicy section for resource policy (#10011, @adam-jian-zhang)
+  * Add operation context to user-facing error messages in CR statuses and CLI output (#10474, @chlins)
+  * Fix issue 10454, enforce resource filter policies in memory in stage 1 to fix wildcard namespace bypassing issue (#10473, @adam-jian-zhang)
 
 ## v1.18.2
 
