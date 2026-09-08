@@ -28,7 +28,7 @@ Please use the version selector at the top of the site to ensure you are using t
 
 ## Troubleshooting
 
-If you encounter issues, review the [troubleshooting docs][30], [file an issue][4], or talk to us on the [#velero channel][25] on the Kubernetes Slack server.
+If you encounter issues, review the [troubleshooting docs][30], [file an issue][4], or talk to us on the [#velero-users][25] and [#velero-dev][26] channel on the Kubernetes Slack server.
 
 ## Community
 
@@ -36,8 +36,7 @@ Velero is an open community and we welcome your participation. The best way to g
 
 * Join the [Velero community meetings](https://velero.io/community/), held bi-weekly, alternating between Beijing-friendly and US/Europe-friendly time zones.
 * Subscribe to the [project meeting calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/velero?view=week).
-* Watch previous meetings on our [YouTube channel](https://www.youtube.com/playlist?list=PL7bmigfV0EqQRysvqvqOtRNk4L5S7uqwM).
-* Chat with us on the [Kubernetes Slack][25] `#velero` channel and join the [mailing list][24].
+* Chat with us on the [Kubernetes Slack][25] `#velero-users` channel and join the [mailing list][24].
 
 See the [community page](https://velero.io/community/) for the full schedule and details.
 
@@ -98,7 +97,8 @@ For website terms of use, trademark policy and other project policies please see
 [12]: https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/dns/README.md
 [14]: https://github.com/kubernetes/kubernetes
 [24]: https://groups.google.com/forum/#!forum/projectvelero
-[25]: https://kubernetes.slack.com/messages/velero
+[25]: https://kubernetes.slack.com/messages/velero-users
+[26]: https://kubernetes.slack.com/messages/velero-dev
 [29]: https://velero.io/docs/
 [30]: https://velero.io/docs/troubleshooting
 [31]: https://velero.io/docs/start-contributing
