@@ -1,0 +1,1 @@
+Fix archive extraction path check so a sibling directory sharing the destination directory's name prefix can no longer bypass the Zip Slip containment check
