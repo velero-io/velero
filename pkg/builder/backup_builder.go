@@ -25,6 +25,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/label"
 
 	"github.com/sirupsen/logrus"
 
@@ -104,7 +105,7 @@ func (b *BackupBuilder) FromSchedule(schedule *velerov1api.Schedule) *BackupBuil
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels[velerov1api.ScheduleNameLabel] = schedule.Name
+	labels[velerov1api.ScheduleNameLabel] = label.GetValidName(schedule.Name)
 
 	b.object.Spec = schedule.Spec.Template
 	b.ObjectMeta(WithLabelsMap(labels))
