@@ -81,7 +81,7 @@ type TestCase struct {
 func TestFunc(test VeleroBackupRestoreTest) func() {
 	return func() {
 		Expect(test.Init()).To(Succeed(), "Failed to instantiate test cases")
-		By(fmt.Sprintf("Run test %s ...... \n", test.GetTestCase().CaseBaseName))
+		
 		BeforeEach(func() {
 			// Using the global velero config which covered the installation for most common cases
 			if InstallVelero {
@@ -89,6 +89,7 @@ func TestFunc(test VeleroBackupRestoreTest) func() {
 			}
 		})
 		It(test.GetTestMsg().Text, func() {
+			By(fmt.Sprintf("Run test %s ...... \n", test.GetTestCase().CaseBaseName))
 			Expect(RunTestCase(test)).To(Succeed(), test.GetTestMsg().FailedMSG)
 		})
 	}
