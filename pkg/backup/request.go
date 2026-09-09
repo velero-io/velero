@@ -83,11 +83,16 @@ type Request struct {
 	VolumeSnapshots           SynchronizedVSList
 	PodVolumeBackups          []*velerov1api.PodVolumeBackup
 	BackedUpItems             *backedUpItemsMap
-	itemOperationsList        *[]*itemoperation.BackupOperation
-	ResPolicies               *resourcepolicies.Policies
-	SkippedPVTracker          *skipPVTracker
-	VolumesInformation        volume.BackupVolumesInformation
-	WorkerPool                *ItemBlockWorkerPool
+	// MustIncludeAdditionalItemPVCs keeps track of PVCs that are returned as additionalItems
+	// by a BackupItemAction plugin with the must-include annotation. This is specifically
+	// used to ensure PodVolumeBackups (FSB) are created for these PVCs even when PVCs are
+	// excluded by global or fine-grained backup resource filters.
+	MustIncludeAdditionalItemPVCs *backedUpItemsMap
+	itemOperationsList            *[]*itemoperation.BackupOperation
+	ResPolicies                   *resourcepolicies.Policies
+	SkippedPVTracker              *skipPVTracker
+	VolumesInformation            volume.BackupVolumesInformation
+	WorkerPool                    *ItemBlockWorkerPool
 
 	// ClusterScopedFilterMap holds resolved global filters for cluster-scoped resources.
 	// Key is the resolved group-resource string.

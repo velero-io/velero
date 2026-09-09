@@ -136,6 +136,9 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 		s = spec.DataMover
 	}
 	backupSpecInfo["dataMover"] = s
+	if string(spec.BackupType) != "" {
+		backupSpecInfo["backupType"] = spec.BackupType
+	}
 
 	// describe TTL
 	backupSpecInfo["TTL"] = spec.TTL.Duration.String()
@@ -474,6 +477,9 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 		// nothing, and that has to be reportable rather than absent.
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			dataMovement["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
+		}
+		if info.SnapshotDataMovementInfo.ParentSnapshot != "" {
+			dataMovement["parentSnapshot"] = info.SnapshotDataMovementInfo.ParentSnapshot
 		}
 
 		snapshotDetail["dataMovement"] = dataMovement

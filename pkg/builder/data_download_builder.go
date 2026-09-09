@@ -61,6 +61,12 @@ func (d *DataDownloadBuilder) Phase(phase velerov2alpha1api.DataDownloadPhase) *
 	return d
 }
 
+// RestoreType sets the DataDownload's RestoreType.
+func (d *DataDownloadBuilder) RestoreType(restoreType string) *DataDownloadBuilder {
+	d.object.Spec.RestoreType = restoreType
+	return d
+}
+
 // SnapshotID sets the DataDownload's SnapshotID.
 func (d *DataDownloadBuilder) SnapshotID(id string) *DataDownloadBuilder {
 	d.object.Spec.SnapshotID = id

@@ -197,6 +197,7 @@ func TestRestorePodVolumes(t *testing.T) {
 		pvbs            []*velerov1api.PodVolumeBackup
 		restoredPod     *corev1api.Pod
 		sourceNamespace string
+		volumeInfos     map[string]volume.BackupVolumeInfo
 		inplace         bool
 		errs            []expectError
 	}{
@@ -414,6 +415,31 @@ func TestRestorePodVolumes(t *testing.T) {
 			},
 		},
 		{
+			name: "in-place restore blocked when the PVC is bound to a different PV than at backup time",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createPVCObj(1),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos:     map[string]volume.BackupVolumeInfo{"some-other-pv": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1"}},
+			runtimeScheme:   scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
 			name: "in-place restore proceeds when the PVC is only used by the gated restored pod",
 			pvbs: []*velerov1api.PodVolumeBackup{
 				createPVBObj(true, true, 1, "kopia"),
@@ -481,11 +507,12 @@ func TestRestorePodVolumes(t *testing.T) {
 			}()
 
 			errs := rs.RestorePodVolumes(RestoreData{
-				Restore:          restoreObj,
-				Pod:              test.restoredPod,
-				PodVolumeBackups: test.pvbs,
-				SourceNamespace:  test.sourceNamespace,
-				BackupLocation:   test.bsl,
+				Restore:           restoreObj,
+				Pod:               test.restoredPod,
+				PodVolumeBackups:  test.pvbs,
+				SourceNamespace:   test.sourceNamespace,
+				BackupLocation:    test.bsl,
+				BackupVolumeInfos: test.volumeInfos,
 			}, volume.NewRestoreVolInfoTracker(restoreObj, logrus.New(), fakeCRClient))
 
 			if errs == nil {

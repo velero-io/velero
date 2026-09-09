@@ -742,8 +742,8 @@ func TestExecuteInplaceRestore(t *testing.T) {
 }
 
 // TestExecuteInplaceRestorePreflight verifies the RIA fails the item without
-// side effects when the pre-flight check fails. The in-use semantics are
-// covered by the pkg/restore/inplace unit tests.
+// side effects when a pre-flight check fails. The check semantics themselves
+// are covered by the pkg/restore/inplace unit tests.
 func TestExecuteInplaceRestorePreflight(t *testing.T) {
 	newPodUsingPVC := func(phase corev1api.PodPhase) *corev1api.Pod {
 		pod := builder.ForPod("velero", "consumer-pod").
@@ -754,17 +754,25 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		pod         *corev1api.Pod
-		expectBlock bool
+		name           string
+		pod            *corev1api.Pod
+		backedUpPVName string
+		expectBlock    string
 	}{
 		{
-			name: "no pod, restore proceeds",
+			name:           "checks pass, restore proceeds",
+			backedUpPVName: "testPV",
 		},
 		{
-			name:        "active pod blocks the restore",
-			pod:         newPodUsingPVC(corev1api.PodRunning),
-			expectBlock: true,
+			name:           "active pod blocks the restore",
+			pod:            newPodUsingPVC(corev1api.PodRunning),
+			backedUpPVName: "testPV",
+			expectBlock:    "consumer-pod",
+		},
+		{
+			name:           "PVC bound to a different PV blocks the restore",
+			backedUpPVName: "backupPV",
+			expectBlock:    "was bound to PV backupPV at backup time",
 		},
 	}
 
@@ -778,6 +786,7 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			restore := builder.ForRestore("velero", "testRestore").Backup("testBackup").
 				ObjectMeta(builder.WithUID("uid")).ExistingVolumeDataPolicy("full").Result()
 			pvcFromBackup := builder.ForPersistentVolumeClaim("velero", "testPVC").
+				VolumeName(tc.backedUpPVName).
 				ObjectMeta(builder.WithAnnotations(
 					velerov1api.VolumeSnapshotLabel, "vsName",
 					velerov1api.DataUploadNameAnnotation, "velero/testDU",
@@ -817,10 +826,10 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			dataDownloadList := new(velerov2alpha1.DataDownloadList)
 			require.NoError(t, pvcRIA.crClient.List(t.Context(), dataDownloadList, &crclient.ListOptions{}))
 
-			if tc.expectBlock {
+			if tc.expectBlock != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "pre-flight check failed")
-				require.Contains(t, err.Error(), "consumer-pod")
+				require.Contains(t, err.Error(), tc.expectBlock)
 				// No side effects: PVC untouched with the original volumeName,
 				// PV reclaim policy not patched, no DataDownload created.
 				require.NoError(t, getErr)

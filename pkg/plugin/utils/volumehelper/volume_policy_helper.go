@@ -93,6 +93,7 @@ func ShouldPerformSnapshotWithVolumeHelper(
 		crClient,
 		boolptr.IsSetToTrue(backup.Spec.DefaultVolumesToFsBackup),
 		true,
+		nil,
 	)
 
 	return volumeHelperImpl.ShouldPerformSnapshot(unstructured, groupResource)
@@ -111,6 +112,7 @@ func NewVolumeHelperWithNamespaces(
 	defaultVolumesToFSBackup bool,
 	backupExcludePVC bool,
 	namespaces []string,
+	pvcMustInclusionTracker vhutil.PVCMustInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
 	return volumehelper.NewVolumeHelperImplWithNamespaces(
 		volumePolicy,
@@ -120,6 +122,7 @@ func NewVolumeHelperWithNamespaces(
 		defaultVolumesToFSBackup,
 		backupExcludePVC,
 		namespaces,
+		pvcMustInclusionTracker,
 	)
 }
 
@@ -131,11 +134,13 @@ func NewVolumeHelperWithCache(
 	client crclient.Client,
 	logger logrus.FieldLogger,
 	pvcPodCache *podvolumeutil.PVCPodCache,
+	pvcMustInclusionTracker vhutil.PVCMustInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
 	return volumehelper.NewVolumeHelperImplWithCache(
 		backup,
 		client,
 		logger,
 		pvcPodCache,
+		pvcMustInclusionTracker,
 	)
 }

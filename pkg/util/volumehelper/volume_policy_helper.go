@@ -22,6 +22,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// PVCMustInclusionTracker provides read-only checks for whether a PVC is included
+// in the backup as BIA's additionalItems through annotation
+// backup.velero.io/must-include-additional-items.
+type PVCMustInclusionTracker interface {
+	IsPVCIncluded(namespace, pvcName string) bool
+}
+
 type VolumeHelper interface {
 	ShouldPerformSnapshot(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, error)
 	ShouldPerformFSBackup(volume corev1api.Volume, pod corev1api.Pod) (bool, error)

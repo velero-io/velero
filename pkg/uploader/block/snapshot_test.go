@@ -351,6 +351,7 @@ func TestSnapshotSource(t *testing.T) {
 func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	const volumeID = "vol-123"
 	const realSource = "/test/source"
+	const parentSnapID = "snap-parent-42"
 	const rootObj = "root-obj-42"
 
 	snapshotTags := map[string]string{
@@ -364,6 +365,7 @@ func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	repo := udmrepomocks.NewBackupRepo(t)
 	repo.On("ListSnapshot", mock.Anything, realSource).
 		Return([]udmrepo.Snapshot{{
+			ID:         parentSnapID,
 			RootObject: udmrepo.ObjectMetadata{ID: rootObj},
 			Tags: map[string]string{
 				uploader.CBTChangeIDTag:       "cid-abc",
@@ -389,7 +391,7 @@ func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	for _, entry := range hook.AllEntries() {
 		if strings.HasPrefix(entry.Message, "Using parent snapshot ") {
 			found = true
-			assert.Contains(t, entry.Message, rootObj,
+			assert.Contains(t, entry.Message, parentSnapID,
 				"parent-selection message must name the discovered snapshot, got %q", entry.Message)
 		}
 	}

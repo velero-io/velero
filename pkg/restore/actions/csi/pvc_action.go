@@ -234,11 +234,10 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	var volumeSnapshot *snapshotv1api.VolumeSnapshot
 	restoreType := input.Restore.Spec.ExistingVolumeDataPolicy
 	if pvcExists {
-		if existingPVC.Status.Phase != corev1api.ClaimBound {
-			return nil, errors.New("ExistingVolumeDataPolicy is in-place restore, but the existing PVC is not bound.")
-		}
-
 		// Pre-flight checks must pass before any side effect on the existing PVC/PV.
+		if err := inplace.CheckPVCBoundToBackedUpPV(existingPVC, pvcFromBackup.Spec.VolumeName, pvcFromBackup.Namespace); err != nil {
+			return nil, errors.WithStack(err)
+		}
 		if err := inplace.CheckPVCNotInUse(ctx, p.crClient, existingPVC, input.Restore.UID); err != nil {
 			return nil, errors.WithStack(err)
 		}

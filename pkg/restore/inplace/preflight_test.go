@@ -200,3 +200,66 @@ func TestCheckPVCNotInUse(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckPVCBoundToBackedUpPV(t *testing.T) {
+	pvc := func(namespace, pvName string, phase corev1api.PersistentVolumeClaimPhase) *corev1api.PersistentVolumeClaim {
+		return &corev1api.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: namespace},
+			Spec:       corev1api.PersistentVolumeClaimSpec{VolumeName: pvName},
+			Status:     corev1api.PersistentVolumeClaimStatus{Phase: phase},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		existingPVC    *corev1api.PersistentVolumeClaim
+		backedUpPVName string
+		expectError    string
+	}{
+		{
+			name:           "bound to the backed-up PV, check passes",
+			existingPVC:    pvc("default", "pv-1", corev1api.ClaimBound),
+			backedUpPVName: "pv-1",
+		},
+		{
+			name:           "bound to a different PV, check fails",
+			existingPVC:    pvc("default", "pv-other", corev1api.ClaimBound),
+			backedUpPVName: "pv-1",
+			expectError:    "is bound to PV pv-other, but was bound to PV pv-1 at backup time",
+		},
+		{
+			name:           "PVC not bound, check fails",
+			existingPVC:    pvc("default", "", corev1api.ClaimPending),
+			backedUpPVName: "pv-1",
+			expectError:    "is not bound (phase Pending)",
+		},
+		{
+			name:           "different PV in a different namespace, check passes",
+			existingPVC:    pvc("mapped-ns", "pv-other", corev1api.ClaimBound),
+			backedUpPVName: "pv-1",
+		},
+		{
+			name:           "backed-up PV name unknown, check passes",
+			existingPVC:    pvc("default", "pv-other", corev1api.ClaimBound),
+			backedUpPVName: "",
+		},
+		{
+			name:           "different namespace but PVC not bound, check still fails",
+			existingPVC:    pvc("mapped-ns", "", corev1api.ClaimLost),
+			backedUpPVName: "pv-1",
+			expectError:    "is not bound (phase Lost)",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckPVCBoundToBackedUpPV(tc.existingPVC, tc.backedUpPVName, "default")
+			if tc.expectError == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.expectError)
+		})
+	}
+}

@@ -245,7 +245,11 @@ The check runs on both restore paths before any side effect on the existing PVC/
 This check is a fail-fast validation, not an atomic guarantee; the `pvc-protection` finalizer remains the actual safety gate for PVC deletion. A residual `VolumeAttachment` check (e.g. a `Failed` Pod imposed by the control plane after a non-graceful node shutdown, where the node never unmounted the volume) may be added as a future enhancement.
 
 #### 2. PVC is Bound to the Original PV
-Velero checks whether the existing PVC in the cluster is still bound to the same PersistentVolume (PV) it was bound to at the time of the backup. If the PVC is bound to a different PV, performing an in-place restore (especially an incremental one that relies on Changed Block Tracking) may be unsafe or result in unpredictable behavior. If this check fails, Velero will log an error and skip the in-place restore for that volume.
+Velero checks whether the existing PVC in the cluster is still bound to the same PersistentVolume (PV) it was bound to at the time of the backup (compared by PV name against the backed-up PVC's `spec.volumeName`). If the PVC is bound to a different PV, performing an in-place restore (especially an incremental one that relies on Changed Block Tracking) may be unsafe or result in unpredictable behavior. If this check fails, Velero will log an error and skip the in-place restore for that volume.
+
+The PV comparison is skipped when the PVC is restored into a mapped namespace, where the target PVC is necessarily bound to a different PV (see [Namespace Mapping](#namespace-mapping) for the cross-namespace clone-and-restore workflow). The PVC must still be bound in all cases.
+
+The check runs on both restore paths: in the PVC CSI RIA (using the backed-up PVC's volume name), and before creating the `PodVolumeRestore` on the file system path (using the PVC-to-PV mapping recorded in the backup's volume info).
 
 
 #### 3. Volume Size Validation

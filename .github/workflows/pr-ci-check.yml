@@ -1,5 +1,9 @@
 name: Pull Request CI Check
 on: [pull_request]
+
+permissions:
+  contents: read
+
 jobs:
   get-go-version:
     uses: ./.github/workflows/get-go-version.yaml

@@ -129,3 +129,23 @@ func gatedByThisRestore(pod *corev1api.Pod, restoreUID types.UID) bool {
 	// is still closed.
 	return true
 }
+
+// CheckPVCBoundToBackedUpPV verifies the existing PVC is still bound to the
+// same PV it was bound to at backup time. An in-place restore onto a
+// different volume is unsafe: an incremental (CBT) restore computes deltas
+// against a different volume lineage, and even a full restore would patch and
+// write into a volume unrelated to the backup. The PV comparison is skipped
+// when the PVC is restored into a different namespace, where it is necessarily
+// bound to a different PV (the documented cross-namespace clone-and-restore
+// workflow), and when the backed-up PV name is unknown.
+func CheckPVCBoundToBackedUpPV(existingPVC *corev1api.PersistentVolumeClaim, backedUpPVName, sourceNamespace string) error {
+	if existingPVC.Status.Phase != corev1api.ClaimBound {
+		return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is not bound (phase %s)",
+			existingPVC.Namespace, existingPVC.Name, existingPVC.Status.Phase)
+	}
+	if existingPVC.Namespace != sourceNamespace || backedUpPVName == "" || existingPVC.Spec.VolumeName == backedUpPVName {
+		return nil
+	}
+	return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is bound to PV %s, but was bound to PV %s at backup time",
+		existingPVC.Namespace, existingPVC.Name, existingPVC.Spec.VolumeName, backedUpPVName)
+}

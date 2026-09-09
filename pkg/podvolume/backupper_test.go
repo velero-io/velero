@@ -333,7 +333,8 @@ func createPVObj(index int, withHostPath bool) *corev1api.PersistentVolume {
 }
 
 func createPVCObj(index int) *corev1api.PersistentVolumeClaim {
-	pvcObj := builder.ForPersistentVolumeClaim("fake-ns", fmt.Sprintf("fake-pvc-%d", index)).VolumeName(fmt.Sprintf("fake-pv-%d", index)).Result()
+	pvcObj := builder.ForPersistentVolumeClaim("fake-ns", fmt.Sprintf("fake-pvc-%d", index)).VolumeName(fmt.Sprintf("fake-pv-%d", index)).
+		Phase(corev1api.ClaimBound).Result()
 	return pvcObj
 }
 

@@ -9,6 +9,9 @@ on:
       - '.goreleaser.yml'
       - 'hack/release-tools/goreleaser.sh'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build

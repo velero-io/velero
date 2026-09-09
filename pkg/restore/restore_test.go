@@ -118,7 +118,7 @@ func TestRestorePVWithVolumeInfo(t *testing.T) {
 				"pv-1": {
 					BackupMethod: volume.PodVolumeBackup,
 					PVName:       "pv-1",
-					PVBInfo: &volume.PodVolumeInfo{
+					PVBInfo: &volume.PodVolumeBackupInfo{
 						SnapshotHandle: "testSnapshotHandle",
 						Size:           100,
 						NodeName:       "testNode",
@@ -173,7 +173,7 @@ func TestRestorePVWithVolumeInfo(t *testing.T) {
 					CSISnapshotInfo: &volume.CSISnapshotInfo{
 						Driver: "pd.csi.storage.gke.io",
 					},
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover: "velero",
 					},
 				},
