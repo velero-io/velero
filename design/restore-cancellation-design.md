@@ -19,6 +19,10 @@ In #9190, sseago asks for cancellation as an operation distinct from deleting a 
 In [#2098](https://github.com/velero-io/velero/issues/2098#issuecomment-2634886944), an explicit spec field or a cancellation-request CR was discussed; later discussion favors preserving the object and using a distinct terminal [Canceled phase](https://github.com/velero-io/velero/issues/2098#issuecomment-2640290422).
 [Terminal backups remain unchanged when cancellation arrives too late](https://github.com/velero-io/velero/issues/2098#issuecomment-3211169866).
 These provide design direction; the exact shared API is still to be agreed with the backup contributors.
+Joeavaikath's later [backup design #9284](https://github.com/velero-io/velero/pull/9284) proposed `Backup.spec.cancel`; that design and [implementation #9320](https://github.com/velero-io/velero/pull/9320) closed without merge on February 26, 2026.
+Their review discusses [keeping cancellation in the existing state machine](https://github.com/velero-io/velero/pull/9284#discussion_r2430934181), [waiting for synchronous actions to complete or time out](https://github.com/velero-io/velero/pull/9284#discussion_r2430951752), and alternatives for unconfirmed asynchronous cancellation.
+The earlier request-CR discussion is therefore not an accepted shared API; this proposal must resolve the later spec-field and controller-ownership feedback with those contributors before implementation.
+Backup data deletion in that discussion must not be applied to already restored destination data.
 
 The current Restore controller runs the restore synchronously within Reconcile, while independent operations and finalizer controllers perform later work and metadata writes.
 DataDownload and PodVolumeRestore already expose cancellation, and server startup already fails stale InProgress Restores and requests child cancellation.
@@ -157,6 +161,8 @@ Do not terminate a shared plugin process to stop one Restore, and do not assume 
 
 The operations and restore-finalizer controllers must stop new restorative work and ordinary phase progression after cancellation wins.
 Allow only the agreed cancellation cleanup and diagnostic-persistence paths, under coordinated writer ownership.
+The DownloadRequest controller is also a writer: requesting RestoreItemOperations can flush the in-memory operation map to object storage.
+Include that upload path in UID validation, persistence ownership and the deletion drain; reviewing its phase eligibility alone is insufficient.
 Persist partial resource/volume information and known operation IDs even when the synchronous engine exits by cancellation; do not lose them through an early-return path.
 Do not complete normal restore hooks or signal successful volume restoration merely to unblock destination pods.
 The recovery implications for partially restored workloads must be documented.
@@ -178,6 +184,9 @@ A successful optional Cancel call is not proof of termination; unknown or unsupp
 The engine currently learns the operation ID after Execute returns and persists its operation list after the synchronous stage.
 External work that starts before an ID is durably recorded cannot be guaranteed recoverable after a crash without another plugin/persistence contract.
 Retry behavior must account for ambiguous results and process crashes; exactly-once Cancel invocation is not promised.
+Native snapshot restores also call `VolumeSnapshotter.CreateVolumeFromSnapshot` synchronously, without a context or RIA operation ID.
+Fence admission before that call and include the call's return in producer acknowledgment; context cancellation cannot interrupt it or prove the provider operation ended.
+After an ambiguous call outcome or crash, retain the unresolved outcome until the supported provider contract supplies evidence, or explicitly exclude that mode from the initial guarantee.
 
 The proposed conservative completion policy keeps Restore Canceling and requests InProgress while producer acknowledgment, relevant operation termination, storage preservation or required cleanup is unresolved.
 A diagnostic deadline can expose a blocked condition and operator guidance, but does not automatically declare Canceled or force deletion.
@@ -202,12 +211,25 @@ A separate Delete can therefore remove a canceled record later; cancellation alo
 The finalizer installed atomically at acceptance also covers cancel-before-start followed immediately by Delete.
 This cancellation-first/delete-second protection is required in the first change because otherwise ordinary deletion can erase metadata the accepted coordinator still needs.
 
+Restore deletion can also originate from the backup-deletion controller, which deletes Restores referencing the Backup and waits for them to disappear.
+Today that controller removes backup snapshots/data and object-store backup artifacts before requesting Restore deletion; it deletes the Backup API object only after the Restore wait succeeds without errors.
+An unresolved Canceling Restore could exhaust that wait and leave a DeleteBackupRequest Processed with errors after destructive backup cleanup has already happened.
+Processed deletion requests are not automatically retried by that controller.
+Retaining the Backup API object alone therefore does not preserve the dependencies needed by cancellation.
+For the cancellation-first case, the preferred requirement is to preserve required backup data, identity/location information and diagnostic dependencies until the agreed cancellation and persistence barriers complete, coordinating before the first destructive backup-deletion action.
+Retain the dependencies needed to settle admitted operations or provide an agreed durable independent source; backup artifact deletion and Restore diagnostic-prefix deletion are separate operations.
+This requires an agreed ordering mechanism between cancellation acceptance and backup deletion; a point-in-time list of dependent Restores is not a sufficient race fence.
+If backup deletion has already begun or required backup information disappears independently, expose the unavailable dependency and unresolved outcome instead of inferring Canceled or taking a missing-backup finalization shortcut.
+The admission outcome, retained metadata and operator handling of these orderings must be agreed before implementation; the necessary backup-deletion integration is a Restore cancellation prerequisite, not an implementation of backup cancellation.
+
 After restart, scan accepted Canceling Restores independently of whether their original request CR still exists.
 Reuse current DD/PVR startup handling, but do not let the existing stale-InProgress-to-Failed path overwrite an accepted cancellation.
 Persist acceptedAt rather than restarting elapsed-time diagnostics from zero.
 An empty local registry after restart or leader change is not proof that remote work stopped; reconstruct known children/operation metadata and retain unresolved evidence.
 Old workers and callbacks must pass identity/state fences before updating outcomes.
 Validate RestoreUID on name-keyed operation-cache entries; do not use a restore-name label alone to authorize cleanup of temporary resources after a name is reused.
+The current hook tracker is also name-keyed and reports complete when no tracker exists.
+Neither a missing tracker after restart nor a same-name entry supplies UID-specific acknowledgment that an old hook finished; recovery must preserve that uncertainty until the agreed hook outcome can be established.
 
 ### Compatibility and acceptance matrix
 
@@ -221,10 +243,15 @@ Validate RestoreUID on name-keyed operation-cache entries; do not use a restore-
 | Duplicate requests or deleted accepted request | One logical target cancellation continues; deletion of a request cannot resume restore |
 | Child completes before cancel patch | Preserve its terminal result and still verify required cleanup |
 | Plugin unsupported, unavailable or untracked | Explicit unresolved outcome; no invented termination acknowledgment |
+| Native snapshot call admitted before cancellation | Wait for the supported call/outcome acknowledgment; an ambiguous provider result remains unresolved |
 | Cancel then Delete / Delete then cancel | Respect both orderings; drain diagnostic writers too, with no late metadata recreation after deletion |
+| Operation download races cancellation or Delete | Fence the DownloadRequest-triggered upload by UID and drain it before deleting metadata |
+| Backup deletion while cancellation is unresolved | Apply the agreed ordering before destructive backup cleanup; expose defer/failure or unavailable dependencies without false Canceled or silent diagnostic loss |
 | Restart around every acceptance/completion write | Durable cancellation survives; no stale Failed/Completed overwrite or renewed producer admission |
+| Restart loses hook tracker or a name is reused | Missing/name-only hook state cannot acknowledge the prior Restore's producers |
 | In-place full/incremental and destination volumes | Preserve pre-existing storage; partial restored bytes remain possible |
 | CLI wait/logs/describe/download | Canceled is recognized; supported diagnostics remain accessible; before-start absence is distinguished |
+| Phase metrics race normal completion and cancellation | Count committed outcomes once; a losing normal transition cannot report successful completion |
 | Another Restore or reused name | No collateral cancellation, phase update or metadata cleanup |
 
 ## Alternatives Considered
@@ -232,6 +259,7 @@ Validate RestoreUID on name-keyed operation-cache entries; do not use a restore-
 ### Restore.spec.cancel
 
 This matches existing child flags and needs fewer resource types.
+It also matches the closed backup design #9284 and remains a concrete shared-API candidate, not merely a hypothetical alternative.
 It grants cancellation through broad Restore update/patch capability, has no separate request result for a too-late call, and requires explicit irreversible false-to-true semantics and UID/resourceVersion preconditions in the client.
 It remains a valid alternative if backup maintainers prefer it; request CRs are preferred here for separate permissions/results and the existing backup discussion.
 The coordination and writer-fencing requirements remain the same with either API.
@@ -262,6 +290,7 @@ Current logs CLI excludes new phases; create --wait enumerates terminal states; 
 Do not announce a supported API with only some server components respecting cancellation.
 
 Use the upgraded schema and a fully upgraded Velero server for this feature; an old CLI has no cancel command and older phase consumers may misinterpret new states.
+An older Restore CRD explicitly rejects Canceling/Canceled phase writes because its phase enum lacks those values; update the CRD before the server uses them.
 Do not claim a rolling mixed-controller or downgrade combination is safe without validation.
 The first implementation needs an agreed supported-version/rollout contract and version-consistent installation manifests.
 No existing Restore is canceled merely by upgrading.
@@ -283,6 +312,7 @@ Prior diagnostic tests are preserved as baseline evidence; they have not been re
 - Is strict pending-on-unknown acceptable, or what explicitly weaker timeout outcome and recovery procedure should be exposed?
 - Which in-place/data-mover modes and third-party plugin outcomes can meet the initial completion contract?
 - What diagnostic deadline, request retention, user-facing condition details and rollout/version guarantees should be finalized before implementation?
+- How should cancellation acceptance and backup deletion order their work to retain required dependencies, and what defer/retry or Processed-with-errors outcome should operators see when cancellation is unresolved or backup cleanup has already begun?
 - Who can review the shared API and the cross-controller implementation, and should automatic delete-first cancellation be a separately reviewed follow-up?
 
 ## Source References
@@ -294,3 +324,6 @@ The following references pin the current behavior being changed, rather than des
 - [Operations controller](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/controller/restore_operations_controller.go#L205-L350) and [finalizer phase writes](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/controller/restore_finalizer_controller.go#L243-L255).
 - [Hook context lifetime](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/restore/restore.go#L2319-L2363) and [startup failure recovery](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/cmd/server/server.go#L1020-L1042).
 - [CLI terminal wait](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/cmd/cli/restore/create.go#L465-L466) and [download artifact eligibility](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/controller/download_request_controller.go#L280-L287).
+- [Download-triggered operation upload](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/controller/download_request_controller.go#L221-L226) and [name-keyed operation flush](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/itemoperationmap/restore_operation_map.go#L99-L113).
+- [Native snapshot restore call](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/restore/pv_restorer.go#L71-L100) and [absent-hook completion](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/internal/hook/hook_tracker.go#L231-L238).
+- [Backup cleanup before Restore deletion and its final request outcome](https://github.com/velero-io/velero/blob/cbd9059f8006211170e2ac9911221f1ea30d1082/pkg/controller/backup_deletion_controller.go#L265-L445).
