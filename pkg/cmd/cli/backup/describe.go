@@ -56,7 +56,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 			cmd.CheckError(err)
 
 			if outputFormat != "plaintext" && outputFormat != "json" {
-				cmd.CheckError(fmt.Errorf("invalid output format '%s'. valid value are 'plaintext, json'", outputFormat))
+				cmd.CheckError(fmt.Errorf("invalid output format '%s'. valid values are 'plaintext' and 'json'", outputFormat))
 			}
 
 			backups := new(velerov1api.BackupList)
@@ -118,7 +118,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 	c.Flags().BoolVar(&details, "details", details, "Display additional detail in the command output.")
 	c.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", insecureSkipTLSVerify, "If true, the object store's TLS certificate will not be checked for validity. This is insecure and susceptible to man-in-the-middle attacks. Not recommended for production.")
 	c.Flags().StringVar(&caCertFile, "cacert", caCertFile, "Path to a certificate bundle to use when verifying TLS connections. If not specified, the CA certificate from the BackupStorageLocation will be used if available.")
-	c.Flags().StringVarP(&outputFormat, "output", "o", outputFormat, "Output display format. Valid formats are 'plaintext, json'. 'json' only applies to a single backup")
+	c.Flags().StringVarP(&outputFormat, "output", "o", outputFormat, "Output display format. Valid formats are 'plaintext' and 'json'. 'json' only applies to a single backup")
 
 	return c
 }

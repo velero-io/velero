@@ -132,6 +132,10 @@ type DataDownloadStatus struct {
 	// +optional
 	Progress shared.DataMoveOperationProgress `json:"progress,omitempty"`
 
+	// IncrementalBytes holds the number of bytes restored incrementally since the last snapshot
+	// +optional
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+
 	// Node is name of the node where the DataDownload is processed.
 	// +optional
 	Node string `json:"node,omitempty"`
@@ -154,9 +158,13 @@ type DataDownloadStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="DataDownload status such as New/InProgress"
+// The "Restore Type" column is hidden by default to align with DataUpload.
+// +kubebuilder:printcolumn:name="Restore Type",type="string",JSONPath=".spec.restoreType",description="Restore type such as Full/Incremental",priority=10
 // +kubebuilder:printcolumn:name="Started",type="date",JSONPath=".status.startTimestamp",description="Time duration since this DataDownload was started"
 // +kubebuilder:printcolumn:name="Bytes Done",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Completed bytes"
 // +kubebuilder:printcolumn:name="Total Bytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Total bytes"
+// The "Incremental Bytes" column is hidden by default to align with DataUpload.
+// +kubebuilder:printcolumn:name="Incremental Bytes",type="integer",format="int64",JSONPath=".status.incrementalBytes",description="Incremental bytes",priority=10
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where the backup data is stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this DataDownload was created"
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the DataDownload is processed"

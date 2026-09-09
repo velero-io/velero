@@ -38,6 +38,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/restore/inplace"
 	uploaderutil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -48,6 +49,9 @@ type RestoreData struct {
 	Pod                             *corev1api.Pod
 	PodVolumeBackups                []*velerov1api.PodVolumeBackup
 	SourceNamespace, BackupLocation string
+	// BackupVolumeInfos is the backup's volume info keyed by PV name, used by
+	// the in-place restore pre-flight checks.
+	BackupVolumeInfos map[string]volume.BackupVolumeInfo
 }
 
 // Restorer can execute pod volume restores of volumes in a pod.
@@ -179,6 +183,22 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 			}
 		}
 
+		// Pre-flight checks for in-place restore. Pods gated by this
+		// restore's restore-wait init container are excluded: they must mount
+		// the PVC so the volume gets mounted on the node for the node-agent
+		// to write into, and they cannot write to it themselves until this
+		// restore's PodVolumeRestores complete.
+		if data.Restore.IsVolumeDataInplaceRestore() && pvc != nil {
+			if err := inplace.CheckPVCBoundToBackedUpPV(pvc, backedUpPVName(data.BackupVolumeInfos, data.SourceNamespace, pvc.Name), data.SourceNamespace); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := inplace.CheckPVCNotInUse(r.ctx, r.crClient, pvc, data.Restore.UID); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+
 		volumeRestore := newPodVolumeRestore(data.Restore, data.Pod, data.BackupLocation, volume, backupInfo.snapshotID, backupInfo.snapshotSize, "", backupInfo.uploaderType, data.SourceNamespace, pvc)
 		if err := veleroclient.CreateRetryGenerateName(r.crClient, r.ctx, volumeRestore); err != nil {
 			errs = append(errs, errors.WithStack(err))
@@ -302,6 +322,17 @@ func newPodVolumeRestore(restore *velerov1api.Restore, pod *corev1api.Pod, backu
 	}
 
 	return pvr
+}
+
+// backedUpPVName returns the name of the PV the given source-namespace PVC was
+// bound to at backup time, or "" if unknown.
+func backedUpPVName(infos map[string]volume.BackupVolumeInfo, pvcNamespace, pvcName string) string {
+	for pvName, info := range infos {
+		if info.PVCNamespace == pvcNamespace && info.PVCName == pvcName {
+			return pvName
+		}
+	}
+	return ""
 }
 
 func getVolumesRepositoryType(volumes map[string]volumeBackupInfo) (string, error) {

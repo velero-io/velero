@@ -209,6 +209,11 @@ func DescribeRestore(
 			s = string(restore.Spec.ExistingResourcePolicy)
 		}
 		d.Printf("Existing Resource Policy: \t%s\n", s)
+		s = emptyDisplay
+		if restore.Spec.ExistingVolumeDataPolicy != "" {
+			s = string(restore.Spec.ExistingVolumeDataPolicy)
+		}
+		d.Printf("Existing Volume Data Policy: \t%s\n", s)
 		d.Printf("ItemOperationTimeout:\t%s\n", restore.Spec.ItemOperationTimeout.Duration)
 
 		d.Println()
@@ -468,6 +473,15 @@ func describeCSISnapshotsRestores(d *Describer, restoreVolInfo []volume.RestoreV
 			d.Printf("\t\t\tOperation ID: %s\n", info.SnapshotDataMovementInfo.OperationID)
 			d.Printf("\t\t\tData Mover: %s\n", info.SnapshotDataMovementInfo.DataMover)
 			d.Printf("\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
+			if info.SnapshotDataMovementInfo.RestoreType != "" {
+				d.Printf("\t\t\tRestore Type: %s\n", info.SnapshotDataMovementInfo.RestoreType)
+			}
+			if info.SnapshotDataMovementInfo.Size > 0 {
+				d.Printf("\t\t\tRestored data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)
+			}
+			if info.SnapshotDataMovementInfo.IncrementalSize != nil {
+				d.Printf("\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
+			}
 		} else {
 			d.Printf("\t\tData Movement: specify --details for more information\n")
 		}

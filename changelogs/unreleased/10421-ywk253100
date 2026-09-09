@@ -1,0 +1,1 @@
+Add "IncrementalBytes" field to status of DataDownload and PVR to indicate data transferred by the incremental restore

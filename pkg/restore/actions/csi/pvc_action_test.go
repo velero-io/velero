@@ -741,6 +741,114 @@ func TestExecuteInplaceRestore(t *testing.T) {
 	require.Equal(t, "testPV", dataDownloadList.Items[0].Spec.TargetVolume.PV)
 }
 
+// TestExecuteInplaceRestorePreflight verifies the RIA fails the item without
+// side effects when a pre-flight check fails. The check semantics themselves
+// are covered by the pkg/restore/inplace unit tests.
+func TestExecuteInplaceRestorePreflight(t *testing.T) {
+	newPodUsingPVC := func(phase corev1api.PodPhase) *corev1api.Pod {
+		pod := builder.ForPod("velero", "consumer-pod").
+			Volumes(builder.ForVolume("data").PersistentVolumeClaimSource("testPVC").Result()).
+			Result()
+		pod.Status.Phase = phase
+		return pod
+	}
+
+	tests := []struct {
+		name           string
+		pod            *corev1api.Pod
+		backedUpPVName string
+		expectBlock    string
+	}{
+		{
+			name:           "checks pass, restore proceeds",
+			backedUpPVName: "testPV",
+		},
+		{
+			name:           "active pod blocks the restore",
+			pod:            newPodUsingPVC(corev1api.PodRunning),
+			backedUpPVName: "testPV",
+			expectBlock:    "consumer-pod",
+		},
+		{
+			name:           "PVC bound to a different PV blocks the restore",
+			backedUpPVName: "backupPV",
+			expectBlock:    "was bound to PV backupPV at backup time",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			existingPVC := builder.ForPersistentVolumeClaim("velero", "testPVC").
+				VolumeName("testPV").
+				Phase(corev1api.ClaimBound).Result()
+			existingPV := builder.ForPersistentVolume("testPV").Result()
+			backup := builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result()
+			restore := builder.ForRestore("velero", "testRestore").Backup("testBackup").
+				ObjectMeta(builder.WithUID("uid")).ExistingVolumeDataPolicy("full").Result()
+			pvcFromBackup := builder.ForPersistentVolumeClaim("velero", "testPVC").
+				VolumeName(tc.backedUpPVName).
+				ObjectMeta(builder.WithAnnotations(
+					velerov1api.VolumeSnapshotLabel, "vsName",
+					velerov1api.DataUploadNameAnnotation, "velero/testDU",
+				)).Result()
+			dataUploadResult := builder.ForConfigMap("velero", "testCM").Data("uid", "{}").
+				ObjectMeta(builder.WithLabels(
+					velerov1api.RestoreUIDLabel, "uid",
+					velerov1api.PVCNamespaceNameLabel, "velero.testPVC",
+					velerov1api.ResourceUsageLabel, label.GetValidName(string(velerov1api.VeleroResourceUsageDataUploadResult)),
+				)).Result()
+
+			crObjects := []runtime.Object{existingPVC, existingPV, backup, dataUploadResult}
+			kubeObjects := []runtime.Object{existingPVC, existingPV}
+			if tc.pod != nil {
+				crObjects = append(crObjects, tc.pod)
+				kubeObjects = append(kubeObjects, tc.pod)
+			}
+
+			pvcRIA := pvcRestoreItemAction{
+				log:        logrus.New(),
+				crClient:   velerotest.NewFakeControllerRuntimeClient(t, crObjects...),
+				kubeClient: fake.NewSimpleClientset(kubeObjects...),
+			}
+
+			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup.DeepCopy())
+			require.NoError(t, err)
+			pvcFromBackupMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup)
+			require.NoError(t, err)
+
+			_, err = pvcRIA.Execute(&velero.RestoreItemActionExecuteInput{
+				Item:           &unstructured.Unstructured{Object: pvcMap},
+				ItemFromBackup: &unstructured.Unstructured{Object: pvcFromBackupMap},
+				Restore:        restore,
+			})
+
+			gotPVC, getErr := pvcRIA.kubeClient.CoreV1().PersistentVolumeClaims("velero").Get(t.Context(), "testPVC", metav1.GetOptions{})
+			dataDownloadList := new(velerov2alpha1.DataDownloadList)
+			require.NoError(t, pvcRIA.crClient.List(t.Context(), dataDownloadList, &crclient.ListOptions{}))
+
+			if tc.expectBlock != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "pre-flight check failed")
+				require.Contains(t, err.Error(), tc.expectBlock)
+				// No side effects: PVC untouched with the original volumeName,
+				// PV reclaim policy not patched, no DataDownload created.
+				require.NoError(t, getErr)
+				require.Equal(t, "testPV", gotPVC.Spec.VolumeName)
+				gotPV, pvErr := pvcRIA.kubeClient.CoreV1().PersistentVolumes().Get(t.Context(), "testPV", metav1.GetOptions{})
+				require.NoError(t, pvErr)
+				require.Equal(t, existingPV.Spec.PersistentVolumeReclaimPolicy, gotPV.Spec.PersistentVolumeReclaimPolicy)
+				require.Empty(t, dataDownloadList.Items)
+			} else {
+				require.NoError(t, err)
+				// The in-place restore proceeded: the existing PVC is deleted
+				// and a DataDownload is created.
+				require.True(t, apierrors.IsNotFound(getErr))
+				require.Len(t, dataDownloadList.Items, 1)
+			}
+		})
+	}
+}
+
 func TestPVCAppliesTo(t *testing.T) {
 	p := pvcRestoreItemAction{
 		log: logrus.StandardLogger(),

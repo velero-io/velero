@@ -157,8 +157,10 @@ func TestRunRestore(t *testing.T) {
 			if tc.volMode == "" {
 				tc.volMode = uploader.PersistentVolumeFilesystem
 			}
-			kopiaRestoreFunc = tc.hookRestoreFunc
-			_, err := kp.RunRestore(t.Context(), "", "/var", tc.incremental, CBTParam{}, tc.volMode, map[string]string{}, &updater)
+			kopiaRestoreFunc = func(ctx context.Context, rep repo.RepositoryWriter, progress *kopia.Progress, snapshotID, dest string, incremental bool, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
+				return tc.hookRestoreFunc(ctx, rep, progress, snapshotID, dest, incremental, volMode, uploaderCfg, log, cancleCh)
+			}
+			_, _, err := kp.RunRestore(t.Context(), "", "/var", tc.incremental, CBTParam{}, tc.volMode, map[string]string{}, &updater)
 			if tc.notError {
 				assert.NoError(t, err)
 			} else {

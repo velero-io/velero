@@ -351,6 +351,7 @@ func TestSnapshotSource(t *testing.T) {
 func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	const volumeID = "vol-123"
 	const realSource = "/test/source"
+	const parentSnapID = "snap-parent-42"
 	const rootObj = "root-obj-42"
 
 	snapshotTags := map[string]string{
@@ -364,6 +365,7 @@ func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	repo := udmrepomocks.NewBackupRepo(t)
 	repo.On("ListSnapshot", mock.Anything, realSource).
 		Return([]udmrepo.Snapshot{{
+			ID:         parentSnapID,
 			RootObject: udmrepo.ObjectMetadata{ID: rootObj},
 			Tags: map[string]string{
 				uploader.CBTChangeIDTag:       "cid-abc",
@@ -389,7 +391,7 @@ func TestGetParentBackupInfoLogsDiscoveredParentID(t *testing.T) {
 	for _, entry := range hook.AllEntries() {
 		if strings.HasPrefix(entry.Message, "Using parent snapshot ") {
 			found = true
-			assert.Contains(t, entry.Message, rootObj,
+			assert.Contains(t, entry.Message, parentSnapID,
 				"parent-selection message must name the discovered snapshot, got %q", entry.Message)
 		}
 	}
@@ -767,6 +769,27 @@ func TestRestore(t *testing.T) {
 			expectedSize: 4096,
 		},
 		{
+			name:        "incremental restore fallback - empty cbtSource VolumeID",
+			incremental: true,
+			cbtSource:   cbtservice.SourceInfo{Snapshot: "snap-cbt", VolumeID: ""},
+			setupMocks: func(blkup *mockUploader, repo *udmrepomocks.BackupRepo) {
+				snapWithTags := udmrepo.Snapshot{
+					Tags: map[string]string{
+						uploader.CBTChangeIDTag: "cid-1",
+						uploader.CBTVolumeIDTag: "vol-1",
+					},
+				}
+				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-001")).Return(snapWithTags, nil)
+				blkup.On("Restore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(int64(4096), int64(4096), nil)
+			},
+			setupOpenDev: func(t *testing.T) *os.File {
+				t.Helper()
+				return tempFile(t, "")
+			},
+			expectedSize: 4096,
+		},
+		{
 			name:        "incremental restore fallback - VolumeID mismatch",
 			incremental: true,
 			cbtSource:   cbtservice.SourceInfo{VolumeID: "vol-actual"},
@@ -842,7 +865,7 @@ func TestRestore(t *testing.T) {
 				cbtSvc = tc.cbtService(t)
 			}
 
-			size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", tc.incremental, tc.cbtSource, cbtSvc, map[string]string{}, testLog())
+			_, size, err := Restore(ctx, mockBlkup, mockRepo, "snap-001", "/dev/sdb", tc.incremental, tc.cbtSource, cbtSvc, map[string]string{}, testLog())
 
 			if tc.expectedErrStr != "" {
 				require.Error(t, err)

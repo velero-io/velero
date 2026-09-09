@@ -82,13 +82,17 @@ func KbClientIsRunningInNode(ctx context.Context, namespace string, nodeName str
 }
 
 // IsReady checks whether the node-agent daemonset has at least one ready pod
-// by inspecting the DaemonSet status.
+// by inspecting the DaemonSet status. Both the linux and windows daemonsets
+// are checked before returning any non-NotFound lookup error, so that a
+// transient error fetching one daemonset does not mask the other daemonset
+// being ready.
 func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) error {
 	dsLinux := new(appsv1api.DaemonSet)
+	var lookupErr error
 	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonSet}, dsLinux); err != nil {
 		dsLinux = nil
 		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get linux node-agent daemonset")
+			lookupErr = errors.Wrap(err, "failed to get linux node-agent daemonset")
 		}
 	}
 
@@ -96,7 +100,7 @@ func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) 
 	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, dsWindows); err != nil {
 		dsWindows = nil
 		if !apierrors.IsNotFound(err) {
-			return errors.Wrap(err, "failed to get windows node-agent daemonset")
+			lookupErr = errors.CombineErrors(lookupErr, errors.Wrap(err, "failed to get windows node-agent daemonset"))
 		}
 	}
 
@@ -106,6 +110,10 @@ func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) 
 
 	if dsWindows != nil && dsWindows.Status.NumberReady > 0 {
 		return nil
+	}
+
+	if lookupErr != nil {
+		return lookupErr
 	}
 
 	return errors.New("node-agent is not ready: no ready pods found")

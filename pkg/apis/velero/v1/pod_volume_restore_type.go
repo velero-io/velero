@@ -111,6 +111,10 @@ type PodVolumeRestoreStatus struct {
 	// +optional
 	Progress shared.DataMoveOperationProgress `json:"progress,omitempty"`
 
+	// IncrementalBytes holds the number of bytes restored incrementally
+	// +optional
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+
 	// AcceptedTimestamp records the time the pod volume restore is to be prepared.
 	// The server's time is used for AcceptedTimestamp
 	// +optional
@@ -129,9 +133,13 @@ type PodVolumeRestoreStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="PodVolumeRestore status such as New/InProgress"
+// The "Restore Type" column is hidden by default to align with PVB.
+// +kubebuilder:printcolumn:name="Restore Type",type="string",JSONPath=".spec.restoreType",description="Restore type such as Full/Incremental",priority=10
 // +kubebuilder:printcolumn:name="Started",type="date",JSONPath=".status.startTimestamp",description="Time duration since this PodVolumeRestore was started"
 // +kubebuilder:printcolumn:name="Bytes Done",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Completed bytes"
 // +kubebuilder:printcolumn:name="Total Bytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Total bytes"
+// The "Incremental Bytes" column is hidden by default to align with PVB.
+// +kubebuilder:printcolumn:name="Incremental Bytes",type="integer",format="int64",JSONPath=".status.incrementalBytes",description="Incremental bytes",priority=10
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where the backup data is stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this PodVolumeRestore was created"
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the PodVolumeRestore is processed"

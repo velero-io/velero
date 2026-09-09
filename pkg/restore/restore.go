@@ -2287,11 +2287,12 @@ func restorePodVolumeBackups(ctx *restoreContext, createdObj *unstructured.Unstr
 			}
 
 			data := podvolume.RestoreData{
-				Restore:          ctx.restore,
-				Pod:              pod,
-				PodVolumeBackups: ctx.podVolumeBackups,
-				SourceNamespace:  originalNamespace,
-				BackupLocation:   ctx.backup.Spec.StorageLocation,
+				Restore:           ctx.restore,
+				Pod:               pod,
+				PodVolumeBackups:  ctx.podVolumeBackups,
+				SourceNamespace:   originalNamespace,
+				BackupLocation:    ctx.backup.Spec.StorageLocation,
+				BackupVolumeInfos: ctx.backupVolumeInfoMap,
 			}
 			if errs := ctx.podVolumeRestorer.RestorePodVolumes(data, ctx.restoreVolumeInfoTracker); errs != nil {
 				ctx.log.WithError(kubeerrs.NewAggregate(errs)).Error("unable to successfully complete pod volume restores of pod's volumes")

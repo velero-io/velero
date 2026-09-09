@@ -1,0 +1,7 @@
+# CLOMonitor metadata file
+# https://github.com/cncf/clomonitor/blob/main/docs/metadata/.clomonitor.yml
+
+# Checks exemptions
+exemptions:
+  - check: artifacthub_badge
+    reason: "Velero is not distributed as an Artifact Hub package. The Velero core project is consumed via container images and release binaries, and the community-maintained Helm chart is published from a separate repository (vmware-tanzu/helm-charts). There is no Artifact Hub listing for this repository."

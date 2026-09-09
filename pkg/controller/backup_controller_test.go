@@ -1205,7 +1205,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
-					FailureReason:       "backup already exists in object storage",
+					FailureReason:       "backup execution failed: backup already exists in object storage",
 					Version:             1,
 					FormatVersion:       "1.1.0",
 					StartTimestamp:      &timestamp,
@@ -1250,7 +1250,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
-					FailureReason:       "error checking if backup already exists in object storage: Backup already exists in object storage",
+					FailureReason:       "backup execution failed: error checking if backup already exists in object storage: Backup already exists in object storage",
 					Version:             1,
 					FormatVersion:       "1.1.0",
 					StartTimestamp:      &timestamp,

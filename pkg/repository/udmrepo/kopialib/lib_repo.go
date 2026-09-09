@@ -712,6 +712,7 @@ func (kr *kopiaRepository) GetSnapshot(ctx context.Context, id udmrepo.ID) (udmr
 	}
 
 	return udmrepo.Snapshot{
+		ID:          udmrepo.ID(snap.ID),
 		Source:      snap.Source.Path,
 		Description: snap.Description,
 		StartTime:   snap.StartTime.ToTime(),
@@ -751,6 +752,7 @@ func (kr *kopiaRepository) ListSnapshot(ctx context.Context, source string) ([]u
 	snapshots := []udmrepo.Snapshot{}
 	for _, snap := range mani {
 		snapshots = append(snapshots, udmrepo.Snapshot{
+			ID:          udmrepo.ID(snap.ID),
 			Source:      snap.Source.Path,
 			Description: snap.Description,
 			StartTime:   snap.StartTime.ToTime(),

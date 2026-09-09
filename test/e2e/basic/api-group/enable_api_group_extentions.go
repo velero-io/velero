@@ -19,6 +19,7 @@ package basic
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -45,26 +46,22 @@ func APIExtensionsVersionsTest() {
 		veleroCfg = VeleroCfg
 		Expect(KubectlConfigUseContext(context.Background(), veleroCfg.DefaultClusterContext)).To(Succeed())
 		srcVersions, err := GetAPIVersions(veleroCfg.DefaultClient, resourceName)
-		Expect(err).ShouldNot(HaveOccurred())
+		Expect(err).ToNot(HaveOccurred())
 		dstVersions, err := GetAPIVersions(veleroCfg.StandbyClient, resourceName)
-		Expect(err).ShouldNot(HaveOccurred())
+		Expect(err).ToNot(HaveOccurred())
 
-		Expect(srcVersions).Should(ContainElement("v1"), func() string {
+		if !slices.Contains(srcVersions, "v1") {
 			Skip("CRD with apiextension versions srcVersions should have v1")
-			return ""
-		})
-		Expect(srcVersions).Should(ContainElement("v1beta1"), func() string {
-			Skip("CRD with apiextension versions srcVersions should have v1")
-			return ""
-		})
-		Expect(dstVersions).Should(ContainElement("v1"), func() string {
+		}
+		if !slices.Contains(srcVersions, "v1beta1") {
+			Skip("CRD with apiextension versions srcVersions should have v1beta1")
+		}
+		if !slices.Contains(dstVersions, "v1") {
 			Skip("CRD with apiextension versions dstVersions should have v1")
-			return ""
-		})
-		Expect(len(srcVersions) > 1 && len(dstVersions) == 1).Should(BeTrue(), func() string {
+		}
+		if !(len(srcVersions) > 1 && len(dstVersions) == 1) {
 			Skip("Source cluster should support apiextension v1 and v1beta1, destination cluster should only support apiextension v1")
-			return ""
-		})
+		}
 	})
 	AfterEach(func() {
 		By(fmt.Sprintf("Switch to default kubeconfig context %s", veleroCfg.DefaultClusterContext), func() {

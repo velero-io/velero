@@ -362,7 +362,7 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// result in the backup being Failed.
 		log.WithError(err).Error("backup failed")
 		request.Status.Phase = velerov1api.BackupPhaseFailed
-		request.Status.FailureReason = err.Error()
+		request.Status.FailureReason = fmt.Sprintf("backup execution failed: %v", err)
 	}
 
 	switch request.Status.Phase {
@@ -619,7 +619,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
 		*request.Backup, b.kbClient, b.globalVolumePoliciesConfigMap, request.Namespace, logger)
 	if err != nil {
-		request.Status.ValidationErrors = append(request.Status.ValidationErrors, err.Error())
+		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("invalid resource policies: %v", err))
 	} else if b.globalVolumePoliciesConfigMap != "" {
 		// Record the contributing global volume policies ConfigMap so `velero backup describe` can surface it.
 		request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = b.globalVolumePoliciesConfigMap

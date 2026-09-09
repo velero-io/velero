@@ -165,7 +165,7 @@ func TestOnPvrCompleted(t *testing.T) {
 		{
 			name:        "marshal fail",
 			marshalErr:  errors.New("fake-marshal-error"),
-			expectedErr: "error marshaling restore result {{ } 0}: fake-marshal-error",
+			expectedErr: "error marshaling restore result {{ } 0 0}: fake-marshal-error",
 		},
 		{
 			name:                "succeed",
