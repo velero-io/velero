@@ -341,7 +341,7 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 			// clear on a later attempt. Treat it as terminal only once it has
 			// outlived CSISnapshotTimeout, the same bound the synchronous path
 			// applies while waiting for the handle. A backup created without
-			// that timeout set keeps the previous fail-fast behaviour.
+			// that timeout set keeps the previous fail-fast behavior.
 			timeout := backup.Spec.CSISnapshotTimeout.Duration
 			if timeout > 0 && now.Sub(progress.Started) < timeout {
 				p.log.Warnf("VolumeSnapshotContent %s has a temporary error %s. Snapshot controller will retry later.",
