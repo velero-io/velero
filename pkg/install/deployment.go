@@ -31,10 +31,24 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
+// resolveImagePullPolicy returns pullPolicy if set, otherwise one based on the image tag.
+func resolveImagePullPolicy(image, pullPolicy string) corev1api.PullPolicy {
+	if pullPolicy != "" {
+		return corev1api.PullPolicy(pullPolicy)
+	}
+
+	imageParts := strings.Split(image, ":")
+	if len(imageParts) == 2 && imageParts[1] != "latest" {
+		return corev1api.PullIfNotPresent
+	}
+	return corev1api.PullAlways
+}
+
 type podTemplateOption func(*podTemplateConfig)
 
 type podTemplateConfig struct {
 	image                            string
+	imagePullPolicy                  string
 	envVars                          []corev1api.EnvVar
 	restoreOnly                      bool
 	annotations                      map[string]string
@@ -71,6 +85,12 @@ type podTemplateConfig struct {
 func WithImage(image string) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.image = image
+	}
+}
+
+func WithImagePullPolicy(pullPolicy string) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.imagePullPolicy = pullPolicy
 	}
 }
 
@@ -282,11 +302,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 		opt(c)
 	}
 
-	pullPolicy := corev1api.PullAlways
-	imageParts := strings.Split(c.image, ":")
-	if len(imageParts) == 2 && imageParts[1] != "latest" {
-		pullPolicy = corev1api.PullIfNotPresent
-	}
+	pullPolicy := resolveImagePullPolicy(c.image, c.imagePullPolicy)
 
 	args := []string{"server"}
 	if len(c.features) > 0 {
