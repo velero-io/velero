@@ -176,7 +176,7 @@ kubectl config use-context kind-velero-csi
 
 **2. Install external-snapshotter CRDs + snapshot-controller**
 
-Pick a recent release tag from https://github.com/kubernetes-csi/external-snapshotter/releases (example below uses `v8.2.0`):
+Pick a recent release tag from https://github.com/kubernetes-csi/external-snapshotter/releases (example below uses `v8.2.0`). Note that the `deploy.sh` script in step 3 pins its own sidecar images independently of this `SNAP_VER` (e.g. it may deploy a newer csi-snapshotter sidecar than the CRDs you apply here):
 
 ```bash
 SNAP_VER=v8.2.0
@@ -208,13 +208,7 @@ On Windows, run the deploy script from WSL/Git Bash. A normal Windows `git clone
 
 **4. StorageClass + Velero VolumeSnapshotClass label**
 
-Host-path ships `csi-hostpath-snapclass`, but Velero looks for `velero.io/csi-volumesnapshot-class: "true"`. Either label the existing class:
-
-```bash
-kubectl label volumesnapshotclass csi-hostpath-snapclass velero.io/csi-volumesnapshot-class=true --overwrite
-```
-
-or apply the Kind testdata file:
+Host-path ships `csi-hostpath-snapclass`, but Velero looks for `velero.io/csi-volumesnapshot-class: "true"`. Apply the Kind testdata file to create a labelled class:
 
 ```bash
 kubectl apply -f test/testdata/volume-snapshot-class/kind.yaml
@@ -237,7 +231,7 @@ EOF
 
 **5. Quick sanity check**
 
-Create a PVC on `csi-hostpath-sc`, then a VolumeSnapshot that points at that PVC and `csi-hostpath-snapclass` (or `e2e-volume-snapshot-class`). `kubectl get volumesnapshot` should show `READYTOUSE=true`.
+Create a PVC on `csi-hostpath-sc`, then a VolumeSnapshot that points at that PVC and `e2e-volume-snapshot-class`. `kubectl get volumesnapshot` should show `READYTOUSE=true`.
 
 **6. Running CSI e2e labels locally**
 
@@ -251,11 +245,15 @@ FEATURES=EnableCSI \
 GINKGO_LABELS='BackupVolumeInfo && CSISnapshot' \
 CLOUD_PROVIDER=kind \
 OBJECT_STORE_PROVIDER=aws \
+PLUGINS=velero/velero-plugin-for-aws:latest \
 BSL_BUCKET=<bucket> \
 BSL_PREFIX=<prefix> \
+BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://<addr>:9000 \
 CREDS_FILE=/path/to/creds \
-make test-e2e
+make -C test/ run-e2e
 ```
+
+*Note: For local MinIO, `<addr>` must be reachable from both the host (where Ginkgo runs) and the pod (where Velero runs). A container name resolves inside Kind but not from the host. You can use the Kind bridge gateway IP, e.g. `docker network inspect kind --format '{{json .IPAM.Config}}'`.*
 
 Other useful filters: `CSIDataMover`, or broader `Snapshot` depending on what you want to exercise. Check the current Kind CI matrix in `.github/workflows/e2e-test-kind.yaml` — today it does not select those CSI labels (see #7507).
 
