@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -236,6 +237,9 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	if pvcExists {
 		// Pre-flight checks must pass before any side effect on the existing PVC/PV.
 		if err := inplace.CheckPVCBoundToBackedUpPV(existingPVC, pvcFromBackup.Spec.VolumeName, pvcFromBackup.Namespace); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		if err := inplace.CheckPVCCapacity(existingPVC, sourceSizeFromCarrier(pvc)); err != nil {
 			return nil, errors.WithStack(err)
 		}
 		if err := inplace.CheckPVCNotInUse(ctx, p.crClient, existingPVC, input.Restore.UID); err != nil {
@@ -727,6 +731,13 @@ func (p *pvcRestoreItemAction) createVolumeSnapshot(ctx context.Context, logger 
 	logger.Infof("VolumeSnapshot %s for PVC %s/%s is ready to use", vs.Name, pvc.Namespace, pvc.Name)
 
 	return vs, nil
+}
+
+// sourceSizeFromCarrier reads the source volume size the restore engine carries on the PVC
+// item from the backup volume info, or 0 if absent or malformed.
+func sourceSizeFromCarrier(pvc *corev1api.PersistentVolumeClaim) int64 {
+	size, _ := strconv.ParseInt(pvc.Annotations[velerov1api.InplaceRestoreSourceSizeAnnotation], 10, 64)
+	return size
 }
 
 func NewPvcRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {

@@ -757,6 +757,8 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 		name           string
 		pod            *corev1api.Pod
 		backedUpPVName string
+		sourceSize     string // carried on the PVC item by the restore engine
+		pvcCapacity    string
 		expectBlock    string
 	}{
 		{
@@ -774,6 +776,17 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			backedUpPVName: "backupPV",
 			expectBlock:    "was bound to PV backupPV at backup time",
 		},
+		{
+			// Backed-up PV unknown so the same-volume skip does not apply.
+			name:        "PVC smaller than the source volume blocks the restore",
+			sourceSize:  "209715200",
+			pvcCapacity: "100Mi",
+			expectBlock: "capacity 100Mi is smaller than the backed-up volume size 209715200 bytes",
+		},
+		{
+			name:        "source size not carried skips the capacity check",
+			pvcCapacity: "100Mi",
+		},
 	}
 
 	for _, tc := range tests {
@@ -781,6 +794,9 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 			existingPVC := builder.ForPersistentVolumeClaim("velero", "testPVC").
 				VolumeName("testPV").
 				Phase(corev1api.ClaimBound).Result()
+			if tc.pvcCapacity != "" {
+				existingPVC.Status.Capacity = corev1api.ResourceList{corev1api.ResourceStorage: resource.MustParse(tc.pvcCapacity)}
+			}
 			existingPV := builder.ForPersistentVolume("testPV").Result()
 			backup := builder.ForBackup("velero", "testBackup").SnapshotMoveData(true).Result()
 			restore := builder.ForRestore("velero", "testRestore").Backup("testBackup").
@@ -811,7 +827,11 @@ func TestExecuteInplaceRestorePreflight(t *testing.T) {
 				kubeClient: fake.NewSimpleClientset(kubeObjects...),
 			}
 
-			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup.DeepCopy())
+			item := pvcFromBackup.DeepCopy()
+			if tc.sourceSize != "" {
+				item.Annotations[velerov1api.InplaceRestoreSourceSizeAnnotation] = tc.sourceSize
+			}
+			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
 			require.NoError(t, err)
 			pvcFromBackupMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvcFromBackup)
 			require.NoError(t, err)
