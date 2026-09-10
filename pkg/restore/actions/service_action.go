@@ -190,11 +190,17 @@ func deleteNodePorts(service *corev1api.Service) error {
 					}
 					if nodePortInt > 0 {
 						portName, ok := p["name"]
-						if !ok {
+						switch name, isString := portName.(string); {
+						case !ok:
 							// unnamed port
 							unnamedPortInts.Insert(nodePortInt)
-						} else {
-							explicitNodePorts.Insert(portName.(string))
+						case isString:
+							explicitNodePorts.Insert(name)
+						default:
+							// The annotation is free-form JSON, so the name is
+							// not necessarily a string. One that is not cannot
+							// match a port on the service, so there is nothing
+							// to retain for it.
 						}
 					}
 				}
