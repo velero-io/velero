@@ -166,3 +166,43 @@ func TestStructuredDescriber_DescribeMetadata(t *testing.T) {
 
 	assert.True(t, reflect.DeepEqual(expect, d.output))
 }
+
+func TestJoinStringWithFallback(t *testing.T) {
+	testcases := []struct {
+		name     string
+		input    []string
+		fallback string
+		expect   string
+	}{
+		{
+			name:     "empty slice",
+			input:    []string{},
+			fallback: "fallback-str",
+			expect:   "fallback-str",
+		},
+		{
+			name:     "nil slice",
+			input:    nil,
+			fallback: "fallback-str",
+			expect:   "fallback-str",
+		},
+		{
+			name:     "single element",
+			input:    []string{"a"},
+			fallback: "fallback-str",
+			expect:   "a",
+		},
+		{
+			name:     "multiple elements",
+			input:    []string{"a", "b", "c"},
+			fallback: "fallback-str",
+			expect:   "a, b, c",
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := JoinStringWithFallback(tc.input, tc.fallback)
+			assert.Equal(t, tc.expect, got)
+		})
+	}
+}
