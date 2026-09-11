@@ -78,6 +78,11 @@ func DescribeBackupInSF(
 
 // DescribeBackupSpecInSF describes a backup spec in structured format.
 func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec) {
+	d.Describe("spec", BackupSpecInSF(spec))
+}
+
+// BackupSpecInSF converts a BackupSpec into a structured format map.
+func BackupSpecInSF(spec velerov1api.BackupSpec) map[string]any {
 	backupSpecInfo := make(map[string]any)
 	var s string
 
@@ -225,7 +230,7 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 		backupSpecInfo["orderedResources"] = spec.OrderedResources
 	}
 
-	d.Describe("spec", backupSpecInfo)
+	return backupSpecInfo
 }
 
 // DescribeBackupStatusInSF describes a backup status in structured format.

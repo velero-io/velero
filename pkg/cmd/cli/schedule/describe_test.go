@@ -17,6 +17,7 @@ limitations under the License.
 package schedule
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,4 +48,33 @@ func TestNewDescribeCommandDescribesOnlyTheVeleroNamespace(t *testing.T) {
 
 	assert.Contains(t, out, "ours")
 	assert.NotContains(t, out, "theirs")
+}
+
+func TestNewDescribeCommandStructuredJSONOutput(t *testing.T) {
+	schedule := builder.ForSchedule(cmdtest.VeleroNameSpace, "schedule-json").CronSchedule("@weekly").Result()
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t, schedule)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"schedule-json", "-o", "json"})
+
+	out := captureStdout(t, func() {
+		require.NoError(t, c.Execute())
+	})
+
+	var data map[string]any
+	err := json.Unmarshal([]byte(out), &data)
+	require.NoError(t, err)
+
+	metadata, ok := data["metadata"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "schedule-json", metadata["name"])
+
+	spec, ok := data["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "@weekly", spec["schedule"])
 }
