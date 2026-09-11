@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -27,8 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlClient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	//"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -238,4 +241,47 @@ func TestBackupQueueReconciler(t *testing.T) {
 			assert.Equal(t, test.expectQueuePosition, backupAfter.Status.QueuePosition)
 		})
 	}
+}
+
+// TestBackupQueueReconcilerTrackerNotLeakedWhenBackupCompletesDuringPatch verifies the fix for
+// https://github.com/velero-io/velero/issues/10519: if backupReconciler picks up the
+// ReadyToStart phase change (e.g. because the backup fails validation immediately) and calls
+// BackupTracker.Add/Delete before backupQueueReconciler reaches its own AddReadyToStart call,
+// the queue controller must not re-insert a tracker entry nobody will ever delete.
+func TestBackupQueueReconcilerTrackerNotLeakedWhenBackupCompletesDuringPatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-11").Phase(velerov1api.BackupPhaseQueued).QueuePosition(1).Result()
+	backupTracker := NewBackupTracker()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+		WithRuntimeObjects(backup).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c ctrlClient.WithWatch, obj ctrlClient.Object, patch ctrlClient.Patch, opts ...ctrlClient.PatchOption) error {
+				if err := c.Patch(ctx, obj, patch, opts...); err != nil {
+					return err
+				}
+				// Simulate backupReconciler racing ahead of this goroutine: it sees
+				// the ReadyToStart patch land, runs, and immediately completes the
+				// backup (e.g. FailedValidation), calling Add then its deferred
+				// Delete before backupQueueReconciler's next statement executes.
+				if b, ok := obj.(*velerov1api.Backup); ok && b.Status.Phase == velerov1api.BackupPhaseReadyToStart {
+					backupTracker.Add(b.Namespace, b.Name)
+					backupTracker.Delete(b.Namespace, b.Name)
+				}
+				return nil
+			},
+		}).
+		Build()
+
+	logger := logrus.New()
+	log := logger.WithField("controller", "backup-queue-test")
+	r := NewBackupQueueReconciler(fakeClient, scheme, log, 1, backupTracker)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}}
+	_, err := r.Reconcile(t.Context(), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, backupTracker.RunningCount(),
+		"tracker entry must not be leaked when a racing reconcile completes the backup before AddReadyToStart runs")
 }
