@@ -90,6 +90,7 @@ const (
 	// Each completed job's duration is recorded in the appropriate bucket, allowing
 	// analysis of individual job performance and trending over time.
 	repoMaintenanceDurationSeconds = "repo_maintenance_duration_seconds"
+	buildInfo                      = "build_info"
 
 	// Labels
 	nodeMetricLabel         = "node"
@@ -393,6 +394,14 @@ func NewServerMetrics() *ServerMetrics {
 				},
 				[]string{repositoryNameLabel},
 			),
+			buildInfo: prometheus.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Namespace: metricNamespace,
+					Name:      buildInfo,
+					Help:      "A metric with a constant '1' value labeled with Velero build information.",
+				},
+				[]string{"version", "git_commit", "git_tree_state", "go_version", "goos", "goarch"},
+			),
 		},
 	}
 }
@@ -499,6 +508,13 @@ func NewNodeMetrics() *ServerMetrics {
 func (m *ServerMetrics) RegisterAllMetrics() {
 	for _, pm := range m.metrics {
 		prometheus.MustRegister(pm)
+	}
+}
+
+// RegisterBuildInfo records static build information for the Velero server.
+func (m *ServerMetrics) RegisterBuildInfo(version, gitCommit, gitTreeState, goVersion, goos, goarch string) {
+	if g, ok := m.metrics[buildInfo].(*prometheus.GaugeVec); ok {
+		g.WithLabelValues(version, gitCommit, gitTreeState, goVersion, goos, goarch).Set(1)
 	}
 }
 
