@@ -821,10 +821,11 @@ func TestAcceptPvb(t *testing.T) {
 
 func TestOnPvbPrepareTimeout(t *testing.T) {
 	tests := []struct {
-		name     string
-		pvb      *velerov1api.PodVolumeBackup
-		needErrs []error
-		expected *velerov1api.PodVolumeBackup
+		name       string
+		pvb        *velerov1api.PodVolumeBackup
+		hostingPod *corev1api.Pod
+		needErrs   []error
+		expected   *velerov1api.PodVolumeBackup
 	}{
 		{
 			name:     "update fail",
@@ -844,6 +845,21 @@ func TestOnPvbPrepareTimeout(t *testing.T) {
 			needErrs: []error{nil, nil, nil, nil},
 			expected: pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseFailed).Result(),
 		},
+		{
+			name: "succeed, surfaces pod's own PodScheduled=False message",
+			pvb:  pvbBuilder().Result(),
+			hostingPod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: pvbName},
+				Status: corev1api.PodStatus{
+					Conditions: []corev1api.PodCondition{
+						{Type: corev1api.PodScheduled, Status: corev1api.ConditionFalse, Message: "0/1 nodes are available: didn't match node affinity"},
+					},
+				},
+			},
+			needErrs: []error{nil, nil, nil, nil},
+			expected: pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseFailed).
+				Message("timeout on preparing PVB: pod scheduling failed: 0/1 nodes are available: didn't match node affinity").Result(),
+		},
 	}
 	for _, test := range tests {
 		ctx := t.Context()
@@ -852,6 +868,11 @@ func TestOnPvbPrepareTimeout(t *testing.T) {
 
 		err = r.client.Create(ctx, test.pvb)
 		require.NoError(t, err)
+
+		if test.hostingPod != nil {
+			_, err = r.kubeClient.CoreV1().Pods(test.hostingPod.Namespace).Create(ctx, test.hostingPod, metav1.CreateOptions{})
+			require.NoError(t, err)
+		}
 
 		r.onPrepareTimeout(ctx, test.pvb)
 
@@ -862,6 +883,9 @@ func TestOnPvbPrepareTimeout(t *testing.T) {
 		}, &pvb)
 
 		assert.Equal(t, test.expected.Status.Phase, pvb.Status.Phase)
+		if test.expected.Status.Message != "" {
+			assert.Equal(t, test.expected.Status.Message, pvb.Status.Message)
+		}
 	}
 }
 

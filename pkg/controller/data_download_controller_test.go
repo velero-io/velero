@@ -959,6 +959,7 @@ func TestOnDdPrepareTimeout(t *testing.T) {
 	tests := []struct {
 		name     string
 		dd       *velerov2alpha1api.DataDownload
+		objects  []any
 		needErrs []error
 		expected *velerov2alpha1api.DataDownload
 	}{
@@ -980,10 +981,25 @@ func TestOnDdPrepareTimeout(t *testing.T) {
 			needErrs: []error{nil, nil, nil, nil},
 			expected: dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseFailed).Result(),
 		},
+		{
+			name: "succeed, surfaces pod's own PodScheduled=False message",
+			dd:   dataDownloadBuilder().Result(),
+			objects: []any{&corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: dataDownloadName},
+				Status: corev1api.PodStatus{
+					Conditions: []corev1api.PodCondition{
+						{Type: corev1api.PodScheduled, Status: corev1api.ConditionFalse, Message: "0/1 nodes are available: didn't match node affinity"},
+					},
+				},
+			}},
+			needErrs: []error{nil, nil, nil, nil},
+			expected: dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseFailed).
+				Message("timeout on preparing data download: pod scheduling failed: 0/1 nodes are available: didn't match node affinity").Result(),
+		},
 	}
 	for _, test := range tests {
 		ctx := t.Context()
-		r, err := initDataDownloadReconcilerWithError(t, nil, test.needErrs...)
+		r, err := initDataDownloadReconcilerWithError(t, test.objects, test.needErrs...)
 		require.NoError(t, err)
 
 		err = r.client.Create(ctx, test.dd)
@@ -998,6 +1014,9 @@ func TestOnDdPrepareTimeout(t *testing.T) {
 		}, &dd)
 
 		assert.Equal(t, test.expected.Status.Phase, dd.Status.Phase)
+		if test.expected.Status.Message != "" {
+			assert.Equal(t, test.expected.Status.Message, dd.Status.Message)
+		}
 	}
 }
 
