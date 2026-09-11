@@ -95,6 +95,7 @@ type Options struct {
 	NodeAgentDisableHostPath         bool
 	kubeletRootDir                   string
 	Apply                            bool
+	NoWait                           bool
 	ServerPriorityClassName          string
 	NodeAgentPriorityClassName       string
 }
@@ -132,7 +133,8 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.UseNodeAgent, "use-node-agent", o.UseNodeAgent, "Create Velero node-agent daemonset. Optional. Velero node-agent hosts and associates Velero modules that need to run in one or more Linux nodes.")
 	flags.BoolVar(&o.UseNodeAgentWindows, "use-node-agent-windows", o.UseNodeAgentWindows, "Create Velero node-agent-windows daemonset. Optional. Velero node-agent-windows hosts and associates Velero modules that need to run in one or more Windows nodes.")
 	flags.BoolVar(&o.PrivilegedNodeAgent, "privileged-node-agent", o.PrivilegedNodeAgent, "Use privileged mode for the node agent. Optional. Required to backup block devices.")
-	flags.BoolVar(&o.Wait, "wait", o.Wait, "Wait for Velero deployment to be ready. Optional.")
+	flags.BoolVar(&o.Wait, "wait", o.Wait, "Wait for Velero deployment to be ready. Enabled by default. Use --no-wait to skip waiting.")
+	flags.BoolVar(&o.NoWait, "no-wait", o.NoWait, "Skip waiting for Velero deployment to be ready after install.")
 	flags.DurationVar(&o.DefaultRepoMaintenanceFrequency, "default-repo-maintain-frequency", o.DefaultRepoMaintenanceFrequency, "How often 'maintain' is run for backup repositories by default. Optional.")
 	flags.DurationVar(&o.GarbageCollectionFrequency, "garbage-collection-frequency", o.GarbageCollectionFrequency, "How often the garbage collection runs for expired backups.(default 1h)")
 	flags.DurationVar(&o.PodVolumeOperationTimeout, "pod-volume-operation-timeout", o.PodVolumeOperationTimeout, "How long to wait for pod volume operations to complete before timing out(default 4h). Optional.")
@@ -258,6 +260,7 @@ func NewInstallOptions() *Options {
 		ScheduleSkipImmediately:         false,
 		kubeletRootDir:                  install.DefaultKubeletRootDir,
 		NodeAgentDisableHostPath:        false,
+		Wait:                            true,
 	}
 }
 
@@ -372,7 +375,8 @@ All namespaced resources will be placed in the 'velero' namespace by default.
 
 The '--namespace' flag can be used to specify a different namespace to install into.
 
-Use '--wait' to wait for the Velero Deployment to be ready before proceeding.
+By default, the command waits for the Velero Deployment to be ready before proceeding.
+Use '--no-wait' to skip waiting and return immediately after resource creation.
 
 Use '-o yaml' or '-o json' with '--dry-run' to output all generated resources as text instead of sending the resources to the server.
 This is useful as a starting point for more customized installations.
@@ -487,6 +491,11 @@ func (o *Options) Complete(args []string, f client.Factory) error {
 func (o *Options) Validate(c *cobra.Command, args []string, f client.Factory) error {
 	if err := output.ValidateFlags(c); err != nil {
 		return err
+	}
+
+	// --no-wait overrides --wait
+	if o.NoWait {
+		o.Wait = false
 	}
 
 	// If we're only installing CRDs, we can skip the rest of the validation.
