@@ -82,10 +82,16 @@ func TestCheckPVCNotInUse(t *testing.T) {
 	tests := []struct {
 		name          string
 		pods          []*corev1api.Pod
+		pvc           *corev1api.PersistentVolumeClaim
 		restoreUID    types.UID
 		expectPass    bool
 		expectMessage []string
+		expectError   string
 	}{
+		{
+			name:        "nil PVC returns error",
+			expectError: "pvc cannot be nil",
+		},
 		{
 			name:       "no pods, check passes",
 			expectPass: true,
@@ -183,11 +189,19 @@ func TestCheckPVCNotInUse(t *testing.T) {
 			}
 			cli := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 
-			pvc := &corev1api.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "default"},
+			pvc := tc.pvc
+			if pvc == nil && tc.name != "nil PVC returns error" {
+				pvc = &corev1api.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "default"},
+				}
 			}
 
 			err := CheckPVCNotInUse(t.Context(), cli, pvc, tc.restoreUID)
+			if tc.expectError != "" {
+				require.Error(t, err)
+				assert.EqualError(t, err, tc.expectError)
+				return
+			}
 			if tc.expectPass {
 				require.NoError(t, err)
 				return
@@ -216,6 +230,12 @@ func TestCheckPVCBoundToBackedUpPV(t *testing.T) {
 		backedUpPVName string
 		expectError    string
 	}{
+		{
+			name:           "nil existing PVC returns error",
+			existingPVC:    nil,
+			backedUpPVName: "pv-1",
+			expectError:    "existing PVC cannot be nil",
+		},
 		{
 			name:           "bound to the backed-up PV, check passes",
 			existingPVC:    pvc("default", "pv-1", corev1api.ClaimBound),
