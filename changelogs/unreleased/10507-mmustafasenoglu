@@ -1,0 +1,1 @@
+Default --wait to true in velero install and add --no-wait flag to skip waiting for resources to be ready
