@@ -88,8 +88,8 @@ func runBackupDeletionTests(client TestClient, veleroCfg VeleroConfig, backupLoc
 	nsCount := len(workloadNamespaceList)
 	workloadNamespaces := strings.Join(workloadNamespaceList[:], ",")
 
-	if useVolumeSnapshots && veleroCfg.CloudProvider == "kind" {
-		Skip("Volume snapshots not supported on kind")
+	if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
+		Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
 	}
 	oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 	defer ctxCancel()
