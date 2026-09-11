@@ -19,6 +19,7 @@ package csi
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -270,6 +271,44 @@ func TestVSProgress(t *testing.T) {
 					},
 				}).Result(),
 			backup:      builder.ForBackup("velero", "backup").Result(),
+			expectedErr: false,
+			expectedProgress: &velero.OperationProgress{
+				Completed: true,
+				Err:       "error",
+			},
+		},
+		{
+			// The snapshot controller requeues retryable CSI errors, so an
+			// error younger than CSISnapshotTimeout must leave the operation
+			// running rather than failing the backup on first sight.
+			name:        "VSC error within CSISnapshotTimeout is not terminal",
+			operationID: "ns/name/" + time.Now().Format(time.RFC3339),
+			vs: builder.ForVolumeSnapshot("ns", "name").Status().
+				ReadyToUse(true).BoundVolumeSnapshotContentName("vsc").Result(),
+			vsc: builder.ForVolumeSnapshotContent("vsc").
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{
+					Error: &snapshotv1api.VolumeSnapshotError{
+						Message: &errorStr,
+					},
+				}).Result(),
+			backup: builder.ForBackup("velero", "backup").
+				CSISnapshotTimeout(10 * time.Minute).Result(),
+			expectedErr:      false,
+			expectedProgress: &velero.OperationProgress{},
+		},
+		{
+			name:        "VSC error outliving CSISnapshotTimeout is terminal",
+			operationID: "ns/name/" + time.Now().Add(-time.Hour).Format(time.RFC3339),
+			vs: builder.ForVolumeSnapshot("ns", "name").Status().
+				ReadyToUse(true).BoundVolumeSnapshotContentName("vsc").Result(),
+			vsc: builder.ForVolumeSnapshotContent("vsc").
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{
+					Error: &snapshotv1api.VolumeSnapshotError{
+						Message: &errorStr,
+					},
+				}).Result(),
+			backup: builder.ForBackup("velero", "backup").
+				CSISnapshotTimeout(10 * time.Minute).Result(),
 			expectedErr: false,
 			expectedProgress: &velero.OperationProgress{
 				Completed: true,
