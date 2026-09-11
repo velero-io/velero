@@ -255,7 +255,7 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// retries continue across reconciles rather than blocking a worker
 	// goroutine indefinitely on a call that will never succeed.
 	if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
-		func() error { return backupStore.PutBackupMetadata(backup.Name, backupJSON) },
+		func() error { return backupStore.PutBackupMetadata(backup.Name, bytes.NewReader(backupJSON.Bytes())) },
 	); err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
 	}
