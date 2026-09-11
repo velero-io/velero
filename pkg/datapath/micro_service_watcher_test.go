@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	kubeclientfake "k8s.io/client-go/kubernetes/fake"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -163,23 +164,25 @@ type insertEvent struct {
 
 func TestStartWatch(t *testing.T) {
 	tests := []struct {
-		name                 string
-		namespace            string
-		thisPod              string
-		thisContainer        string
-		terminationMessage   string
-		redirectLogErr       error
-		insertPod            *corev1api.Pod
-		insertEventsBefore   []insertEvent
-		insertEventsAfter    []insertEvent
-		ctxCancel            bool
-		expectStartEvent     bool
-		expectTerminateEvent bool
-		expectComplete       bool
-		expectCancel         bool
-		expectFail           bool
-		expectFailMsg        string
-		expectProgress       int
+		name                  string
+		namespace             string
+		thisPod               string
+		thisContainer         string
+		terminationMessage    string
+		redirectLogErr        error
+		insertPod             *corev1api.Pod
+		podDeleted            bool
+		insertEventsBefore    []insertEvent
+		insertEventsAfter     []insertEvent
+		ctxCancel             bool
+		expectStartEvent      bool
+		expectTerminateEvent  bool
+		expectComplete        bool
+		expectCancel          bool
+		expectFail            bool
+		expectFailMsg         string
+		expectFailMsgContains string
+		expectProgress        int
 	}{
 		{
 			name:          "exit from ctx",
@@ -354,6 +357,21 @@ func TestStartWatch(t *testing.T) {
 			expectFail:         true,
 		},
 		{
+			// GAP-15 fix1: the pod is force-deleted (or force-removed by the node
+			// controller once its node is confirmed gone) before ever reporting a
+			// terminal phase. Its last cached state is still Running, and
+			// funcGetPodTerminationMessage would return "" for it -- this pins that
+			// handlePodDelete's synthetic message is used instead of that blank one.
+			name:                  "pod deleted before terminal phase",
+			thisPod:               "fak-pod-1",
+			thisContainer:         "fake-container-1",
+			insertPod:             builder.ForPod("velero", "fake-pod-1").Phase(corev1api.PodRunning).Result(),
+			podDeleted:            true,
+			terminationMessage:    "",
+			expectFail:            true,
+			expectFailMsgContains: "was deleted before reaching a terminal phase",
+		},
+		{
 			name:          "canceled",
 			thisPod:       "fak-pod-1",
 			thisContainer: "fake-container-1",
@@ -445,6 +463,11 @@ func TestStartWatch(t *testing.T) {
 			}
 
 			if test.insertPod != nil {
+				if test.podDeleted {
+					ms.watcherLock.Lock()
+					ms.podDeletedByInformer = true
+					ms.watcherLock.Unlock()
+				}
 				ms.podCh <- test.insertPod
 			}
 
@@ -472,7 +495,56 @@ func TestStartWatch(t *testing.T) {
 			}
 			assert.Equal(t, test.expectProgress, sw.progress)
 
+			if test.expectFailMsgContains != "" {
+				require.Error(t, sw.failedErr)
+				assert.Contains(t, sw.failedErr.Error(), test.expectFailMsgContains)
+			}
+
 			cancel()
+		})
+	}
+}
+
+// TestHandlePodDelete pins the pod informer's DeleteFunc: both a direct delete and one
+// observed only as a DeletedFinalStateUnknown tombstone (client-go's shape for a delete
+// event missed and recovered via relist) must be recognized as this watcher's own pod and
+// forwarded to podCh with podDeletedByInformer set, so a real informer registration can't
+// silently regress into the pre-fix no-DeleteFunc behavior for either shape.
+func TestHandlePodDelete(t *testing.T) {
+	matchingPod := builder.ForPod("velero", "fake-pod-1").Result()
+	otherPod := builder.ForPod("velero", "other-pod").Result()
+
+	tests := []struct {
+		name       string
+		obj        any
+		expectSent bool
+	}{
+		{name: "direct pod delete for this watcher's pod", obj: matchingPod, expectSent: true},
+		{name: "DeletedFinalStateUnknown wrapping this watcher's pod", obj: cache.DeletedFinalStateUnknown{Key: "velero/fake-pod-1", Obj: matchingPod}, expectSent: true},
+		{name: "direct pod delete for a different pod is ignored", obj: otherPod, expectSent: false},
+		{name: "DeletedFinalStateUnknown wrapping a different pod is ignored", obj: cache.DeletedFinalStateUnknown{Key: "velero/other-pod", Obj: otherPod}, expectSent: false},
+		{name: "DeletedFinalStateUnknown wrapping a non-pod object is ignored", obj: cache.DeletedFinalStateUnknown{Key: "velero/fake-pod-1", Obj: "not-a-pod"}, expectSent: false},
+		{name: "unexpected object type is ignored", obj: "not-a-pod", expectSent: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ms := &microServiceBRWatcher{
+				namespace: "velero",
+				thisPod:   "fake-pod-1",
+				podCh:     make(chan *corev1api.Pod, 1),
+			}
+			ms.handlePodDelete(test.obj)
+			ms.watcherLock.Lock()
+			flagged := ms.podDeletedByInformer
+			ms.watcherLock.Unlock()
+			assert.Equal(t, test.expectSent, flagged)
+			select {
+			case <-ms.podCh:
+				assert.True(t, test.expectSent, "pod was sent to podCh but expectSent was false")
+			default:
+				assert.False(t, test.expectSent, "expected pod to be sent to podCh but nothing was received")
+			}
 		})
 	}
 }
