@@ -89,6 +89,36 @@ a specified object store type.  Currently supported cloud provider types are _aw
 
 ## 4. Running tests
 
+### Quick start: fully self-contained `kind` run
+
+`make test-e2e-kind` runs the suite against a `kind` cluster and MinIO with no
+manual setup at all - no `kind create cluster`, no MinIO deployment, no credentials
+file to write by hand, and no risk to your current kubectl context.
+
+The kind cluster, MinIO, the Velero build, and the test run all happen inside a
+single privileged wrapper container (a nested `dockerd`, similar to how kind's own
+node containers already run a nested container runtime). The kind cluster, its
+kubeconfig, and MinIO never exist on the host - your `~/.kube/config`, current
+kubectl context, and `kind get clusters` are untouched. The host engine only sees
+the wrapper image and, while the run is active, the wrapper container itself; the
+host filesystem is only written inside this repo checkout (build output, same as a
+native `make test-e2e`). When the container exits, the inner cluster, MinIO, and
+kubeconfig all disappear with it.
+
+Prerequisites: `docker` (or `podman`, via `CONTAINER_TOOL=podman`) and `git` on
+`PATH`. That's it - `kind`, `kubectl`, `go`, MinIO, and the Velero image are all
+handled inside the wrapper.
+
+```bash
+make test-e2e-kind
+# narrow to a subset, same as GINKGO_LABELS for make test-e2e:
+GINKGO_LABELS="Basic" make test-e2e-kind
+```
+
+See `hack/e2e-kind.sh` and `hack/e2e-kind/` for how it's assembled. This target
+always builds Velero from your local checkout (not a published image), so it
+exercises whatever you have checked out, including uncommitted changes.
+
 ### Parameters for `make`
 
 E2E tests can be run from the Velero repository root by running `make test-e2e`. While running E2E tests using `make` the E2E test configuration values are passed using `make` variables.
