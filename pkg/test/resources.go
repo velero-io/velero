@@ -31,6 +31,10 @@ type APIResource struct {
 	ShortName  string
 	Namespaced bool
 	Items      []metav1.Object
+	// Verbs overrides the discovery verbs reported for this resource.
+	// When empty, the discovery client fixture defaults to
+	// list/create/get/delete.
+	Verbs []string
 }
 
 // GVR returns a GroupVersionResource representing the resource.
