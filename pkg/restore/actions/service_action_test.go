@@ -698,3 +698,50 @@ func TestServiceActionExecute(t *testing.T) {
 		})
 	}
 }
+
+// The last-applied-configuration annotation is free-form JSON copied from the
+// backed up Service, so a port name in it need not be a string.
+func TestServiceActionExecuteWithNonStringPortName(t *testing.T) {
+	tests := []struct {
+		name              string
+		lastAppliedConfig string
+	}{
+		{
+			name:              "numeric port name",
+			lastAppliedConfig: `{"spec":{"ports":[{"name":8080,"nodePort":8080}]}}`,
+		},
+		{
+			name:              "object port name",
+			lastAppliedConfig: `{"spec":{"ports":[{"name":{"a":"b"},"nodePort":8080}]}}`,
+		},
+		{
+			name:              "null port name",
+			lastAppliedConfig: `{"spec":{"ports":[{"name":null,"nodePort":8080}]}}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := corev1api.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "svc-1",
+					Annotations: map[string]string{annotationLastAppliedConfig: test.lastAppliedConfig},
+				},
+				Spec: corev1api.ServiceSpec{
+					Ports: []corev1api.ServicePort{{Name: "http", NodePort: 8080}},
+				},
+			}
+
+			unstructuredSvc, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&svc)
+			require.NoError(t, err)
+
+			action := NewServiceAction(velerotest.NewLogger())
+			_, err = action.Execute(&velero.RestoreItemActionExecuteInput{
+				Item:           &unstructured.Unstructured{Object: unstructuredSvc},
+				ItemFromBackup: &unstructured.Unstructured{Object: unstructuredSvc},
+				Restore:        builder.ForRestore(api.DefaultNamespace, "").Result(),
+			})
+			require.NoError(t, err)
+		})
+	}
+}
