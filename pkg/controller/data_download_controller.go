@@ -814,9 +814,17 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 	log := r.logger.WithField("DataDownload", dd.Name)
 
 	log.Info("Timeout happened for preparing datadownload")
+
+	message := "timeout on preparing data download"
+	if pod, getErr := r.kubeClient.CoreV1().Pods(dd.Namespace).Get(ctx, dd.Name, metav1.GetOptions{}); getErr == nil {
+		if reason := kube.GetPodSchedulingFailureMessage(pod); reason != "" {
+			message = fmt.Sprintf("%s: pod scheduling failed: %s", message, reason)
+		}
+	}
+
 	succeeded, err := funcExclusiveUpdateDataDownload(ctx, r.client, dd, func(dd *velerov2alpha1api.DataDownload) {
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseFailed
-		dd.Status.Message = "timeout on preparing data download"
+		dd.Status.Message = message
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
 	})

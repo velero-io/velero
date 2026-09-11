@@ -1,0 +1,1 @@
+Surface the pod's own PodScheduled=False condition message (e.g. "didn't match node affinity") in the data mover pod's preparing-timeout error, instead of just an opaque "timeout on preparing" message.

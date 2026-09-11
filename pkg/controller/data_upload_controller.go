@@ -855,9 +855,16 @@ func (r *DataUploadReconciler) onPrepareTimeout(ctx context.Context, du *velerov
 
 	log.Info("Timeout happened for preparing dataupload")
 
+	message := "timeout on preparing data upload"
+	if pod, getErr := r.kubeClient.CoreV1().Pods(du.Namespace).Get(ctx, du.Name, metav1.GetOptions{}); getErr == nil {
+		if reason := kube.GetPodSchedulingFailureMessage(pod); reason != "" {
+			message = fmt.Sprintf("%s: pod scheduling failed: %s", message, reason)
+		}
+	}
+
 	succeeded, err := funcExclusiveUpdateDataUpload(ctx, r.client, du, func(du *velerov2alpha1api.DataUpload) {
 		du.Status.Phase = velerov2alpha1api.DataUploadPhaseFailed
-		du.Status.Message = "timeout on preparing data upload"
+		du.Status.Message = message
 
 		delete(du.Labels, exposer.ExposeOnGoingLabel)
 	})

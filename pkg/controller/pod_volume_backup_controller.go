@@ -469,9 +469,16 @@ func (r *PodVolumeBackupReconciler) onPrepareTimeout(ctx context.Context, pvb *v
 
 	log.Info("Timeout happened for preparing PVB")
 
+	message := "timeout on preparing PVB"
+	if pod, getErr := r.kubeClient.CoreV1().Pods(pvb.Namespace).Get(ctx, pvb.Name, metav1.GetOptions{}); getErr == nil {
+		if reason := kube.GetPodSchedulingFailureMessage(pod); reason != "" {
+			message = fmt.Sprintf("%s: pod scheduling failed: %s", message, reason)
+		}
+	}
+
 	succeeded, err := funcExclusiveUpdatePodVolumeBackup(ctx, r.client, pvb, func(pvb *velerov1api.PodVolumeBackup) {
 		pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseFailed
-		pvb.Status.Message = "timeout on preparing PVB"
+		pvb.Status.Message = message
 
 		delete(pvb.Labels, exposer.ExposeOnGoingLabel)
 	})

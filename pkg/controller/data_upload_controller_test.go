@@ -1022,10 +1022,11 @@ func TestAcceptDataUpload(t *testing.T) {
 
 func TestOnDuPrepareTimeout(t *testing.T) {
 	tests := []struct {
-		name     string
-		du       *velerov2alpha1api.DataUpload
-		needErrs []error
-		expected *velerov2alpha1api.DataUpload
+		name       string
+		du         *velerov2alpha1api.DataUpload
+		hostingPod *corev1api.Pod
+		needErrs   []error
+		expected   *velerov2alpha1api.DataUpload
 	}{
 		{
 			name:     "update fail",
@@ -1045,6 +1046,21 @@ func TestOnDuPrepareTimeout(t *testing.T) {
 			needErrs: []error{nil, nil, nil, nil},
 			expected: dataUploadBuilder().Phase(velerov2alpha1api.DataUploadPhaseFailed).Result(),
 		},
+		{
+			name: "succeed, surfaces pod's own PodScheduled=False message",
+			du:   dataUploadBuilder().Result(),
+			hostingPod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: dataUploadName},
+				Status: corev1api.PodStatus{
+					Conditions: []corev1api.PodCondition{
+						{Type: corev1api.PodScheduled, Status: corev1api.ConditionFalse, Message: "0/1 nodes are available: didn't match node affinity"},
+					},
+				},
+			},
+			needErrs: []error{nil, nil, nil, nil},
+			expected: dataUploadBuilder().Phase(velerov2alpha1api.DataUploadPhaseFailed).
+				Message("timeout on preparing data upload: pod scheduling failed: 0/1 nodes are available: didn't match node affinity").Result(),
+		},
 	}
 	for _, test := range tests {
 		ctx := t.Context()
@@ -1053,6 +1069,11 @@ func TestOnDuPrepareTimeout(t *testing.T) {
 
 		err = r.client.Create(ctx, test.du)
 		require.NoError(t, err)
+
+		if test.hostingPod != nil {
+			_, err = r.kubeClient.CoreV1().Pods(test.hostingPod.Namespace).Create(ctx, test.hostingPod, metav1.CreateOptions{})
+			require.NoError(t, err)
+		}
 
 		r.onPrepareTimeout(ctx, test.du)
 
@@ -1063,6 +1084,9 @@ func TestOnDuPrepareTimeout(t *testing.T) {
 		}, &du)
 
 		assert.Equal(t, test.expected.Status.Phase, du.Status.Phase)
+		if test.expected.Status.Message != "" {
+			assert.Equal(t, test.expected.Status.Message, du.Status.Message)
+		}
 	}
 }
 

@@ -1586,6 +1586,7 @@ func TestOnPVRPrepareTimeout(t *testing.T) {
 	tests := []struct {
 		name     string
 		pvr      *velerov1api.PodVolumeRestore
+		objects  []runtime.Object
 		needErrs []error
 		expected *velerov1api.PodVolumeRestore
 	}{
@@ -1607,10 +1608,25 @@ func TestOnPVRPrepareTimeout(t *testing.T) {
 			needErrs: []error{nil, nil, nil, nil},
 			expected: pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseFailed).Result(),
 		},
+		{
+			name: "succeed, surfaces pod's own PodScheduled=False message",
+			pvr:  pvrBuilder().Result(),
+			objects: []runtime.Object{&corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: velerov1api.DefaultNamespace, Name: pvrName},
+				Status: corev1api.PodStatus{
+					Conditions: []corev1api.PodCondition{
+						{Type: corev1api.PodScheduled, Status: corev1api.ConditionFalse, Message: "0/1 nodes are available: didn't match node affinity"},
+					},
+				},
+			}},
+			needErrs: []error{nil, nil, nil, nil},
+			expected: pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseFailed).
+				Message("timeout on preparing PVR: pod scheduling failed: 0/1 nodes are available: didn't match node affinity").Result(),
+		},
 	}
 	for _, test := range tests {
 		ctx := t.Context()
-		r, err := initPodVolumeRestoreReconcilerWithError(nil, []client.Object{}, test.needErrs...)
+		r, err := initPodVolumeRestoreReconcilerWithError(test.objects, []client.Object{}, test.needErrs...)
 		require.NoError(t, err)
 
 		err = r.client.Create(ctx, test.pvr)
@@ -1625,6 +1641,9 @@ func TestOnPVRPrepareTimeout(t *testing.T) {
 		}, &pvr)
 
 		assert.Equal(t, test.expected.Status.Phase, pvr.Status.Phase)
+		if test.expected.Status.Message != "" {
+			assert.Equal(t, test.expected.Status.Message, pvr.Status.Message)
+		}
 	}
 }
 

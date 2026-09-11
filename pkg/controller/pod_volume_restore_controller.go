@@ -486,9 +486,16 @@ func (r *PodVolumeRestoreReconciler) onPrepareTimeout(ctx context.Context, pvr *
 
 	log.Info("Timeout happened for preparing PVR")
 
+	message := "timeout on preparing PVR"
+	if pod, getErr := r.kubeClient.CoreV1().Pods(pvr.Namespace).Get(ctx, pvr.Name, metav1.GetOptions{}); getErr == nil {
+		if reason := kube.GetPodSchedulingFailureMessage(pod); reason != "" {
+			message = fmt.Sprintf("%s: pod scheduling failed: %s", message, reason)
+		}
+	}
+
 	succeeded, err := funcExclusiveUpdatePodVolumeRestore(ctx, r.client, pvr, func(pvr *velerov1api.PodVolumeRestore) {
 		pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseFailed
-		pvr.Status.Message = "timeout on preparing PVR"
+		pvr.Status.Message = message
 
 		delete(pvr.Labels, exposer.ExposeOnGoingLabel)
 	})
