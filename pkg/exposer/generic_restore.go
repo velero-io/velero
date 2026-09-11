@@ -512,7 +512,7 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
-	if param.Snapshot != nil {
+	if param.Snapshot != nil && param.Snapshot.CleanUp {
 		kube.EnsureDeleteVolumeSnapshotIfAny(ctx, e.ctrlClient, param.Snapshot.VolumeSnapshotNamespace,
 			param.Snapshot.VolumeSnapshot, 0, e.log)
 	}

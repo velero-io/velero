@@ -231,7 +231,16 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 		return nil, errors.Wrapf(err, "fail get DataUploadResult for restore: %s", input.Restore.Name)
 	}
 
+	// If cross-namespace restore is configured, change the namespace
+	// for PVC object to be restored
+	newNamespace, namespaceMapped := input.Restore.Spec.NamespaceMapping[pvc.GetNamespace()]
+	if !namespaceMapped {
+		// Use original namespace
+		newNamespace = pvc.Namespace
+	}
+
 	var volumeSnapshot *snapshotv1api.VolumeSnapshot
+	cleanUpVolumeSnapshot := false
 	restoreType := input.Restore.Spec.ExistingVolumeDataPolicy
 	if pvcExists {
 		// Pre-flight checks must pass before any side effect on the existing PVC/PV.
@@ -244,16 +253,30 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 
 		// take a CSI snapshot of the existing PVC as the baseline of CBT
 		if input.Restore.IsVolumeDataInplaceIncrementalRestore() && datamover.IsVeleroBlockDataMover(dataUploadResult.DataMover) {
-			logger.Info("ExistingVolumeDataPolicy is in-place incremental restore and data mover is velero-block. Taking a CSI snapshot of the existing PVC as the baseline of CBT...")
-			volumeSnapshot, err = p.createVolumeSnapshot(ctx, logger, input.Restore, *existingPVC, dataUploadResult.SnapshotClass, backup.Spec.CSISnapshotTimeout.Duration)
-			if err != nil {
-				logger.Warnf("Fail to create VolumeSnapshot for existing PVC %s/%s: %s, incremental restore will be suppressed", existingPVC.Namespace, existingPVC.Name, err.Error())
+			// take a CSI snapshot of the existing PVC as the baseline of CBT
+			if !namespaceMapped {
+				logger.Info("ExistingVolumeDataPolicy is in-place incremental restore and data mover is velero-block. Taking a CSI snapshot of the existing PVC as the baseline of CBT...")
+				volumeSnapshot, err = p.createVolumeSnapshot(ctx, logger, input.Restore, *existingPVC, dataUploadResult.SnapshotClass, backup.Spec.CSISnapshotTimeout.Duration)
+				if err != nil {
+					logger.Warnf("fail to create VolumeSnapshot for existing PVC %s/%s: %s, fallback to in-place full restore", existingPVC.Namespace, existingPVC.Name, err.Error())
+					restoreType = velerov1api.VolumeDataPolicyTypeFull
+				} else {
+					cleanUpVolumeSnapshot = true
+					defer func() {
+						if err != nil {
+							csi.CleanupVolumeSnapshot(ctx, volumeSnapshot, p.crClient, p.log)
+						}
+					}()
+				}
 			} else {
-				defer func() {
-					if err != nil {
-						csi.CleanupVolumeSnapshot(ctx, volumeSnapshot, p.crClient, logger)
-					}
-				}()
+				var ok bool
+				volumeSnapshot, ok, err = p.isCreatedFromSnapshot(ctx, existingPVC, backup.Spec.CSISnapshotTimeout.Duration)
+				if err != nil {
+					return nil, errors.WithStack(err)
+				}
+				if !ok {
+					return nil, fmt.Errorf("ExistingVolumeDataPolicy is in-place incremental restore, data mover is velero-block and namespace-mapping is set, but the existing PVC %s/%s is not created from a VolumeSnapshot, fail the restore", existingPVC.Namespace, existingPVC.Name)
+				}
 			}
 		}
 
@@ -268,18 +291,10 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 		string(velerov1api.AsyncOperationIDPrefixDataDownload) +
 			string(input.Restore.UID) + "." + string(pvcFromBackup.UID))
 
-	// If cross-namespace restore is configured, change the namespace
-	// for PVC object to be restored
-	newNamespace, ok := input.Restore.Spec.NamespaceMapping[pvc.GetNamespace()]
-	if !ok {
-		// Use original namespace
-		newNamespace = pvc.Namespace
-	}
-
 	var dataDownload *velerov2alpha1.DataDownload
 	dataDownload, err = restoreFromDataUploadResult(
 		context.Background(), dataUploadResult, input.Restore, backup, pvc, existingPV, newNamespace,
-		operationID, string(restoreType), volumeSnapshot, p.crClient)
+		operationID, string(restoreType), volumeSnapshot, cleanUpVolumeSnapshot, p.crClient)
 	if err != nil {
 		logger.Errorf("Fail to restore from DataUploadResult: %s", err.Error())
 		return nil, errors.WithStack(err)
@@ -508,6 +523,7 @@ func newDataDownload(
 	pv *corev1api.PersistentVolume,
 	newNamespace, operationID, restoreType string,
 	volumeSnapshot *snapshotv1api.VolumeSnapshot,
+	cleanUpVolumeSnapshot bool,
 ) *velerov2alpha1.DataDownload {
 	pvName := ""
 	if pv != nil {
@@ -557,6 +573,7 @@ func newDataDownload(
 		dataDownload.Spec.CSISnapshot = &velerov2alpha1.CSISnapshotSpec{
 			VolumeSnapshot:          volumeSnapshot.Name,
 			VolumeSnapshotNamespace: volumeSnapshot.Namespace,
+			CleanUp:                 cleanUpVolumeSnapshot,
 		}
 	}
 	if restore.Spec.UploaderConfig != nil {
@@ -574,6 +591,7 @@ func restoreFromDataUploadResult(
 	pv *corev1api.PersistentVolume,
 	newNamespace, operationID, restoreType string,
 	volumeSnapshot *snapshotv1api.VolumeSnapshot,
+	cleanUpVolumeSnapshot bool,
 	crClient crclient.Client,
 ) (*velerov2alpha1.DataDownload, error) {
 	pvc.Spec.VolumeName = ""
@@ -597,6 +615,7 @@ func restoreFromDataUploadResult(
 		operationID,
 		restoreType,
 		volumeSnapshot,
+		cleanUpVolumeSnapshot,
 	)
 	err := crClient.Create(ctx, dataDownload)
 	if err != nil {
@@ -728,6 +747,43 @@ func (p *pvcRestoreItemAction) createVolumeSnapshot(ctx context.Context, logger 
 	return vs, nil
 }
 
+func (p *pvcRestoreItemAction) isCreatedFromSnapshot(
+	ctx context.Context,
+	pvc *corev1api.PersistentVolumeClaim,
+	operationTimeout time.Duration,
+) (*snapshotv1api.VolumeSnapshot, bool, error) {
+	var vsName string
+	var vsNamespace string
+
+	if pvc.Spec.DataSource != nil && pvc.Spec.DataSource.Kind == "VolumeSnapshot" &&
+		pvc.Spec.DataSource.APIGroup != nil && *pvc.Spec.DataSource.APIGroup == snapshotv1api.SchemeGroupVersion.Group {
+		vsName = pvc.Spec.DataSource.Name
+		vsNamespace = pvc.Namespace
+	} else if pvc.Spec.DataSourceRef != nil && pvc.Spec.DataSourceRef.Kind == "VolumeSnapshot" &&
+		pvc.Spec.DataSourceRef.APIGroup != nil && *pvc.Spec.DataSourceRef.APIGroup == snapshotv1api.SchemeGroupVersion.Group {
+		vsName = pvc.Spec.DataSourceRef.Name
+		if pvc.Spec.DataSourceRef.Namespace != nil {
+			vsNamespace = *pvc.Spec.DataSourceRef.Namespace
+		} else {
+			vsNamespace = pvc.Namespace
+		}
+	}
+
+	if vsName == "" {
+		return nil, false, nil
+	}
+
+	if _, err := kube.WaitPVCBound(ctx, p.kubeClient.CoreV1(), p.kubeClient.CoreV1(), pvc.Name, pvc.Namespace, operationTimeout); err != nil {
+		return nil, false, errors.Wrapf(err, "failed to wait for PVC %s/%s to be bound within timeout %v", pvc.Namespace, pvc.Name, operationTimeout)
+	}
+
+	vs := new(snapshotv1api.VolumeSnapshot)
+	if err := p.crClient.Get(ctx, crclient.ObjectKey{Namespace: vsNamespace, Name: vsName}, vs); err != nil {
+		return nil, false, errors.Wrapf(err, "fail to get VolumeSnapshot %s/%s", vsNamespace, vsName)
+	}
+
+	return vs, true, nil
+}
 func NewPvcRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {
 	return func(logger logrus.FieldLogger) (any, error) {
 		crClient, err := f.KubebuilderClient()
