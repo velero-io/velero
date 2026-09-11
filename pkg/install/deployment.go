@@ -439,6 +439,14 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 									},
 								},
 								{
+									Name: "POD_NAME",
+									ValueFrom: &corev1api.EnvVarSource{
+										FieldRef: &corev1api.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
+									},
+								},
+								{
 									Name:  "LD_LIBRARY_PATH",
 									Value: "/plugins",
 								},

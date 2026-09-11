@@ -35,7 +35,7 @@ func TestDeployment(t *testing.T) {
 	assert.Equal(t, "--restore-only", deploy.Spec.Template.Spec.Containers[0].Args[1])
 
 	deploy = Deployment("velero", WithEnvFromSecretKey("my-var", "my-secret", "my-key"))
-	envSecret := deploy.Spec.Template.Spec.Containers[0].Env[3]
+	envSecret := deploy.Spec.Template.Spec.Containers[0].Env[4]
 	assert.Equal(t, "my-var", envSecret.Name)
 	assert.Equal(t, "my-secret", envSecret.ValueFrom.SecretKeyRef.LocalObjectReference.Name)
 	assert.Equal(t, "my-key", envSecret.ValueFrom.SecretKeyRef.Key)
@@ -45,8 +45,13 @@ func TestDeployment(t *testing.T) {
 	assert.Equal(t, corev1api.PullIfNotPresent, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 
 	deploy = Deployment("velero", WithSecret(true))
-	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Env, 7)
+	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Env, 8)
 	assert.Len(t, deploy.Spec.Template.Spec.Volumes, 3)
+
+	deploy = Deployment("velero")
+	podNameEnv := deploy.Spec.Template.Spec.Containers[0].Env[2]
+	assert.Equal(t, "POD_NAME", podNameEnv.Name)
+	assert.Equal(t, "metadata.name", podNameEnv.ValueFrom.FieldRef.FieldPath)
 
 	deploy = Deployment("velero", WithDefaultRepoMaintenanceFrequency(24*time.Hour))
 	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 2)
