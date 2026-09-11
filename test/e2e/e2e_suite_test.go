@@ -612,6 +612,15 @@ var _ = Describe(
 )
 
 var _ = Describe(
+	"BackupRepositories are invalidated when BSL config changes while Velero is not running",
+	// Serial: scales the velero deployment down/up and patches the default BSL —
+	// must not run alongside other specs
+	Label("BSL", "BackupRepository", "StartupValidation"),
+	Serial,
+	BackupRepoStartupValidationTest,
+)
+
+var _ = Describe(
 	"Migrate resources between clusters by FileSystem backup",
 	Label("Migration", "FSB"),
 	MigrationWithFS,
