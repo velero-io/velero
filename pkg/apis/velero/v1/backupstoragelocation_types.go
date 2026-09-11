@@ -37,6 +37,13 @@ type BackupStorageLocationSpec struct {
 	// +optional
 	Credential *corev1api.SecretKeySelector `json:"credential,omitempty"`
 
+	// RepositoryPasswordSecretRef is a reference to the secret, in the same
+	// namespace as the BackupStorageLocation, that holds the repository
+	// password. If unset, the global repository password from the velero
+	// install namespace is used.
+	// +optional
+	RepositoryPasswordSecretRef *corev1api.SecretKeySelector `json:"repositoryPasswordSecretRef,omitempty"`
+
 	StorageType `json:",inline"`
 
 	// Default indicates this location is the default backup storage location.

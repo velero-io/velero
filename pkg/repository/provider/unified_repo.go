@@ -401,12 +401,12 @@ func (urp *unifiedRepoProvider) ClientSideCacheLimit(repoOption map[string]strin
 }
 
 func (urp *unifiedRepoProvider) GetPassword(param any) (string, error) {
-	_, ok := param.(RepoParam)
+	repoParam, ok := param.(RepoParam)
 	if !ok {
 		return "", errors.Errorf("invalid parameter, expect %T, actual %T", RepoParam{}, param)
 	}
 
-	repoPassword, err := getRepoPassword(urp.credentialGetter.FromSecret)
+	repoPassword, err := getRepoPassword(urp.credentialGetter.FromSecret, repoParam)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get repo password")
 	}
@@ -458,12 +458,19 @@ func (urcp *unifiedRepoConfigProvider) ClientSideCacheLimit(repoOption map[strin
 	return urcp.repoService.ClientSideCacheLimit(repoOption)
 }
 
-func getRepoPassword(secretStore credentials.SecretStore) (string, error) {
+func getRepoPassword(secretStore credentials.SecretStore, param RepoParam) (string, error) {
 	if secretStore == nil {
 		return "", errors.New("invalid credentials interface")
 	}
 
-	rawPass, err := secretStore.Get(repokey.RepoKeySelector())
+	// Use the per-BSL repository password secret when set, otherwise fall back
+	// to the global repository password in the velero install namespace.
+	selector := repokey.RepoKeySelector()
+	if param.BackupLocation != nil && param.BackupLocation.Spec.RepositoryPasswordSecretRef != nil {
+		selector = param.BackupLocation.Spec.RepositoryPasswordSecretRef
+	}
+
+	rawPass, err := secretStore.Get(selector)
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

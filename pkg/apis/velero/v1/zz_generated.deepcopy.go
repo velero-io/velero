@@ -550,6 +550,11 @@ func (in *BackupStorageLocationSpec) DeepCopyInto(out *BackupStorageLocationSpec
 		*out = new(corev1.SecretKeySelector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.RepositoryPasswordSecretRef != nil {
+		in, out := &in.RepositoryPasswordSecretRef, &out.RepositoryPasswordSecretRef
+		*out = new(corev1.SecretKeySelector)
+		(*in).DeepCopyInto(*out)
+	}
 	in.StorageType.DeepCopyInto(&out.StorageType)
 	if in.BackupSyncPeriod != nil {
 		in, out := &in.BackupSyncPeriod, &out.BackupSyncPeriod
