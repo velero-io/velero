@@ -104,8 +104,10 @@ type BackupStorageLocationStatus struct {
 // +kubebuilder:resource:shortName=bsl
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
+// +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".spec.provider",description="Provider is the provider of the backup storage"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Backup Storage Location status such as Available/Unavailable"
 // +kubebuilder:printcolumn:name="Last Validated",type="date",JSONPath=".status.lastValidationTime",description="LastValidationTime is the last time the backup store location was validated"
+// +kubebuilder:printcolumn:name="Access Mode",type="string",JSONPath=".spec.accessMode",description="AccessMode defines the permissions for the backup storage location"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Default",type="boolean",JSONPath=".spec.default",description="Default backup storage location"
 
