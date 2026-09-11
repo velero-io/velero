@@ -331,12 +331,13 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 			progress.Completed = true
 			progress.Updated = now
 		} else if vsc.Status.Error != nil {
-			progress.Completed = true
-			progress.Updated = now
+			errorMessage := ""
 			if vsc.Status.Error.Message != nil {
-				progress.Err = *vsc.Status.Error.Message
+				errorMessage = *vsc.Status.Error.Message
 			}
-			p.log.Warnf("VolumeSnapshotContent meets an error %s.", progress.Err)
+			p.log.Warnf("VolumeSnapshotContent has a temporary error %s. SnapshotContent controller will retry later.",
+				errorMessage)
+			return progress, nil
 		}
 	}
 
