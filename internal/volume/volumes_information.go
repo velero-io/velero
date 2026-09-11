@@ -379,6 +379,13 @@ type PVInfo struct {
 	Labels map[string]string `json:"labels"`
 }
 
+type SkippedVolume struct {
+	PVName       string
+	PVCName      string
+	PVCNamespace string
+	Reasons      string
+}
+
 // BackupVolumesInformation contains the information needs by generating
 // the backup BackupVolumeInfo array.
 type BackupVolumesInformation struct {
@@ -391,7 +398,7 @@ type BackupVolumesInformation struct {
 	volumeSnapshots        []snapshotv1api.VolumeSnapshot
 	volumeSnapshotContents []snapshotv1api.VolumeSnapshotContent
 	volumeSnapshotClasses  []snapshotv1api.VolumeSnapshotClass
-	SkippedPVs             map[string]string
+	SkippedVolumes         []SkippedVolume
 	NativeSnapshots        []*Snapshot
 	PodVolumeBackups       []*velerov1api.PodVolumeBackup
 	BackupOperations       []*itemoperation.BackupOperation
@@ -444,24 +451,34 @@ func (v *BackupVolumesInformation) Result(
 func (v *BackupVolumesInformation) generateVolumeInfoForSkippedPV() {
 	tmpVolumeInfos := make([]*BackupVolumeInfo, 0)
 
-	for pvName, skippedReason := range v.SkippedPVs {
-		if pvcPVInfo := v.pvMap.retrieve(pvName, "", ""); pvcPVInfo != nil {
-			volumeInfo := &BackupVolumeInfo{
+	for _, skippedVolume := range v.SkippedVolumes {
+		var volumeInfo *BackupVolumeInfo
+		if pvcPVInfo := v.pvMap.retrieve(skippedVolume.PVName, skippedVolume.PVCName, skippedVolume.PVCNamespace); pvcPVInfo != nil {
+			volumeInfo = &BackupVolumeInfo{
 				PVCName:           pvcPVInfo.PVCName,
 				PVCNamespace:      pvcPVInfo.PVCNamespace,
-				PVName:            pvName,
+				PVName:            pvcPVInfo.PV.Name,
 				SnapshotDataMoved: false,
 				Skipped:           true,
-				SkippedReason:     skippedReason,
+				SkippedReason:     skippedVolume.Reasons,
 				PVInfo: &PVInfo{
 					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
 					Labels:        pvcPVInfo.PV.Labels,
 				},
 			}
-			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("Cannot find info for PV %s", pvName)
-			continue
+			// If we cannot find it in pvMap, it might be a PVC without PV.
+			volumeInfo = &BackupVolumeInfo{
+				PVCName:           skippedVolume.PVCName,
+				PVCNamespace:      skippedVolume.PVCNamespace,
+				PVName:            skippedVolume.PVName,
+				SnapshotDataMoved: false,
+				Skipped:           true,
+				SkippedReason:     skippedVolume.Reasons,
+			}
+		}
+		if volumeInfo != nil {
+			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		}
 	}
 

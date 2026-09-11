@@ -1426,11 +1426,16 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 				SkippedPVTracker: &skipPVTracker{
 					RWMutex: &sync.RWMutex{},
 					pvs: map[string]map[string]string{
-						"pv-1": {
+						"pv:pv-1": {
 							"any": "whatever reason",
 						},
 					},
 					includedPVs: map[string]struct{}{},
+					volumeInfo: map[string]SkippedPV{
+						"pv:pv-1": {
+							Name: "pv-1",
+						},
+					},
 				},
 				BackedUpItems: NewBackedUpItemsMap(),
 				WorkerPool:    itemBlockPool,
@@ -1484,7 +1489,7 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 
 			if tc.expectSkippedPVs != nil {
 				for pvName, reasons := range tc.expectSkippedPVs {
-					v, ok := tc.backupReq.SkippedPVTracker.pvs[pvName]
+					v, ok := tc.backupReq.SkippedPVTracker.pvs["pv:"+pvName]
 					assert.True(tt, ok)
 					for approach, reason := range reasons {
 						assert.Equal(tt, reason, v[approach])
@@ -1492,7 +1497,7 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 				}
 			}
 			for _, pvName := range tc.expectNotSkippedPVs {
-				_, ok := tc.backupReq.SkippedPVTracker.pvs[pvName]
+				_, ok := tc.backupReq.SkippedPVTracker.pvs["pv:"+pvName]
 				assert.False(tt, ok)
 			}
 		})

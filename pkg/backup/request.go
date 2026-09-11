@@ -139,13 +139,18 @@ func (r *Request) BackupResourceList() map[string][]string {
 }
 
 func (r *Request) FillVolumesInformation() {
-	skippedPVMap := make(map[string]string)
+	var skippedVolumes []volume.SkippedVolume
 
 	for _, skippedPV := range r.SkippedPVTracker.Summary() {
-		skippedPVMap[skippedPV.Name] = skippedPV.SerializeSkipReasons()
+		skippedVolumes = append(skippedVolumes, volume.SkippedVolume{
+			PVName:       skippedPV.Name,
+			PVCName:      skippedPV.PVCName,
+			PVCNamespace: skippedPV.PVCNamespace,
+			Reasons:      skippedPV.SerializeSkipReasons(),
+		})
 	}
 
-	r.VolumesInformation.SkippedPVs = skippedPVMap
+	r.VolumesInformation.SkippedVolumes = skippedVolumes
 	r.VolumesInformation.NativeSnapshots = r.VolumeSnapshots.Get()
 	r.VolumesInformation.PodVolumeBackups = r.PodVolumeBackups
 	r.VolumesInformation.BackupOperations = *r.GetItemOperationsList()

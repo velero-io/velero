@@ -69,7 +69,13 @@ func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
 					},
 				},
 			},
-			expectedVolumeInfos: []*BackupVolumeInfo{},
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVName:        "testPV",
+					Skipped:       true,
+					SkippedReason: "CSI: skipped for PodVolumeBackup",
+				},
+			},
 		},
 		{
 			name:          "Normal Skipped PV info",
@@ -126,8 +132,11 @@ func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
 			volumesInfo.Init()
 
 			if tc.skippedPVName != "" {
-				volumesInfo.SkippedPVs = map[string]string{
-					tc.skippedPVName: "CSI: skipped for PodVolumeBackup",
+				volumesInfo.SkippedVolumes = []SkippedVolume{
+					{
+						PVName:  tc.skippedPVName,
+						Reasons: "CSI: skipped for PodVolumeBackup",
+					},
 				}
 			}
 

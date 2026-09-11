@@ -25,16 +25,18 @@ import (
 
 func TestSummary(t *testing.T) {
 	tracker := NewSkipPVTracker()
-	tracker.Track("pv5", "", "skipped due to policy")
-	tracker.Track("pv3", podVolumeApproach, "it's set to opt-out")
-	tracker.Track("pv3", csiSnapshotApproach, "not applicable for CSI ")
+	tracker.Track("pv5", "pvc5", "ns1", "", "skipped due to policy")
+	tracker.Track("pv3", "pvc3", "ns1", podVolumeApproach, "it's set to opt-out")
+	tracker.Track("pv3", "pvc3", "ns1", csiSnapshotApproach, "not applicable for CSI ")
 	// shouldn't be added
-	tracker.Track("", podVolumeApproach, "pvc3 is set to be skipped")
-	tracker.Track("pv10", volumeSnapshotApproach, "added by mistake")
-	tracker.Untrack("pv10")
+	tracker.Track("", "", "", podVolumeApproach, "pvc3 is set to be skipped")
+	tracker.Track("pv10", "pvc10", "ns1", volumeSnapshotApproach, "added by mistake")
+	tracker.Untrack("pv10", "pvc10", "ns1")
 	expected := []SkippedPV{
 		{
-			Name: "pv3",
+			Name:         "pv3",
+			PVCName:      "pvc3",
+			PVCNamespace: "ns1",
 			Reasons: []PVSkipReason{
 				{
 					Approach: csiSnapshotApproach,
@@ -47,7 +49,9 @@ func TestSummary(t *testing.T) {
 			},
 		},
 		{
-			Name: "pv5",
+			Name:         "pv5",
+			PVCName:      "pvc5",
+			PVCNamespace: "ns1",
 			Reasons: []PVSkipReason{
 				{
 					Approach: anyApproach,
@@ -61,9 +65,8 @@ func TestSummary(t *testing.T) {
 
 func TestSerializeSkipReasons(t *testing.T) {
 	tracker := NewSkipPVTracker()
-	//tracker.Track("pv5", "", "skipped due to policy")
-	tracker.Track("pv3", podVolumeApproach, "it's set to opt-out")
-	tracker.Track("pv3", csiSnapshotApproach, "not applicable for CSI ")
+	tracker.Track("pv3", "pvc3", "ns1", podVolumeApproach, "it's set to opt-out")
+	tracker.Track("pv3", "pvc3", "ns1", csiSnapshotApproach, "not applicable for CSI ")
 
 	for _, skippedPV := range tracker.Summary() {
 		require.Equal(t, "csiSnapshot: not applicable for CSI ;podvolume: it's set to opt-out;", skippedPV.SerializeSkipReasons())
@@ -73,8 +76,8 @@ func TestSerializeSkipReasons(t *testing.T) {
 func TestTrackUntrack(t *testing.T) {
 	// If a pv is untracked explicitly it can't be Tracked again, b/c the pv is considered backed up already.
 	tracker := NewSkipPVTracker()
-	tracker.Track("pv3", podVolumeApproach, "it's set to opt-out")
-	tracker.Untrack("pv3")
-	tracker.Track("pv3", csiSnapshotApproach, "not applicable for CSI ")
+	tracker.Track("pv3", "pvc3", "ns1", podVolumeApproach, "it's set to opt-out")
+	tracker.Untrack("pv3", "pvc3", "ns1")
+	tracker.Track("pv3", "pvc3", "ns1", csiSnapshotApproach, "not applicable for CSI ")
 	assert.Empty(t, tracker.Summary())
 }
