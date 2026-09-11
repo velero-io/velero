@@ -6,7 +6,7 @@ toc: "true"
 
 There are some guidelines maintainers need to follow. We list them here for quick reference, especially for new maintainers. These guidelines apply to all projects in the Velero org, including the main project, the Velero Helm chart, and all other [related repositories](https://github.com/velero-io/velero/blob/main/GOVERNANCE.md#code-repositories).
 
-Please be sure to also go through the guidance under the entire [Contribute](start-contributing/) section.
+Please be sure to also go through the guidance under the entire [Contribute](start-contributing.md) section.
 
 ## Reviewing PRs
 - PRs require 2 approvals before it is mergeable.
