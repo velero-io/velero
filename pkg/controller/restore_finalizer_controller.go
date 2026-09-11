@@ -603,6 +603,7 @@ func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo != nil {
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Size = dataDownload.Status.Progress.TotalBytes
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataDownload.Status.IncrementalBytes
+				ctx.restoreVolumeInfos[index].FallbackFull = dataDownload.Status.FallbackFull
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Phase = dataDownload.Status.Phase
 			}
 		}

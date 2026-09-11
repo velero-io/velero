@@ -124,6 +124,9 @@ type PodVolumeRestoreStatus struct {
 	// Node is name of the node where the pod volume restore is processed.
 	// +optional
 	Node string `json:"node,omitempty"`
+
+	// FallbackFull indicates whether the incremental restore has fallen back to full restore
+	FallbackFull bool `json:"fallbackFull,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.

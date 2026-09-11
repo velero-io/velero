@@ -149,6 +149,9 @@ type DataDownloadStatus struct {
 	// +optional
 	// +nullable
 	AcceptedTimestamp *metav1.Time `json:"acceptedTimestamp,omitempty"`
+
+	// FallbackFull indicates whether the incremental restore has fallen back to full restore
+	FallbackFull bool `json:"fallbackFull,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.

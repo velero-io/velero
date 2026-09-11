@@ -91,7 +91,7 @@ func (_c *Provider_Close_Call) RunAndReturn(run func(ctx context.Context) error)
 }
 
 // RunBackup provides a mock function for the type Provider
-func (_mock *Provider) RunBackup(ctx context.Context, path string, realSource string, tags map[string]string, forceFull bool, parentSnapshot string, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, error) {
+func (_mock *Provider) RunBackup(ctx context.Context, path string, realSource string, tags map[string]string, forceFull bool, parentSnapshot string, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, bool, error) {
 	ret := _mock.Called(ctx, path, realSource, tags, forceFull, parentSnapshot, cbtParam, volMode, uploaderCfg, updater)
 
 	if len(ret) == 0 {
@@ -103,8 +103,9 @@ func (_mock *Provider) RunBackup(ctx context.Context, path string, realSource st
 	var r2 int64
 	var r3 int64
 	var r4 int64
-	var r5 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) (string, bool, int64, int64, int64, error)); ok {
+	var r5 bool
+	var r6 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) (string, bool, int64, int64, int64, bool, error)); ok {
 		return returnFunc(ctx, path, realSource, tags, forceFull, parentSnapshot, cbtParam, volMode, uploaderCfg, updater)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) string); ok {
@@ -132,12 +133,17 @@ func (_mock *Provider) RunBackup(ctx context.Context, path string, realSource st
 	} else {
 		r4 = ret.Get(4).(int64)
 	}
-	if returnFunc, ok := ret.Get(5).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) error); ok {
+	if returnFunc, ok := ret.Get(5).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) bool); ok {
 		r5 = returnFunc(ctx, path, realSource, tags, forceFull, parentSnapshot, cbtParam, volMode, uploaderCfg, updater)
 	} else {
-		r5 = ret.Error(5)
+		r5 = ret.Get(5).(bool)
 	}
-	return r0, r1, r2, r3, r4, r5
+	if returnFunc, ok := ret.Get(6).(func(context.Context, string, string, map[string]string, bool, string, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) error); ok {
+		r6 = returnFunc(ctx, path, realSource, tags, forceFull, parentSnapshot, cbtParam, volMode, uploaderCfg, updater)
+	} else {
+		r6 = ret.Error(6)
+	}
+	return r0, r1, r2, r3, r4, r5, r6
 }
 
 // Provider_RunBackup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunBackup'
@@ -218,18 +224,18 @@ func (_c *Provider_RunBackup_Call) Run(run func(ctx context.Context, path string
 	return _c
 }
 
-func (_c *Provider_RunBackup_Call) Return(_a0 string, _a1 bool, _a2 int64, _a3 int64, _a4 int64, _a5 error) *Provider_RunBackup_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5)
+func (_c *Provider_RunBackup_Call) Return(_a0 string, _a1 bool, _a2 int64, _a3 int64, _a4 int64, _a5 bool, _a6 error) *Provider_RunBackup_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5, _a6)
 	return _c
 }
 
-func (_c *Provider_RunBackup_Call) RunAndReturn(run func(ctx context.Context, path string, realSource string, tags map[string]string, forceFull bool, parentSnapshot string, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, error)) *Provider_RunBackup_Call {
+func (_c *Provider_RunBackup_Call) RunAndReturn(run func(ctx context.Context, path string, realSource string, tags map[string]string, forceFull bool, parentSnapshot string, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string, updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, bool, error)) *Provider_RunBackup_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // RunRestore provides a mock function for the type Provider
-func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volumePath string, incremental bool, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, int64, error) {
+func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volumePath string, incremental bool, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, int64, bool, error) {
 	ret := _mock.Called(ctx, snapshotID, volumePath, incremental, cbtParam, volMode, uploaderConfig, updater)
 
 	if len(ret) == 0 {
@@ -238,8 +244,9 @@ func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volume
 
 	var r0 int64
 	var r1 int64
-	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) (int64, int64, error)); ok {
+	var r2 bool
+	var r3 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) (int64, int64, bool, error)); ok {
 		return returnFunc(ctx, snapshotID, volumePath, incremental, cbtParam, volMode, uploaderConfig, updater)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) int64); ok {
@@ -254,13 +261,19 @@ func (_mock *Provider) RunRestore(ctx context.Context, snapshotID string, volume
 		r1 = ret.Get(1).(int64)
 	}
 
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) error); ok {
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) bool); ok {
 		r2 = returnFunc(ctx, snapshotID, volumePath, incremental, cbtParam, volMode, uploaderConfig, updater)
 	} else {
-		r2 = ret.Error(2)
+		r2 = ret.Get(2).(bool)
 	}
 
-	return r0, r1, r2
+	if returnFunc, ok := ret.Get(3).(func(context.Context, string, string, bool, provider.CBTParam, uploader.PersistentVolumeMode, map[string]string, uploader.ProgressUpdater) error); ok {
+		r3 = returnFunc(ctx, snapshotID, volumePath, incremental, cbtParam, volMode, uploaderConfig, updater)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // Provider_RunRestore_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunRestore'
@@ -329,12 +342,12 @@ func (_c *Provider_RunRestore_Call) Run(run func(ctx context.Context, snapshotID
 	return _c
 }
 
-func (_c *Provider_RunRestore_Call) Return(_a0 int64, _a1 int64, _a2 error) *Provider_RunRestore_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *Provider_RunRestore_Call) Return(_a0 int64, _a1 int64, _a2 bool, _a3 error) *Provider_RunRestore_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
 	return _c
 }
 
-func (_c *Provider_RunRestore_Call) RunAndReturn(run func(ctx context.Context, snapshotID string, volumePath string, incremental bool, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, int64, error)) *Provider_RunRestore_Call {
+func (_c *Provider_RunRestore_Call) RunAndReturn(run func(ctx context.Context, snapshotID string, volumePath string, incremental bool, cbtParam provider.CBTParam, volMode uploader.PersistentVolumeMode, uploaderConfig map[string]string, updater uploader.ProgressUpdater) (int64, int64, bool, error)) *Provider_RunRestore_Call {
 	_c.Call.Return(run)
 	return _c
 }

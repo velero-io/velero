@@ -372,8 +372,13 @@ func describeCSISnapshotsRestoresInSF(d *StructuredDescriber, restoreVolInfo []v
 				"dataMover":    info.SnapshotDataMovementInfo.DataMover,
 				"uploaderType": info.SnapshotDataMovementInfo.UploaderType,
 			}
-			if info.SnapshotDataMovementInfo.RestoreType != "" {
-				dmInfo["restoreType"] = info.SnapshotDataMovementInfo.RestoreType
+			if info.RestoreType != "" {
+				restoreType := info.RestoreType
+				if info.FallbackFull {
+					restoreType += " (fallen back to Full)"
+				}
+
+				dmInfo["restoreType"] = restoreType
 			}
 			if info.SnapshotDataMovementInfo.Size > 0 {
 				dmInfo["size"] = info.SnapshotDataMovementInfo.Size

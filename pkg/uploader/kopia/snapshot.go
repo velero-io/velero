@@ -190,11 +190,12 @@ func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.Re
 
 	kopiaCtx := kopia.SetupKopiaLog(ctx, log)
 
-	snapID, snapshotSize, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, uploaderCfg, updater, log, "Kopia Uploader")
+	snapID, snapshotSize, fallback, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, uploaderCfg, updater, log, "Kopia Uploader")
 	snapshotInfo := &uploader.SnapshotInfo{
 		ID:           snapID,
 		SnapshotSize: snapshotSize,
 		SourceSize:   snapshotSize,
+		Fallback:     fallback,
 	}
 
 	return snapshotInfo, false, err
@@ -242,11 +243,12 @@ func SnapshotSource(
 	updater uploader.ProgressUpdater,
 	log logrus.FieldLogger,
 	description string,
-) (string, int64, error) {
+) (string, int64, bool, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
 
 	var previous []*snapshot.Manifest
+	fallback := false
 	if !forceFull {
 		if parentSnapshot != "" {
 			log.Infof("Using provided parent snapshot %s", parentSnapshot)
@@ -258,6 +260,8 @@ func SnapshotSource(
 					TotalBytes: -1,
 					Message:    fmt.Sprintf("Failed to load previous snapshot %v, fallback to full backup. Err: %v", parentSnapshot, err),
 				})
+
+				fallback = true
 			} else {
 				previous = append(previous, mani)
 			}
@@ -271,6 +275,8 @@ func SnapshotSource(
 					TotalBytes: -1,
 					Message:    fmt.Sprintf("Failed to find previous snapshots, fallback to full backup. Err: %v", err),
 				})
+
+				fallback = true
 			} else {
 				previous = pre
 			}
@@ -285,12 +291,12 @@ func SnapshotSource(
 
 	policyTree, err := setupPolicy(ctx, rep, sourceInfo, uploaderCfg)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "unable to set policy for si %v", sourceInfo)
+		return "", 0, fallback, errors.Wrapf(err, "unable to set policy for si %v", sourceInfo)
 	}
 
 	manifest, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to upload the kopia snapshot for si %v", sourceInfo)
+		return "", 0, fallback, errors.Wrapf(err, "Failed to upload the kopia snapshot for si %v", sourceInfo)
 	}
 
 	manifest.Tags = snapshotTags
@@ -299,22 +305,22 @@ func SnapshotSource(
 	manifest.Pins = []string{"velero-pin"}
 
 	if _, err = saveSnapshotFunc(ctx, rep, manifest); err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to save kopia manifest %v", manifest.ID)
+		return "", 0, fallback, errors.Wrapf(err, "Failed to save kopia manifest %v", manifest.ID)
 	}
 
 	_, err = applyRetentionPolicyFunc(ctx, rep, sourceInfo, true)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to apply kopia retention policy for si %v", sourceInfo)
+		return "", 0, fallback, errors.Wrapf(err, "Failed to apply kopia retention policy for si %v", sourceInfo)
 	}
 
 	if err = rep.Flush(ctx); err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to flush kopia repository")
+		return "", 0, fallback, errors.Wrapf(err, "Failed to flush kopia repository")
 	}
 	log.Infof("Created snapshot with root %v and ID %v in %v", manifest.RootObjectID(), manifest.ID, time.Since(snapshotStartTime).Truncate(time.Second))
-	return reportSnapshotStatus(manifest, policyTree)
+	return reportSnapshotStatus(manifest, policyTree, fallback)
 }
 
-func reportSnapshotStatus(manifest *snapshot.Manifest, policyTree *policy.Tree) (string, int64, error) {
+func reportSnapshotStatus(manifest *snapshot.Manifest, policyTree *policy.Tree, fallback bool) (string, int64, bool, error) {
 	manifestID := manifest.ID
 	snapSize := manifest.Stats.TotalFileSize
 
@@ -333,10 +339,10 @@ func reportSnapshotStatus(manifest *snapshot.Manifest, policyTree *policy.Tree) 
 	}
 
 	if len(errs) != 0 {
-		return string(manifestID), snapSize, errors.New(strings.Join(errs, "\n"))
+		return string(manifestID), snapSize, fallback, errors.New(strings.Join(errs, "\n"))
 	}
 
-	return string(manifestID), snapSize, nil
+	return string(manifestID), snapSize, fallback, nil
 }
 
 // findPreviousSnapshotManifest returns the list of previous snapshots for a given source, including
@@ -401,26 +407,26 @@ func (o *fileSystemRestoreOutput) Terminate() error {
 
 // Restore restore specific sourcePath with given snapshotID and update progress
 func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress, snapshotID, dest string, incremental bool, volMode uploader.PersistentVolumeMode, uploaderCfg map[string]string,
-	log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
+	log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, bool, error) {
 	log.Info("Start to restore...")
 
 	kopiaCtx := kopia.SetupKopiaLog(ctx, log)
 
 	snapshot, err := snapshot.LoadSnapshot(kopiaCtx, rep, manifest.ID(snapshotID))
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
 	}
 
 	log.Infof("Restore from snapshot %s, description %s, created time %v, tags %v", snapshotID, snapshot.Description, snapshot.EndTime.ToTime(), snapshot.Tags)
 
 	rootEntry, err := filesystemEntryFunc(kopiaCtx, rep, snapshotID, false)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "Unable to get filesystem entry for snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "Unable to get filesystem entry for snapshot %v", snapshotID)
 	}
 
 	path, err := filepath.Abs(dest)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "Unable to resolve path %v", dest)
+		return 0, 0, false, errors.Wrapf(err, "Unable to resolve path %v", dest)
 	}
 
 	fsOutput := &restore.FilesystemOutput{
@@ -436,7 +442,7 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 	if len(uploaderCfg) > 0 {
 		writeSparseFiles, err := uploaderutil.GetWriteSparseFiles(uploaderCfg)
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "failed to get uploader config")
+			return 0, 0, false, errors.Wrap(err, "failed to get uploader config")
 		}
 		if writeSparseFiles {
 			fsOutput.WriteSparseFiles = true
@@ -444,7 +450,7 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 
 		concurrency, err := uploaderutil.GetRestoreConcurrency(uploaderCfg)
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "failed to get parallel restore uploader config")
+			return 0, 0, false, errors.Wrap(err, "failed to get parallel restore uploader config")
 		}
 		if concurrency > 0 {
 			restoreConcurrency = concurrency
@@ -452,7 +458,7 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 
 		deleteExtra, err = uploaderutil.GetDeleteExtraFiles(uploaderCfg)
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "failed to get delete extra files config")
+			return 0, 0, false, errors.Wrap(err, "failed to get delete extra files config")
 		}
 	}
 
@@ -460,7 +466,7 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 
 	err = fsOutput.Init(ctx)
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "error to init output")
+		return 0, 0, false, errors.Wrap(err, "error to init output")
 	}
 
 	var output RestoreOutput
@@ -500,18 +506,18 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 	})
 
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "Failed to copy snapshot data to the target")
+		return 0, 0, false, errors.Wrapf(err, "Failed to copy snapshot data to the target")
 	}
 
 	if err := output.Flush(); err != nil {
 		if err == errFlushUnsupported {
 			log.Warnf("Skip flushing data for %v under the current OS %v", path, runtime.GOOS)
 		} else {
-			return 0, 0, errors.Wrapf(err, "Failed to flush data to target")
+			return 0, 0, false, errors.Wrapf(err, "Failed to flush data to target")
 		}
 	} else {
 		log.Infof("Flush done for volume dir %v", path)
 	}
 
-	return stat.RestoredTotalFileSize, stat.RestoredFileCount, nil
+	return stat.RestoredTotalFileSize, stat.RestoredFileCount, false, nil
 }

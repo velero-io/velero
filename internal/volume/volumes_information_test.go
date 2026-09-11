@@ -730,6 +730,79 @@ func TestGenerateVolumeInfoFromPVB(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "PVB's volume has a PVC with fallback to full",
+			pvMap: map[string]pvcPvInfo{
+				"testPV": {
+					PVCName:      "testPVC",
+					PVCNamespace: "velero",
+					PV: corev1api.PersistentVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:   "testPV",
+							Labels: map[string]string{"a": "b"},
+						},
+						Spec: corev1api.PersistentVolumeSpec{
+							PersistentVolumeReclaimPolicy: corev1api.PersistentVolumeReclaimDelete,
+						},
+					},
+				},
+			},
+			pvb: func() *velerov1api.PodVolumeBackup {
+				pvb := builder.ForPodVolumeBackup("velero", "testPVB").
+					PodName("testPod").
+					PodNamespace("velero").
+					StartTimestamp(&now).
+					CompletionTimestamp(&now).
+					Phase(velerov1api.PodVolumeBackupPhaseCompleted).
+					TotalBytes(1024).
+					IncrementalBytes(512).
+					Result()
+				pvb.Status.FallbackFull = true
+				return pvb
+			}(),
+			pod: builder.ForPod("velero", "testPod").Containers(&corev1api.Container{
+				Name: "test",
+				VolumeMounts: []corev1api.VolumeMount{
+					{
+						Name:      "testVolume",
+						MountPath: "/data",
+					},
+				},
+			}).Volumes(
+				&corev1api.Volume{
+					Name: "",
+					VolumeSource: corev1api.VolumeSource{
+						PersistentVolumeClaim: &corev1api.PersistentVolumeClaimVolumeSource{
+							ClaimName: "testPVC",
+						},
+					},
+				},
+			).Result(),
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVCName:             "testPVC",
+					PVCNamespace:        "velero",
+					PVName:              "testPV",
+					BackupMethod:        PodVolumeBackup,
+					BackupType:          velerov1api.BackupTypeIncremental,
+					FallbackFull:        true,
+					StartTimestamp:      &now,
+					CompletionTimestamp: &now,
+					Result:              VolumeResultSucceeded,
+					PVBInfo: &PodVolumeBackupInfo{
+						PodName:         "testPod",
+						PodNamespace:    "velero",
+						Phase:           velerov1api.PodVolumeBackupPhaseCompleted,
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
+					},
+					PVInfo: &PVInfo{
+						ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+						Labels:        map[string]string{"a": "b"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1095,6 +1168,7 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 					PVName:            "testPV2",
 					RestoreMethod:     PodVolumeRestore,
 					SnapshotDataMoved: false,
+					RestoreType:       "Incremental",
 					PVRInfo: &PodVolumeRestoreInfo{
 						SnapshotHandle:  "pvr-snap-001",
 						PodName:         "testPod",
@@ -1102,7 +1176,6 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 						UploaderType:    "kopia",
 						VolumeName:      "data-volume-1",
 						Phase:           velerov1api.PodVolumeRestorePhaseCompleted,
-						RestoreType:     "Incremental",
 						Size:            1024,
 						IncrementalSize: ptr.To(int64(512)),
 					},
@@ -1251,6 +1324,7 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 					PVName:            "testPV",
 					RestoreMethod:     CSISnapshot,
 					SnapshotDataMoved: true,
+					RestoreType:       "Incremental",
 					SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
 						DataMover:       "velero",
 						UploaderType:    velerov1api.BackupRepositoryTypeKopia,
@@ -1259,7 +1333,6 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 						Phase:           velerov2alpha1.DataDownloadPhaseCompleted,
 						Size:            2048,
 						IncrementalSize: ptr.To(int64(512)),
-						RestoreType:     "Incremental",
 					},
 				},
 				{
@@ -1268,6 +1341,7 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 					PVName:            "testPV2",
 					RestoreMethod:     CSISnapshot,
 					SnapshotDataMoved: true,
+					RestoreType:       "Full",
 					SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
 						DataMover:      "velero",
 						UploaderType:   velerov1api.BackupRepositoryTypeKopia,
@@ -1275,7 +1349,6 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 						OperationID:    "dd-operation-002",
 						Phase:          velerov2alpha1.DataDownloadPhaseCompleted,
 						Size:           4096,
-						RestoreType:    "Full",
 					},
 				},
 			},
@@ -1330,6 +1403,7 @@ func TestBackupVolumeInfoJSONRoundTrip(t *testing.T) {
 		Skipped:               false,
 		Result:                VolumeResultSucceeded,
 		BackupType:            velerov1api.BackupTypeIncremental,
+		FallbackFull:          true,
 		CSISnapshotInfo: &CSISnapshotInfo{
 			SnapshotHandle:            "csi-snap-1",
 			Size:                      2000,
@@ -1346,7 +1420,6 @@ func TestBackupVolumeInfoJSONRoundTrip(t *testing.T) {
 			OperationID:      "op-1",
 			Size:             1000,
 			IncrementalSize:  int64Ptr(200),
-			ParentSnapshot:   "parent-1",
 			Phase:            velerov2alpha1.DataUploadPhaseCompleted,
 		},
 		NativeSnapshotInfo: &NativeSnapshotInfo{
@@ -1391,7 +1464,7 @@ func TestBackupVolumeInfoJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, jsonStr, `"operationID":"op-1"`)
 	assert.Contains(t, jsonStr, `"size":1000`)
 	assert.Contains(t, jsonStr, `"incrementalSize":200`)
-	assert.Contains(t, jsonStr, `"parentSnapshot":"parent-1"`)
+	assert.Contains(t, jsonStr, `"fallbackFull":true`)
 	assert.Contains(t, jsonStr, `"phase":"Completed"`)
 	assert.Contains(t, jsonStr, `"pvbInfo":{`)
 	assert.Contains(t, jsonStr, `"podName":"pod-1"`)
@@ -1421,6 +1494,8 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 		PVName:            "pv-2",
 		RestoreMethod:     CSISnapshot,
 		SnapshotDataMoved: true,
+		RestoreType:       "Incremental",
+		FallbackFull:      true,
 		SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
 			DataMover:        "velero",
 			UploaderType:     "kopia",
@@ -1430,7 +1505,6 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 			Size:             3000,
 			IncrementalSize:  int64Ptr(300),
 			Phase:            velerov2alpha1.DataDownloadPhaseCompleted,
-			RestoreType:      "Incremental",
 		},
 		PVRInfo: &PodVolumeRestoreInfo{
 			SnapshotHandle:  "pvr-snap-1",
@@ -1442,7 +1516,6 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 			PodNamespace:    "ns-2",
 			NodeName:        "node-2",
 			Phase:           velerov1api.PodVolumeRestorePhaseCompleted,
-			RestoreType:     "Incremental",
 		},
 		CSISnapshotInfo: &CSISnapshotInfo{
 			SnapshotHandle: "csi-snap-2",
@@ -1477,6 +1550,7 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, jsonStr, `"incrementalSize":300`)
 	assert.Contains(t, jsonStr, `"phase":"Completed"`)
 	assert.Contains(t, jsonStr, `"restoreType":"Incremental"`)
+	assert.Contains(t, jsonStr, `"fallbackFull":true`)
 	assert.Contains(t, jsonStr, `"pvrInfo":{`)
 	assert.Contains(t, jsonStr, `"podName":"pod-2"`)
 	assert.Contains(t, jsonStr, `"podNamespace":"ns-2"`)
@@ -1519,7 +1593,6 @@ func TestNewPodVolumeInfoFromPVR(t *testing.T) {
 				PodName:         "pod-1",
 				PodNamespace:    "ns-1",
 				Phase:           velerov1api.PodVolumeRestorePhaseCompleted,
-				RestoreType:     "Incremental",
 			},
 		},
 		{
@@ -1558,17 +1631,21 @@ func TestNewPodVolumeInfoFromPVB(t *testing.T) {
 	}{
 		{
 			name: "all fields populated including incremental bytes",
-			pvb: builder.ForPodVolumeBackup("velero", "pvb-1").
-				SnapshotID("snap-1").
-				Volume("vol-1").
-				PodName("pod-1").
-				PodNamespace("ns-1").
-				Node("node-1").
-				UploaderType("kopia").
-				Phase(velerov1api.PodVolumeBackupPhaseCompleted).
-				TotalBytes(2048).
-				IncrementalBytes(512).
-				Result(),
+			pvb: func() *velerov1api.PodVolumeBackup {
+				pvb := builder.ForPodVolumeBackup("velero", "pvb-1").
+					SnapshotID("snap-1").
+					Volume("vol-1").
+					PodName("pod-1").
+					PodNamespace("ns-1").
+					Node("node-1").
+					UploaderType("kopia").
+					Phase(velerov1api.PodVolumeBackupPhaseCompleted).
+					TotalBytes(2048).
+					IncrementalBytes(512).
+					Result()
+				pvb.Status.FallbackFull = true
+				return pvb
+			}(),
 			expected: &PodVolumeBackupInfo{
 				SnapshotHandle:  "snap-1",
 				Size:            2048,

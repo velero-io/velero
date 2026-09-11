@@ -473,8 +473,13 @@ func describeCSISnapshotsRestores(d *Describer, restoreVolInfo []volume.RestoreV
 			d.Printf("\t\t\tOperation ID: %s\n", info.SnapshotDataMovementInfo.OperationID)
 			d.Printf("\t\t\tData Mover: %s\n", info.SnapshotDataMovementInfo.DataMover)
 			d.Printf("\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
-			if info.SnapshotDataMovementInfo.RestoreType != "" {
-				d.Printf("\t\t\tRestore Type: %s\n", info.SnapshotDataMovementInfo.RestoreType)
+			if info.RestoreType != "" {
+				restoreType := info.RestoreType
+				if info.FallbackFull {
+					restoreType += " (fallen back to Full)"
+				}
+
+				d.Printf("\t\t\tRestore Type: %s\n", restoreType)
 			}
 			if info.SnapshotDataMovementInfo.Size > 0 {
 				d.Printf("\t\t\tRestored data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)

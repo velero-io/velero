@@ -502,6 +502,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseCompleted
 		dd.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
+		dd.Status.FallbackFull = result.Restore.FallbackFull
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)

@@ -200,7 +200,7 @@ func TestSnapshotSource(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := injectSnapshotFuncs()
 			MockFuncs(s, tc.args)
-			_, _, err = SnapshotSource(ctx, s.repoWriterMock, s.uploderMock, sourceInfo, rootDir, false, "/", nil, tc.uploaderCfg, &fakeProgressUpdater{}, log, "TestSnapshotSource")
+			_, _, _, err = SnapshotSource(ctx, s.repoWriterMock, s.uploderMock, sourceInfo, rootDir, false, "/", nil, tc.uploaderCfg, &fakeProgressUpdater{}, log, "TestSnapshotSource")
 			if tc.notError {
 				assert.NoError(t, err)
 			} else {
@@ -212,6 +212,7 @@ func TestSnapshotSource(t *testing.T) {
 
 func TestReportSnapshotStatus(t *testing.T) {
 	testCases := []struct {
+		fallback         bool
 		shouldError      bool
 		expectedResult   string
 		expectedSize     int64
@@ -219,6 +220,7 @@ func TestReportSnapshotStatus(t *testing.T) {
 		expectedErrors   []string
 	}{
 		{
+			fallback:       false,
 			shouldError:    false,
 			expectedResult: "sample-manifest-id",
 			expectedSize:   1024,
@@ -227,6 +229,7 @@ func TestReportSnapshotStatus(t *testing.T) {
 			},
 		},
 		{
+			fallback:       true,
 			shouldError:    true,
 			expectedResult: "sample-manifest-id",
 			expectedSize:   1024,
@@ -253,7 +256,7 @@ func TestReportSnapshotStatus(t *testing.T) {
 			},
 		}
 
-		result, size, err := reportSnapshotStatus(manifest, policy.BuildTree(nil, getDefaultPolicy()))
+		result, size, fallback, err := reportSnapshotStatus(manifest, policy.BuildTree(nil, getDefaultPolicy()), tc.fallback)
 
 		switch {
 		case tc.shouldError && err == nil:
@@ -273,6 +276,10 @@ func TestReportSnapshotStatus(t *testing.T) {
 
 		if size != tc.expectedSize {
 			t.Errorf("unexpected size: got %v, want %v", size, tc.expectedSize)
+		}
+
+		if fallback != tc.fallback {
+			t.Errorf("unexpected fallback: got %v, want %v", fallback, tc.fallback)
 		}
 	}
 }
@@ -819,7 +826,7 @@ func TestRestore(t *testing.T) {
 			repoWriterMock.On("OpenObject", mock.Anything, mock.Anything).Return(em, nil)
 
 			progress := new(Progress)
-			bytesRestored, fileCount, err := Restore(t.Context(), repoWriterMock, progress, tc.snapshotID, tc.dest, tc.incremental, tc.volMode, map[string]string{}, logrus.New(), nil)
+			bytesRestored, fileCount, fallback, err := Restore(t.Context(), repoWriterMock, progress, tc.snapshotID, tc.dest, tc.incremental, tc.volMode, map[string]string{}, logrus.New(), nil)
 
 			// Check if the returned error matches the expected error
 			if tc.expectedError != nil {
@@ -833,6 +840,7 @@ func TestRestore(t *testing.T) {
 
 			// Check the number of files restored
 			assert.Equal(t, tc.expectedCount, fileCount)
+			assert.False(t, fallback)
 		})
 	}
 }

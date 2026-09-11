@@ -462,6 +462,15 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 		dataMovement := make(map[string]any)
 		dataMovement["operationID"] = info.SnapshotDataMovementInfo.OperationID
 
+		if info.BackupType != "" {
+			backupType := string(info.BackupType)
+			if info.FallbackFull {
+				backupType += " (fallen back to Full)"
+			}
+
+			dataMovement["backupType"] = backupType
+		}
+
 		dataMover := "velero"
 		if info.SnapshotDataMovementInfo.DataMover != "" {
 			dataMover = info.SnapshotDataMovementInfo.DataMover
@@ -477,9 +486,6 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 		// nothing, and that has to be reportable rather than absent.
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			dataMovement["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
-		}
-		if info.SnapshotDataMovementInfo.ParentSnapshot != "" {
-			dataMovement["parentSnapshot"] = info.SnapshotDataMovementInfo.ParentSnapshot
 		}
 
 		snapshotDetail["dataMovement"] = dataMovement

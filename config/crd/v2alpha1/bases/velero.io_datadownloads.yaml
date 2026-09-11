@@ -213,6 +213,10 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental restore
+                  has fallen back to full restore
+                type: boolean
               incrementalBytes:
                 description: IncrementalBytes holds the number of bytes restored incrementally
                   since the last snapshot

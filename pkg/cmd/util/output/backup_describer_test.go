@@ -635,7 +635,6 @@ func TestCSISnapshots(t *testing.T) {
 						Size:            100,
 						IncrementalSize: ptr.To(int64(50)),
 						Phase:           velerov2alpha1.DataUploadPhaseFailed,
-						ParentSnapshot:  "fake-parent-snapshot",
 					},
 				},
 			},
@@ -645,11 +644,46 @@ func TestCSISnapshots(t *testing.T) {
       Data Movement:
         Operation ID: fake-operation-5
         Data Mover: velero
+        Backup Type: Incremental
         Uploader Type: fake-uploader
         Moved data Size (bytes): 100
         Incremental data Size (bytes): 50
-        Parent Snapshot: fake-parent-snapshot
         Result: failed
+`,
+		},
+		{
+			name: "details, data movement, incremental fallback to full",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{
+					BackupMethod:      volume.CSISnapshot,
+					PVCNamespace:      "pvc-ns-6",
+					PVCName:           "pvc-6",
+					Result:            volume.VolumeResultSucceeded,
+					SnapshotDataMoved: true,
+					BackupType:        velerov1api.BackupTypeIncremental,
+					FallbackFull:      true,
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
+						DataMover:       "velero",
+						UploaderType:    "fake-uploader",
+						SnapshotHandle:  "fake-repo-id-6",
+						OperationID:     "fake-operation-6",
+						Size:            200,
+						IncrementalSize: ptr.To(int64(200)),
+						Phase:           velerov2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			inputDetails: true,
+			expect: `  CSI Snapshots:
+    pvc-ns-6/pvc-6:
+      Data Movement:
+        Operation ID: fake-operation-6
+        Data Mover: velero
+        Backup Type: Incremental (fallen back to Full)
+        Uploader Type: fake-uploader
+        Moved data Size (bytes): 200
+        Incremental data Size (bytes): 200
+        Result: succeeded
 `,
 		},
 	}

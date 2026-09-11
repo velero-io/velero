@@ -1199,17 +1199,18 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 func TestUpdateVolumeInfos(t *testing.T) {
 	tests := []struct {
-		name               string
-		restore            *velerov1api.Restore
-		restoreVolumeInfos []*volume.RestoreVolumeInfo
-		dataDownloads      []*velerov2alpha1.DataDownload
-		listErr            error
-		putErr             error
-		expectedSize       int64
-		expectedIncrSize   *int64
-		expectedPhase      velerov2alpha1.DataDownloadPhase
-		expectErrs         bool
-		expectErrMsg       string
+		name                 string
+		restore              *velerov1api.Restore
+		restoreVolumeInfos   []*volume.RestoreVolumeInfo
+		dataDownloads        []*velerov2alpha1.DataDownload
+		listErr              error
+		putErr               error
+		expectedSize         int64
+		expectedIncrSize     *int64
+		expectedPhase        velerov2alpha1.DataDownloadPhase
+		expectedFallbackFull bool
+		expectErrs           bool
+		expectErrMsg         string
 	}{
 		{
 			name:    "successful update of restore volume infos from data downloads",
@@ -1238,6 +1239,16 @@ func TestUpdateVolumeInfos(t *testing.T) {
 						Phase:     velerov2alpha1.DataDownloadPhaseCompleted,
 					},
 				},
+				{
+					PVCName:      "pvc-4",
+					PVCNamespace: "ns-4",
+					FallbackFull: true,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+						Size:      0,
+						Phase:     "",
+					},
+				},
 			},
 			dataDownloads: []*velerov2alpha1.DataDownload{
 				builder.ForDataDownload("velero", "dd-1").
@@ -1246,6 +1257,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					TotalBytes(4096).
 					IncrementalBytes(1024).
 					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(true).
 					Result(),
 				builder.ForDataDownload("velero", "dd-2").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
@@ -1253,6 +1265,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					TotalBytes(2048).
 					IncrementalBytes(512).
 					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(true).
 					Result(),
 				builder.ForDataDownload("velero", "dd-other-restore").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-other"})).
@@ -1260,12 +1273,22 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					TotalBytes(9999).
 					IncrementalBytes(8888).
 					Phase(velerov2alpha1.DataDownloadPhaseFailed).
+					FallbackFull(true).
+					Result(),
+				builder.ForDataDownload("velero", "dd-4").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-4", Namespace: "ns-4"}).
+					TotalBytes(1024).
+					IncrementalBytes(256).
+					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(false).
 					Result(),
 			},
-			expectedSize:     4096,
-			expectedIncrSize: ptr.To(int64(1024)),
-			expectedPhase:    velerov2alpha1.DataDownloadPhaseCompleted,
-			expectErrs:       false,
+			expectedSize:         4096,
+			expectedIncrSize:     ptr.To(int64(1024)),
+			expectedPhase:        velerov2alpha1.DataDownloadPhaseCompleted,
+			expectedFallbackFull: true,
+			expectErrs:           false,
 		},
 		{
 			name:    "failed to list data downloads",
@@ -1350,10 +1373,18 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				assert.Equal(t, tc.expectedSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Size)
 				assert.Equal(t, tc.expectedIncrSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.IncrementalSize)
 				assert.Equal(t, tc.expectedPhase, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Phase)
-				// pvc-2 had nil SnapshotDataMovementInfo and should remain nil
+				assert.Equal(t, tc.expectedFallbackFull, ctx.restoreVolumeInfos[0].FallbackFull)
+				// pvc-2 had nil SnapshotDataMovementInfo and should remain nil, FallbackFull should remain false
 				assert.Nil(t, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo)
+				assert.False(t, ctx.restoreVolumeInfos[1].FallbackFull)
 				// pvc-3 belonged to another restore and should be untouched
 				assert.Equal(t, int64(100), ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.Size)
+				assert.False(t, ctx.restoreVolumeInfos[2].FallbackFull)
+				// pvc-4 had FallbackFull updated to false from data download
+				assert.Equal(t, int64(1024), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Size)
+				assert.Equal(t, ptr.To(int64(256)), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.IncrementalSize)
+				assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Phase)
+				assert.False(t, ctx.restoreVolumeInfos[3].FallbackFull)
 
 				// Verify the content uploaded to backup store can be decoded and matches
 				require.NotEmpty(t, uploadedData)

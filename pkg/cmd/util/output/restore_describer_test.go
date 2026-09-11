@@ -312,13 +312,13 @@ CSI Snapshot Restores:
 					PVName:            "pv-3",
 					RestoreMethod:     volume.CSISnapshot,
 					SnapshotDataMoved: true,
+					RestoreType:       "Incremental",
 					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
 						OperationID:     "op-3",
 						DataMover:       "velero",
 						UploaderType:    "kopia",
 						Size:            1234,
 						IncrementalSize: ptr.To(int64(500)),
-						RestoreType:     "Incremental",
 					},
 				},
 			},
@@ -333,6 +333,39 @@ CSI Snapshot Restores:
       Restore Type: Incremental
       Restored data Size (bytes): 1234
       Incremental data Size (bytes): 500
+`,
+		},
+		{
+			name: "CSI restore with data movement, detailed, fallback to full",
+			inputVolInfoList: []volume.RestoreVolumeInfo{
+				{
+					PVCName:           "pvc-4",
+					PVCNamespace:      "ns-4",
+					PVName:            "pv-4",
+					RestoreMethod:     volume.CSISnapshot,
+					SnapshotDataMoved: true,
+					RestoreType:       "Incremental",
+					FallbackFull:      true,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						OperationID:     "op-4",
+						DataMover:       "velero",
+						UploaderType:    "kopia",
+						Size:            2345,
+						IncrementalSize: ptr.To(int64(600)),
+					},
+				},
+			},
+			inputDetail: true,
+			expect: `
+CSI Snapshot Restores:
+  ns-4/pvc-4:
+    Data Movement:
+      Operation ID: op-4
+      Data Mover: velero
+      Uploader Type: kopia
+      Restore Type: Incremental (fallen back to Full)
+      Restored data Size (bytes): 2345
+      Incremental data Size (bytes): 600
 `,
 		},
 		{

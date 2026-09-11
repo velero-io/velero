@@ -198,6 +198,9 @@ type DataUploadStatus struct {
 	// +optional
 	// +nullable
 	AcceptedTimestamp *metav1.Time `json:"acceptedTimestamp,omitempty"`
+
+	// FallbackFull indicates whether the incremental backup has fallen back to full backup
+	FallbackFull bool `json:"fallbackFull,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,

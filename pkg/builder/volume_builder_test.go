@@ -36,6 +36,18 @@ func TestDataDownloadBuilder_Bytes(t *testing.T) {
 	assert.Equal(t, int64(512), *dd.Status.IncrementalBytes)
 }
 
+func TestDataDownloadBuilder_FallbackFull(t *testing.T) {
+	dd1 := ForDataDownload("velero", "dd-1").
+		FallbackFull(true).
+		Result()
+	assert.True(t, dd1.Status.FallbackFull)
+
+	dd2 := ForDataDownload("velero", "dd-2").
+		FallbackFull(false).
+		Result()
+	assert.False(t, dd2.Status.FallbackFull)
+}
+
 func TestPodVolumeBackupBuilder_ProgressAndBytes(t *testing.T) {
 	pvb1 := ForPodVolumeBackup("velero", "pvb-1").
 		Progress(shared.DataMoveOperationProgress{

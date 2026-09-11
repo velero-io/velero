@@ -195,6 +195,10 @@ spec:
                   as a result of the DataUpload.
                 nullable: true
                 type: object
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental backup
+                  has fallen back to full backup
+                type: boolean
               incrementalBytes:
                 description: |-
                   IncrementalBytes holds the number of bytes new or changed since the last backup.

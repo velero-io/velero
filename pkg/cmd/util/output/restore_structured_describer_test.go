@@ -473,13 +473,13 @@ func TestDescribeRestoreCSISnapshotsInSF_NoData(t *testing.T) {
 					SnapshotDataMoved: true,
 					PVCName:           "pvc-3",
 					PVCNamespace:      "ns-3",
+					RestoreType:       "Incremental",
 					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
 						OperationID:     "op-3",
 						DataMover:       "velero",
 						UploaderType:    "kopia",
 						Size:            1234,
 						IncrementalSize: ptr.To(int64(500)),
-						RestoreType:     "Incremental",
 					},
 				},
 			},
@@ -494,6 +494,41 @@ func TestDescribeRestoreCSISnapshotsInSF_NoData(t *testing.T) {
 							"size":            int64(1234),
 							"incrementalSize": int64(500),
 							"restoreType":     "Incremental",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "data movement entry, with details, fallback to full",
+			inputVolInfoList: []volume.RestoreVolumeInfo{
+				{
+					RestoreMethod:     volume.CSISnapshot,
+					SnapshotDataMoved: true,
+					PVCName:           "pvc-4",
+					PVCNamespace:      "ns-4",
+					RestoreType:       "Incremental",
+					FallbackFull:      true,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						OperationID:     "op-4",
+						DataMover:       "velero",
+						UploaderType:    "kopia",
+						Size:            2345,
+						IncrementalSize: ptr.To(int64(600)),
+					},
+				},
+			},
+			details: true,
+			expect: map[string]any{
+				"csiSnapshotRestores": map[string]any{
+					"ns-4/pvc-4": map[string]any{
+						"dataMovement": map[string]any{
+							"operationID":     "op-4",
+							"dataMover":       "velero",
+							"uploaderType":    "kopia",
+							"size":            int64(2345),
+							"incrementalSize": int64(600),
+							"restoreType":     "Incremental (fallen back to Full)",
 						},
 					},
 				},

@@ -337,7 +337,7 @@ func TestBlockProviderRunBackup(t *testing.T) {
 				log:           logrus.New(),
 			}
 
-			snapshotID, isEmpty, size, incrSize, sourceSize, err := bp.RunBackup(
+			snapshotID, isEmpty, size, incrSize, sourceSize, fallback, err := bp.RunBackup(
 				t.Context(),
 				tc.path,
 				tc.realSource,
@@ -354,6 +354,7 @@ func TestBlockProviderRunBackup(t *testing.T) {
 			assert.Equal(t, tc.expectedSize, size)
 			assert.Equal(t, tc.expectedIncrSize, incrSize)
 			assert.Equal(t, tc.expectedSourceSize, sourceSize)
+			assert.Equal(t, tc.mockBackupResult.Fallback, fallback)
 
 			if tc.expectError {
 				require.Error(t, err)
@@ -404,7 +405,7 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 			log:           logrus.New(),
 		}
 
-		_, _, _, _, _, err := bp.RunBackup(
+		_, _, _, _, _, _, err := bp.RunBackup(
 			t.Context(), "/dev/sda", "ns/pvc", map[string]string{}, false, "",
 			CBTParam{}, uploader.PersistentVolumeBlock, map[string]string{},
 			&FakeBackupProgressUpdater{},
@@ -418,8 +419,8 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 	t.Run("restore", func(t *testing.T) {
 		orig := blockRestoreFunc
 		defer func() { blockRestoreFunc = orig }()
-		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ bool, _ cbtservice.SourceInfo, _ cbtservice.Service, _ map[string]string, _ logrus.FieldLogger) (int64, int64, error) {
-			return 0, 0, errors.Wrap(block.ErrCanceled, "error restoring bdev")
+		blockRestoreFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, _ string, _ string, _ bool, _ cbtservice.SourceInfo, _ cbtservice.Service, _ map[string]string, _ logrus.FieldLogger) (int64, int64, bool, error) {
+			return 0, 0, false, errors.Wrap(block.ErrCanceled, "error restoring bdev")
 		}
 
 		bp := &blockProvider{
@@ -428,7 +429,7 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 			log:           logrus.New(),
 		}
 
-		_, _, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda", false, CBTParam{},
+		_, _, _, err := bp.RunRestore(t.Context(), "snap-1", "/dev/sda", false, CBTParam{},
 			uploader.PersistentVolumeBlock, map[string]string{}, &blockMockProgressUpdater{})
 
 		require.ErrorIs(t, err, ErrorCanceled)
@@ -502,10 +503,10 @@ func TestBlockProviderRunRestore(t *testing.T) {
 			var capturedSnapshotID string
 			var capturedVolumePath string
 
-			blockRestoreFunc = func(ctx context.Context, blkUp block.Uploader, rep udmrepo.BackupRepo, snapshotID string, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, int64, error) {
+			blockRestoreFunc = func(ctx context.Context, blkUp block.Uploader, rep udmrepo.BackupRepo, snapshotID string, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, int64, bool, error) {
 				capturedSnapshotID = snapshotID
 				capturedVolumePath = dest
-				return tc.mockRestoreSize, tc.mockRestoreSize, tc.mockRestoreErr
+				return tc.mockRestoreSize, tc.mockRestoreSize, false, tc.mockRestoreErr
 			}
 
 			bp := &blockProvider{
@@ -513,7 +514,7 @@ func TestBlockProviderRunRestore(t *testing.T) {
 				log:    logrus.New(),
 			}
 
-			_, size, err := bp.RunRestore(
+			_, size, _, err := bp.RunRestore(
 				t.Context(),
 				tc.snapshotID,
 				tc.volumePath,

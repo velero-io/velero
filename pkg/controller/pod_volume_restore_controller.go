@@ -838,6 +838,7 @@ func (r *PodVolumeRestoreReconciler) OnDataPathCompleted(ctx context.Context, na
 		pvr.Status.Phase = velerov1api.PodVolumeRestorePhaseCompleted
 		pvr.Status.CompletionTimestamp = &metav1.Time{Time: r.clock.Now()}
 		pvr.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
+		pvr.Status.FallbackFull = result.Restore.FallbackFull
 
 		delete(pvr.Labels, exposer.ExposeOnGoingLabel)
 

@@ -741,6 +741,16 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 			dataMover = info.SnapshotDataMovementInfo.DataMover
 		}
 		d.Printf("\t\t\t\tData Mover: %s\n", dataMover)
+
+		if info.BackupType != "" {
+			backupType := string(info.BackupType)
+			if info.FallbackFull {
+				backupType += " (fallen back to Full)"
+			}
+
+			d.Printf("\t\t\t\tBackup Type: %s\n", backupType)
+		}
+
 		d.Printf("\t\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
 		d.Printf("\t\t\t\tMoved data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)
 		// Print whenever the uploader measured a figure, including zero. A zero-delta
@@ -749,9 +759,6 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 		// indistinguishable from a full transfer.
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			d.Printf("\t\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
-		}
-		if info.SnapshotDataMovementInfo.ParentSnapshot != "" {
-			d.Printf("\t\t\t\tParent Snapshot: %s\n", info.SnapshotDataMovementInfo.ParentSnapshot)
 		}
 
 		d.Printf("\t\t\t\tResult: %s\n", info.Result)

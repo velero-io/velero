@@ -204,6 +204,10 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental backup
+                  has fallen back to full backup
+                type: boolean
               incrementalBytes:
                 description: |-
                   IncrementalBytes holds the number of bytes new or changed since the last backup.

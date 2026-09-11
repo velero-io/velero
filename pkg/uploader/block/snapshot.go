@@ -83,12 +83,13 @@ func Backup(ctx context.Context, blkUp Uploader, repoWriter udmrepo.BackupRepo, 
 		return uploader.SnapshotInfo{}, false, errors.Wrapf(err, "error reset pos of block device %s", source)
 	}
 
-	snapID, backupSize, snapshotSize, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log, "Block Uploader")
+	snapID, backupSize, snapshotSize, fallback, err := snapshotSource(ctx, repoWriter, blkUp, sourceInfo, forceFull, parentSnapshot, cbtSource, cbtService, tags, uploaderCfg, log, "Block Uploader")
 	snapshotInfo := uploader.SnapshotInfo{
 		ID:              snapID,
 		SnapshotSize:    snapshotSize,
 		IncrementalSize: backupSize,
 		SourceSize:      sourceInfo.size,
+		Fallback:        fallback,
 	}
 
 	return snapshotInfo, false, err
@@ -107,7 +108,7 @@ func snapshotSource(
 	uploaderCfg map[string]string,
 	log logrus.FieldLogger,
 	description string,
-) (string, int64, int64, error) {
+) (string, int64, int64, bool, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
 
@@ -127,9 +128,14 @@ func snapshotSource(
 		log.WithError(err).Warnf("Failed to create CBT with source %v", cbtSource)
 	}
 
+	fallback := false
+	if !forceFull {
+		fallback = (len(bitmap.Errors()) > 0)
+	}
+
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
-		return "", 0, 0, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
+		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
 	}
 
 	if snap.Tags == nil {
@@ -146,16 +152,16 @@ func snapshotSource(
 
 	snapID, err := rep.SaveSnapshot(ctx, snap)
 	if err != nil {
-		return "", 0, 0, errors.Wrapf(err, "Failed to save snapshot %v", snap)
+		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to save snapshot %v", snap)
 	}
 
 	if err = rep.Flush(ctx); err != nil {
-		return "", 0, 0, errors.Wrapf(err, "Failed to flush repository")
+		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to flush repository")
 	}
 
 	log.Infof("Created snapshot with root %v and ID %v in %v", snap.RootObject, snapID, time.Since(snapshotStartTime).Truncate(time.Second))
 
-	return string(snapID), backupSize, snap.TotalSize, nil
+	return string(snapID), backupSize, snap.TotalSize, fallback, nil
 }
 
 func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull bool, parentSnapshot string, volumeID string,
@@ -221,12 +227,12 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 }
 
 // Restore restore specific sourcePath with given snapshotID and update progress
-func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, int64, error) {
+func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapshotID, dest string, incremental bool, cbtSource cbtservice.SourceInfo, cbtService cbtservice.Service, uploaderCfg map[string]string, log logrus.FieldLogger) (int64, int64, bool, error) {
 	log.Info("Start to restore...")
 
 	snapshot, err := rep.GetSnapshot(ctx, udmrepo.ID(snapshotID))
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
 	}
 	log.Infof("Restore from snapshot %s, incremental %v, cbt source %v, description %s, created time %v, tags %v", snapshotID, incremental, cbtSource, snapshot.Description, snapshot.EndTime, snapshot.Tags)
 
@@ -248,36 +254,41 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 		bitmap.SetFull()
 	}
 
+	fallback := false
+	if incremental {
+		fallback = (len(bitmap.Errors()) > 0)
+	}
+
 	destPath, err := filepath.Abs(dest)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "invalid dest path '%s'", dest)
+		return 0, 0, fallback, errors.Wrapf(err, "invalid dest path '%s'", dest)
 	}
 
 	destPath = filepath.Clean(destPath)
 
 	destDev, err := openBlockDeviceFunc(destPath, false)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "error opening block device '%s'", destPath)
+		return 0, 0, fallback, errors.Wrapf(err, "error opening block device '%s'", destPath)
 	}
 
 	defer destDev.Close()
 
 	destSize, err := destDev.Seek(0, io.SeekEnd)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "error getting length of block device %s", dest)
+		return 0, 0, fallback, errors.Wrapf(err, "error getting length of block device %s", dest)
 	}
 
 	_, err = destDev.Seek(0, io.SeekStart)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "error reset pos of block device %s", dest)
+		return 0, 0, fallback, errors.Wrapf(err, "error reset pos of block device %s", dest)
 	}
 
 	incrementalBytes, totalSize, err := blkUp.Restore(snapshot, destInfo{dev: destDev, path: destPath, size: destSize}, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "error restoring to block dev %s", destPath)
+		return 0, 0, fallback, errors.Wrapf(err, "error restoring to block dev %s", destPath)
 	}
 
-	return incrementalBytes, totalSize, nil
+	return incrementalBytes, totalSize, fallback, nil
 }
 
 func getBackupInfo(snapshot udmrepo.Snapshot, volumeID string) (backupInfo, error) {

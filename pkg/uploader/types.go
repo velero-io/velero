@@ -55,6 +55,7 @@ type SnapshotInfo struct {
 	SnapshotSize    int64
 	IncrementalSize int64
 	SourceSize      int64
+	Fallback        bool
 }
 
 // Progress which defined two variables to record progress
