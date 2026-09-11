@@ -1,0 +1,102 @@
+# Reproduces https://github.com/velero-io/velero/issues/10040 in CI:
+# fs-backup (kopia) restore silently loses file ownership on NFS exports that
+# squash root, while the restore reports Completed.
+#
+# The NFSOwnership e2e asserts ownership is preserved, so this workflow is
+# EXPECTED TO FAIL on current main — the failure is the reproduction. It goes
+# green once the swallowed chown EPERM (IgnorePermissionErrors hardcoded true
+# in pkg/uploader/kopia/snapshot.go) is surfaced or ownership restore works.
+#
+# Scoped triggers: only runs when the test itself (or this workflow) changes,
+# or on manual dispatch — so the intentional red does not affect other PRs.
+name: "[EXPECTED FAIL until #10040 fixed] NFS ownership-preservation E2E on kind"
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "test/e2e/nfs-ownership/**"
+      - "test/testdata/nfs-ownership/**"
+      - "pkg/uploader/kopia/snapshot.go"
+      - ".github/workflows/e2e-nfs-ownership.yaml"
+  pull_request:
+    paths:
+      - "test/e2e/nfs-ownership/**"
+      - "test/testdata/nfs-ownership/**"
+      - "pkg/uploader/kopia/snapshot.go"
+      - ".github/workflows/e2e-nfs-ownership.yaml"
+permissions:
+  contents: read
+jobs:
+  get-go-version:
+    uses: ./.github/workflows/get-go-version.yaml
+    with:
+      ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+
+  run-nfs-ownership-e2e:
+    name: "run-nfs-ownership-e2e (expected to fail — reproduces #10040)"
+    needs: get-go-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go version
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ needs.get-go-version.outputs.version }}
+
+      - name: Build Velero CLI
+        run: |
+          make local
+
+      - name: Build Velero Image
+        run: |
+          IMAGE=velero VERSION=pr-test BUILD_OUTPUT_TYPE=docker make container
+
+      - name: Install MinIO
+        run: |
+          docker run -d --rm --name minio -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" quay.io/minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/ready && break
+            sleep 2
+          done
+          docker run --rm --network host --entrypoint sh quay.io/minio/mc:latest -c \
+            "mc alias set m http://127.0.0.1:9000 minio minio123 && mc mb -p m/bucket"
+
+      - uses: helm/kind-action@7a97ed793754775518f9db3a8151ee7461dc9c31 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165) + node24
+        with:
+          cluster_name: "kind"
+          version: "v0.32.0"
+
+      - name: Load Velero Image
+        run: |
+          kind load docker-image velero:pr-test-linux-amd64
+
+      - name: Run NFSOwnership E2E test
+        run: |
+          cat << EOF > /tmp/credential
+          [default]
+          aws_access_key_id=minio
+          aws_secret_access_key=minio123
+          EOF
+
+          GOPATH=~/go \
+              CLOUD_PROVIDER=kind \
+              OBJECT_STORE_PROVIDER=aws \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              CREDS_FILE=/tmp/credential \
+              BSL_BUCKET=bucket \
+              VELERO_IMAGE=velero:pr-test-linux-amd64 \
+              PLUGINS=velero/velero-plugin-for-aws:latest \
+              GINKGO_LABELS="NFSOwnership" \
+              make -C test/ run-e2e
+        timeout-minutes: 30
+
+      - name: Upload debug bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: DebugBundle-nfs-ownership
+          path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
