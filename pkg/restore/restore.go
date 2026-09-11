@@ -27,6 +27,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1636,15 +1637,23 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		return warnings, errs, itemExists
 	}
 
-	// Strip any pre-existing Velero-internal in-place restore carrier annotation coming from
-	// the backup metadata before RestoreItemActions run. The carrier is only trusted when it
-	// is set by a RestoreItemAction (the PVC CSI RIA) during this restore; a stale carrier
-	// baked into the backup must not be translated into the Kubernetes "selected-node"
-	// annotation, which could pin a newly provisioned PVC to a stale node.
-	if annotations := obj.GetAnnotations(); annotations != nil {
-		if _, present := annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]; present {
-			restoreLogger.Infof("Removing pre-existing %q annotation from backup metadata", velerov1api.InplaceRestoreSelectedNodeAnnotation)
-			delete(annotations, velerov1api.InplaceRestoreSelectedNodeAnnotation)
+	// Strip any pre-existing Velero-internal in-place restore carrier annotations coming from
+	// the backup metadata before RestoreItemActions run. A carrier is only trusted when it is
+	// set during this restore (by the engine below or by the PVC CSI RIA); a stale carrier
+	// baked into the backup must not be acted on, e.g. a stale "selected-node" could pin a
+	// newly provisioned PVC to a stale node.
+	stripInplaceRestoreCarrierAnnotations(obj)
+
+	// Carry the source volume size from the backup volume info to the PVC CSI RIA, which has no
+	// access to the volume info, so it can run the in-place restore capacity pre-flight check.
+	if groupResource == kuberesource.PersistentVolumeClaims {
+		pvName, _, _ := unstructured.NestedString(obj.Object, "spec", "volumeName")
+		if sourceSize := ctx.backupVolumeInfoMap[pvName].SourceSize(); sourceSize > 0 {
+			annotations := obj.GetAnnotations()
+			if annotations == nil {
+				annotations = map[string]string{}
+			}
+			annotations[velerov1api.InplaceRestoreSourceSizeAnnotation] = strconv.FormatInt(sourceSize, 10)
 			obj.SetAnnotations(annotations)
 		}
 	}
@@ -1788,15 +1797,13 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	// while the carrier annotation passes through untouched. The carrier itself is always
 	// stripped so it never lands on the cluster.
 	if annotations := obj.GetAnnotations(); annotations != nil {
-		if selectedNode, present := annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]; present {
-			if selectedNode != "" {
-				restoreLogger.Infof("Restoring %q annotation with value %q from in-place restore carrier annotation", kube.KubeAnnSelectedNode, selectedNode)
-				annotations[kube.KubeAnnSelectedNode] = selectedNode
-			}
-			delete(annotations, velerov1api.InplaceRestoreSelectedNodeAnnotation)
+		if selectedNode := annotations[velerov1api.InplaceRestoreSelectedNodeAnnotation]; selectedNode != "" {
+			restoreLogger.Infof("Restoring %q annotation with value %q from in-place restore carrier annotation", kube.KubeAnnSelectedNode, selectedNode)
+			annotations[kube.KubeAnnSelectedNode] = selectedNode
 			obj.SetAnnotations(annotations)
 		}
 	}
+	stripInplaceRestoreCarrierAnnotations(obj)
 
 	// This comes after running item actions because we have built-in actions that restore
 	// a PVC's associated PV (if applicable). As part of the PV being restored, the 'pvsToProvision'
@@ -2511,6 +2518,22 @@ func resetMetadataAndStatus(obj *unstructured.Unstructured) (*unstructured.Unstr
 	}
 	resetStatus(obj)
 	return obj, nil
+}
+
+// inplaceRestoreCarrierAnnotations are the Velero-internal annotations used to pass data
+// between the restore engine and the in-place restore RestoreItemActions. They never land on
+// the cluster.
+var inplaceRestoreCarrierAnnotations = []string{
+	velerov1api.InplaceRestoreSelectedNodeAnnotation,
+	velerov1api.InplaceRestoreSourceSizeAnnotation,
+}
+
+func stripInplaceRestoreCarrierAnnotations(obj metav1.Object) {
+	annotations := obj.GetAnnotations()
+	for _, k := range inplaceRestoreCarrierAnnotations {
+		delete(annotations, k)
+	}
+	obj.SetAnnotations(annotations)
 }
 
 // addRestoreLabels labels the provided object with the restore name and the

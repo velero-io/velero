@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -148,4 +149,27 @@ func CheckPVCBoundToBackedUpPV(existingPVC *corev1api.PersistentVolumeClaim, bac
 	}
 	return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is bound to PV %s, but was bound to PV %s at backup time",
 		existingPVC.Namespace, existingPVC.Name, existingPVC.Spec.VolumeName, backedUpPVName)
+}
+
+// CheckPVCCapacity verifies the existing PVC is large enough to hold the
+// backed-up volume, failing early instead of letting the restore run out of
+// space midway. sourceSize is the size of the source volume recorded at
+// backup time: the device size for the block data mover, the logical size of
+// the backed-up files for the file system data movers (a lower bound, since
+// file system metadata is not accounted for). The check is skipped when the
+// size is unknown (backups taken before it was recorded) or when the PVC's
+// capacity is not reported.
+func CheckPVCCapacity(existingPVC *corev1api.PersistentVolumeClaim, sourceSize int64) error {
+	if sourceSize <= 0 {
+		return nil
+	}
+	capacity, ok := existingPVC.Status.Capacity[corev1api.ResourceStorage]
+	if !ok || capacity.IsZero() {
+		return nil
+	}
+	if capacity.Cmp(*resource.NewQuantity(sourceSize, resource.BinarySI)) < 0 {
+		return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s capacity %s is smaller than the backed-up volume size %d bytes",
+			existingPVC.Namespace, existingPVC.Name, capacity.String(), sourceSize)
+	}
+	return nil
 }

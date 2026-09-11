@@ -5160,3 +5160,84 @@ func TestHasPodVolumeBackup(t *testing.T) {
 		})
 	}
 }
+
+func TestRestoreInplaceSourceSizeCarrierAnnotation(t *testing.T) {
+	newRequest := func(t *testing.T, h *harness, volumeInfos map[string]volume.BackupVolumeInfo) *Request {
+		t.Helper()
+		return &Request{
+			Log:     h.log,
+			Restore: defaultRestore().Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").VolumeName("pv-1").Result()).
+				Done(),
+			BackupVolumeInfoMap: volumeInfos,
+		}
+	}
+
+	// captureCarrier records the source-size carrier the RIA sees on the item.
+	captureCarrier := func(seen *string) riav2.RestoreItemAction {
+		return &pluggableAction{
+			executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+				item := input.Item.(*unstructured.Unstructured)
+				*seen = item.GetAnnotations()[velerov1api.InplaceRestoreSourceSizeAnnotation]
+				return &velero.RestoreItemActionExecuteOutput{UpdatedItem: item}, nil
+			},
+		}
+	}
+
+	t.Run("source size from volume info is carried to RIAs and stripped from the cluster object", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.PVCs())
+		var seen string
+
+		warnings, errs := h.restorer.Restore(
+			newRequest(t, h, map[string]volume.BackupVolumeInfo{
+				"pv-1": {PVCNamespace: "ns-1", PVCName: "pvc-1", PVBInfo: &volume.PodVolumeBackupInfo{SourceSize: 31457288}},
+			}),
+			[]riav2.RestoreItemAction{captureCarrier(&seen)},
+			nil,
+		)
+		assertEmptyResults(t, warnings, errs)
+		assert.Equal(t, "31457288", seen)
+
+		got, err := h.DynamicClient.Resource(test.PVCs().GVR()).Namespace("ns-1").Get(t.Context(), "pvc-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreSourceSizeAnnotation)
+	})
+
+	t.Run("no carrier when the volume info has no source size", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.PVCs())
+		var seen string
+
+		warnings, errs := h.restorer.Restore(
+			newRequest(t, h, map[string]volume.BackupVolumeInfo{
+				"pv-1": {PVCNamespace: "ns-1", PVCName: "pvc-1", PVBInfo: &volume.PodVolumeBackupInfo{}},
+			}),
+			[]riav2.RestoreItemAction{captureCarrier(&seen)},
+			nil,
+		)
+		assertEmptyResults(t, warnings, errs)
+		assert.Empty(t, seen)
+	})
+
+	t.Run("stale carrier from the backup metadata is not trusted", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.PVCs())
+		var seen string
+
+		req := newRequest(t, h, nil)
+		req.BackupReader = test.NewTarWriter(t).
+			AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").
+				ObjectMeta(builder.WithAnnotations(velerov1api.InplaceRestoreSourceSizeAnnotation, "999")).Result()).
+			Done()
+		warnings, errs := h.restorer.Restore(req, []riav2.RestoreItemAction{captureCarrier(&seen)}, nil)
+		assertEmptyResults(t, warnings, errs)
+		assert.Empty(t, seen)
+
+		got, err := h.DynamicClient.Resource(test.PVCs().GVR()).Namespace("ns-1").Get(t.Context(), "pvc-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreSourceSizeAnnotation)
+	})
+}

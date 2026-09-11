@@ -369,6 +369,17 @@ func newPodVolumeInfoFromPVR(pvr *velerov1api.PodVolumeRestore) *PodVolumeRestor
 	}
 }
 
+// SourceSize returns the size of the source volume recorded at backup time, or 0 if unknown.
+func (v BackupVolumeInfo) SourceSize() int64 {
+	switch {
+	case v.SnapshotDataMovementInfo != nil:
+		return v.SnapshotDataMovementInfo.SourceSize
+	case v.PVBInfo != nil:
+		return v.PVBInfo.SourceSize
+	}
+	return 0
+}
+
 // PVInfo is used to store some PV information modified after creation.
 // Those information are lost after PV recreation.
 type PVInfo struct {

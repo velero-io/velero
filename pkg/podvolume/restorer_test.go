@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -435,6 +436,37 @@ func TestRestorePodVolumes(t *testing.T) {
 			errs: []expectError{
 				{
 					err:        "in-place restore pre-flight check failed",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
+			name: "in-place restore blocked when the PVC is too small for the source volume",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				func() *corev1api.PersistentVolumeClaim {
+					pvc := createPVCObj(1)
+					pvc.Status.Capacity = corev1api.ResourceList{corev1api.ResourceStorage: resource.MustParse("100Mi")}
+					return pvc
+				}(),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos: map[string]volume.BackupVolumeInfo{
+				"fake-pv-1": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1", PVBInfo: &volume.PodVolumeBackupInfo{SourceSize: 200 << 20}},
+			},
+			runtimeScheme: scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed, skipping volume data restore: PVC fake-ns/fake-pvc-1 capacity 100Mi is smaller than the backed-up volume size 209715200 bytes",
 					prefixOnly: true,
 				},
 			},

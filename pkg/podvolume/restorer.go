@@ -189,7 +189,12 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 		// to write into, and they cannot write to it themselves until this
 		// restore's PodVolumeRestores complete.
 		if data.Restore.IsVolumeDataInplaceRestore() && pvc != nil {
-			if err := inplace.CheckPVCBoundToBackedUpPV(pvc, backedUpPVName(data.BackupVolumeInfos, data.SourceNamespace, pvc.Name), data.SourceNamespace); err != nil {
+			pvName := backedUpPVName(data.BackupVolumeInfos, data.SourceNamespace, pvc.Name)
+			if err := inplace.CheckPVCBoundToBackedUpPV(pvc, pvName, data.SourceNamespace); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := inplace.CheckPVCCapacity(pvc, data.BackupVolumeInfos[pvName].SourceSize()); err != nil {
 				errs = append(errs, err)
 				continue
 			}
