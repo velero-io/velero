@@ -110,6 +110,9 @@ func Run(o *cli.DeleteOptions) error {
 		}
 	}
 	if len(schedules) == 0 {
+		if len(errs) > 0 {
+			return kubeerrs.NewAggregate(errs)
+		}
 		fmt.Println("No schedules found")
 		return nil
 	}
