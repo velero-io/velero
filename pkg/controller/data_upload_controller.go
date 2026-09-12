@@ -86,6 +86,7 @@ type DataUploadReconciler struct {
 	podLabels                      map[string]string
 	podAnnotations                 map[string]string
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+	tolerations                    []corev1api.Toleration
 }
 
 func NewDataUploadReconciler(
@@ -107,6 +108,7 @@ func NewDataUploadReconciler(
 	podLabels map[string]string,
 	podAnnotations map[string]string,
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
+	tolerations []corev1api.Toleration,
 ) *DataUploadReconciler {
 	return &DataUploadReconciler{
 		client:            client,
@@ -134,6 +136,7 @@ func NewDataUploadReconciler(
 		podLabels:                      podLabels,
 		podAnnotations:                 podAnnotations,
 		snapshotMetadataServiceConfigs: snapshotMetadataServiceConfigs,
+		tolerations:                    tolerations,
 	}
 }
 
@@ -1009,15 +1012,9 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 			}
 		}
 
-		hostingPodTolerations := []corev1api.Toleration{}
-		for _, k := range util.ThirdPartyTolerations {
-			if v, err := nodeagent.GetToleration(context.Background(), r.kubeClient, du.Namespace, k, nodeOS); err != nil {
-				if err != nodeagent.ErrNodeAgentTolerationNotFound {
-					log.WithError(err).Warnf("Failed to check node-agent toleration, skip adding host pod toleration %s", k)
-				}
-			} else {
-				hostingPodTolerations = append(hostingPodTolerations, *v)
-			}
+		hostingPodTolerations, err := nodeagent.GetTolerations(context.Background(), r.kubeClient, du.Namespace, nodeOS, r.tolerations)
+		if err != nil {
+			log.WithError(err).Warn("Failed to get node-agent daemonset tolerations, hosting pod will only get configured tolerations")
 		}
 
 		return &exposer.CSISnapshotExposeParam{

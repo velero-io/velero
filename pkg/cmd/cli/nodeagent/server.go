@@ -384,6 +384,12 @@ func (s *nodeAgentServer) run() {
 		s.logger.Infof("Using customized pod annotations %+v", podAnnotations)
 	}
 
+	var tolerations []corev1api.Toleration
+	if s.dataPathConfigs != nil && len(s.dataPathConfigs.Tolerations) > 0 {
+		tolerations = s.dataPathConfigs.Tolerations
+		s.logger.Infof("Using customized tolerations %+v", tolerations)
+	}
+
 	if s.backupRepoConfigs != nil {
 		s.logger.Infof("Using backup repo config %v", s.backupRepoConfigs)
 	} else if cachePVCConfig != nil {
@@ -412,6 +418,7 @@ func (s *nodeAgentServer) run() {
 		privilegedFsBackup,
 		podLabels,
 		podAnnotations,
+		tolerations,
 	)
 	if err := pvbReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerPodVolumeBackup)
@@ -435,6 +442,7 @@ func (s *nodeAgentServer) run() {
 		s.repoConfigMgr,
 		podLabels,
 		podAnnotations,
+		tolerations,
 	)
 	if err := pvrReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.WithError(err).Fatal("Unable to create the pod volume restore controller")
@@ -459,6 +467,7 @@ func (s *nodeAgentServer) run() {
 		podLabels,
 		podAnnotations,
 		csiSnapshotMetadataServiceConfigs,
+		tolerations,
 	)
 	if err := dataUploadReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.WithError(err).Fatal("Unable to create the data upload controller")
@@ -490,6 +499,7 @@ func (s *nodeAgentServer) run() {
 		podLabels,
 		podAnnotations,
 		csiSnapshotMetadataServiceConfigs,
+		tolerations,
 	)
 
 	if err := dataDownloadReconciler.SetupWithManager(s.mgr); err != nil {
