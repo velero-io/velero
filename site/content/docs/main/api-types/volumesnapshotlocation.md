@@ -38,8 +38,8 @@ The configurable parameters are as follows:
 {{< table caption="Main config parameters" >}}
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `provider` | String | Required Field | The name for whichever storage provider will be used to create/store the volume snapshots. See [your volume snapshot provider's plugin documentation](../supported-providers) for the appropriate value to use. |
-| `config` | map string string | None (Optional) |  Provider-specific configuration keys/values to be passed to the volume snapshotter plugin. See [your volume snapshot provider's plugin documentation](../supported-providers) for details. |
+| `provider` | String | Required Field | The name for whichever storage provider will be used to create/store the volume snapshots. See [your volume snapshot provider's plugin documentation](../supported-providers.md) for the appropriate value to use. |
+| `config` | map string string | None (Optional) |  Provider-specific configuration keys/values to be passed to the volume snapshotter plugin. See [your volume snapshot provider's plugin documentation](../supported-providers.md) for details. |
 | `credential` | [corev1.SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#secretkeyselector-v1-core) | Optional Field | The credential information to be used with this location. |
 | `credential/name` | String | Optional Field | The name of the secret within the Velero namespace which contains the credential information. |
 | `credential/key` | String | Optional Field | The key to use within the secret. |

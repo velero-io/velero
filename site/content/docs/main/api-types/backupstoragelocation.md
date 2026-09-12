@@ -94,7 +94,7 @@ The configurable parameters are as follows:
 {{< table caption="Main config parameters" >}}
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `provider` | String | Required Field | The name for whichever object storage provider will be used to store the backups. See [your object storage provider's plugin documentation](../supported-providers) for the appropriate value to use. |
+| `provider` | String | Required Field | The name for whichever object storage provider will be used to store the backups. See [your object storage provider's plugin documentation](../supported-providers.md) for the appropriate value to use. |
 | `objectStorage` | ObjectStorageLocation | Required Field | Specification of the object storage for the given provider. |
 | `objectStorage/bucket` | String | Required Field | The storage bucket where backups are to be uploaded. |
 | `objectStorage/prefix` | String | Optional Field | The directory inside a storage bucket where backups are to be uploaded. |
@@ -102,7 +102,7 @@ The configurable parameters are as follows:
 | `objectStorage/caCertRef` | [corev1.SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#secretkeyselector-v1-core) | Optional Field | Reference to a Secret containing a CA bundle to be used when verifying TLS connections. The Secret must be in the same namespace as the BackupStorageLocation. |
 | `objectStorage/caCertRef/name` | String | Required Field (when using caCertRef) | The name of the Secret containing the CA certificate bundle |
 | `objectStorage/caCertRef/key` | String | Required Field (when using caCertRef) | The key within the Secret that contains the CA certificate bundle |
-| `config` | map[string]string | None (Optional) | Provider-specific configuration keys/values to be passed to the object store plugin. See [your object storage provider's plugin documentation](../supported-providers) for details. |
+| `config` | map[string]string | None (Optional) | Provider-specific configuration keys/values to be passed to the object store plugin. See [your object storage provider's plugin documentation](../supported-providers.md) for details. |
 | `accessMode` | String | `ReadWrite` | How Velero can access the backup storage location. Valid values are `ReadWrite`, `ReadOnly`. |
 | `backupSyncPeriod` | metav1.Duration | Optional Field | How frequently Velero should synchronize backups in object storage. Default is Velero's server backup sync period. Set this to `0s` to disable sync. |
 | `validationFrequency` | metav1.Duration | Optional Field | How frequently Velero should validate the object storage . Default is Velero's server validation frequency. Set this to `0s` to disable validation. Default 1 minute. |

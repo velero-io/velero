@@ -224,8 +224,8 @@ func SetupConnectOptions(ctx context.Context, repoOptions udmrepo.RepoOptions) r
 ```  
 
 
-[1]: Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md
-[2]: Implemented/vgdp-micro-service/vgdp-micro-service.md
-[3]: Implemented/vgdp-micro-service-for-fs-backup/vgdp-micro-service-for-fs-backup.md
-[4]: Implemented/repo_maintenance_job_config.md
-[5]: Implemented/backup-repo-config.md
+[1]: ./unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md
+[2]: ./vgdp-micro-service/vgdp-micro-service.md
+[3]: ./vgdp-micro-service-for-fs-backup/vgdp-micro-service-for-fs-backup.md
+[4]: ./repo_maintenance_job_config.md
+[5]: ./backup-repo-config.md
