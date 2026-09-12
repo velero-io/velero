@@ -450,7 +450,7 @@ func TestExecute(t *testing.T) {
 			restore:     builder.ForRestore("velero", "testRestore").Backup("testBackup").Result(),
 			pvc:         builder.ForPersistentVolumeClaim("velero", "testPVC").ObjectMeta(builder.WithAnnotations(velerov1api.VolumeSnapshotLabel, "vsName", velerov1api.VolumeSnapshotRestoreSize, "10Gi", velerov1api.DataUploadNameAnnotation, "velero/")).Result(),
 			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").Result(),
-			expectedErr: "fail get DataUploadResult for restore: testRestore: no DataUpload result cm found with labels velero.io/pvc-namespace-name=velero.testPVC,velero.io/restore-uid=,velero.io/resource-usage=DataUpload",
+			expectedErr: "failed to get DataUploadResult for restore: testRestore: no DataUpload result cm found with labels velero.io/pvc-namespace-name=velero.testPVC,velero.io/restore-uid=,velero.io/resource-usage=DataUpload",
 		},
 		{
 			name:             "Restore from DataUploadResult",
@@ -883,4 +883,23 @@ func TestNewPvcRestoreItemAction(t *testing.T) {
 	plugin1 := NewPvcRestoreItemAction(f1)
 	_, err1 := plugin1(logger)
 	require.NoError(t, err1)
+}
+
+func TestDeleteExistingPVCFailure(t *testing.T) {
+	pvcRIA := pvcRestoreItemAction{
+		log:        logrus.New(),
+		crClient:   velerotest.NewFakeControllerRuntimeClient(t),
+		kubeClient: fake.NewSimpleClientset(),
+	}
+	existingPVC := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").
+		VolumeName("non-existent-pv").
+		Phase(corev1api.ClaimBound).Result()
+	targetPVC := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result()
+
+	returnedPV, err := pvcRIA.deleteExistingPVC(
+		t.Context(), logrus.New().WithField("test", "fail-to-get-pv"),
+		targetPVC, existingPVC, time.Minute)
+	require.Error(t, err)
+	assert.Nil(t, returnedPV)
+	assert.Contains(t, err.Error(), "failed to get PV non-existent-pv")
 }

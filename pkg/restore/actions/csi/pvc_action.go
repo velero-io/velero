@@ -228,7 +228,7 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	var dataUploadResult *velerov2alpha1.DataUploadResult
 	dataUploadResult, err = getDataUploadResult(ctx, input.Restore, pvc, p.crClient)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fail get DataUploadResult for restore: %s", input.Restore.Name)
+		return nil, errors.Wrapf(err, "failed to get DataUploadResult for restore: %s", input.Restore.Name)
 	}
 
 	var volumeSnapshot *snapshotv1api.VolumeSnapshot
@@ -278,10 +278,10 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 
 	var dataDownload *velerov2alpha1.DataDownload
 	dataDownload, err = restoreFromDataUploadResult(
-		context.Background(), dataUploadResult, input.Restore, backup, pvc, existingPV, newNamespace,
+		ctx, dataUploadResult, input.Restore, backup, pvc, existingPV, newNamespace,
 		operationID, string(restoreType), volumeSnapshot, p.crClient)
 	if err != nil {
-		logger.Errorf("Fail to restore from DataUploadResult: %s", err.Error())
+		logger.Errorf("Failed to restore from DataUploadResult: %s", err.Error())
 		return nil, errors.WithStack(err)
 	}
 	logger.Infof("DataDownload %s/%s is created successfully.",
@@ -338,7 +338,7 @@ func (p *pvcRestoreItemAction) Progress(
 		p.crClient,
 	)
 	if err != nil {
-		logger.Errorf("fail to get DataDownload: %s", err.Error())
+		logger.Errorf("Failed to get DataDownload: %s", err.Error())
 		return progress, err
 	}
 	if dataDownload.Status.Phase == velerov2alpha1.DataDownloadPhaseNew ||
@@ -391,13 +391,13 @@ func (p *pvcRestoreItemAction) Cancel(
 		p.crClient,
 	)
 	if err != nil {
-		logger.Errorf("fail to get DataDownload: %s", err.Error())
+		logger.Errorf("Failed to get DataDownload: %s", err.Error())
 		return err
 	}
 
 	err = cancelDataDownload(context.Background(), p.crClient, dataDownload)
 	if err != nil {
-		logger.Errorf("fail to cancel DataDownload %s: %s", dataDownload.Name, err.Error())
+		logger.Errorf("Failed to cancel DataDownload %s: %s", dataDownload.Name, err.Error())
 	}
 	return err
 }
@@ -600,7 +600,7 @@ func restoreFromDataUploadResult(
 	)
 	err := crClient.Create(ctx, dataDownload)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fail to create DataDownload")
+		return nil, errors.Wrapf(err, "failed to create DataDownload")
 	}
 
 	return dataDownload, nil
@@ -653,8 +653,8 @@ func (p *pvcRestoreItemAction) deleteExistingPVC(ctx context.Context, logger *lo
 	var err error
 	logger.Info("ExistingVolumeDataPolicy is in-place restore. Deleting the existing PVC but keep the PV...")
 	pv := &corev1api.PersistentVolume{}
-	if err = p.crClient.Get(context.Background(), crclient.ObjectKey{Name: existingPVC.Spec.VolumeName}, pv); err != nil {
-		return nil, errors.Errorf("Fail to get PV %s: %s", existingPVC.Spec.VolumeName, err.Error())
+	if err = p.crClient.Get(ctx, crclient.ObjectKey{Name: existingPVC.Spec.VolumeName}, pv); err != nil {
+		return nil, errors.Wrapf(err, "failed to get PV %s", existingPVC.Spec.VolumeName)
 	}
 
 	// set reclaim policy to retain
