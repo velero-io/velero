@@ -267,6 +267,13 @@ func GetTolerations(ctx context.Context, kubeClient kubernetes.Interface, namesp
 		return configuredTolerations, errors.Wrapf(err, "error getting %s daemonset", dsName)
 	}
 
+	// configuredTolerations is appended first so it wins: DeduplicateTolerations
+	// keeps only the first occurrence of each exact (Key, Operator, Value,
+	// Effect) combination, so an allowlisted daemonset toleration identical to
+	// one already set in the configmap is dropped as a duplicate rather than
+	// overriding it. A daemonset toleration that only shares a Key (but
+	// differs in Operator/Value/Effect) isn't a duplicate and is kept
+	// alongside the configured one, not replaced by it.
 	merged := make([]corev1api.Toleration, 0, len(configuredTolerations)+len(ds.Spec.Template.Spec.Tolerations))
 	merged = append(merged, configuredTolerations...)
 	for _, t := range ds.Spec.Template.Spec.Tolerations {
