@@ -5666,7 +5666,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover: "velero",
 					},
 				},
@@ -5677,7 +5677,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultFailed,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
@@ -5706,7 +5706,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover: "velero",
 					},
 				},
@@ -5717,7 +5717,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultSucceeded,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",

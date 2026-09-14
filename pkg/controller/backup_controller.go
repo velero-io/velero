@@ -362,7 +362,7 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// result in the backup being Failed.
 		log.WithError(err).Error("backup failed")
 		request.Status.Phase = velerov1api.BackupPhaseFailed
-		request.Status.FailureReason = err.Error()
+		request.Status.FailureReason = fmt.Sprintf("backup execution failed: %v", err)
 	}
 
 	switch request.Status.Phase {
@@ -395,10 +395,11 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *velerov1api.Backup, logger logrus.FieldLogger) *pkgbackup.Request {
 	request := &pkgbackup.Request{
-		Backup:           backup.DeepCopy(), // don't modify items in the cache
-		SkippedPVTracker: pkgbackup.NewSkipPVTracker(),
-		BackedUpItems:    pkgbackup.NewBackedUpItemsMap(),
-		WorkerPool:       pkgbackup.StartItemBlockWorkerPool(ctx, b.itemBlockWorkerCount, logger),
+		Backup:                        backup.DeepCopy(), // don't modify items in the cache
+		SkippedPVTracker:              pkgbackup.NewSkipPVTracker(),
+		BackedUpItems:                 pkgbackup.NewBackedUpItemsMap(),
+		MustIncludeAdditionalItemPVCs: pkgbackup.NewBackedUpItemsMap(),
+		WorkerPool:                    pkgbackup.StartItemBlockWorkerPool(ctx, b.itemBlockWorkerCount, logger),
 	}
 	request.VolumesInformation.Init()
 
@@ -619,7 +620,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
 		*request.Backup, b.kbClient, b.globalVolumePoliciesConfigMap, request.Namespace, logger)
 	if err != nil {
-		request.Status.ValidationErrors = append(request.Status.ValidationErrors, err.Error())
+		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("invalid resource policies: %v", err))
 	} else if b.globalVolumePoliciesConfigMap != "" {
 		// Record the contributing global volume policies ConfigMap so `velero backup describe` can surface it.
 		request.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = b.globalVolumePoliciesConfigMap

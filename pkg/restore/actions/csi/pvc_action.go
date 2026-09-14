@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -44,6 +45,7 @@ import (
 	plugincommon "github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
+	"github.com/vmware-tanzu/velero/pkg/restore/inplace"
 	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
@@ -233,16 +235,23 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	var volumeSnapshot *snapshotv1api.VolumeSnapshot
 	restoreType := input.Restore.Spec.ExistingVolumeDataPolicy
 	if pvcExists {
-		if existingPVC.Status.Phase != corev1api.ClaimBound {
-			return nil, errors.New("ExistingVolumeDataPolicy is in-place restore, but the existing PVC is not bound.")
+		// Pre-flight checks must pass before any side effect on the existing PVC/PV.
+		if err := inplace.CheckPVCBoundToBackedUpPV(existingPVC, pvcFromBackup.Spec.VolumeName, pvcFromBackup.Namespace); err != nil {
+			return nil, errors.WithStack(err)
 		}
+		if err := inplace.CheckPVCCapacity(existingPVC, sourceSizeFromCarrier(pvc)); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		if err := inplace.CheckPVCNotInUse(ctx, p.crClient, existingPVC, input.Restore.UID); err != nil {
+			return nil, errors.WithStack(err)
+		}
+
 		// take a CSI snapshot of the existing PVC as the baseline of CBT
 		if input.Restore.IsVolumeDataInplaceIncrementalRestore() && datamover.IsVeleroBlockDataMover(dataUploadResult.DataMover) {
 			logger.Info("ExistingVolumeDataPolicy is in-place incremental restore and data mover is velero-block. Taking a CSI snapshot of the existing PVC as the baseline of CBT...")
 			volumeSnapshot, err = p.createVolumeSnapshot(ctx, logger, input.Restore, *existingPVC, dataUploadResult.SnapshotClass, backup.Spec.CSISnapshotTimeout.Duration)
 			if err != nil {
-				logger.Warnf("fail to create VolumeSnapshot for existing PVC %s/%s: %s, fallback to in-place full restore", existingPVC.Namespace, existingPVC.Name, err.Error())
-				restoreType = velerov1api.VolumeDataPolicyTypeFull
+				logger.Warnf("Fail to create VolumeSnapshot for existing PVC %s/%s: %s, incremental restore will be suppressed", existingPVC.Namespace, existingPVC.Name, err.Error())
 			} else {
 				defer func() {
 					if err != nil {
@@ -721,6 +730,13 @@ func (p *pvcRestoreItemAction) createVolumeSnapshot(ctx context.Context, logger 
 	logger.Infof("VolumeSnapshot %s for PVC %s/%s is ready to use", vs.Name, pvc.Namespace, pvc.Name)
 
 	return vs, nil
+}
+
+// sourceSizeFromCarrier reads the source volume size the restore engine carries on the PVC
+// item from the backup volume info, or 0 if absent or malformed.
+func sourceSizeFromCarrier(pvc *corev1api.PersistentVolumeClaim) int64 {
+	size, _ := strconv.ParseInt(pvc.Annotations[velerov1api.InplaceRestoreSourceSizeAnnotation], 10, 64)
+	return size
 }
 
 func NewPvcRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {

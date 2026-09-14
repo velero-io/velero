@@ -6,6 +6,10 @@ on:
       - "site/**"
       - "design/**"
       - "**/*.md"
+
+permissions:
+  contents: read
+
 jobs:
   get-go-version:
     uses: ./.github/workflows/get-go-version.yaml

@@ -1,0 +1,1 @@
+Fix issue 10454, enforce resource filter policies in memory in stage 1 to fix wildcard namespace bypassing issue

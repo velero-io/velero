@@ -1,0 +1,1 @@
+Scope velero schedule get/describe/pause/unpause and velero repo get to the Velero namespace instead of listing across all namespaces

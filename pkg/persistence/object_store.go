@@ -85,6 +85,7 @@ type BackupStore interface {
 	PutRestoredResourceList(restore string, results io.Reader) error
 	PutRestoreItemOperations(restore string, restoreItemOperations io.Reader) error
 	GetRestoreItemOperations(name string) ([]*itemoperation.RestoreOperation, error)
+	GetRestoreVolumeInfos(name string) ([]*volume.RestoreVolumeInfo, error)
 	PutRestoreVolumeInfo(restore string, volumeInfo io.Reader) error
 	DeleteRestore(name string) error
 	GetRestoredResourceList(name string) (map[string][]string, error)
@@ -628,6 +629,24 @@ func (s *objectBackupStore) PutRestoreVolumeInfo(restore string, volumeInfo io.R
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getRestoreVolumeInfoKey(restore), volumeInfo)
 }
 
+func (s *objectBackupStore) GetRestoreVolumeInfos(name string) ([]*volume.RestoreVolumeInfo, error) {
+	volumeInfos := make([]*volume.RestoreVolumeInfo, 0)
+
+	res, err := tryGet(s.objectStore, s.bucket, s.layout.getRestoreVolumeInfoKey(name))
+	if err != nil {
+		return volumeInfos, err
+	}
+	if res == nil {
+		return volumeInfos, nil
+	}
+	defer res.Close()
+
+	if err := decode(res, &volumeInfos); err != nil {
+		return volumeInfos, err
+	}
+
+	return volumeInfos, nil
+}
 func (s *objectBackupStore) PutBackupItemOperations(backup string, backupItemOperations io.Reader) error {
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupItemOperationsKey(backup), backupItemOperations)
 }

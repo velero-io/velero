@@ -249,6 +249,10 @@ func DescribeBackupSpec(d *Describer, spec velerov1api.BackupSpec) {
 	}
 	d.Printf("Data Mover:\t%s\n", s)
 
+	if string(spec.BackupType) != "" {
+		d.Printf("Backup Type:\t%s\n", spec.BackupType)
+	}
+
 	d.Println()
 	d.Printf("TTL:\t%s\n", spec.TTL.Duration)
 
@@ -737,6 +741,16 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 			dataMover = info.SnapshotDataMovementInfo.DataMover
 		}
 		d.Printf("\t\t\t\tData Mover: %s\n", dataMover)
+
+		if info.BackupType != "" {
+			backupType := string(info.BackupType)
+			if info.FallbackFull {
+				backupType += " (fallen back to Full)"
+			}
+
+			d.Printf("\t\t\t\tBackup Type: %s\n", backupType)
+		}
+
 		d.Printf("\t\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
 		d.Printf("\t\t\t\tMoved data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)
 		// Print whenever the uploader measured a figure, including zero. A zero-delta
@@ -746,6 +760,7 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			d.Printf("\t\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
 		}
+
 		d.Printf("\t\t\t\tResult: %s\n", info.Result)
 	} else {
 		d.Printf("\t\t\tData Movement: %s\n", "included, specify --details for more information")

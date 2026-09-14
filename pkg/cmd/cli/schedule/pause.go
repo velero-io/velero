@@ -114,6 +114,7 @@ func runPause(f client.Factory, o *cli.SelectOptions, paused bool, skipImmediate
 		res := new(velerov1api.ScheduleList)
 		err := crClient.List(context.TODO(), res, &ctrlclient.ListOptions{
 			LabelSelector: selector,
+			Namespace:     f.Namespace(),
 		})
 		if err != nil {
 			errs = append(errs, errors.WithStack(err))

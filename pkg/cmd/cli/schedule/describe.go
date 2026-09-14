@@ -56,7 +56,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 					selector, err = labels.Parse(listOptions.LabelSelector)
 					cmd.CheckError(err)
 				}
-				err = crClient.List(context.TODO(), schedules, &ctrlclient.ListOptions{LabelSelector: selector})
+				err = crClient.List(context.TODO(), schedules, &ctrlclient.ListOptions{LabelSelector: selector, Namespace: f.Namespace()})
 				cmd.CheckError(err)
 			}
 

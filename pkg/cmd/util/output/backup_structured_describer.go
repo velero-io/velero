@@ -136,6 +136,9 @@ func DescribeBackupSpecInSF(d *StructuredDescriber, spec velerov1api.BackupSpec)
 		s = spec.DataMover
 	}
 	backupSpecInfo["dataMover"] = s
+	if string(spec.BackupType) != "" {
+		backupSpecInfo["backupType"] = spec.BackupType
+	}
 
 	// describe TTL
 	backupSpecInfo["TTL"] = spec.TTL.Duration.String()
@@ -458,6 +461,15 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 	if details {
 		dataMovement := make(map[string]any)
 		dataMovement["operationID"] = info.SnapshotDataMovementInfo.OperationID
+
+		if info.BackupType != "" {
+			backupType := string(info.BackupType)
+			if info.FallbackFull {
+				backupType += " (fallen back to Full)"
+			}
+
+			dataMovement["backupType"] = backupType
+		}
 
 		dataMover := "velero"
 		if info.SnapshotDataMovementInfo.DataMover != "" {

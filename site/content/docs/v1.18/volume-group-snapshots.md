@@ -160,15 +160,14 @@ kubectl get volumegroupsnapshotclass -o wide
 **Important:** The VolumeGroupSnapshotClass must have the label `velero.io/csi-volumegroupsnapshot-class: "true"` for Velero to automatically discover and use it:
 
 ```yaml
-apiVersion: groupsnapshot.storage.k8s.io/v1alpha1
+apiVersion: groupsnapshot.storage.k8s.io/v1beta2
 kind: VolumeGroupSnapshotClass
 metadata:
   name: csi-vgs-class
   labels:
     velero.io/csi-volumegroupsnapshot-class: "true"
-spec:
-  driver: ebs.csi.aws.com
-  deletionPolicy: Delete
+driver: ebs.csi.aws.com
+deletionPolicy: Delete
 ```
 
 Verify your VolumeGroupSnapshotClass has the correct label:

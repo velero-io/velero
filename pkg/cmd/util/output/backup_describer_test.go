@@ -108,6 +108,7 @@ func TestDescribeBackupSpec(t *testing.T) {
 		TTL(72 * time.Hour).
 		CSISnapshotTimeout(10 * time.Minute).
 		DataMover("mover").
+		BackupType(velerov1api.BackupTypeFull).
 		Hooks(velerov1api.BackupHooks{
 			Resources: []velerov1api.BackupResourceHookSpec{
 				{
@@ -156,6 +157,7 @@ Storage Location:  backup-location
 Velero-Native Snapshot PVs:  auto
 Snapshot Move Data:          auto
 Data Mover:                  mover
+Backup Type:                 Full
 
 TTL:  72h0m0s
 
@@ -575,7 +577,7 @@ func TestCSISnapshots(t *testing.T) {
 					PVCNamespace:      "pvc-ns-3",
 					PVCName:           "pvc-3",
 					SnapshotDataMoved: true,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:      "velero",
 						UploaderType:   "fake-uploader",
 						SnapshotHandle: "fake-repo-id-3",
@@ -597,7 +599,7 @@ func TestCSISnapshots(t *testing.T) {
 					PVCName:           "pvc-4",
 					SnapshotDataMoved: true,
 					Result:            volume.VolumeResultSucceeded,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:      "velero",
 						UploaderType:   "fake-uploader",
 						SnapshotHandle: "fake-repo-id-4",
@@ -625,7 +627,8 @@ func TestCSISnapshots(t *testing.T) {
 					PVCName:           "pvc-5",
 					Result:            volume.VolumeResultFailed,
 					SnapshotDataMoved: true,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					BackupType:        velerov1api.BackupTypeIncremental,
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						UploaderType:    "fake-uploader",
 						SnapshotHandle:  "fake-repo-id-5",
 						OperationID:     "fake-operation-5",
@@ -641,10 +644,46 @@ func TestCSISnapshots(t *testing.T) {
       Data Movement:
         Operation ID: fake-operation-5
         Data Mover: velero
+        Backup Type: Incremental
         Uploader Type: fake-uploader
         Moved data Size (bytes): 100
         Incremental data Size (bytes): 50
         Result: failed
+`,
+		},
+		{
+			name: "details, data movement, incremental fallback to full",
+			volumeInfo: []*volume.BackupVolumeInfo{
+				{
+					BackupMethod:      volume.CSISnapshot,
+					PVCNamespace:      "pvc-ns-6",
+					PVCName:           "pvc-6",
+					Result:            volume.VolumeResultSucceeded,
+					SnapshotDataMoved: true,
+					BackupType:        velerov1api.BackupTypeIncremental,
+					FallbackFull:      true,
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
+						DataMover:       "velero",
+						UploaderType:    "fake-uploader",
+						SnapshotHandle:  "fake-repo-id-6",
+						OperationID:     "fake-operation-6",
+						Size:            200,
+						IncrementalSize: ptr.To(int64(200)),
+						Phase:           velerov2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			inputDetails: true,
+			expect: `  CSI Snapshots:
+    pvc-ns-6/pvc-6:
+      Data Movement:
+        Operation ID: fake-operation-6
+        Data Mover: velero
+        Backup Type: Incremental (fallen back to Full)
+        Uploader Type: fake-uploader
+        Moved data Size (bytes): 200
+        Incremental data Size (bytes): 200
+        Result: succeeded
 `,
 		},
 	}

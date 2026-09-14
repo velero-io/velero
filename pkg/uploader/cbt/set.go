@@ -26,36 +26,75 @@ import (
 )
 
 // SetBitmapOrFull translates the allocated/changed blocks from CBT service to the given bitmap or set the bitmap to full when error happens
-func SetBitmapOrFull(ctx context.Context, service cbtservice.Service, bitmap types.Bitmap) (err error) {
+func SetBitmapOrFull(ctx context.Context, service cbtservice.Service, bitmap types.Bitmap, incOnly bool) (ret error) {
+	setFull := false
+
 	defer func() {
-		if err != nil {
+		bitmap.SetError(ret)
+
+		if setFull {
 			bitmap.SetFull()
 		}
 	}()
 
 	if service == nil {
-		return errors.New("CBT service is absent")
+		setFull = true
+		return errors.New("CBT service is absent, fallback to real full")
 	}
 
 	if bitmap.Snapshot() == "" {
-		return errors.New("invalid snapshot")
+		setFull = true
+		return errors.New("invalid snapshot, fallback to real full")
 	}
 
-	if bitmap.ChangeID() == "" {
-		return errors.Wrapf(service.GetAllocatedBlocks(ctx, bitmap.Snapshot(), func(blocks []cbtservice.Range) error {
+	if incOnly && bitmap.ChangeID() == "" {
+		setFull = true
+		return errors.New("invalid changeID, fallback to real full")
+	}
+
+	var changedErr error
+	if bitmap.ChangeID() != "" {
+		err := service.GetChangedBlocks(ctx, bitmap.Snapshot(), bitmap.ChangeID(), func(blocks []cbtservice.Range) error {
 			for _, b := range blocks {
 				bitmap.Set(b.Offset, b.Length)
 			}
 
 			return nil
-		}), "error getting allocated blocks from CBT service")
+		})
+
+		if err == nil {
+			return nil
+		}
+
+		if incOnly {
+			setFull = true
+			return errors.Wrap(err, "error getting changed blocks from CBT service, fallback to real full")
+		}
+
+		changedErr = err
 	}
 
-	return errors.Wrapf(service.GetChangedBlocks(ctx, bitmap.Snapshot(), bitmap.ChangeID(), func(blocks []cbtservice.Range) error {
+	err := service.GetAllocatedBlocks(ctx, bitmap.Snapshot(), func(blocks []cbtservice.Range) error {
 		for _, b := range blocks {
 			bitmap.Set(b.Offset, b.Length)
 		}
 
 		return nil
-	}), "error getting changed blocks from CBT service")
+	})
+
+	if err != nil {
+		setFull = true
+
+		if changedErr != nil {
+			return errors.Wrap(err, "error getting both changed and allocated blocks from CBT service, fallback to real full")
+		} else {
+			return errors.Wrap(err, "error getting allocated blocks from CBT service, fallback to real full")
+		}
+	}
+
+	if changedErr != nil {
+		return errors.Wrap(changedErr, "error getting changed blocks from CBT service, fallback to full")
+	}
+
+	return nil
 }

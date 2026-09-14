@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: '0 2 * * *' # run at 2 AM UTC
 
+permissions:
+  contents: read
+
 jobs:
   nightly-scan:
     name: Trivy nightly scan
@@ -15,6 +18,7 @@ jobs:
         # list of images that need scan
         images: [velero, velero-plugin-for-aws, velero-plugin-for-gcp, velero-plugin-for-microsoft-azure]
     permissions:
+      contents: read  # for actions/checkout to fetch code
       security-events: write  # for github/codeql-action/upload-sarif to upload SARIF results
 
     steps:

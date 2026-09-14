@@ -36,6 +36,7 @@ type bitmapImpl struct {
 	snapshot     string
 	changeID     string
 	volumeID     string
+	cbtErrors    []error
 }
 
 type bitmapIterator struct {
@@ -43,14 +44,13 @@ type bitmapIterator struct {
 	iterator roaring.IntPeekable
 }
 
-func NewBitmap(blockSize uint, length uint64, snapshot string, changeID string, volumeID string) types.Bitmap {
+func NewBitmap(blockSize uint, length uint64, snapshot string, volumeID string) types.Bitmap {
 	return &bitmapImpl{
 		bitmap:       roaring.New(),
 		blockSize:    blockSize,
 		blockSizeLog: bits.Len(blockSize) - 1,
 		length:       length,
 		snapshot:     snapshot,
-		changeID:     changeID,
 		volumeID:     volumeID,
 	}
 }
@@ -81,12 +81,28 @@ func (c *bitmapImpl) Snapshot() string {
 	return c.snapshot
 }
 
+func (c *bitmapImpl) SetChangeID(id string) {
+	c.changeID = id
+}
+
 func (c *bitmapImpl) ChangeID() string {
 	return c.changeID
 }
 
 func (c *bitmapImpl) VolumeID() string {
 	return c.volumeID
+}
+
+func (c *bitmapImpl) SetError(err error) {
+	if err == nil {
+		return
+	}
+
+	c.cbtErrors = append(c.cbtErrors, err)
+}
+
+func (c *bitmapImpl) Errors() []error {
+	return c.cbtErrors
 }
 
 func (c *bitmapImpl) Iterator() types.Iterator {
@@ -114,4 +130,8 @@ func (c *bitmapIterator) Count() uint64 {
 
 func (c *bitmapIterator) BlockSize() uint {
 	return c.blockSize
+}
+
+func (c *bitmapIterator) Errors() []error {
+	return c.cbtErrors
 }

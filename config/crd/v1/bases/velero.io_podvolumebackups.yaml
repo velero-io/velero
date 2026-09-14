@@ -204,6 +204,10 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental backup
+                  has fallen back to full backup
+                type: boolean
               incrementalBytes:
                 description: |-
                   IncrementalBytes holds the number of bytes new or changed since the last backup.
@@ -249,6 +253,10 @@ spec:
                 description: SnapshotID is the identifier for the snapshot of the
                   pod volume.
                 type: string
+              sourceSize:
+                description: SourceSize holds the total size of the source volume.
+                format: int64
+                type: integer
               startTimestamp:
                 description: |-
                   StartTimestamp records the time a backup was started.

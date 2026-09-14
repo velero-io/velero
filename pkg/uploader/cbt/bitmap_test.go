@@ -17,6 +17,7 @@ limitations under the License.
 package cbt
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,10 +25,18 @@ import (
 )
 
 func TestBitmapProperties(t *testing.T) {
-	b := NewBitmap(1024*1024, 10000*1024*1024, "snap-1", "change-1", "vol-1")
+	b := NewBitmap(1024*1024, 10000*1024*1024, "snap-1", "vol-1")
 	assert.Equal(t, "snap-1", b.Snapshot())
-	assert.Equal(t, "change-1", b.ChangeID())
+	assert.Empty(t, b.ChangeID())
 	assert.Equal(t, "vol-1", b.VolumeID())
+	assert.Empty(t, b.Errors())
+
+	b.SetChangeID("change-1")
+	assert.Equal(t, "change-1", b.ChangeID())
+
+	err := errors.New("test error")
+	b.SetError(err)
+	assert.Equal(t, []error{err}, b.Errors())
 }
 
 func TestBitmapSet(t *testing.T) {
@@ -138,7 +147,7 @@ func TestBitmapSet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := NewBitmap(tt.blockSize, tt.totalLength, "snap-1", "change-1", "vol-1")
+			b := NewBitmap(tt.blockSize, tt.totalLength, "snap-1", "vol-1")
 
 			for _, call := range tt.setCalls {
 				b.Set(call.offset, call.length)
@@ -174,7 +183,7 @@ func TestBitmapSetFull(t *testing.T) {
 	// block 0: 0 - 1MB
 	// block 1: 1MB - 2MB
 	// block 2: 2MB - 3MB
-	b := NewBitmap(mb, 3*mb, "snap-1", "change-1", "vol-1")
+	b := NewBitmap(mb, 3*mb, "snap-1", "vol-1")
 	b.SetFull()
 
 	iter := b.Iterator()
@@ -199,7 +208,10 @@ func TestBitmapIterator(t *testing.T) {
 	const mb = 1024 * 1024
 	const gb = 1024 * 1024 * 1024
 
-	b := NewBitmap(mb, 10*gb, "snap-1", "change-1", "vol-1")
+	b := NewBitmap(mb, 10*gb, "snap-1", "vol-1")
+	b.SetChangeID("change-1")
+	err := errors.New("test error")
+	b.SetError(err)
 
 	// Set multiple ranges to test contiguous iteration
 	b.Set(mb, 100)      // Block 1
@@ -214,6 +226,7 @@ func TestBitmapIterator(t *testing.T) {
 	assert.Equal(t, "change-1", iter.ChangeID())
 	assert.Equal(t, "vol-1", iter.VolumeID())
 	assert.Equal(t, uint(mb), iter.BlockSize())
+	assert.Equal(t, []error{err}, iter.Errors())
 	assert.Equal(t, uint64(7), iter.Count()) // 1 + 5 + 1 = 7 blocks
 
 	expectedOffsets := []uint64{

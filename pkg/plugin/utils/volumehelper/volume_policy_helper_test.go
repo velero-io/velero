@@ -300,6 +300,7 @@ func TestShouldPerformSnapshotWithNonNilVolumeHelper(t *testing.T) {
 		false, // defaultVolumesToFSBackup
 		true,  // backupExcludePVC
 		[]string{"default"},
+		nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, vh)

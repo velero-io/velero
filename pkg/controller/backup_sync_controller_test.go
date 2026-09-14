@@ -439,7 +439,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			}
 
 			if test.location != nil {
-				Expect(r.client.Create(ctx, test.location)).ShouldNot(HaveOccurred())
+				Expect(r.client.Create(ctx, test.location)).ToNot(HaveOccurred())
 				backupStores[test.location.Name] = &persistencemocks.BackupStore{}
 
 				backupStore, ok := backupStores[test.location.Name]
@@ -457,12 +457,12 @@ var _ = Describe("Backup Sync Reconciler", func() {
 
 			for _, existingBackup := range test.existingBackups {
 				err := client.Create(context.TODO(), existingBackup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			for _, existingPodVolumeBackup := range test.existingPodVolumeBackups {
 				err := client.Create(context.TODO(), existingPodVolumeBackup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			actualResult, err := r.Reconcile(ctx, ctrl.Request{
@@ -534,7 +534,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 							cloudBackupData.backup.Status.Expiration.After(fakeClock.Now())) {
 						Expect(apierrors.IsNotFound(err)).To(BeTrue())
 					} else {
-						Expect(err).ShouldNot(HaveOccurred())
+						Expect(err).ToNot(HaveOccurred())
 
 						// did this cloud pod volume backup already exist in the cluster?
 						var existingPodVolumeBackup *velerov1api.PodVolumeBackup
@@ -673,7 +673,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 		}
 
 		queueScheme := runtime.NewScheme()
-		Expect(velerov1api.AddToScheme(queueScheme)).ShouldNot(HaveOccurred())
+		Expect(velerov1api.AddToScheme(queueScheme)).ToNot(HaveOccurred())
 
 		for _, test := range tests {
 			var (
@@ -693,7 +693,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				logger:                  velerotest.NewLogger(),
 			}
 
-			Expect(client.Create(ctx, location)).ShouldNot(HaveOccurred(), test.name)
+			Expect(client.Create(ctx, location)).ToNot(HaveOccurred(), test.name)
 			backupStore := &persistencemocks.BackupStore{}
 			backupStores[location.Name] = backupStore
 			backupStore.On("ListBackups").Return([]string{test.cloudBackup.Name}, nil)
@@ -704,7 +704,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			_, err := syncReconciler.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{Namespace: location.Namespace, Name: location.Name},
 			})
-			Expect(err).ShouldNot(HaveOccurred(), test.name)
+			Expect(err).ToNot(HaveOccurred(), test.name)
 
 			backupKey := types.NamespacedName{Namespace: "ns-1", Name: test.cloudBackup.Name}
 			synced := &velerov1api.Backup{}
@@ -714,7 +714,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				Expect(apierrors.IsNotFound(err)).To(BeTrue(), test.name)
 				continue
 			}
-			Expect(err).ShouldNot(HaveOccurred(), test.name)
+			Expect(err).ToNot(HaveOccurred(), test.name)
 
 			// Reconcile the synced backup with the queue controller twice: the first
 			// reconcile would move a New/empty-phase backup to Queued, the second one
@@ -723,11 +723,11 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			queueReconciler := NewBackupQueueReconciler(client, queueScheme, velerotest.NewLogger(), 1, NewBackupTracker())
 			for range 2 {
 				_, err = queueReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: backupKey})
-				Expect(err).ShouldNot(HaveOccurred(), test.name)
+				Expect(err).ToNot(HaveOccurred(), test.name)
 			}
 
 			after := &velerov1api.Backup{}
-			Expect(client.Get(ctx, backupKey, after)).ShouldNot(HaveOccurred(), test.name)
+			Expect(client.Get(ctx, backupKey, after)).ToNot(HaveOccurred(), test.name)
 			Expect(after.Status.Phase).To(BeEquivalentTo(test.expectPhase), test.name)
 			// Hooks are dropped on sync, so the stored metadata cannot carry a payload
 			// that a later code path could execute.
@@ -880,7 +880,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			for _, backup := range test.k8sBackups {
 				// add test backup to client
 				err := client.Create(context.TODO(), backup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			bslName := "default"
@@ -890,7 +890,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			r.deleteOrphanedBackups(ctx, bslName, test.cloudBackups, velerotest.NewLogger())
 
 			numBackups, err := numBackups(client)
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 
 			fmt.Println("")
 
@@ -913,7 +913,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 
 		testObjList := backupSyncSourceOrderFunc(locationList)
 		testObjArray, err := meta.ExtractList(testObjList)
-		Expect(err).ShouldNot(HaveOccurred())
+		Expect(err).ToNot(HaveOccurred())
 
 		expectLocation := testObjArray[0].(*velerov1api.BackupStorageLocation)
 		Expect(expectLocation.Spec.Default).To(BeEquivalentTo(true))
@@ -1085,7 +1085,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				//create all required schedules as needed.
 				for _, creatable := range test.toCreate {
 					err := b.client.Create(context.Background(), creatable)
-					Expect(err).ShouldNot(HaveOccurred())
+					Expect(err).ToNot(HaveOccurred())
 				}
 
 				references := b.filterBackupOwnerReferences(context.Background(), test.backup, logger)

@@ -1609,6 +1609,7 @@ func TestGetSnapshot(t *testing.T) {
 			snapshotID:  udmrepo.ID("fake-id"),
 			setRepoMock: true,
 			expectedSnap: udmrepo.Snapshot{
+				ID:          "fake-id",
 				Source:      "fake-source",
 				Description: "fake-desc",
 				StartTime:   mockMani.StartTime.ToTime(),
@@ -1805,6 +1806,7 @@ func TestListSnapshot(t *testing.T) {
 			setRepoMock: true,
 			expectedSnaps: []udmrepo.Snapshot{
 				{
+					ID:          "fake-id",
 					Source:      "fake-source",
 					Description: "fake-desc",
 					StartTime:   mockMani.StartTime.ToTime(),

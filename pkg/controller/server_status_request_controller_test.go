@@ -92,7 +92,7 @@ var _ = Describe("Server Status Request Reconciler", func() {
 				Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			} else {
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(instance.Status.Phase == test.expected.Status.Phase, timeout).Should(BeTrue())
+				Expect(instance.Status.Phase).To(Equal(test.expected.Status.Phase))
 			}
 		},
 		Entry("with phase=empty will be processed and phased successfully patched", request{

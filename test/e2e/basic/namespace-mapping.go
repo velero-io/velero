@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/vmware-tanzu/velero/test"
 	. "github.com/vmware-tanzu/velero/test/e2e/test"
 	. "github.com/vmware-tanzu/velero/test/util/k8s"
 	. "github.com/vmware-tanzu/velero/test/util/kibishii"
@@ -34,7 +35,7 @@ func (n *NamespaceMapping) Init() error {
 	n.VeleroCfg.UseVolumeSnapshots = n.UseVolumeSnapshots
 	n.VeleroCfg.UseNodeAgent = !n.UseVolumeSnapshots
 	n.kibishiiData = &KibishiiData{Levels: 2, DirsPerLevel: 10, FilesPerLevel: 10, FileLength: 1024, BlockSize: 1024, PassNum: 0, ExpectedNodes: 2}
-	if n.VeleroCfg.CloudProvider == "kind" {
+	if n.VeleroCfg.CloudProvider == test.Kind {
 		n.kibishiiData = &KibishiiData{Levels: 0, DirsPerLevel: 0, FilesPerLevel: 0, FileLength: 0, BlockSize: 0, PassNum: 0, ExpectedNodes: 2}
 	}
 	backupType := "fs-backup"
@@ -70,7 +71,7 @@ func (n *NamespaceMapping) Init() error {
 		"create", "--namespace", n.VeleroCfg.VeleroNamespace, "backup", n.BackupName,
 		"--include-namespaces", strings.Join(*n.NSIncluded, ","), "--wait",
 	}
-	if n.VeleroCfg.CloudProvider == "kind" {
+	if n.VeleroCfg.CloudProvider == test.Kind {
 		// don't test volume snapshotter or file system backup on kind
 		n.BackupArgs = append(n.BackupArgs, "--snapshot-volumes=false")
 		n.UseVolumeSnapshots = false

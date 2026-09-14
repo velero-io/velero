@@ -17,7 +17,13 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"syscall"
 	"testing"
 	"time"
@@ -33,12 +39,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	testclocks "k8s.io/utils/clock/testing"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
@@ -61,16 +70,17 @@ func TestRestoreFinalizerReconcile(t *testing.T) {
 	assert.NotNil(t, timestamp)
 
 	rfrTests := []struct {
-		name                  string
-		restore               *velerov1api.Restore
-		backup                *velerov1api.Backup
-		location              *velerov1api.BackupStorageLocation
-		expectError           bool
-		expectPhase           velerov1api.RestorePhase
-		expectWarningsCnt     int
-		expectErrsCnt         int
-		statusCompare         bool
-		expectedCompletedTime *metav1.Time
+		name                     string
+		restore                  *velerov1api.Restore
+		backup                   *velerov1api.Backup
+		location                 *velerov1api.BackupStorageLocation
+		expectError              bool
+		expectPhase              velerov1api.RestorePhase
+		expectWarningsCnt        int
+		expectErrsCnt            int
+		statusCompare            bool
+		expectedCompletedTime    *metav1.Time
+		getRestoreVolumeInfosErr error
 	}{
 		{
 			name:          "Restore is not awaiting finalization, skip",
@@ -114,6 +124,15 @@ func TestRestoreFinalizerReconcile(t *testing.T) {
 			expectError:   false,
 			statusCompare: false,
 		},
+		{
+			name:                     "Fail to get restore volume infos from backup store",
+			restore:                  builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Phase(velerov1api.RestorePhaseFinalizing).Backup("backup-1").Result(),
+			backup:                   defaultBackup().StorageLocation("default").Result(),
+			location:                 defaultStorageLocation,
+			expectError:              true,
+			statusCompare:            false,
+			getRestoreVolumeInfosErr: errors.New("failed to get restore volume infos"),
+		},
 	}
 
 	for _, test := range rfrTests {
@@ -149,8 +168,14 @@ func TestRestoreFinalizerReconcile(t *testing.T) {
 
 			if test.restore != nil && test.restore.Namespace == velerov1api.DefaultNamespace {
 				require.NoError(t, r.Client.Create(t.Context(), test.restore))
-				backupStore.On("GetRestoredResourceList", test.restore.Name).Return(map[string][]string{}, nil)
-				backupStore.On("GetRestoreItemOperations", test.restore.Name).Return([]*itemoperation.RestoreOperation{}, nil)
+				if test.getRestoreVolumeInfosErr != nil {
+					backupStore.On("GetRestoreVolumeInfos", test.restore.Name).Return(nil, test.getRestoreVolumeInfosErr)
+				} else {
+					backupStore.On("GetRestoreVolumeInfos", test.restore.Name).Return([]*volume.RestoreVolumeInfo{}, nil)
+					backupStore.On("GetRestoredResourceList", test.restore.Name).Return(map[string][]string{}, nil)
+					backupStore.On("GetRestoreItemOperations", test.restore.Name).Return([]*itemoperation.RestoreOperation{}, nil)
+					backupStore.On("PutRestoreVolumeInfo", test.restore.Name, mock.Anything).Return(nil)
+				}
 			}
 			if test.backup != nil {
 				require.NoError(t, r.Client.Create(t.Context(), test.backup))
@@ -437,11 +462,11 @@ func TestPatchDynamicPVWithVolumeInfo(t *testing.T) {
 			logger     = velerotest.NewLogger()
 		)
 		ctx := &finalizerContext{
-			logger:          logger,
-			crClient:        fakeClient,
-			restore:         tc.restore,
-			restoredPVCList: tc.restoredPVCNames,
-			volumeInfo:      tc.volumeInfo,
+			logger:            logger,
+			crClient:          fakeClient,
+			restore:           tc.restore,
+			restoredPVCList:   tc.restoredPVCNames,
+			backupVolumeInfos: tc.volumeInfo,
 		}
 
 		for _, pv := range tc.restoredPV {
@@ -915,7 +940,7 @@ func TestHasVolumeGroupSnapshotHandles(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := &finalizerContext{
-				volumeInfo: tc.volumeInfo,
+				backupVolumeInfos: tc.volumeInfo,
 			}
 			assert.Equal(t, tc.expected, ctx.hasVolumeGroupSnapshotHandles())
 		})
@@ -1167,6 +1192,209 @@ func TestCleanupStubVGSC(t *testing.T) {
 			for _, remaining := range remainingList.Items {
 				assert.NotEqual(t, tc.restore.Name, remaining.Labels[velerov1api.RestoreNameLabel],
 					"VGSC %s should have been deleted", remaining.Name)
+			}
+		})
+	}
+}
+
+func TestUpdateVolumeInfos(t *testing.T) {
+	tests := []struct {
+		name                 string
+		restore              *velerov1api.Restore
+		restoreVolumeInfos   []*volume.RestoreVolumeInfo
+		dataDownloads        []*velerov2alpha1.DataDownload
+		listErr              error
+		putErr               error
+		expectedSize         int64
+		expectedIncrSize     *int64
+		expectedPhase        velerov2alpha1.DataDownloadPhase
+		expectedFallbackFull bool
+		expectErrs           bool
+		expectErrMsg         string
+	}{
+		{
+			name:    "successful update of restore volume infos from data downloads",
+			restore: builder.ForRestore("velero", "restore-1").Result(),
+			restoreVolumeInfos: []*volume.RestoreVolumeInfo{
+				{
+					PVCName:      "pvc-1",
+					PVCNamespace: "ns-1",
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+						Size:      0,
+						Phase:     "",
+					},
+				},
+				{
+					PVCName:                  "pvc-2",
+					PVCNamespace:             "ns-2",
+					SnapshotDataMovementInfo: nil,
+				},
+				{
+					PVCName:      "pvc-3",
+					PVCNamespace: "ns-3",
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+						Size:      100,
+						Phase:     velerov2alpha1.DataDownloadPhaseCompleted,
+					},
+				},
+				{
+					PVCName:      "pvc-4",
+					PVCNamespace: "ns-4",
+					FallbackFull: true,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+						Size:      0,
+						Phase:     "",
+					},
+				},
+			},
+			dataDownloads: []*velerov2alpha1.DataDownload{
+				builder.ForDataDownload("velero", "dd-1").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1"}).
+					TotalBytes(4096).
+					IncrementalBytes(1024).
+					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(true).
+					Result(),
+				builder.ForDataDownload("velero", "dd-2").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-2", Namespace: "ns-2"}).
+					TotalBytes(2048).
+					IncrementalBytes(512).
+					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(true).
+					Result(),
+				builder.ForDataDownload("velero", "dd-other-restore").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-other"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-3", Namespace: "ns-3"}).
+					TotalBytes(9999).
+					IncrementalBytes(8888).
+					Phase(velerov2alpha1.DataDownloadPhaseFailed).
+					FallbackFull(true).
+					Result(),
+				builder.ForDataDownload("velero", "dd-4").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-4", Namespace: "ns-4"}).
+					TotalBytes(1024).
+					IncrementalBytes(256).
+					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					FallbackFull(false).
+					Result(),
+			},
+			expectedSize:         4096,
+			expectedIncrSize:     ptr.To(int64(1024)),
+			expectedPhase:        velerov2alpha1.DataDownloadPhaseCompleted,
+			expectedFallbackFull: true,
+			expectErrs:           false,
+		},
+		{
+			name:    "failed to list data downloads",
+			restore: builder.ForRestore("velero", "restore-1").Result(),
+			restoreVolumeInfos: []*volume.RestoreVolumeInfo{
+				{
+					PVCName:      "pvc-1",
+					PVCNamespace: "ns-1",
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+					},
+				},
+			},
+			listErr:      errors.New("list error"),
+			expectErrs:   true,
+			expectErrMsg: "failed to list data downloads of restore restore-1",
+		},
+		{
+			name:    "failed to put restore volume info to backup store",
+			restore: builder.ForRestore("velero", "restore-1").Result(),
+			restoreVolumeInfos: []*volume.RestoreVolumeInfo{
+				{
+					PVCName:      "pvc-1",
+					PVCNamespace: "ns-1",
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover: "velero",
+					},
+				},
+			},
+			putErr:       errors.New("put error"),
+			expectErrs:   true,
+			expectErrMsg: "failed to put restore volume info for restore restore-1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clientBuilder := velerotest.NewFakeControllerRuntimeClientBuilder(t)
+			if tc.listErr != nil {
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, client crclient.WithWatch, list crclient.ObjectList, opts ...crclient.ListOption) error {
+						return tc.listErr
+					},
+				})
+			}
+			fakeClient := clientBuilder.Build()
+
+			for _, dd := range tc.dataDownloads {
+				require.NoError(t, fakeClient.Create(t.Context(), dd))
+			}
+
+			backupStore := &persistencemocks.BackupStore{}
+			var uploadedData []byte
+			if tc.listErr == nil {
+				if tc.putErr != nil {
+					backupStore.On("PutRestoreVolumeInfo", tc.restore.Name, mock.Anything).Return(tc.putErr)
+				} else {
+					backupStore.On("PutRestoreVolumeInfo", tc.restore.Name, mock.Anything).Run(func(args mock.Arguments) {
+						reader, ok := args.Get(1).(io.Reader)
+						require.True(t, ok)
+						data, err := io.ReadAll(reader)
+						require.NoError(t, err)
+						uploadedData = data
+					}).Return(nil)
+				}
+			}
+
+			ctx := &finalizerContext{
+				logger:             velerotest.NewLogger(),
+				restore:            tc.restore,
+				crClient:           fakeClient,
+				backupStore:        backupStore,
+				restoreVolumeInfos: tc.restoreVolumeInfos,
+			}
+
+			errs := ctx.updateVolumeInfos()
+			if tc.expectErrs {
+				assert.False(t, errs.IsEmpty())
+				assert.Contains(t, errs.Namespaces["cluster"][0], tc.expectErrMsg)
+			} else {
+				assert.True(t, errs.IsEmpty())
+				assert.Equal(t, tc.expectedSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Size)
+				assert.Equal(t, tc.expectedIncrSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.IncrementalSize)
+				assert.Equal(t, tc.expectedPhase, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Phase)
+				assert.Equal(t, tc.expectedFallbackFull, ctx.restoreVolumeInfos[0].FallbackFull)
+				// pvc-2 had nil SnapshotDataMovementInfo and should remain nil, FallbackFull should remain false
+				assert.Nil(t, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo)
+				assert.False(t, ctx.restoreVolumeInfos[1].FallbackFull)
+				// pvc-3 belonged to another restore and should be untouched
+				assert.Equal(t, int64(100), ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.Size)
+				assert.False(t, ctx.restoreVolumeInfos[2].FallbackFull)
+				// pvc-4 had FallbackFull updated to false from data download
+				assert.Equal(t, int64(1024), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Size)
+				assert.Equal(t, ptr.To(int64(256)), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.IncrementalSize)
+				assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Phase)
+				assert.False(t, ctx.restoreVolumeInfos[3].FallbackFull)
+
+				// Verify the content uploaded to backup store can be decoded and matches
+				require.NotEmpty(t, uploadedData)
+				gzr, err := gzip.NewReader(bytes.NewReader(uploadedData))
+				require.NoError(t, err)
+				defer gzr.Close()
+
+				var decoded []*volume.RestoreVolumeInfo
+				require.NoError(t, json.NewDecoder(gzr).Decode(&decoded))
+				assert.Equal(t, ctx.restoreVolumeInfos, decoded)
 			}
 		})
 	}

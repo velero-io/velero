@@ -1,6 +1,6 @@
 # Velero Maintainers
 
-[GOVERNANCE.md](https://github.com/vmware-tanzu/velero/blob/main/GOVERNANCE.md) describes governance guidelines and maintainer responsibilities.
+[GOVERNANCE.md](https://github.com/velero-io/.github/blob/main/GOVERNANCE.md) describes governance guidelines and maintainer responsibilities.
 
 ## Maintainers
 

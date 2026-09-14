@@ -17,7 +17,10 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -39,6 +42,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	serverconfig "github.com/vmware-tanzu/velero/pkg/cmd/server/config"
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
@@ -148,10 +152,16 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, errors.Wrap(err, "error getting backup store")
 	}
 
-	volumeInfo, err := backupStore.GetBackupVolumeInfos(restore.Spec.BackupName)
+	backupVolumeInfos, err := backupStore.GetBackupVolumeInfos(restore.Spec.BackupName)
 	if err != nil {
 		log.WithError(err).Errorf("error getting volumeInfo for backup %s", restore.Spec.BackupName)
-		return ctrl.Result{}, errors.Wrap(err, "error getting volumeInfo")
+		return ctrl.Result{}, errors.Wrap(err, "error getting backup volumeInfos")
+	}
+
+	restoreVolumeInfos, err := backupStore.GetRestoreVolumeInfos(restore.Name)
+	if err != nil {
+		log.WithError(err).Errorf("error getting volumeInfos for restore %s", restore.Name)
+		return ctrl.Result{}, errors.Wrap(err, "error getting restore volumeInfos")
 	}
 
 	restoredResourceList, err := backupStore.GetRestoredResourceList(restore.Name)
@@ -169,13 +179,15 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	finalizerCtx := &finalizerContext{
-		logger:           log,
-		restore:          restore,
-		crClient:         r.crClient,
-		volumeInfo:       volumeInfo,
-		restoredPVCList:  restoredPVCList,
-		multiHookTracker: r.multiHookTracker,
-		resourceTimeout:  r.resourceTimeout,
+		logger:             log,
+		backupStore:        backupStore,
+		restore:            restore,
+		crClient:           r.crClient,
+		backupVolumeInfos:  backupVolumeInfos,
+		restoreVolumeInfos: restoreVolumeInfos,
+		restoredPVCList:    restoredPVCList,
+		multiHookTracker:   r.multiHookTracker,
+		resourceTimeout:    r.resourceTimeout,
 		restoreItemOperationList: restoreItemOperationList{
 			items: restoreItemOperations,
 		},
@@ -288,7 +300,9 @@ type finalizerContext struct {
 	logger                   logrus.FieldLogger
 	restore                  *velerov1api.Restore
 	crClient                 client.Client
-	volumeInfo               []*volume.BackupVolumeInfo
+	backupStore              persistence.BackupStore
+	backupVolumeInfos        []*volume.BackupVolumeInfo
+	restoreVolumeInfos       []*volume.RestoreVolumeInfo
 	restoredPVCList          map[string]struct{}
 	restoreItemOperationList restoreItemOperationList
 	multiHookTracker         *hook.MultiHookTracker
@@ -307,6 +321,9 @@ func (ctx *finalizerContext) execute() (results.Result, results.Result) {
 		warnings.Merge(&vgscWarnings)
 	}
 
+	viErrs := ctx.updateVolumeInfos()
+	errs.Merge(&viErrs)
+
 	rehErrs := ctx.WaitRestoreExecHook()
 	errs.Merge(&rehErrs)
 
@@ -324,7 +341,7 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 	maxConcurrency := 3
 	semaphore := make(chan struct{}, maxConcurrency)
 
-	for _, volumeItem := range ctx.volumeInfo {
+	for _, volumeItem := range ctx.backupVolumeInfos {
 		if (volumeItem.BackupMethod == volume.PodVolumeBackup || volumeItem.BackupMethod == volume.CSISnapshot) && volumeItem.PVInfo != nil {
 			// Determine restored PVC namespace
 			restoredNamespace := volumeItem.PVCNamespace
@@ -463,7 +480,7 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 }
 
 func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
-	for _, vi := range ctx.volumeInfo {
+	for _, vi := range ctx.backupVolumeInfos {
 		if vi.CSISnapshotInfo != nil && vi.CSISnapshotInfo.VolumeGroupSnapshotHandle != "" {
 			return true
 		}
@@ -571,6 +588,44 @@ func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
 	}
 
 	return false
+}
+
+func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
+	dataDownloads := &velerov2alpha1.DataDownloadList{}
+	if err := ctx.crClient.List(context.Background(), dataDownloads, client.InNamespace(ctx.restore.Namespace), client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name}); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "failed to list data downloads of restore %s", ctx.restore.Name))
+		return errs
+	}
+	for _, dataDownload := range dataDownloads.Items {
+		for index := range ctx.restoreVolumeInfos {
+			if ctx.restoreVolumeInfos[index].PVCName == dataDownload.Spec.TargetVolume.PVC &&
+				ctx.restoreVolumeInfos[index].PVCNamespace == dataDownload.Spec.TargetVolume.Namespace &&
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo != nil {
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Size = dataDownload.Status.Progress.TotalBytes
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataDownload.Status.IncrementalBytes
+				ctx.restoreVolumeInfos[index].FallbackFull = dataDownload.Status.FallbackFull
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Phase = dataDownload.Status.Phase
+			}
+		}
+	}
+
+	buffer := new(bytes.Buffer)
+	gzw := gzip.NewWriter(buffer)
+	defer gzw.Close()
+	if err := json.NewEncoder(gzw).Encode(ctx.restoreVolumeInfos); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "error encoding restore volume infos to JSON for restore %s", ctx.restore.Name))
+		return errs
+	}
+	if err := gzw.Close(); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "error closing gzip writer for restore %s", ctx.restore.Name))
+		return errs
+	}
+	if err := ctx.backupStore.PutRestoreVolumeInfo(ctx.restore.Name, buffer); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "failed to put restore volume info for restore %s", ctx.restore.Name))
+		return errs
+	}
+
+	return errs
 }
 
 // WaitRestoreExecHook waits for restore exec hooks to finish then update the hook execution results

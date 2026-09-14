@@ -177,6 +177,10 @@ type DataUploadStatus struct {
 	// +optional
 	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
 
+	// SourceSize holds the total size of the source volume.
+	// +optional
+	SourceSize int64 `json:"sourceSize,omitempty"`
+
 	// Node is name of the node where the DataUpload is processed.
 	// +optional
 	Node string `json:"node,omitempty"`
@@ -194,6 +198,9 @@ type DataUploadStatus struct {
 	// +optional
 	// +nullable
 	AcceptedTimestamp *metav1.Time `json:"acceptedTimestamp,omitempty"`
+
+	// FallbackFull indicates whether the incremental backup has fallen back to full backup
+	FallbackFull bool `json:"fallbackFull,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,

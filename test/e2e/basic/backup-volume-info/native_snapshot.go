@@ -55,7 +55,7 @@ func (n *NativeSnapshotVolumeInfo) Verify() error {
 		BackupObjectsPrefix+"/"+n.BackupName,
 	)
 
-	Expect(err).ShouldNot(HaveOccurred(), "Fail to get VolumeInfo metadata in the Backup Repository.")
+	Expect(err).ToNot(HaveOccurred(), "Fail to get VolumeInfo metadata in the Backup Repository.")
 
 	fmt.Printf("The VolumeInfo metadata content: %+v\n", *volumeInfo[0])
 	Expect(volumeInfo).ToNot(BeEmpty())

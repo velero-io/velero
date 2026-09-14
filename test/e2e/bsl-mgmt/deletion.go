@@ -308,7 +308,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 			By(fmt.Sprintf("Get all backups from 2 BSLs %s before deleting one of them", backupLocation1), func() {
 				backupsBeforeDel, err := GetAllBackups(context.Background(), veleroCfg.VeleroCLI)
 				Expect(err).To(Succeed())
-				Expect(cmp.Diff(backupsInBsl1AndBsl2, backupsBeforeDel, cmpopts.SortSlices(less))).Should(BeEmpty())
+				Expect(cmp.Diff(backupsInBsl1AndBsl2, backupsBeforeDel, cmpopts.SortSlices(less))).To(BeEmpty())
 
 				By(fmt.Sprintf("Backup1 %s should exist in cloud object store before bsl deletion", backupName1), func() {
 					Expect(ObjectsShouldBeInBucket(veleroCfg.ObjectStoreProvider, veleroCfg.CloudCredentialsFile,
@@ -325,7 +325,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 					backupsAfterDel, err := GetAllBackups(context.Background(), veleroCfg.VeleroCLI)
 					Expect(err).To(Succeed())
 					// Default BSL is deleted, so backups in additional BSL should be left only
-					Expect(cmp.Diff(backupsInBSL2, backupsAfterDel, cmpopts.SortSlices(less))).Should(BeEmpty())
+					Expect(cmp.Diff(backupsInBSL2, backupsAfterDel, cmpopts.SortSlices(less))).To(BeEmpty())
 				})
 			})
 

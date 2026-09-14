@@ -103,13 +103,13 @@ func (bp *blockProvider) RunBackup(
 	cbtParam CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
-	updater uploader.ProgressUpdater) (string, bool, int64, int64, error) {
+	updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, bool, error) {
 	if updater == nil {
-		return "", false, 0, 0, errors.New("backup progress updater is invalid")
+		return "", false, 0, 0, 0, false, errors.New("backup progress updater is invalid")
 	}
 
 	if path == "" {
-		return "", false, 0, 0, errors.New("path is empty")
+		return "", false, 0, 0, 0, false, errors.New("path is empty")
 	}
 
 	log := bp.log.WithFields(logrus.Fields{
@@ -140,23 +140,23 @@ func (bp *blockProvider) RunBackup(
 	// equality check never matches and cancellation gets reported as a failure.
 	if errors.Is(err, block.ErrCanceled) {
 		log.Warn("Block backup is canceled")
-		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, ErrorCanceled
+		return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, snapshotInfo.Fallback, ErrorCanceled
 	}
 
 	if err != nil {
-		return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, errors.Wrapf(err, "Failed to run block backup")
+		return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, snapshotInfo.Fallback, errors.Wrapf(err, "Failed to run block backup")
 	}
 
 	updater.UpdateProgress(
 		&uploader.Progress{
-			TotalBytes: snapshotInfo.Size,
-			BytesDone:  snapshotInfo.Size,
+			TotalBytes: snapshotInfo.SnapshotSize,
+			BytesDone:  snapshotInfo.SnapshotSize,
 		},
 	)
 
-	log.Infof("Block backup finished, snapshot ID %s, backup size %v, incremental size %v", snapshotInfo.ID, snapshotInfo.Size, snapshotInfo.IncrementalSize)
+	log.Infof("Block backup finished, snapshot ID %s, backup size %v, incremental size %v, source size %v, fallback %v", snapshotInfo.ID, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, snapshotInfo.Fallback)
 
-	return snapshotInfo.ID, false, snapshotInfo.Size, snapshotInfo.IncrementalSize, nil
+	return snapshotInfo.ID, false, snapshotInfo.SnapshotSize, snapshotInfo.IncrementalSize, snapshotInfo.SourceSize, snapshotInfo.Fallback, nil
 }
 
 func (bp *blockProvider) RunRestore(
@@ -167,9 +167,9 @@ func (bp *blockProvider) RunRestore(
 	cbtParam CBTParam,
 	volMode uploader.PersistentVolumeMode,
 	uploaderCfg map[string]string,
-	updater uploader.ProgressUpdater) (int64, error) {
+	updater uploader.ProgressUpdater) (int64, int64, bool, error) {
 	if updater == nil {
-		return 0, errors.New("restore progress updater is invalid")
+		return 0, 0, false, errors.New("restore progress updater is invalid")
 	}
 
 	log := bp.log.WithFields(logrus.Fields{
@@ -180,24 +180,24 @@ func (bp *blockProvider) RunRestore(
 
 	blkUploader := block.NewUploader(ctx, bp.bkRepo, updater, log)
 
-	size, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, incremental, cbtParam.Source, cbtParam.Service, uploaderCfg, log)
+	incrementalBytes, totalBytes, fallback, err := blockRestoreFunc(ctx, blkUploader, bp.bkRepo, snapshotID, volumePath, incremental, cbtParam.Source, cbtParam.Service, uploaderCfg, log)
 
 	// errors.Is, not ==: see the equivalent comment on the backup path above.
 	if errors.Is(err, block.ErrCanceled) {
 		log.Warn("Block restore is canceled")
-		return 0, ErrorCanceled
+		return 0, 0, fallback, ErrorCanceled
 	}
 
 	if err != nil {
-		return 0, errors.Wrapf(err, "Failed to run block restore")
+		return 0, 0, fallback, errors.Wrapf(err, "Failed to run block restore")
 	}
 
 	updater.UpdateProgress(&uploader.Progress{
-		TotalBytes: size,
-		BytesDone:  size,
+		TotalBytes: totalBytes,
+		BytesDone:  totalBytes,
 	})
 
-	log.Infof("Block restore finished, restore size %v", size)
+	log.Infof("Block restore finished, restore incremental size %v, total size %v, fallback %v", incrementalBytes, totalBytes, fallback)
 
-	return size, nil
+	return incrementalBytes, totalBytes, fallback, nil
 }

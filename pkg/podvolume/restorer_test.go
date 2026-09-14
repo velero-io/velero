@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -37,6 +38,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/restorehelper"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
 
@@ -119,6 +121,21 @@ func TestGetVolumesRepositoryType(t *testing.T) {
 	}
 }
 
+// createGatedPodObj returns the restored pod as it exists in the cluster:
+// running with the restore-wait init container injected by the given restore.
+func createGatedPodObj(restoreUID string, volumeNum int) *corev1api.Pod {
+	pod := createPodObj(true, true, true, volumeNum)
+	pod.Spec.InitContainers = append([]corev1api.Container{{
+		Name: restorehelper.WaitInitContainer,
+		Args: []string{restoreUID},
+	}}, pod.Spec.InitContainers...)
+	pod.Status.InitContainerStatuses = []corev1api.ContainerStatus{{
+		Name:  restorehelper.WaitInitContainer,
+		State: corev1api.ContainerState{Running: &corev1api.ContainerStateRunning{}},
+	}}
+	return pod
+}
+
 func createNodeAgentDaemonset() *appsv1api.DaemonSet {
 	ds := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -181,6 +198,8 @@ func TestRestorePodVolumes(t *testing.T) {
 		pvbs            []*velerov1api.PodVolumeBackup
 		restoredPod     *corev1api.Pod
 		sourceNamespace string
+		volumeInfos     map[string]volume.BackupVolumeInfo
+		inplace         bool
 		errs            []expectError
 	}{
 		{
@@ -340,6 +359,142 @@ func TestRestorePodVolumes(t *testing.T) {
 				completedPVR,
 			},
 		},
+		{
+			name: "in-place restore blocked when the PVC is used by another running pod",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createPVCObj(1),
+				func() *corev1api.Pod {
+					pod := builder.ForPod("fake-ns", "other-pod").
+						Volumes(builder.ForVolume("fake-volume-1").PersistentVolumeClaimSource("fake-pvc-1").Result()).
+						Result()
+					pod.Status.Phase = corev1api.PodRunning
+					return pod
+				}(),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			runtimeScheme:   scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
+			name: "in-place restore blocked when the pod is gated by a different restore",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createPVCObj(1),
+				createGatedPodObj("old-restore-uid", 1),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			runtimeScheme:   scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
+			name: "in-place restore blocked when the PVC is bound to a different PV than at backup time",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createPVCObj(1),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos:     map[string]volume.BackupVolumeInfo{"some-other-pv": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1"}},
+			runtimeScheme:   scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
+			name: "in-place restore blocked when the PVC is too small for the source volume",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				func() *corev1api.PersistentVolumeClaim {
+					pvc := createPVCObj(1)
+					pvc.Status.Capacity = corev1api.ResourceList{corev1api.ResourceStorage: resource.MustParse("100Mi")}
+					return pvc
+				}(),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos: map[string]volume.BackupVolumeInfo{
+				"fake-pv-1": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1", PVBInfo: &volume.PodVolumeBackupInfo{SourceSize: 200 << 20}},
+			},
+			runtimeScheme: scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed, skipping volume data restore: PVC fake-ns/fake-pvc-1 capacity 100Mi is smaller than the backed-up volume size 209715200 bytes",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
+			name: "in-place restore proceeds when the PVC is only used by the gated restored pod",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createNodeObj(),
+				createPVCObj(1),
+				createGatedPodObj("fake-restore-uid", 1),
+				createNodeAgentPodObj(true),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			runtimeScheme:   scheme,
+			retPVRs: []*velerov1api.PodVolumeRestore{
+				completedPVR,
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -362,7 +517,12 @@ func TestRestorePodVolumes(t *testing.T) {
 
 			ensurer := repository.NewEnsurer(fakeCRClient, velerotest.NewLogger(), time.Millisecond)
 
-			restoreObj := builder.ForRestore(velerov1api.DefaultNamespace, "fake-restore").Result()
+			restoreBuilder := builder.ForRestore(velerov1api.DefaultNamespace, "fake-restore").
+				ObjectMeta(builder.WithUID("fake-restore-uid"))
+			if test.inplace {
+				restoreBuilder = restoreBuilder.ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull))
+			}
+			restoreObj := restoreBuilder.Result()
 
 			rs := newRestorer(ctx, repository.NewRepoLocker(), ensurer, pvrInformer, kubeClient, fakeCRClient, restoreObj, velerotest.NewLogger())
 
@@ -379,11 +539,12 @@ func TestRestorePodVolumes(t *testing.T) {
 			}()
 
 			errs := rs.RestorePodVolumes(RestoreData{
-				Restore:          restoreObj,
-				Pod:              test.restoredPod,
-				PodVolumeBackups: test.pvbs,
-				SourceNamespace:  test.sourceNamespace,
-				BackupLocation:   test.bsl,
+				Restore:           restoreObj,
+				Pod:               test.restoredPod,
+				PodVolumeBackups:  test.pvbs,
+				SourceNamespace:   test.sourceNamespace,
+				BackupLocation:    test.bsl,
+				BackupVolumeInfos: test.volumeInfos,
 			}, volume.NewRestoreVolInfoTracker(restoreObj, logrus.New(), fakeCRClient))
 
 			if errs == nil {

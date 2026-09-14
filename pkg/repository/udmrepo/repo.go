@@ -98,6 +98,7 @@ type Metadata struct {
 }
 
 type Snapshot struct {
+	ID          ID
 	Source      string
 	Description string
 	StartTime   time.Time

@@ -9,6 +9,9 @@ on:
       - 'Dockerfile'
       - 'Dockerfile-Windows'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build
