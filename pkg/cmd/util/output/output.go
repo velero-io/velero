@@ -34,6 +34,21 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
 
+type printConfig struct {
+	defaultVolumeSnapshotLocations map[string]string
+}
+
+// PrintOption configures table printing behavior.
+type PrintOption func(*printConfig)
+
+// WithDefaultVolumeSnapshotLocations sets the Velero server default volume snapshot
+// locations used when printing VolumeSnapshotLocation tables.
+func WithDefaultVolumeSnapshotLocations(locations map[string]string) PrintOption {
+	return func(cfg *printConfig) {
+		cfg.defaultVolumeSnapshotLocations = locations
+	}
+}
+
 const (
 	downloadRequestTimeout = 30 * time.Second
 	emptyDisplay           = "<none>"
@@ -110,15 +125,20 @@ func validateOutputFlag(cmd *cobra.Command) error {
 
 // PrintWithFormat prints the provided object in the format specified by
 // the command's flags.
-func PrintWithFormat(c *cobra.Command, obj runtime.Object) (bool, error) {
+func PrintWithFormat(c *cobra.Command, obj runtime.Object, opts ...PrintOption) (bool, error) {
 	format := GetOutputFlagValue(c)
 	if format == "" {
 		return false, nil
 	}
 
+	printCfg := printConfig{}
+	for _, opt := range opts {
+		opt(&printCfg)
+	}
+
 	switch format {
 	case "table":
-		return printTable(c, obj)
+		return printTable(c, obj, printCfg)
 	case "json", "yaml":
 		return printEncoded(obj, format)
 	}
@@ -148,7 +168,7 @@ func printEncoded(obj runtime.Object, format string) (bool, error) {
 	return true, nil
 }
 
-func printTable(cmd *cobra.Command, obj runtime.Object) (bool, error) {
+func printTable(cmd *cobra.Command, obj runtime.Object, printCfg printConfig) (bool, error) {
 	// 1. generate table
 	var table *metav1.Table
 
@@ -206,12 +226,12 @@ func printTable(cmd *cobra.Command, obj runtime.Object) (bool, error) {
 	case *velerov1api.VolumeSnapshotLocation:
 		table = &metav1.Table{
 			ColumnDefinitions: volumeSnapshotLocationColumns,
-			Rows:              printVolumeSnapshotLocation(objType),
+			Rows:              printVolumeSnapshotLocation(objType, printCfg.defaultVolumeSnapshotLocations),
 		}
 	case *velerov1api.VolumeSnapshotLocationList:
 		table = &metav1.Table{
 			ColumnDefinitions: volumeSnapshotLocationColumns,
-			Rows:              printVolumeSnapshotLocationList(objType),
+			Rows:              printVolumeSnapshotLocationList(objType, printCfg.defaultVolumeSnapshotLocations),
 		}
 	case *velerov1api.ServerStatusRequest:
 		table = &metav1.Table{

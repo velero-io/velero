@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/cmd"
 )
 
 var (
@@ -29,26 +30,33 @@ var (
 		// https://github.com/kubernetes/kubernetes/blob/v1.15.3/pkg/printers/tableprinter.go#L204
 		{Name: "Name", Type: "string", Format: "name"},
 		{Name: "Provider"},
+		{Name: "Default"},
 	}
 )
 
-func printVolumeSnapshotLocationList(list *v1.VolumeSnapshotLocationList) []metav1.TableRow {
+func printVolumeSnapshotLocationList(list *v1.VolumeSnapshotLocationList, defaultLocations map[string]string) []metav1.TableRow {
 	rows := make([]metav1.TableRow, 0, len(list.Items))
 
 	for i := range list.Items {
-		rows = append(rows, printVolumeSnapshotLocation(&list.Items[i])...)
+		rows = append(rows, printVolumeSnapshotLocation(&list.Items[i], defaultLocations)...)
 	}
 	return rows
 }
 
-func printVolumeSnapshotLocation(location *v1.VolumeSnapshotLocation) []metav1.TableRow {
+func printVolumeSnapshotLocation(location *v1.VolumeSnapshotLocation, defaultLocations map[string]string) []metav1.TableRow {
 	row := metav1.TableRow{
 		Object: runtime.RawExtension{Object: location},
+	}
+
+	isDefault := ""
+	if defaultLocation, ok := defaultLocations[location.Spec.Provider]; ok && defaultLocation == location.Name {
+		isDefault = cmd.TRUE
 	}
 
 	row.Cells = append(row.Cells,
 		location.Name,
 		location.Spec.Provider,
+		isDefault,
 	)
 
 	return []metav1.TableRow{row}
