@@ -1,0 +1,1 @@
+Fix backup queue permanently stuck when a dequeued backup completes during the patch
