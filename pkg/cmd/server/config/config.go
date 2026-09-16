@@ -1,3 +1,19 @@
+/*
+Copyright the Velero contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package config
 
 import (
@@ -7,6 +23,7 @@ import (
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
@@ -53,6 +70,8 @@ const (
 
 	DefaultItemBlockWorkerCount = 1
 	DefaultConcurrentBackups    = 1
+
+	defaultGracefulShutdownSafetyBuffer = 2 * time.Second
 )
 
 var (
@@ -189,6 +208,63 @@ type Config struct {
 	GlobalBackupVolumePoliciesConfigMap string
 	DefaultResourceModifierConfigMap    string
 	MaxBackupExtractionSize             int
+	GracefulShutdownTimeout             time.Duration
+	GracefulShutdownSafetyBuffer        time.Duration
+}
+
+// gracefulShutdownTimeoutValue is a pflag.Value for --graceful-shutdown-timeout. Its Set()
+// is only invoked when the operator explicitly passes the flag, so it can reject a
+// non-positive explicit value while leaving the flag's zero value (never passed) alone to
+// mean "derive automatically" (FR2/FR6).
+type gracefulShutdownTimeoutValue struct {
+	duration *time.Duration
+}
+
+func (f *gracefulShutdownTimeoutValue) String() string {
+	return f.duration.String()
+}
+
+func (f *gracefulShutdownTimeoutValue) Set(val string) error {
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return err
+	}
+	if d <= 0 {
+		return errors.New("--graceful-shutdown-timeout must be positive; omit the flag to derive it automatically from the pod's terminationGracePeriodSeconds")
+	}
+	*f.duration = d
+	return nil
+}
+
+func (f *gracefulShutdownTimeoutValue) Type() string {
+	return "duration"
+}
+
+// gracefulShutdownSafetyBufferValue is a pflag.Value for --graceful-shutdown-safety-buffer. Its
+// Set() rejects a negative explicit value, which would otherwise inflate the derived graceful
+// shutdown timeout beyond the pod's own terminationGracePeriodSeconds.
+type gracefulShutdownSafetyBufferValue struct {
+	duration *time.Duration
+}
+
+func (f *gracefulShutdownSafetyBufferValue) String() string {
+	return f.duration.String()
+}
+
+func (f *gracefulShutdownSafetyBufferValue) Set(val string) error {
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return err
+	}
+	if d < 0 {
+		return errors.New("--graceful-shutdown-safety-buffer must not be negative")
+	}
+	*f.duration = d
+	return nil
+}
+
+func (f *gracefulShutdownSafetyBufferValue) Type() string {
+	return "duration"
 }
 
 func GetDefaultConfig() *Config {
@@ -222,6 +298,7 @@ func GetDefaultConfig() *Config {
 		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
 		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
 		ConcurrentBackups:              DefaultConcurrentBackups,
+		GracefulShutdownSafetyBuffer:   defaultGracefulShutdownSafetyBuffer,
 	}
 
 	return config
@@ -300,5 +377,15 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"max-backup-extraction-size",
 		c.MaxBackupExtractionSize,
 		"Maximum size of a backup extraction in megabytes. If not set, default value (16GB) will be used.",
+	)
+	flags.Var(
+		&gracefulShutdownTimeoutValue{duration: &c.GracefulShutdownTimeout},
+		"graceful-shutdown-timeout",
+		"How long the server waits for in-flight controller work to finish before force-exiting on shutdown. If unset (default), derived automatically from the pod's terminationGracePeriodSeconds minus --graceful-shutdown-safety-buffer. Not validated against terminationGracePeriodSeconds: a value equal to or greater than it will be cut short by Kubernetes force-killing the pod first.",
+	)
+	flags.Var(
+		&gracefulShutdownSafetyBufferValue{duration: &c.GracefulShutdownSafetyBuffer},
+		"graceful-shutdown-safety-buffer",
+		"Buffer subtracted from the pod's terminationGracePeriodSeconds when auto-deriving --graceful-shutdown-timeout. Default is 2 seconds. If the pod defines a preStop hook, size this to also cover the hook's maximum duration, since the hook and the manager's shutdown share the same terminationGracePeriodSeconds budget.",
 	)
 }
