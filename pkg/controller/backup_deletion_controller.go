@@ -684,25 +684,29 @@ func batchDeleteSnapshots(ctx context.Context, repoEnsurer *repository.Ensurer, 
 	directSnapshots map[string][]repotypes.SnapshotIdentifier, backup *velerov1api.Backup, logger logrus.FieldLogger) []error {
 	var errs []error
 	for volumeNamespace, snapshots := range directSnapshots {
-		batchForget := []string{}
+		// The BSL is the same for all snapshots of one backup, but the repository
+		// type may differ per snapshot (e.g. kopia and restic snapshots coexisting
+		// during an uploader-type migration), so batch the IDs per repository type
+		// and forget each batch against its own repository.
+		batchForgetByRepoType := map[string][]string{}
 		for _, snapshot := range snapshots {
-			batchForget = append(batchForget, snapshot.SnapshotID)
+			batchForgetByRepoType[snapshot.RepositoryType] = append(batchForgetByRepoType[snapshot.RepositoryType], snapshot.SnapshotID)
 		}
 
-		// For volumes in one backup, the BSL and repositoryType should always be the same
-		repoType := snapshots[0].RepositoryType
-		repo, err := repoEnsurer.EnsureRepo(ctx, backup.Namespace, volumeNamespace, backup.Spec.StorageLocation, repoType)
-		if err != nil {
-			errs = append(errs, errors.Wrapf(err, "error to ensure repo %s-%s-%s, skip deleting PVB snapshots %v", backup.Spec.StorageLocation, volumeNamespace, repoType, batchForget))
-			continue
-		}
+		for repoType, batchForget := range batchForgetByRepoType {
+			repo, err := repoEnsurer.EnsureRepo(ctx, backup.Namespace, volumeNamespace, backup.Spec.StorageLocation, repoType)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "error to ensure repo %s-%s-%s, skip deleting PVB snapshots %v", backup.Spec.StorageLocation, volumeNamespace, repoType, batchForget))
+				continue
+			}
 
-		if forgetErrs := repoMgr.BatchForget(ctx, repo, batchForget); len(forgetErrs) > 0 {
-			errs = append(errs, forgetErrs...)
-			continue
-		}
+			if forgetErrs := repoMgr.BatchForget(ctx, repo, batchForget); len(forgetErrs) > 0 {
+				errs = append(errs, forgetErrs...)
+				continue
+			}
 
-		logger.Infof("Batch deleted snapshots %v", batchForget)
+			logger.Infof("Batch deleted snapshots %v", batchForget)
+		}
 	}
 
 	return errs
