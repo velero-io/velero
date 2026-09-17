@@ -44,7 +44,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
-	k8sfake "k8s.io/client-go/kubernetes/fake"
 	kubetesting "k8s.io/client-go/testing"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -2984,11 +2983,9 @@ func TestRestoreInplaceSelectedNodeCarrierAnnotation(t *testing.T) {
 				// action proves the carrier survives the real strip regardless of action order.
 				&pluggableAction{
 					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
-						clientset := k8sfake.NewSimpleClientset()
 						return riav1.NewPVCAction(
 							h.log,
-							clientset.CoreV1().ConfigMaps("velero"),
-							clientset.CoreV1().Nodes(),
+							nil,
 						).Execute(input)
 					},
 				},

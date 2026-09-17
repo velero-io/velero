@@ -346,15 +346,14 @@ func newClusterRoleBindingItemAction(logger logrus.FieldLogger) (any, error) {
 
 func newPVCRestoreItemAction(f client.Factory) plugincommon.HandlerInitializer {
 	return func(logger logrus.FieldLogger) (any, error) {
-		client, err := f.KubeClient()
+		crClient, err := f.KubebuilderClient()
 		if err != nil {
 			return nil, err
 		}
 
 		return ria.NewPVCAction(
 			logger,
-			client.CoreV1().ConfigMaps(f.Namespace()),
-			client.CoreV1().Nodes(),
+			crClient,
 		), nil
 	}
 }

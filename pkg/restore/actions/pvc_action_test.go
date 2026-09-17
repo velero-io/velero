@@ -26,8 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
@@ -82,12 +82,9 @@ func TestPVCActionExecute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			clientset := fake.NewSimpleClientset()
-
 			a := NewPVCAction(
 				velerotest.NewLogger(),
-				clientset.CoreV1().ConfigMaps("velero"),
-				clientset.CoreV1().Nodes(),
+				nil,
 			)
 
 			// set up test data
@@ -129,10 +126,17 @@ func TestAddPVFromPVCActionExecute(t *testing.T) {
 		name           string
 		itemFromBackup *corev1api.PersistentVolumeClaim
 		want           []velero.ResourceIdentifier
+		pvbs           []runtime.Object
+		wantVolumeName string
 	}{
 		{
 			name: "bound PVC with volume name returns associated PV",
 			itemFromBackup: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pvc-1",
+					Namespace: "ns-1",
+					UID:       "uid-1",
+				},
 				Spec: corev1api.PersistentVolumeClaimSpec{
 					VolumeName: "bound-pv",
 				},
@@ -146,10 +150,16 @@ func TestAddPVFromPVCActionExecute(t *testing.T) {
 					Name:          "bound-pv",
 				},
 			},
+			wantVolumeName: "bound-pv",
 		},
 		{
 			name: "unbound PVC with volume name does not return any additional items",
 			itemFromBackup: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pvc-1",
+					Namespace: "ns-1",
+					UID:       "uid-1",
+				},
 				Spec: corev1api.PersistentVolumeClaimSpec{
 					VolumeName: "pending-pv",
 				},
@@ -157,17 +167,52 @@ func TestAddPVFromPVCActionExecute(t *testing.T) {
 					Phase: corev1api.ClaimPending,
 				},
 			},
-			want: nil,
+			want:           nil,
+			wantVolumeName: "pending-pv",
 		},
 		{
 			name: "bound PVC without volume name does not return any additional items",
 			itemFromBackup: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pvc-1",
+					Namespace: "ns-1",
+					UID:       "uid-1",
+				},
 				Spec: corev1api.PersistentVolumeClaimSpec{},
 				Status: corev1api.PersistentVolumeClaimStatus{
 					Phase: corev1api.ClaimBound,
 				},
 			},
-			want: nil,
+			want:           nil,
+			wantVolumeName: "",
+		},
+		{
+			name: "bound PVC with volume name and matching PVB resets volume name and does not return additional items",
+			itemFromBackup: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pvc-1",
+					Namespace: "ns-1",
+					UID:       "uid-1",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "bound-pv",
+					DataSource: &corev1api.TypedLocalObjectReference{
+						Name: "some-ds",
+					},
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimBound,
+				},
+			},
+			pvbs: []runtime.Object{
+				builder.ForPodVolumeBackup("ns-1", "pvb-1").
+					ObjectMeta(builder.WithLabels(
+						velerov1api.BackupNameLabel, "backup-1",
+						velerov1api.PVCUIDLabel, "uid-1",
+					)).Result(),
+			},
+			want:           nil,
+			wantVolumeName: "",
 		},
 	}
 
@@ -181,22 +226,31 @@ func TestAddPVFromPVCActionExecute(t *testing.T) {
 			// item should have no status
 			delete(itemData, "status")
 
-			clientset := fake.NewSimpleClientset()
+			crClient := velerotest.NewFakeControllerRuntimeClient(t, test.pvbs...)
 			action := NewPVCAction(
 				velerotest.NewLogger(),
-				clientset.CoreV1().ConfigMaps("velero"),
-				clientset.CoreV1().Nodes(),
+				crClient,
 			)
 
 			input := &velero.RestoreItemActionExecuteInput{
 				Item:           &unstructured.Unstructured{Object: itemData},
 				ItemFromBackup: &unstructured.Unstructured{Object: itemFromBackupData},
+				Restore:        builder.ForRestore("ns-1", "restore-1").Backup("backup-1").Result(),
 			}
 
 			res, err := action.Execute(input)
 			require.NoError(t, err)
 
 			assert.Equal(t, test.want, res.AdditionalItems)
+
+			var updatedPVC corev1api.PersistentVolumeClaim
+			err = runtime.DefaultUnstructuredConverter.FromUnstructured(res.UpdatedItem.UnstructuredContent(), &updatedPVC)
+			require.NoError(t, err)
+			assert.Equal(t, test.wantVolumeName, updatedPVC.Spec.VolumeName)
+			if test.wantVolumeName == "" && len(test.pvbs) > 0 {
+				assert.Nil(t, updatedPVC.Spec.DataSource)
+				assert.Nil(t, updatedPVC.Spec.DataSourceRef)
+			}
 		})
 	}
 }
