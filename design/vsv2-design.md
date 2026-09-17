@@ -1,7 +1,7 @@
 # Design for VolumeSnapshotter v2 API
 
 ## Abstract
-This design includes the changes to the VolumeSnapshotter api design as required by the [Item Action Progress Monitoring](general-progress-monitoring.md) feature.
+This design includes the changes to the VolumeSnapshotter api design as required by the [Item Action Progress Monitoring](Implemented/general-progress-monitoring.md) feature.
 The VolumeSnapshotter v2 interface will have two new methods.
 If there are any additional VolumeSnapshotter API changes that are needed in the same Velero release cycle as this change, those can be added here as well.
 
@@ -18,7 +18,7 @@ This will allow long-running plugin actions to continue in the background while 
 
 
 ## High-Level Design
-As per the [Plugin Versioning](plugin-versioning.md) design, a new VolumeSnapshotterv2 plugin `.proto` file will be created to define the GRPC interface.
+As per the [Plugin Versioning](Implemented/plugin-versioning.md) design, a new VolumeSnapshotterv2 plugin `.proto` file will be created to define the GRPC interface.
 v2 go files will also be created in `plugin/clientmgmt/volumesnapshotter` and `plugin/framework/volumesnapshotter`, and a new PluginKind will be created.
 The velero Backup process will be modified to reference v2 plugins instead of v1 plugins.
 An adapter will be created so that any existing VolumeSnapshotter v1 plugin can be executed as a v2 plugin when executing a backup.
@@ -74,7 +74,7 @@ message OperationProgress {
 ```
 
 A new PluginKind, `VolumeSnapshotterV2`, will be created, and the backup process will be modified to use this plugin kind.
-See [Plugin Versioning](plugin-versioning.md) for more details on implementation plans, including v1 adapters, etc.
+See [Plugin Versioning](Implemented/plugin-versioning.md) for more details on implementation plans, including v1 adapters, etc.
 
 
 ## Compatibility
