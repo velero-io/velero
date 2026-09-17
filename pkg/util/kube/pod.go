@@ -54,7 +54,7 @@ type PodResources struct {
 func IsPodRunning(pod *corev1api.Pod) error {
 	return isPodScheduledInStatus(pod, func(pod *corev1api.Pod) error {
 		if pod.Status.Phase != corev1api.PodRunning {
-			return errors.New("pod is not running")
+			return errors.Errorf("pod is not running. phase: %s, reason: %s, message: %s", pod.Status.Phase, pod.Status.Reason, pod.Status.Message)
 		}
 
 		return nil
@@ -66,7 +66,7 @@ func IsPodRunning(pod *corev1api.Pod) error {
 func IsPodScheduled(pod *corev1api.Pod) error {
 	return isPodScheduledInStatus(pod, func(pod *corev1api.Pod) error {
 		if pod.Status.Phase != corev1api.PodRunning && pod.Status.Phase != corev1api.PodPending {
-			return errors.New("pod is not running or pending")
+			return errors.Errorf("pod is not running or pending. phase: %s, reason: %s, message: %s", pod.Status.Phase, pod.Status.Reason, pod.Status.Message)
 		}
 
 		return nil
