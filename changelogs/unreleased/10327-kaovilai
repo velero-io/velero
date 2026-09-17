@@ -1,0 +1,1 @@
+Detect data path pod deletion via informer DeleteFunc, so a force-deleted or node-controller-removed data path pod fails fast with a clear log instead of stalling until timeout.
