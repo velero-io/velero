@@ -59,6 +59,16 @@ You can update the secret with your own password encoded as base64 prior to the 
 data:
   repository-password: <custom-password>
 ```
+
+You can also define `BackupStorageLocation` specific repository password by setting `repositoryPasswordSecretRef` in its `spec` section pointing to a secret in the same namespace, like this:
+
+```yaml
+spec:
+  repositoryPasswordSecretRef:
+    name: my-bsl-secret
+    key: my-repository-password
+```
+
 Backup repository is created during the first execution of backup targeting to it after installing Velero with node agent. If you update the secret password after the first backup which created the backup repository, then Velero will not be able to connect with the older backups.  
 
 ## Install Velero with CSI support on source cluster
@@ -428,5 +438,3 @@ Sometimes, `RestorePVC` needs to be configured to increase the performance of re
 [20]: node-agent-prepare-queue-length.md
 [21]: data-movement-cache-volume.md
 [22]: https://tip.golang.org/doc/go1.25#container-aware-gomaxprocs:~:text=Runtime%C2%B6-,Container%2Daware%20GOMAXPROCS,-%C2%B6
-
-

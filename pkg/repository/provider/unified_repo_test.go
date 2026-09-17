@@ -33,6 +33,7 @@ import (
 	velerocredentials "github.com/vmware-tanzu/velero/internal/credentials"
 	credmock "github.com/vmware-tanzu/velero/internal/credentials/mocks"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 	reposervicenmocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
@@ -485,6 +486,8 @@ func TestGetRepoPassword(t *testing.T) {
 		credStoreReturn string
 		credStoreError  error
 		cached          string
+		repoParam       any
+		expectSelector  *corev1api.SecretKeySelector
 		expected        string
 		expectedErr     string
 	}{
@@ -504,13 +507,33 @@ func TestGetRepoPassword(t *testing.T) {
 			credStoreReturn: " fake-passwor d  ",
 			expected:        "fake-passwor d",
 		},
+		{
+			name:            "use per-BSL repository password secret",
+			getter:          new(credmock.SecretStore),
+			credStoreReturn: "per-bsl-pass",
+			repoParam: RepoParam{
+				BackupLocation: &velerov1api.BackupStorageLocation{
+					Spec: velerov1api.BackupStorageLocationSpec{
+						RepositoryPasswordSecretRef: builder.ForSecretKeySelector("my-bsl-secret", "repository-password").Result(),
+					},
+				},
+			},
+			expectSelector: builder.ForSecretKeySelector("my-bsl-secret", "repository-password").Result(),
+			expected:       "per-bsl-pass",
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var secretStore velerocredentials.SecretStore
 			if tc.getter != nil {
-				tc.getter.On("Get", mock.Anything, mock.Anything).Return(tc.credStoreReturn, tc.credStoreError)
+				if tc.expectSelector != nil {
+					tc.getter.On("Get", mock.MatchedBy(func(sel *corev1api.SecretKeySelector) bool {
+						return sel.Name == tc.expectSelector.Name && sel.Key == tc.expectSelector.Key
+					})).Return(tc.credStoreReturn, tc.credStoreError)
+				} else {
+					tc.getter.On("Get", mock.Anything).Return(tc.credStoreReturn, tc.credStoreError)
+				}
 				secretStore = tc.getter
 			}
 
@@ -520,7 +543,12 @@ func TestGetRepoPassword(t *testing.T) {
 				},
 			}
 
-			password, err := getRepoPassword(urp.credentialGetter.FromSecret)
+			param := RepoParam{}
+			if tc.repoParam != nil {
+				param = tc.repoParam.(RepoParam)
+			}
+
+			password, err := getRepoPassword(urp.credentialGetter.FromSecret, param)
 
 			require.Equal(t, tc.expected, password)
 
