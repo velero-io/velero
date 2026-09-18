@@ -526,6 +526,44 @@ func TestDefaultBackupTTL(t *testing.T) {
 	}
 }
 
+func TestPrepareBackupRequest_NegativeTTL(t *testing.T) {
+	defaultBackupTTL := metav1.Duration{Duration: 24 * 30 * time.Hour}
+
+	now, err := time.Parse(time.RFC1123Z, time.RFC1123Z)
+	require.NoError(t, err)
+	now = now.Local()
+
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		logger:           logger,
+		discoveryHelper:  discoveryHelper,
+		kbClient:         velerotest.NewFakeControllerRuntimeClient(t),
+		defaultBackupTTL: defaultBackupTTL.Duration,
+		clock:            testclocks.NewFakeClock(now),
+		formatFlag:       formatFlag,
+	}
+
+	res := c.prepareBackupRequest(ctx, defaultBackup().TTL(-time.Hour).Result(), logger)
+	defer res.WorkerPool.Stop()
+
+	require.NotNil(t, res)
+	assert.Contains(t, res.Status.ValidationErrors, "invalid TTL -1h0m0s: TTL must be non-negative")
+
+	// The negative TTL must not be replaced by the server default: only a zero TTL
+	// means "use the default".
+	assert.Equal(t, metav1.Duration{Duration: -time.Hour}, res.Spec.TTL)
+
+	// No expiration is set, otherwise the garbage collector, which only looks at
+	// Status.Expiration, would delete the backup that just failed validation.
+	assert.Nil(t, res.Status.Expiration)
+}
+
 func TestPrepareBackupRequest_SetBackupType(t *testing.T) {
 	now, err := time.Parse(time.RFC1123Z, time.RFC1123Z)
 	require.NoError(t, err)
