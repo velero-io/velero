@@ -17,6 +17,7 @@ limitations under the License.
 package credentials
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ import (
 type FileStore interface {
 	// Path returns a path on disk where the secret key defined by
 	// the given selector is serialized.
-	Path(selector *corev1api.SecretKeySelector) (string, error)
+	Path(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error)
 }
 
 type namespacedFileStore struct {
@@ -63,8 +64,8 @@ func NewNamespacedFileStore(client kbclient.Client, namespace string, fsRoot str
 
 // Path returns a path on disk where the secret key defined by
 // the given selector is serialized.
-func (n *namespacedFileStore) Path(selector *corev1api.SecretKeySelector) (string, error) {
-	creds, err := kube.GetSecretKey(n.client, n.namespace, selector)
+func (n *namespacedFileStore) Path(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error) {
+	creds, err := kube.GetSecretKey(ctx, n.client, n.namespace, selector)
 	if err != nil {
 		return "", errors.Wrap(err, "unable to get key for secret")
 	}

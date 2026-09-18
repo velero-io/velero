@@ -17,6 +17,7 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -146,7 +147,7 @@ func TestEnsureNamespaceExistsAndIsReady(t *testing.T) {
 				resourceDeletionStatusTracker.Add(namespace.Kind, "test", "test")
 			}
 
-			result, nsCreated, _ := EnsureNamespaceExistsAndIsReady(namespace, nsClient, timeout, resourceDeletionStatusTracker)
+			result, nsCreated, _ := EnsureNamespaceExistsAndIsReady(context.Background(), namespace, nsClient, timeout, resourceDeletionStatusTracker)
 
 			assert.Equal(t, test.expectedResult, result)
 			assert.Equal(t, test.expectedCreatedResult, nsCreated)
@@ -178,13 +179,45 @@ func TestEnsureNamespaceExistsAndIsReadyTerminatingTrackerKindMismatch(t *testin
 	tracker := NewResourceDeletionStatusTracker()
 	tracker.Add(namespace.Kind, namespace.Name, namespace.Name)
 
-	result, nsCreated, err := EnsureNamespaceExistsAndIsReady(namespace, nsClient, time.Millisecond, tracker)
+	result, nsCreated, err := EnsureNamespaceExistsAndIsReady(context.Background(), namespace, nsClient, time.Millisecond, tracker)
 
 	assert.False(t, result)
 	assert.False(t, nsCreated)
 	// Skip-path must fire, not the full terminating-resource-timeout wait.
 	require.ErrorContains(t, err, "skipping polling for terminating namespace")
 	assert.NotContains(t, err.Error(), "timed out waiting for terminating namespace")
+}
+
+func TestEnsureNamespaceExistsAndIsReadyCancellation(t *testing.T) {
+	namespace := &corev1api.Namespace{
+		TypeMeta: metav1.TypeMeta{Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+	}
+
+	clusterNS := &corev1api.Namespace{
+		TypeMeta: metav1.TypeMeta{Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Status:     corev1api.NamespaceStatus{Phase: corev1api.NamespaceTerminating},
+	}
+
+	nsClient := &velerotest.FakeNamespaceClient{}
+	defer nsClient.AssertExpectations(t)
+	// Return the terminating namespace so that the polling condition triggers.
+	nsClient.On("Get", "test", metav1.GetOptions{}).Return(clusterNS, nil)
+
+	tracker := NewResourceDeletionStatusTracker()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel the context immediately
+
+	result, nsCreated, err := EnsureNamespaceExistsAndIsReady(ctx, namespace, nsClient, time.Millisecond*100, tracker)
+
+	assert.False(t, result)
+	assert.False(t, nsCreated)
+	require.ErrorIs(t, err, context.Canceled)
+
+	// Verify the tracker is NOT modified
+	assert.False(t, tracker.Contains(namespace.Kind, namespace.Name, namespace.Name))
 }
 
 // TestGetVolumeDirectorySuccess tests that the GetVolumeDirectory function
