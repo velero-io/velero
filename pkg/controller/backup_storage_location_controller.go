@@ -147,7 +147,6 @@ func sanitizeStorageError(err error) string {
 
 // BackupStorageLocationReconciler reconciles a BackupStorageLocation object
 type backupStorageLocationReconciler struct {
-	ctx                       context.Context
 	client                    client.Client
 	defaultBackupLocationInfo storage.DefaultBackupLocationInfo
 	// use variables to refer to these functions so they can be
@@ -160,7 +159,6 @@ type backupStorageLocationReconciler struct {
 
 // NewBackupStorageLocationReconciler initialize and return a backupStorageLocationReconciler struct
 func NewBackupStorageLocationReconciler(
-	ctx context.Context,
 	client client.Client,
 	defaultBackupLocationInfo storage.DefaultBackupLocationInfo,
 	newPluginManager func(logrus.FieldLogger) clientmgmt.Manager,
@@ -168,7 +166,6 @@ func NewBackupStorageLocationReconciler(
 	metrics *metrics.ServerMetrics,
 	log logrus.FieldLogger) *backupStorageLocationReconciler {
 	return &backupStorageLocationReconciler{
-		ctx:                       ctx,
 		client:                    client,
 		defaultBackupLocationInfo: defaultBackupLocationInfo,
 		newPluginManager:          newPluginManager,
@@ -188,7 +185,7 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 	log := r.log.WithField("controller", constant.ControllerBackupStorageLocation).WithField(constant.ControllerBackupStorageLocation, req.NamespacedName.String())
 	log.Debug("Validating availability of BackupStorageLocation")
 
-	locationList, err := storage.ListBackupStorageLocations(r.ctx, r.client, req.Namespace)
+	locationList, err := storage.ListBackupStorageLocations(ctx, r.client, req.Namespace)
 	if err != nil {
 		log.WithError(err).Error("No BackupStorageLocations found, at least one is required")
 		return ctrl.Result{}, nil
@@ -210,7 +207,7 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 	}
 
 	// decide the default BSL
-	defaultFound, err := r.ensureSingleDefaultBSL(locationList)
+	defaultFound, err := r.ensureSingleDefaultBSL(ctx, locationList)
 	if err != nil {
 		log.WithError(err).Error("failed to ensure single default bsl")
 		return ctrl.Result{}, nil
@@ -232,7 +229,7 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 				location.Status.Phase = velerov1api.BackupStorageLocationPhaseAvailable
 				location.Status.Message = ""
 			}
-			if err := r.client.Patch(r.ctx, &location, client.MergeFrom(original)); err != nil {
+			if err := r.client.Patch(ctx, &location, client.MergeFrom(original)); err != nil {
 				log.WithError(err).Error("Error updating BackupStorageLocation phase")
 			}
 		}()
@@ -328,7 +325,7 @@ func (r *backupStorageLocationReconciler) SetupWithManager(mgr ctrl.Manager) err
 // the default BSL priority is as follows:
 // 1. follow the user's setting (the most recent validation BSL is the default BSL)
 // 2. follow the server's setting ("velero server --default-backup-storage-location")
-func (r *backupStorageLocationReconciler) ensureSingleDefaultBSL(locationList velerov1api.BackupStorageLocationList) (bool, error) {
+func (r *backupStorageLocationReconciler) ensureSingleDefaultBSL(ctx context.Context, locationList velerov1api.BackupStorageLocationList) (bool, error) {
 	// get all default BSLs
 	var defaultBSLs []*velerov1api.BackupStorageLocation
 	var defaultFound bool
@@ -360,7 +357,7 @@ func (r *backupStorageLocationReconciler) ensureSingleDefaultBSL(locationList ve
 		for _, bsl := range defaultBSLs {
 			if bsl.Name != mostRecentCreatedBSL.Name {
 				bsl.Spec.Default = false
-				if err := r.client.Update(r.ctx, bsl); err != nil {
+				if err := r.client.Update(ctx, bsl); err != nil {
 					return defaultFound, errors.Wrapf(err, "failed to unset default backup storage location %q", bsl.Name)
 				}
 				r.log.Debugf("update default backup storage location %q to false", bsl.Name)
