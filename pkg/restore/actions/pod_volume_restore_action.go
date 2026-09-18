@@ -50,6 +50,7 @@ const (
 	defaultMemRequestLimit = "128Mi"
 	defaultCommand         = "/velero-restore-helper"
 	restoreHelperUID       = 1000
+	veleroDeploymentName   = "velero"
 )
 
 type PodVolumeRestoreAction struct {
@@ -61,10 +62,12 @@ type PodVolumeRestoreAction struct {
 
 func NewPodVolumeRestoreAction(logger logrus.FieldLogger, client corev1client.ConfigMapInterface, crClient ctrlclient.Client, namespace string) (*PodVolumeRestoreAction, error) {
 	deployment := &appsv1api.Deployment{}
-	if err := crClient.Get(context.TODO(), types.NamespacedName{Name: "velero", Namespace: namespace}, deployment); err != nil {
-		return nil, err
+	image := ""
+	if err := crClient.Get(context.TODO(), types.NamespacedName{Name: veleroDeploymentName, Namespace: namespace}, deployment); err != nil {
+		logger.WithError(err).Warnf("Could not find deployment %q in namespace %q", veleroDeploymentName, namespace)
+	} else {
+		image = veleroutil.GetVeleroServerImage(deployment)
 	}
-	image := veleroutil.GetVeleroServerImage(deployment)
 	return &PodVolumeRestoreAction{
 		logger:      logger,
 		client:      client,
@@ -147,6 +150,9 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 	}
 
 	image := getImage(log, config, a.veleroImage)
+	if image == "" {
+		return nil, errors.New("could not determine image for restore init container")
+	}
 	log.Infof("Using image %q", image)
 
 	cpuRequest, memRequest := getResourceRequests(log, config)
