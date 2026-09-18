@@ -1,0 +1,1 @@
+Fix excluded namespaces still being tracked and backed up when their labels match the backup's LabelSelector or OrLabelSelector. This intentionally changes the union behavior introduced in #7697: an explicit namespace exclusion now always wins over a LabelSelector/OrLabelSelector match.
