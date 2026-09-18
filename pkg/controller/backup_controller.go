@@ -396,7 +396,7 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *velerov1api.Backup, logger logrus.FieldLogger) *pkgbackup.Request {
 	request := &pkgbackup.Request{
 		Backup:                        backup.DeepCopy(), // don't modify items in the cache
-		SkippedPVTracker:              pkgbackup.NewSkipPVTracker(),
+		SkippedVolumeTracker:          pkgbackup.NewSkipVolumeTracker(),
 		BackedUpItems:                 pkgbackup.NewBackedUpItemsMap(),
 		MustIncludeAdditionalItemPVCs: pkgbackup.NewBackedUpItemsMap(),
 		WorkerPool:                    pkgbackup.StartItemBlockWorkerPool(ctx, b.itemBlockWorkerCount, logger),

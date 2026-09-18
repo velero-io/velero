@@ -44,16 +44,34 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
 )
 
-func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
+func TestGenerateVolumeInfoForSkippedVolume(t *testing.T) {
 	tests := []struct {
 		name                string
-		skippedPVName       string
+		skippedVolumeName   string
+		skippedPVCName      string
+		skippedPVCNamespace string
 		pvMap               map[string]pvcPvInfo
 		expectedVolumeInfos []*BackupVolumeInfo
 	}{
 		{
-			name:          "Cannot find info for PV",
-			skippedPVName: "testPV",
+			name:                "Skipped volume with empty PV name but with PVC info",
+			skippedVolumeName:   "",
+			skippedPVCName:      "testPVC",
+			skippedPVCNamespace: "velero",
+			pvMap:               map[string]pvcPvInfo{},
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVName:        "",
+					PVCName:       "testPVC",
+					PVCNamespace:  "velero",
+					Skipped:       true,
+					SkippedReason: "CSI: skipped for PodVolumeBackup",
+				},
+			},
+		},
+		{
+			name:              "Cannot find info for PV",
+			skippedVolumeName: "testPV",
 			pvMap: map[string]pvcPvInfo{
 				"velero/testPVC": {
 					PVCName:      "testPVC",
@@ -69,11 +87,17 @@ func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
 					},
 				},
 			},
-			expectedVolumeInfos: []*BackupVolumeInfo{},
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVName:        "testPV",
+					Skipped:       true,
+					SkippedReason: "CSI: skipped for PodVolumeBackup",
+				},
+			},
 		},
 		{
-			name:          "Normal Skipped PV info",
-			skippedPVName: "testPV",
+			name:              "Normal Skipped Volume info",
+			skippedVolumeName: "testPV",
 			pvMap: map[string]pvcPvInfo{
 				"velero/testPVC": {
 					PVCName:      "testPVC",
@@ -125,9 +149,14 @@ func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
 			volumesInfo := BackupVolumesInformation{}
 			volumesInfo.Init()
 
-			if tc.skippedPVName != "" {
-				volumesInfo.SkippedPVs = map[string]string{
-					tc.skippedPVName: "CSI: skipped for PodVolumeBackup",
+			if tc.skippedVolumeName != "" || tc.skippedPVCName != "" {
+				volumesInfo.SkippedVolumes = []SkippedVolume{
+					{
+						PVName:       tc.skippedVolumeName,
+						PVCName:      tc.skippedPVCName,
+						PVCNamespace: tc.skippedPVCNamespace,
+						Reasons:      "CSI: skipped for PodVolumeBackup",
+					},
 				}
 			}
 
@@ -140,7 +169,7 @@ func TestGenerateVolumeInfoForSkippedPV(t *testing.T) {
 			}
 			volumesInfo.logger = logging.DefaultLogger(logrus.DebugLevel, logging.FormatJSON)
 
-			volumesInfo.generateVolumeInfoForSkippedPV()
+			volumesInfo.generateVolumeInfoForSkippedVolume()
 			require.Equal(t, tc.expectedVolumeInfos, volumesInfo.volumeInfos)
 		})
 	}

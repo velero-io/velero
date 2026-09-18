@@ -160,7 +160,7 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	backupRequest := &pkgbackup.Request{
 		Backup:                        backup,
 		StorageLocation:               location,
-		SkippedPVTracker:              pkgbackup.NewSkipPVTracker(),
+		SkippedVolumeTracker:          pkgbackup.NewSkipVolumeTracker(),
 		BackedUpItems:                 pkgbackup.NewBackedUpItemsMap(),
 		MustIncludeAdditionalItemPVCs: pkgbackup.NewBackedUpItemsMap(),
 	}

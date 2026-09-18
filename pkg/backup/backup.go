@@ -746,10 +746,10 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		log.WithError(errors.WithStack((err))).Warn("Got error trying to update backup's status.progress and hook status")
 	}
 
-	if skippedPVSummary, err := json.Marshal(backupRequest.SkippedPVTracker.Summary()); err != nil {
-		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped PV summary.")
+	if skippedVolumeSummary, err := json.Marshal(backupRequest.SkippedVolumeTracker.Summary()); err != nil {
+		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped volume summary.")
 	} else {
-		log.Infof("Summary for skipped PVs: %s", skippedPVSummary)
+		log.Infof("Summary for skipped volumes: %s", skippedVolumeSummary)
 	}
 
 	backupRequest.Status.Progress = &velerov1api.BackupProgress{TotalItems: backedUpItems, ItemsBackedUp: backedUpItems}
