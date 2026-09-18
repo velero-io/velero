@@ -62,3 +62,11 @@ func TestContains(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitAndTrimCSV(t *testing.T) {
+	assert.Equal(t, []string{"EnableCSI", "EnableAPIGroupVersions"}, SplitAndTrimCSV("EnableCSI, EnableAPIGroupVersions, "))
+	assert.Equal(t, []string{"EnableCSI"}, SplitAndTrimCSV("EnableCSI"))
+	assert.Empty(t, SplitAndTrimCSV(""))
+	assert.Empty(t, SplitAndTrimCSV(" , , "))
+	assert.Equal(t, []string{"ns1/pod1", "ns1/pod2"}, SplitAndTrimCSV("ns1/pod1, ns1/pod2"))
+}
