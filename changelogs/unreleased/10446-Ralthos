@@ -1,0 +1,1 @@
+Add a LastSkipped printer column to Schedule so kubectl shows when a scheduled backup was skipped
