@@ -612,6 +612,12 @@ var _ = Describe(
 )
 
 var _ = Describe(
+	"Backups should be restricted but restores should be allowed when a BackupStorageLocation is ReadOnly",
+	Label("BSL", "ReadOnly"),
+	BslReadOnlyTest,
+)
+
+var _ = Describe(
 	"Migrate resources between clusters by FileSystem backup",
 	Label("Migration", "FSB"),
 	MigrationWithFS,
