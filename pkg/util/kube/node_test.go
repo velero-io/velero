@@ -17,10 +17,15 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -257,4 +262,46 @@ func TestHasNodeWithOS(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeCoreV1 struct {
+	corev1client.CoreV1Interface
+	nodeClient corev1client.NodeInterface
+}
+
+func (f *fakeCoreV1) Nodes() corev1client.NodeInterface {
+	return f.nodeClient
+}
+
+type fakeNodeClient struct {
+	corev1client.NodeInterface
+	getFunc func(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error)
+}
+
+func (f *fakeNodeClient) Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error) {
+	if f.getFunc != nil {
+		return f.getFunc(ctx, name, opts)
+	}
+	return f.NodeInterface.Get(ctx, name, opts)
+}
+
+func TestGetNodeOSWithContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var passedCtx context.Context
+	nodeClient := &fakeNodeClient{
+		getFunc: func(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error) {
+			passedCtx = ctx
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result(), nil
+		},
+	}
+	fakeCore := &fakeCoreV1{nodeClient: nodeClient}
+
+	_, err := GetNodeOS(ctx, "fake-node", fakeCore)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, passedCtx)
 }

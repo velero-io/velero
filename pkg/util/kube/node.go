@@ -92,7 +92,7 @@ func withOSNode(ctx context.Context, client client.Client, osType string, log lo
 }
 
 func GetNodeOS(ctx context.Context, nodeName string, nodeClient corev1client.CoreV1Interface) (string, error) {
-	node, err := nodeClient.Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	node, err := nodeClient.Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return "", errors.Wrapf(err, "error getting node %s", nodeName)
 	}
