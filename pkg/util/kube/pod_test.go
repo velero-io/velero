@@ -496,6 +496,45 @@ func TestIsPodUnrecoverable(t *testing.T) {
 	}
 }
 
+func TestGetPodSchedulingFailureMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1api.Pod
+		want string
+	}{
+		{
+			name: "nil pod",
+			pod:  nil,
+			want: "",
+		},
+		{
+			name: "no PodScheduled condition",
+			pod:  &corev1api.Pod{Status: corev1api.PodStatus{Phase: corev1api.PodPending}},
+			want: "",
+		},
+		{
+			name: "PodScheduled condition true",
+			pod: &corev1api.Pod{Status: corev1api.PodStatus{Conditions: []corev1api.PodCondition{
+				{Type: corev1api.PodScheduled, Status: corev1api.ConditionTrue},
+			}}},
+			want: "",
+		},
+		{
+			name: "PodScheduled condition false",
+			pod: &corev1api.Pod{Status: corev1api.PodStatus{Conditions: []corev1api.PodCondition{
+				{Type: corev1api.PodScheduled, Status: corev1api.ConditionFalse, Message: "0/6 nodes are available: 3 node(s) didn't match Pod's node affinity/selector"},
+			}}},
+			want: "0/6 nodes are available: 3 node(s) didn't match Pod's node affinity/selector",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, GetPodSchedulingFailureMessage(test.pod))
+		})
+	}
+}
+
 func TestGetPodTerminateMessage(t *testing.T) {
 	tests := []struct {
 		name    string
