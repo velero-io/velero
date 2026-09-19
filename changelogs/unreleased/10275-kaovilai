@@ -1,0 +1,1 @@
+Add includedNamespacesByLabel/excludedNamespacesByLabel and labelSelectorLogic to ResourcePolicy's includeExcludePolicy, allowing namespace selection by Kubernetes label selector without enumerating names in BackupSpec.
