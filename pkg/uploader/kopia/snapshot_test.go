@@ -697,12 +697,12 @@ func TestRestore(t *testing.T) {
 			name:                "manifest is not a snapshot",
 			invalidManifestType: true,
 			dest:                "/path/to/destination",
-			expectedError:       errors.New("Unable to load snapshot"),
+			expectedError:       errors.New("unable to load snapshot"),
 		},
 		{
 			name:          "Failed to get filesystem entry",
 			snapshotID:    "snapshot-123",
-			expectedError: errors.New("Unable to get filesystem entry"),
+			expectedError: errors.New("unable to get filesystem entry"),
 		},
 		{
 			name: "Failed to restore with filesystem entry",
@@ -710,10 +710,10 @@ func TestRestore(t *testing.T) {
 				return snapshotfs.EntryFromDirEntry(rep, &snapshot.DirEntry{Type: snapshot.EntryTypeFile}), nil
 			},
 			restoreEntryFunc: func(ctx context.Context, rep repo.Repository, output restore.Output, rootEntry fs.Entry, options restore.Options) (restore.Stats, error) {
-				return restore.Stats{}, errors.New("Unable to get filesystem entry")
+				return restore.Stats{}, errors.New("unable to get filesystem entry")
 			},
 			snapshotID:    "snapshot-123",
-			expectedError: errors.New("Unable to get filesystem entry"),
+			expectedError: errors.New("unable to get filesystem entry"),
 		},
 		{
 			name: "Expect successful",
