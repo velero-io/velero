@@ -1,7 +1,7 @@
 # Plugin Progress Monitoring
 
 This is intended as a replacement for the previously-approved Upload Progress Monitoring design
-([Upload Progress Monitoring](upload-progress.md)) in order to expand the supported use cases beyond
+([Upload Progress Monitoring](../upload-progress.md)) in order to expand the supported use cases beyond
 snapshot uploads to include what was previously called Async Backup/Restore Item Actions. This
 updated design should handle the combined set of use cases for those previously separate designs.
 
