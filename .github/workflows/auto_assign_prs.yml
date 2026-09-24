@@ -14,6 +14,7 @@ permissions:
 jobs:
   # Automatically assigns reviewers and owner
   add-reviews:
+    if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
       - name: Set the author of a PR as the assignee

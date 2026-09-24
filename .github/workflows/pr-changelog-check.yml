@@ -7,6 +7,7 @@ on:
 jobs:
 
   build:
+    if: github.repository == 'velero-io/velero'
     name: Run Changelog Check
     runs-on: ubuntu-latest
     steps:
