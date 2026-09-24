@@ -544,6 +544,10 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("error getting namespace list: %v", err))
 	}
 
+	if len(request.Spec.ExcludedNamespaces) > 0 {
+		request.Spec.ExcludedNamespaces = sets.NewString(request.Spec.ExcludedNamespaces...).List()
+	}
+
 	// validate whether Included/Excluded resources and IncludedClusterResource are mixed with
 	// Included/Excluded cluster-scoped/namespace-scoped resources.
 	if oldAndNewFilterParametersUsedTogether(request.Spec) {

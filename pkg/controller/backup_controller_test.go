@@ -2901,3 +2901,120 @@ func TestPrepareBackupRequest_FilterPoliciesWithNewFilters(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareBackupRequest_DeduplicateExcludedNamespaces(t *testing.T) {
+	tests := []struct {
+		name              string
+		specExcluded      []string
+		clusterNamespaces []*corev1api.Namespace
+		expectedExcluded  []string
+	}{
+		{
+			name:         "duplicates in spec.excludedNamespaces are de-duped",
+			specExcluded: []string{"ns-1", "ns-2", "ns-1", "ns-2", "ns-3"},
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-4",
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2", "ns-3"},
+		},
+		{
+			name:         "labeled namespaces overlapping with spec.excludedNamespaces are de-duped",
+			specExcluded: []string{"ns-1", "ns-2"},
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-2",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-3",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-4",
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2", "ns-3"},
+		},
+		{
+			name:         "empty spec.excludedNamespaces with labeled namespaces",
+			specExcluded: nil,
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-1",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-2",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2"},
+		},
+		{
+			name:              "empty spec.excludedNamespaces with no labeled namespaces remains empty",
+			specExcluded:      nil,
+			clusterNamespaces: nil,
+			expectedExcluded:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatFlag := logging.FormatText
+			logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+			backupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "loc-1").
+				Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+
+			var objects []runtime.Object
+			objects = append(objects, backupLocation)
+			for _, ns := range tt.clusterNamespaces {
+				objects = append(objects, ns)
+			}
+
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objects...)
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+
+			c := &backupReconciler{
+				logger:          logger,
+				discoveryHelper: discoveryHelper,
+				kbClient:        fakeClient,
+				clock:           &clock.RealClock{},
+				formatFlag:      formatFlag,
+			}
+
+			backup := defaultBackup().StorageLocation("loc-1").Result()
+			backup.Spec.ExcludedNamespaces = tt.specExcluded
+
+			res := c.prepareBackupRequest(t.Context(), backup, logger)
+			defer res.WorkerPool.Stop()
+
+			assert.Empty(t, res.Status.ValidationErrors)
+			assert.Equal(t, tt.expectedExcluded, res.Spec.ExcludedNamespaces)
+		})
+	}
+}
