@@ -72,7 +72,7 @@ Description of the parameters:
 
   `s3Url`: Tencent Cloud COS-compatible S3 API access address,Note that instead of creating a COS bucket for public network access domain name, you must use a format of "https://cos.`region`.myqcloud.com" URL, for example, if the region is Guangzhou, the parameter value is "https://cos.ap-guangzhou.myqcloud.com.".
 
-There are other installation parameters that can be viewed using `velero install --help`, such as setting `--use-volume-snapshots-false`  to close the storage volume data snapshot backup if you do not want to back up the storage volume data.
+There are other installation parameters that can be viewed using `velero install --help`, such as setting `--use-volume-snapshots=false` to close the storage volume data snapshot backup if you do not want to back up the storage volume data.
 
 After executing the installation commands above, the installation process looks like this:
 
