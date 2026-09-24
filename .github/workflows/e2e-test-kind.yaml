@@ -156,6 +156,7 @@ jobs:
             \"k8s\":${k8s_json},\
             \"labels\":[\
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
+              \"CRDSchemaCheck\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\

@@ -1,0 +1,1 @@
+Add CRD schema validation during server startup, configurable via --crd-schema-check flag (warn/strict/skip)
