@@ -78,6 +78,7 @@ const (
 	defaultResourceTimeout         = 10 * time.Minute
 	defaultDataMoverPrepareTimeout = 30 * time.Minute
 	defaultDataPathConcurrentNum   = 1
+	defaultPrepareQueueLength      = 5
 )
 
 type nodeAgentServerConfig struct {
@@ -353,14 +354,7 @@ func (s *nodeAgentServer) run() {
 		}
 	}
 
-	if s.dataPathConfigs != nil && s.dataPathConfigs.LoadConcurrency != nil && s.dataPathConfigs.LoadConcurrency.PrepareQueueLength > 0 {
-		if counter, err := exposer.StartVgdpCounter(s.ctx, s.mgr, s.dataPathConfigs.LoadConcurrency.PrepareQueueLength); err != nil {
-			s.logger.WithError(err).Warnf("Failed to start VGDP counter, VDGP loads are not constrained")
-		} else {
-			s.vgdpCounter = counter
-			s.logger.Infof("VGDP loads are constrained with %d", s.dataPathConfigs.LoadConcurrency.PrepareQueueLength)
-		}
-	}
+	s.initVgdpCounter()
 
 	var cachePVCConfig *velerotypes.CachePVC
 	if s.dataPathConfigs != nil && s.dataPathConfigs.CachePVCConfig != nil {
@@ -727,4 +721,20 @@ func (s *nodeAgentServer) validateCachePVCConfig(config velerotypes.CachePVC) er
 	}
 
 	return nil
+}
+
+var startVgdpCounterFunc = exposer.StartVgdpCounter
+
+func (s *nodeAgentServer) initVgdpCounter() {
+	prepareQueueLength := defaultPrepareQueueLength
+	if s.dataPathConfigs != nil && s.dataPathConfigs.LoadConcurrency != nil && s.dataPathConfigs.LoadConcurrency.PrepareQueueLength > 0 {
+		prepareQueueLength = s.dataPathConfigs.LoadConcurrency.PrepareQueueLength
+	}
+
+	if counter, err := startVgdpCounterFunc(s.ctx, s.mgr, prepareQueueLength); err != nil {
+		s.logger.WithError(err).Warnf("Failed to start VGDP counter with length %d, VDGP loads are not constrained", prepareQueueLength)
+	} else {
+		s.vgdpCounter = counter
+		s.logger.Infof("VGDP loads are constrained with %d", prepareQueueLength)
+	}
 }

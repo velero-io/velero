@@ -30,8 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/vmware-tanzu/velero/pkg/exposer"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	testutil "github.com/vmware-tanzu/velero/pkg/test"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
@@ -526,6 +528,143 @@ func TestValidateCachePVCConfig(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.EqualError(t, err, test.expectedErr)
+			}
+		})
+	}
+}
+
+func Test_initVgdpCounter(t *testing.T) {
+	origStartVgdpCounterFunc := startVgdpCounterFunc
+	defer func() {
+		startVgdpCounterFunc = origStartVgdpCounterFunc
+	}()
+
+	mockCounter := &exposer.VgdpCounter{}
+
+	tests := []struct {
+		name                 string
+		dataPathConfigs      *velerotypes.NodeAgentConfigs
+		mockFunc             func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error)
+		expectQueueLength    int
+		expectVgdpCounterSet bool
+		expectLog            string
+	}{
+		{
+			name:            "default configs, startVgdpCounter succeeds",
+			dataPathConfigs: nil,
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return mockCounter, nil
+			},
+			expectQueueLength:    defaultPrepareQueueLength,
+			expectVgdpCounterSet: true,
+			expectLog:            fmt.Sprintf("VGDP loads are constrained with %d", defaultPrepareQueueLength),
+		},
+		{
+			name: "custom queue length, startVgdpCounter succeeds",
+			dataPathConfigs: &velerotypes.NodeAgentConfigs{
+				LoadConcurrency: &velerotypes.LoadConcurrency{
+					PrepareQueueLength: 10,
+				},
+			},
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return mockCounter, nil
+			},
+			expectQueueLength:    10,
+			expectVgdpCounterSet: true,
+			expectLog:            "VGDP loads are constrained with 10",
+		},
+		{
+			name: "LoadConcurrency is nil, uses default queue length",
+			dataPathConfigs: &velerotypes.NodeAgentConfigs{
+				LoadConcurrency: nil,
+			},
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return mockCounter, nil
+			},
+			expectQueueLength:    defaultPrepareQueueLength,
+			expectVgdpCounterSet: true,
+			expectLog:            fmt.Sprintf("VGDP loads are constrained with %d", defaultPrepareQueueLength),
+		},
+		{
+			name: "PrepareQueueLength is 0, uses default queue length",
+			dataPathConfigs: &velerotypes.NodeAgentConfigs{
+				LoadConcurrency: &velerotypes.LoadConcurrency{
+					PrepareQueueLength: 0,
+				},
+			},
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return mockCounter, nil
+			},
+			expectQueueLength:    defaultPrepareQueueLength,
+			expectVgdpCounterSet: true,
+			expectLog:            fmt.Sprintf("VGDP loads are constrained with %d", defaultPrepareQueueLength),
+		},
+		{
+			name: "PrepareQueueLength is negative, uses default queue length",
+			dataPathConfigs: &velerotypes.NodeAgentConfigs{
+				LoadConcurrency: &velerotypes.LoadConcurrency{
+					PrepareQueueLength: -1,
+				},
+			},
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return mockCounter, nil
+			},
+			expectQueueLength:    defaultPrepareQueueLength,
+			expectVgdpCounterSet: true,
+			expectLog:            fmt.Sprintf("VGDP loads are constrained with %d", defaultPrepareQueueLength),
+		},
+		{
+			name:            "startVgdpCounter fails with default queue length",
+			dataPathConfigs: nil,
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return nil, errors.New("fake-start-error")
+			},
+			expectQueueLength:    defaultPrepareQueueLength,
+			expectVgdpCounterSet: false,
+			expectLog:            fmt.Sprintf("Failed to start VGDP counter with length %d, VDGP loads are not constrained", defaultPrepareQueueLength),
+		},
+		{
+			name: "startVgdpCounter fails with custom queue length",
+			dataPathConfigs: &velerotypes.NodeAgentConfigs{
+				LoadConcurrency: &velerotypes.LoadConcurrency{
+					PrepareQueueLength: 8,
+				},
+			},
+			mockFunc: func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				return nil, errors.New("fake-start-error")
+			},
+			expectQueueLength:    8,
+			expectVgdpCounterSet: false,
+			expectLog:            "Failed to start VGDP counter with length 8, VDGP loads are not constrained",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var recordedQueueLength int
+			startVgdpCounterFunc = func(ctx context.Context, mgr manager.Manager, queueLength int) (*exposer.VgdpCounter, error) {
+				recordedQueueLength = queueLength
+				return test.mockFunc(ctx, mgr, queueLength)
+			}
+
+			logBuffer := ""
+			s := &nodeAgentServer{
+				ctx:             t.Context(),
+				dataPathConfigs: test.dataPathConfigs,
+				logger:          testutil.NewSingleLogger(&logBuffer),
+			}
+
+			s.initVgdpCounter()
+
+			assert.Equal(t, test.expectQueueLength, recordedQueueLength)
+			if test.expectVgdpCounterSet {
+				assert.Equal(t, mockCounter, s.vgdpCounter)
+			} else {
+				assert.Nil(t, s.vgdpCounter)
+			}
+
+			if test.expectLog != "" {
+				assert.Contains(t, logBuffer, test.expectLog)
 			}
 		})
 	}

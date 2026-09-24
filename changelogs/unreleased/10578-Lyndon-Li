@@ -1,0 +1,1 @@
+Fix issue #10575, enable VGDP soothing by default and set queue length as 5
