@@ -17,6 +17,10 @@ limitations under the License.
 package schedule
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +30,7 @@ import (
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
 )
 
 func TestNewDescribeCommandDescribesOnlyTheVeleroNamespace(t *testing.T) {
@@ -47,4 +52,116 @@ func TestNewDescribeCommandDescribesOnlyTheVeleroNamespace(t *testing.T) {
 
 	assert.Contains(t, out, "ours")
 	assert.NotContains(t, out, "theirs")
+}
+
+func TestNewDescribeCommandStructuredJSONOutput(t *testing.T) {
+	schedule := builder.ForSchedule(cmdtest.VeleroNameSpace, "schedule-json").CronSchedule("@weekly").Result()
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t, schedule)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"schedule-json", "-o", "json"})
+
+	out := captureStdout(t, func() {
+		require.NoError(t, c.Execute())
+	})
+
+	var data map[string]any
+	err := json.Unmarshal([]byte(out), &data)
+	require.NoError(t, err)
+
+	metadata, ok := data["metadata"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "schedule-json", metadata["name"])
+
+	spec, ok := data["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "@weekly", spec["schedule"])
+}
+
+func TestNewDescribeCommandStructuredJSONOutputMultipleSchedules(t *testing.T) {
+	schedule1 := builder.ForSchedule(cmdtest.VeleroNameSpace, "schedule-1").CronSchedule("@weekly").Result()
+	schedule2 := builder.ForSchedule(cmdtest.VeleroNameSpace, "schedule-2").CronSchedule("@daily").Result()
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t, schedule1, schedule2)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"schedule-1", "schedule-2", "-o", "json"})
+
+	if os.Getenv(cmdtest.CaptureFlag) == "1" {
+		c.Execute()
+		return
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestNewDescribeCommandStructuredJSONOutputMultipleSchedules")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=1", cmdtest.CaptureFlag))
+	_, stderr, err := veleroexec.RunCommand(cmd)
+	require.Error(t, err)
+	assert.Contains(t, stderr, "json output is not supported with more than one schedule")
+}
+
+func TestNewDescribeCommandInvalidOutputFormat(t *testing.T) {
+	f := &factorymocks.Factory{}
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"-o", "invalid"})
+
+	if os.Getenv(cmdtest.CaptureFlag) == "1" {
+		c.Execute()
+		return
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestNewDescribeCommandInvalidOutputFormat")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=1", cmdtest.CaptureFlag))
+	_, stderr, err := veleroexec.RunCommand(cmd)
+	require.Error(t, err)
+	assert.Contains(t, stderr, "invalid output format 'invalid'")
+}
+
+func TestNewDescribeCommandPlaintextMultipleSchedules(t *testing.T) {
+	schedule1 := builder.ForSchedule(cmdtest.VeleroNameSpace, "sched-1").CronSchedule("@daily").Result()
+	schedule2 := builder.ForSchedule(cmdtest.VeleroNameSpace, "sched-2").CronSchedule("@weekly").Result()
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t, schedule1, schedule2)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"sched-1", "sched-2"})
+
+	out := captureStdout(t, func() {
+		require.NoError(t, c.Execute())
+	})
+
+	assert.Contains(t, out, "sched-1")
+	assert.Contains(t, out, "sched-2")
+}
+
+func TestNewDescribeCommandWithLabelSelector(t *testing.T) {
+	schedule := builder.ForSchedule(cmdtest.VeleroNameSpace, "sched-labeled").
+		ObjectMeta(builder.WithLabels("app", "test")).
+		CronSchedule("@daily").
+		Result()
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t, schedule)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	c := NewDescribeCommand(f, "describe")
+	c.SetArgs([]string{"-l", "app=test"})
+
+	out := captureStdout(t, func() {
+		require.NoError(t, c.Execute())
+	})
+
+	assert.Contains(t, out, "sched-labeled")
 }
