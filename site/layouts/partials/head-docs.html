@@ -8,4 +8,5 @@
   {{ $styles := resources.Get "styles.scss" | toCSS $options | resources.Fingerprint }}
   <link rel="stylesheet" href="{{ $styles.RelPermalink }}" integrity="{{ $styles.Data.Integrity }}">
   {{/* TODO  {% seo %}*/}}
+  {{ partial "google-analytics.html" . }}
 </head>

@@ -7,6 +7,7 @@ frontmatter:
   date: [":filename", ":default"]
 params:
   author: Velero Authors
+  googleAnalytics: G-XX7MWLVX37
   logo: Velero.svg
   cncf_logo: cncf-color.svg
   hero:

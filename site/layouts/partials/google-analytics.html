@@ -1,0 +1,19 @@
+{{/*
+  Google Analytics 4 (gtag.js).
+
+  Renders only in production builds (Netlify runs `hugo` with the production
+  environment, so local `hugo server` and PR previews stay out of the data).
+  The Measurement ID is read from `params.googleAnalytics` in config.yaml.
+*/}}
+{{ if hugo.IsProduction }}
+{{ with .Site.Params.googleAnalytics }}
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ . }}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '{{ . }}');
+</script>
+{{ end }}
+{{ end }}
