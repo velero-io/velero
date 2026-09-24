@@ -160,7 +160,7 @@ func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.Re
 	}
 	source, err := filepath.Abs(sourcePath)
 	if err != nil {
-		return nil, false, errors.Wrapf(err, "Invalid source path '%s'", sourcePath)
+		return nil, false, errors.Wrapf(err, "invalid source path '%s'", sourcePath)
 	}
 
 	source = filepath.Clean(source)
@@ -296,7 +296,7 @@ func SnapshotSource(
 
 	manifest, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
 	if err != nil {
-		return "", 0, fallback, errors.Wrapf(err, "Failed to upload the kopia snapshot for si %v", sourceInfo)
+		return "", 0, fallback, errors.Wrapf(err, "failed to upload the kopia snapshot for si %v", sourceInfo)
 	}
 
 	manifest.Tags = snapshotTags
@@ -305,16 +305,16 @@ func SnapshotSource(
 	manifest.Pins = []string{"velero-pin"}
 
 	if _, err = saveSnapshotFunc(ctx, rep, manifest); err != nil {
-		return "", 0, fallback, errors.Wrapf(err, "Failed to save kopia manifest %v", manifest.ID)
+		return "", 0, fallback, errors.Wrapf(err, "failed to save kopia manifest %v", manifest.ID)
 	}
 
 	_, err = applyRetentionPolicyFunc(ctx, rep, sourceInfo, true)
 	if err != nil {
-		return "", 0, fallback, errors.Wrapf(err, "Failed to apply kopia retention policy for si %v", sourceInfo)
+		return "", 0, fallback, errors.Wrapf(err, "failed to apply kopia retention policy for si %v", sourceInfo)
 	}
 
 	if err = rep.Flush(ctx); err != nil {
-		return "", 0, fallback, errors.Wrapf(err, "Failed to flush kopia repository")
+		return "", 0, fallback, errors.Wrapf(err, "failed to flush kopia repository")
 	}
 	log.Infof("Created snapshot with root %v and ID %v in %v", manifest.RootObjectID(), manifest.ID, time.Since(snapshotStartTime).Truncate(time.Second))
 	return reportSnapshotStatus(manifest, policyTree, fallback)
@@ -414,19 +414,19 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 
 	snapshot, err := snapshot.LoadSnapshot(kopiaCtx, rep, manifest.ID(snapshotID))
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "unable to load snapshot %v", snapshotID)
 	}
 
 	log.Infof("Restore from snapshot %s, description %s, created time %v, tags %v", snapshotID, snapshot.Description, snapshot.EndTime.ToTime(), snapshot.Tags)
 
 	rootEntry, err := filesystemEntryFunc(kopiaCtx, rep, snapshotID, false)
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "Unable to get filesystem entry for snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "unable to get filesystem entry for snapshot %v", snapshotID)
 	}
 
 	path, err := filepath.Abs(dest)
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "Unable to resolve path %v", dest)
+		return 0, 0, false, errors.Wrapf(err, "unable to resolve path %v", dest)
 	}
 
 	fsOutput := &restore.FilesystemOutput{
@@ -506,14 +506,14 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 	})
 
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "Failed to copy snapshot data to the target")
+		return 0, 0, false, errors.Wrapf(err, "failed to copy snapshot data to the target")
 	}
 
 	if err := output.Flush(); err != nil {
 		if err == errFlushUnsupported {
 			log.Warnf("Skip flushing data for %v under the current OS %v", path, runtime.GOOS)
 		} else {
-			return 0, 0, false, errors.Wrapf(err, "Failed to flush data to target")
+			return 0, 0, false, errors.Wrapf(err, "failed to flush data to target")
 		}
 	} else {
 		log.Infof("Flush done for volume dir %v", path)

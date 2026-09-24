@@ -104,7 +104,7 @@ func TestBackup(t *testing.T) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(udmrepo.Snapshot{}, int64(0), errors.New("I/O error"))
 			},
-			expectedErrStr: "Failed to run uploader backup",
+			expectedErrStr: "failed to run uploader backup",
 		},
 		{
 			name: "success returns correct SnapshotInfo with snapshotSize larger than sourceSize",
@@ -229,7 +229,7 @@ func TestSnapshotSource(t *testing.T) {
 				blkup.On("Backup", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(udmrepo.Snapshot{}, int64(0), errors.New("uploader error"))
 			},
-			expectedErrStr: "Failed to run uploader backup",
+			expectedErrStr: "failed to run uploader backup",
 		},
 		{
 			name: "SaveSnapshot error",
@@ -239,7 +239,7 @@ func TestSnapshotSource(t *testing.T) {
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).
 					Return(udmrepo.ID(""), errors.New("save failed"))
 			},
-			expectedErrStr: "Failed to save snapshot",
+			expectedErrStr: "failed to save snapshot",
 		},
 		{
 			name: "Flush error",
@@ -249,7 +249,7 @@ func TestSnapshotSource(t *testing.T) {
 				repo.On("SaveSnapshot", mock.Anything, mock.Anything).Return(udmrepo.ID("snap-001"), nil)
 				repo.On("Flush", mock.Anything).Return(errors.New("flush failed"))
 			},
-			expectedErrStr: "Failed to flush repository",
+			expectedErrStr: "failed to flush repository",
 		},
 		{
 			name: "success with nil cbtService falls back to full bitmap",
@@ -550,7 +550,7 @@ func TestGetParentBackupInfo(t *testing.T) {
 			},
 			expectEmpty:    true,
 			expectErr:      true,
-			expectedErrStr: "VolumeID different-vol from parent snapshot snap-vidmismatch is not expected as vol-123",
+			expectedErrStr: "volumeID different-vol from parent snapshot snap-vidmismatch is not expected as vol-123",
 		},
 		{
 			name:           "loadObjectFromSnapshot fails — falls back to full",
@@ -883,7 +883,7 @@ func TestRestore(t *testing.T) {
 				repo.On("GetSnapshot", mock.Anything, udmrepo.ID("snap-001")).
 					Return(udmrepo.Snapshot{}, errors.New("not found"))
 			},
-			expectedErrStr: "Unable to load snapshot",
+			expectedErrStr: "unable to load snapshot",
 		},
 		{
 			name: "openBlockDevice error",
