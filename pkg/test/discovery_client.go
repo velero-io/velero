@@ -68,6 +68,11 @@ func (c *DiscoveryClient) WithAPIResource(resource *APIResource) *DiscoveryClien
 		}
 	}
 
+	verbs := resource.Verbs
+	if len(verbs) == 0 {
+		verbs = []string{"list", "create", "get", "delete"}
+	}
+
 	resourceList.APIResources = append(resourceList.APIResources, metav1.APIResource{
 		Name:         resource.Name,
 		SingularName: strings.TrimSuffix(resource.Name, "s"),
@@ -75,7 +80,7 @@ func (c *DiscoveryClient) WithAPIResource(resource *APIResource) *DiscoveryClien
 		Group:        resource.Group,
 		Version:      resource.Version,
 		Kind:         resource.Kind,
-		Verbs:        metav1.Verbs([]string{"list", "create", "get", "delete"}),
+		Verbs:        metav1.Verbs(verbs),
 		ShortNames:   []string{resource.ShortName},
 	})
 
