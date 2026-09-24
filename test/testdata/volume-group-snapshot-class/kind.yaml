@@ -1,0 +1,9 @@
+---
+apiVersion: groupsnapshot.storage.k8s.io/v1beta2
+deletionPolicy: Delete
+driver: hostpath.csi.k8s.io
+kind: VolumeGroupSnapshotClass
+metadata:
+  labels:
+    velero.io/csi-volumegroupsnapshot-class: "true"
+  name: e2e-volume-group-snapshot-class
