@@ -523,6 +523,11 @@ var _ = Describe(
 	Label("ResourceFiltering", "ResourcePolicies", "FSBackup"),
 	ResourcePoliciesTest,
 )
+var _ = Describe(
+	"Velero test on namespace selection by label via resource policies",
+	Label("ResourceFiltering", "ResourcePolicies"),
+	NamespaceLabelSelectorTest,
+)
 
 // backup VolumeInfo test
 var _ = Describe(
