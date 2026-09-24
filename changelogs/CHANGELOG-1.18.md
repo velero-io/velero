@@ -1,3 +1,21 @@
+## v1.18.4
+
+### Download
+https://github.com/vmware-tanzu/velero/releases/tag/v1.18.4
+
+### Container Image
+`velero/velero:v1.18.4`
+
+### Documentation
+https://velero.io/docs/v1.18/
+
+### Upgrading
+https://velero.io/docs/v1.18/upgrade-to-1.18/
+
+### All Changes
+  * Fix backup queue permanently stuck when a dequeued backup completes during the patch (#10539, @pujitha24)
+
+
 ## v1.18.3
 
 ### Download
