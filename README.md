@@ -25,6 +25,8 @@ Velero consists of:
 
 [The documentation][29] provides a getting started guide and information about building from source, architecture, extending Velero and more.
 
+For a high-level overview of Velero's components, goals, and design process, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Please use the version selector at the top of the site to ensure you are using the appropriate documentation for your version of Velero.
 
 ## Troubleshooting
