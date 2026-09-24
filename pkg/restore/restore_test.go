@@ -4426,6 +4426,64 @@ func TestRestoreInplaceExistingPodWithPodVolumeBackups(t *testing.T) {
 	}
 }
 
+// TestRestoreExistingPVCWithSnapshot verifies that restoring onto an existing
+// PVC whose volume was backed up by a snapshot warns that the volume data is
+// not restored, while volumes restored through PodVolumeRestores do not.
+func TestRestoreExistingPVCWithSnapshot(t *testing.T) {
+	info := func(method volume.Method, moved bool) map[string]volume.BackupVolumeInfo {
+		return map[string]volume.BackupVolumeInfo{
+			"pv-1": {PVCNamespace: "ns-1", PVCName: "pvc-1", PVName: "pv-1", BackupMethod: method, SnapshotDataMoved: moved},
+		}
+	}
+	inplace := defaultRestore().ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull)).Result()
+
+	tests := []struct {
+		name        string
+		restore     *velerov1api.Restore
+		volumeInfos map[string]volume.BackupVolumeInfo
+		wantWarning bool
+	}{
+		{"CSI snapshot without data move", defaultRestore().Result(), info(volume.CSISnapshot, false), true},
+		{"CSI snapshot without data move, in-place", inplace, info(volume.CSISnapshot, false), true},
+		{"CSI snapshot with data move", defaultRestore().Result(), info(volume.CSISnapshot, true), true},
+		{"native snapshot", defaultRestore().Result(), info(volume.NativeSnapshot, false), true},
+		{"pod volume backup, in-place", inplace, info(volume.PodVolumeBackup, false), false},
+		{"no backup volume info", defaultRestore().Result(), nil, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+
+			existing := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").VolumeName("pv-1").StorageClass("changed").Result()
+			h.AddItems(t, test.PVCs(existing))
+
+			warnings, errs := h.restorer.Restore(
+				&Request{
+					Log:     h.log,
+					Restore: tc.restore,
+					Backup:  defaultBackup().Result(),
+					BackupReader: test.NewTarWriter(t).
+						AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").VolumeName("pv-1").Result()).
+						Done(),
+					BackupVolumeInfoMap: tc.volumeInfos,
+				},
+				nil,
+				nil,
+			)
+
+			assert.Empty(t, errs.Namespaces)
+			if tc.wantWarning {
+				require.Len(t, warnings.Namespaces["ns-1"], 2)
+				assert.Contains(t, warnings.Namespaces["ns-1"][0], "its backed-up volume data will not be restored to it")
+			} else {
+				require.Len(t, warnings.Namespaces["ns-1"], 1)
+			}
+			assert.Contains(t, warnings.Namespaces["ns-1"][len(warnings.Namespaces["ns-1"])-1], "already exists")
+		})
+	}
+}
+
 func TestResetMetadata(t *testing.T) {
 	tests := []struct {
 		name        string
