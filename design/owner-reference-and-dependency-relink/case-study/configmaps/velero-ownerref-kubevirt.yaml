@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-kubevirt
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables KubeVirt virtualization, CDI storage, pool management, and operator-owned PVCs.
+  inScope: |
+    - group: kubevirt.io
+    - group: cdi.kubevirt.io
+    - group: pool.kubevirt.io
+    - group: snapshot.kubevirt.io
+    - group: ""
+      kind: PersistentVolumeClaim
+
+  # 2. specRefPaths: KubeVirt uses name-based volume bindings and metadata.ownerReferences.
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Left empty (virt-controller does not support annotation pausing).
+  quiesceOnRestore: ""
