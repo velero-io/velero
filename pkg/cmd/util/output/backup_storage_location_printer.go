@@ -17,6 +17,8 @@ limitations under the License.
 package output
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -33,21 +35,22 @@ var (
 		{Name: "Bucket/Prefix"},
 		{Name: "Phase"},
 		{Name: "Last Validated"},
+		{Name: "Validation Frequency"},
 		{Name: "Access Mode"},
 		{Name: "Default"},
 	}
 )
 
-func printBackupStorageLocationList(list *velerov1api.BackupStorageLocationList) []metav1.TableRow {
+func printBackupStorageLocationList(list *velerov1api.BackupStorageLocationList, serverValidationFrequency time.Duration) []metav1.TableRow {
 	rows := make([]metav1.TableRow, 0, len(list.Items))
 
 	for i := range list.Items {
-		rows = append(rows, printBackupStorageLocation(&list.Items[i])...)
+		rows = append(rows, printBackupStorageLocation(&list.Items[i], serverValidationFrequency)...)
 	}
 	return rows
 }
 
-func printBackupStorageLocation(location *velerov1api.BackupStorageLocation) []metav1.TableRow {
+func printBackupStorageLocation(location *velerov1api.BackupStorageLocation, serverValidationFrequency time.Duration) []metav1.TableRow {
 	row := metav1.TableRow{
 		Object: runtime.RawExtension{Object: location},
 	}
@@ -84,9 +87,17 @@ func printBackupStorageLocation(location *velerov1api.BackupStorageLocation) []m
 		bucketAndPrefix,
 		status,
 		LastValidatedStr,
+		formatValidationFrequency(location.Spec.ValidationFrequency, serverValidationFrequency),
 		accessMode,
 		isDefault,
 	)
 
 	return []metav1.TableRow{row}
+}
+
+func formatValidationFrequency(freq *metav1.Duration, serverValidationFrequency time.Duration) string {
+	if freq == nil {
+		return serverValidationFrequency.String()
+	}
+	return freq.Duration.String()
 }

@@ -30,9 +30,25 @@ import (
 	"k8s.io/cli-runtime/pkg/printers"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/cmd/server/config"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
+
+type printConfig struct {
+	serverValidationFrequency time.Duration
+}
+
+// PrintOption configures table printing behavior.
+type PrintOption func(*printConfig)
+
+// WithServerValidationFrequency sets the Velero server store-validation-frequency
+// used when a BSL does not specify validationFrequency.
+func WithServerValidationFrequency(frequency time.Duration) PrintOption {
+	return func(cfg *printConfig) {
+		cfg.serverValidationFrequency = frequency
+	}
+}
 
 const (
 	downloadRequestTimeout = 30 * time.Second
@@ -110,15 +126,22 @@ func validateOutputFlag(cmd *cobra.Command) error {
 
 // PrintWithFormat prints the provided object in the format specified by
 // the command's flags.
-func PrintWithFormat(c *cobra.Command, obj runtime.Object) (bool, error) {
+func PrintWithFormat(c *cobra.Command, obj runtime.Object, opts ...PrintOption) (bool, error) {
 	format := GetOutputFlagValue(c)
 	if format == "" {
 		return false, nil
 	}
 
+	printCfg := printConfig{
+		serverValidationFrequency: config.GetDefaultConfig().StoreValidationFrequency,
+	}
+	for _, opt := range opts {
+		opt(&printCfg)
+	}
+
 	switch format {
 	case "table":
-		return printTable(c, obj)
+		return printTable(c, obj, printCfg)
 	case "json", "yaml":
 		return printEncoded(obj, format)
 	}
@@ -148,7 +171,7 @@ func printEncoded(obj runtime.Object, format string) (bool, error) {
 	return true, nil
 }
 
-func printTable(cmd *cobra.Command, obj runtime.Object) (bool, error) {
+func printTable(cmd *cobra.Command, obj runtime.Object, printCfg printConfig) (bool, error) {
 	// 1. generate table
 	var table *metav1.Table
 
@@ -196,12 +219,12 @@ func printTable(cmd *cobra.Command, obj runtime.Object) (bool, error) {
 	case *velerov1api.BackupStorageLocation:
 		table = &metav1.Table{
 			ColumnDefinitions: backupStorageLocationColumns,
-			Rows:              printBackupStorageLocation(objType),
+			Rows:              printBackupStorageLocation(objType, printCfg.serverValidationFrequency),
 		}
 	case *velerov1api.BackupStorageLocationList:
 		table = &metav1.Table{
 			ColumnDefinitions: backupStorageLocationColumns,
-			Rows:              printBackupStorageLocationList(objType),
+			Rows:              printBackupStorageLocationList(objType, printCfg.serverValidationFrequency),
 		}
 	case *velerov1api.VolumeSnapshotLocation:
 		table = &metav1.Table{

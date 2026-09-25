@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"k8s.io/client-go/kubernetes/fake"
 
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
 	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
@@ -38,6 +39,7 @@ func TestNewGetCommand(t *testing.T) {
 	kbclient := velerotest.NewFakeControllerRuntimeClient(t)
 	f.On("Namespace").Return(mock.Anything)
 	f.On("KubebuilderClient").Return(kbclient, nil)
+	f.On("KubeClient").Return(fake.NewSimpleClientset(), nil)
 
 	// get command
 	c := NewGetCommand(f, "velero backup-location get")
