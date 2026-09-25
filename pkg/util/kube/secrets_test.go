@@ -17,6 +17,7 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,7 +84,7 @@ func TestGetSecretKey(t *testing.T) {
 				require.NoError(t, fakeClient.Create(t.Context(), secret))
 			}
 
-			data, err := GetSecretKey(fakeClient, tc.namespace, tc.selector)
+			data, err := GetSecretKey(context.Background(), fakeClient, tc.namespace, tc.selector)
 			if tc.expectedErr != "" {
 				require.Nil(t, data)
 				require.EqualError(t, err, tc.expectedErr)
