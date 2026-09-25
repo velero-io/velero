@@ -43,3 +43,21 @@ func TestFeatureFlags(t *testing.T) {
 	NewFeatureFlagSet()
 	assert.Empty(t, All())
 }
+
+func TestFeatureFlagsTrimSpaces(t *testing.T) {
+	NewFeatureFlagSet(" feature1 ", "feature2")
+	assert.True(t, IsEnabled("feature1"))
+	assert.True(t, IsEnabled("feature2"))
+	assert.False(t, IsEnabled(" feature1 "))
+	assert.Equal(t, []string{"feature1", "feature2"}, All())
+
+	NewFeatureFlagSet()
+	Enable("EnableCSI", " EnableAPIGroupVersions")
+	assert.True(t, IsEnabled("EnableCSI"))
+	assert.True(t, IsEnabled("EnableAPIGroupVersions"))
+	assert.False(t, IsEnabled(" EnableAPIGroupVersions"))
+
+	Disable(" EnableCSI ")
+	assert.False(t, IsEnabled("EnableCSI"))
+	assert.True(t, IsEnabled("EnableAPIGroupVersions"))
+}
