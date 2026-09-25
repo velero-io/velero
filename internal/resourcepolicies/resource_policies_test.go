@@ -2579,6 +2579,49 @@ func TestIncludeExcludePolicyValidateNamespacesByLabel(t *testing.T) {
 	}
 }
 
+func TestIncludeExcludePolicyValidateGlobPatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  IncludeExcludePolicy
+		wantErr string
+	}{
+		{
+			name: "valid glob patterns",
+			policy: IncludeExcludePolicy{
+				IncludedClusterScopedResources:   []string{"persistentvolumes", "*.storage.k8s.io"},
+				IncludedNamespaceScopedResources: []string{"config[mM]aps"},
+				ExcludedNamespaceScopedResources: []string{"secret?"},
+			},
+		},
+		{
+			name: "malformed cluster-scoped glob pattern is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedClusterScopedResources: []string{"persistentvolumes", "foo["},
+			},
+			wantErr: `invalid glob pattern "foo["`,
+		},
+		{
+			name: "malformed namespace-scoped glob pattern is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespaceScopedResources: []string{"[bar"},
+			},
+			wantErr: `invalid glob pattern "[bar"`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.Validate()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveNamespacesByLabel(t *testing.T) {
 	nsWith := func(name string, labels map[string]string) *corev1api.Namespace {
 		return &corev1api.Namespace{
