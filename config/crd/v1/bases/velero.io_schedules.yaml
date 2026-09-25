@@ -29,6 +29,10 @@ spec:
       jsonPath: .status.lastBackup
       name: LastBackup
       type: date
+    - description: The last time a Backup was skipped for this schedule
+      jsonPath: .status.lastSkipped
+      name: LastSkipped
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
