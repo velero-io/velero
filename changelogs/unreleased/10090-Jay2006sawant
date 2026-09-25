@@ -1,0 +1,1 @@
+Fix Kopia block restore write loop slice bounds bug during partial writes
