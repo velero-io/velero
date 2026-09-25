@@ -125,6 +125,9 @@ func runPause(f client.Factory, o *cli.SelectOptions, paused bool, skipImmediate
 		}
 	}
 	if len(schedules) == 0 {
+		if len(errs) > 0 {
+			return kubeerrs.NewAggregate(errs)
+		}
 		fmt.Println("No schedules found")
 		return nil
 	}
