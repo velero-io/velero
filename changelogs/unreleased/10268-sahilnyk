@@ -1,0 +1,1 @@
+Add an --image-pull-policy flag to velero install, applying to the Velero server, node agent and plugin containers
