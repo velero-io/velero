@@ -295,6 +295,31 @@ func (urp *unifiedRepoProvider) EnsureUnlockRepo(ctx context.Context, param Repo
 	return nil
 }
 
+// openRepo opens the backup repository from the persisted connection config.
+// If that fails - commonly because the config froze credentials that have
+// since expired, such as an STS session token captured at the first connect -
+// it reconnects with fresh storage options and opens again, so deletion and
+// maintenance are not wedged until the velero pod restarts (#9949).
+func (urp *unifiedRepoProvider) openRepo(ctx context.Context, param RepoParam, repoOption udmrepo.RepoOptions) (udmrepo.BackupRepo, error) {
+	bkRepo, err := urp.repoService.Open(ctx, repoOption)
+	if err == nil {
+		return bkRepo, nil
+	}
+
+	urp.log.WithError(err).Warn("Failed to open repo from the persisted config, reconnecting with fresh storage options")
+
+	if reconnErr := urp.ConnectToRepo(ctx, param); reconnErr != nil {
+		return nil, errors.Wrapf(reconnErr, "error reconnecting to backup repo after open failure: %v", err)
+	}
+
+	bkRepo, err = urp.repoService.Open(ctx, repoOption)
+	if err != nil {
+		return nil, errors.Wrap(err, "error to open backup repo after reconnect")
+	}
+
+	return bkRepo, nil
+}
+
 func (urp *unifiedRepoProvider) Forget(ctx context.Context, snapshotID string, param RepoParam) error {
 	log := urp.log.WithFields(logrus.Fields{
 		"BSL name":   param.BackupLocation.Name,
@@ -315,9 +340,9 @@ func (urp *unifiedRepoProvider) Forget(ctx context.Context, snapshotID string, p
 		return errors.Wrap(err, "error to get repo options")
 	}
 
-	bkRepo, err := urp.repoService.Open(ctx, *repoOption)
+	bkRepo, err := urp.openRepo(ctx, param, *repoOption)
 	if err != nil {
-		return errors.Wrap(err, "error to open backup repo")
+		return err
 	}
 
 	defer func() {
@@ -362,9 +387,9 @@ func (urp *unifiedRepoProvider) BatchForget(ctx context.Context, snapshotIDs []s
 		return []error{errors.Wrap(err, "error to get repo options")}
 	}
 
-	bkRepo, err := urp.repoService.Open(ctx, *repoOption)
+	bkRepo, err := urp.openRepo(ctx, param, *repoOption)
 	if err != nil {
-		return []error{errors.Wrap(err, "error to open backup repo")}
+		return []error{err}
 	}
 
 	defer func() {
