@@ -1,0 +1,1 @@
+Do not fail a backup on a retryable VolumeSnapshotContent error; keep polling until the error outlives CSISnapshotTimeout
