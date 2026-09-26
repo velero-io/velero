@@ -41,6 +41,10 @@ Velero is an open community and we welcome your participation. The best way to g
 
 See the [community page](https://velero.io/community/) for the full schedule and details.
 
+**NOTE**: The issues section in this repository is for tracking issues for upstream opensource velero.  If you encounter 
+any issues while using a downstream product that consumes velero, like OADP, TMC Data Protection, please make sure to file a
+ticket via the support channel of the product for the initial triage.
+
 ## Contributing
 
 If you are ready to jump in and test, add code, or help with documentation, follow the instructions on our [Start contributing][31] documentation for guidance on how to setup Velero for development.
