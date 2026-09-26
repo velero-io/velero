@@ -1,0 +1,1 @@
+Auto-exclude the Velero namespace from backups with a warning instead of failing validation
