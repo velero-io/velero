@@ -42,6 +42,46 @@ A command to do this is `make new-changelog CHANGELOG_BODY="Changes you have mad
 
 If a PR does not warrant a changelog, the CI check for a changelog can be skipped by applying a `changelog-not-required` label on the PR. If you are making a PR on a release branch, you should still make a new file in the `changelogs/unreleased` folder on the release branch for your change. 
 
+## AI-Generated Content
+
+We welcome contributions from all developers, including those who use AI tools to assist in their work. However, to maintain code quality and ensure contributions are accurate and appropriate, please follow these guidelines:
+
+### Using AI Assistance
+
+**Acceptable use:**
+- Using AI tools (like GitHub Copilot, ChatGPT, Claude, etc.) to generate scaffolding or boilerplate code
+- Getting AI assistance for writing unit tests
+- Using AI to help understand complex code patterns
+- AI-assisted debugging and problem-solving
+- Using AI to help with documentation writing
+
+**Requirements when using AI:**
+1. **Always review and verify** AI-generated content before submitting
+2. **Test thoroughly** - ensure the code works as expected in your environment
+3. **Verify technical accuracy** - check that all version numbers, configurations, and technical details are correct
+4. **Remove placeholders** - ensure there are no example or placeholder content
+5. **Understand the code** - be able to explain and defend your changes during code review
+6. **Disclose AI usage** - if a significant portion of your PR was AI-generated, mention it in the PR description
+
+### What to Avoid
+
+**Unacceptable practices:**
+- Submitting entirely AI-generated PRs or issues without review or verification
+- Including hallucinated information (false version numbers, non-existent APIs, etc.)
+- Copying AI-generated content with placeholder or example data
+- Submitting AI-generated issues describing problems you haven't actually experienced
+- Using AI to generate issues about features or bugs without verifying they exist
+
+### For Issues
+
+When creating issues with AI assistance:
+- Ensure the issue describes a **real problem** you have experienced
+- Verify all version numbers, error messages, and configurations are from your actual environment
+- Remove any AI-generated boilerplate or overly formal structure
+- Focus on clarity and accuracy over comprehensive formatting
+
+Issues that appear to be entirely AI-generated without proper verification may be labeled as `potential-ai-generated` and flagged for additional review.
+
 ## Copyright header
 
 Whenever a source code file is being modified, the copyright notice should be updated to our standard copyright notice. That is, it should read “Copyright the Velero contributors.”
