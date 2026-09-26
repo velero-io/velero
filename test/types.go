@@ -25,11 +25,13 @@ import (
 	"github.com/vmware-tanzu/velero/test/util/k8s"
 )
 
-// e2e-storage-class is the default StorageClass for E2E.
-const StorageClassName = "e2e-storage-class"
+// StorageClassName is the default StorageClass for E2E. Override it with the
+// --storage-class flag or the E2E_STORAGE_CLASS environment variable.
+var StorageClassName = "e2e-storage-class"
 
-// e2e-storage-class-2 is used for the StorageClass mapping test case.
-const StorageClassName2 = "e2e-storage-class-2"
+// StorageClassName2 is used for the StorageClass mapping test cases. Override it
+// with the --storage-class-2 flag or the E2E_STORAGE_CLASS_2 environment variable.
+var StorageClassName2 = "e2e-storage-class-2"
 
 const FeatureCSI = "EnableCSI"
 const VanillaZFS = "vanilla-zfs"

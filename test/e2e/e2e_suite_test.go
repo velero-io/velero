@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -377,6 +378,28 @@ func init() {
 		"",
 		"comma-separated list of key=value annotations to add to Velero service account",
 	)
+	flag.StringVar(
+		&test.StorageClassName,
+		"storage-class",
+		envOrDefault("E2E_STORAGE_CLASS", test.StorageClassName),
+		"name of the StorageClass the tests provision volumes with. Optional.",
+	)
+	flag.StringVar(
+		&test.StorageClassName2,
+		"storage-class-2",
+		envOrDefault("E2E_STORAGE_CLASS_2", test.StorageClassName2),
+		"name of the second StorageClass, used by the StorageClass mapping test cases. Optional.",
+	)
+}
+
+// envOrDefault returns the value of the environment variable key, or fallback
+// when it is unset or empty. It lets a StorageClass name be supplied without a
+// flag when the suite is launched from an IDE.
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // Add label [SkipVanillaZfs]:

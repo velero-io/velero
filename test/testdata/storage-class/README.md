@@ -10,3 +10,8 @@ The vSphere environment also has two StorageClass files.
 The ZFS StorageClasses only have the default one. There is no in-tree volume plugin used StorageClass used in E2E.
 
 The kind StorageClass uses the local-path provisioner. Will consider adding the CSI provisioner when there is a need.
+
+The StorageClass names are configurable. Both classes are created from the provider's
+file above, renamed to the values of `--storage-class` and `--storage-class-2` (or the
+`E2E_STORAGE_CLASS` and `E2E_STORAGE_CLASS_2` environment variables), so a cluster with a
+different provisioner can be targeted without editing this test data.

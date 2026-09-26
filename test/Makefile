@@ -139,6 +139,11 @@ SNAPSHOT_MOVE_DATA ?= false
 DATA_MOVER_PLUGIN ?=
 DISABLE_INFORMER_CACHE ?= false
 
+# Names of the StorageClasses the e2e tests provision volumes with. STORAGE_CLASS_2 is
+# only used by the StorageClass mapping cases.
+STORAGE_CLASS ?= e2e-storage-class
+STORAGE_CLASS_2 ?= e2e-storage-class-2
+
 DEFAULT_CLUSTER_NAME ?=
 STANDBY_CLUSTER_NAME ?=
 EKS_POLICY_ARN ?=
@@ -179,7 +184,9 @@ COMMON_ARGS := --velerocli=$(VELERO_CLI) \
 	--debug-velero-pod-restart=$(DEBUG_VELERO_POD_RESTART) \
 	--fail-fast=$(FAIL_FAST) \
 	--has-vsphere-plugin=$(HAS_VSPHERE_PLUGIN) \
-	--item-block-worker-count=$(ITEM_BLOCK_WORKER_COUNT)
+	--item-block-worker-count=$(ITEM_BLOCK_WORKER_COUNT) \
+	--storage-class=$(STORAGE_CLASS) \
+	--storage-class-2=$(STORAGE_CLASS_2)
 
 # Make sure ginkgo is in $GOBIN
 .PHONY:ginkgo
