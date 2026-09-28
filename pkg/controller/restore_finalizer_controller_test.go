@@ -1399,3 +1399,69 @@ func TestUpdateVolumeInfos(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateVolumeInfosCreatesNewVolumeInfoWhenNotPreExisting(t *testing.T) {
+	restore := builder.ForRestore("velero", "restore-1").Result()
+	clientBuilder := velerotest.NewFakeControllerRuntimeClientBuilder(t)
+	fakeClient := clientBuilder.Build()
+
+	pvc := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").VolumeName("pv-1").Result()
+	require.NoError(t, fakeClient.Create(t.Context(), pvc))
+
+	dd := builder.ForDataDownload("velero", "dd-1").
+		ObjectMeta(builder.WithLabelsMap(map[string]string{
+			velerov1api.RestoreNameLabel:       "restore-1",
+			velerov1api.AsyncOperationIDLabel: "op-1",
+		})).
+		TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1", PV: "pv-fallback"}).
+		TotalBytes(4096).
+		IncrementalBytes(1024).
+		Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+		FallbackFull(false).
+		Result()
+	require.NoError(t, fakeClient.Create(t.Context(), dd))
+
+	backupStore := &persistencemocks.BackupStore{}
+	var uploadedData []byte
+	backupStore.On("PutRestoreVolumeInfo", restore.Name, mock.Anything).Run(func(args mock.Arguments) {
+		reader, ok := args.Get(1).(io.Reader)
+		require.True(t, ok)
+		data, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		uploadedData = data
+	}).Return(nil)
+
+	ctx := &finalizerContext{
+		logger:             velerotest.NewLogger(),
+		restore:            restore,
+		crClient:           fakeClient,
+		backupStore:        backupStore,
+		restoreVolumeInfos: []*volume.RestoreVolumeInfo{},
+	}
+
+	errs := ctx.updateVolumeInfos()
+	assert.True(t, errs.IsEmpty())
+	require.Len(t, ctx.restoreVolumeInfos, 1)
+
+	info := ctx.restoreVolumeInfos[0]
+	assert.Equal(t, "pvc-1", info.PVCName)
+	assert.Equal(t, "ns-1", info.PVCNamespace)
+	assert.Equal(t, "pv-1", info.PVName)
+	assert.True(t, info.SnapshotDataMoved)
+	assert.Equal(t, volume.CSISnapshot, info.RestoreMethod)
+	require.NotNil(t, info.SnapshotDataMovementInfo)
+	assert.Equal(t, int64(4096), info.SnapshotDataMovementInfo.Size)
+	assert.Equal(t, ptr.To(int64(1024)), info.SnapshotDataMovementInfo.IncrementalSize)
+	assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, info.SnapshotDataMovementInfo.Phase)
+	assert.Equal(t, "op-1", info.SnapshotDataMovementInfo.OperationID)
+	assert.False(t, info.FallbackFull)
+
+	require.NotEmpty(t, uploadedData)
+	gzr, err := gzip.NewReader(bytes.NewReader(uploadedData))
+	require.NoError(t, err)
+	defer gzr.Close()
+
+	var decoded []*volume.RestoreVolumeInfo
+	require.NoError(t, json.NewDecoder(gzr).Decode(&decoded))
+	assert.Equal(t, ctx.restoreVolumeInfos, decoded)
+}

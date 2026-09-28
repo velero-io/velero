@@ -32,6 +32,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/gobwas/glob"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1165,6 +1166,8 @@ func (kb *kubernetesBackupper) FinalizeBackup(
 	backedUpGroupResources := map[schema.GroupResource]bool{}
 
 	unstructuredDataUploads := make([]unstructured.Unstructured, 0)
+	unstructuredVolumeSnapshots := make([]unstructured.Unstructured, 0)
+	unstructuredVolumeSnapshotContents := make([]unstructured.Unstructured, 0)
 
 	for i, item := range items {
 		log.WithFields(map[string]any{
@@ -1195,6 +1198,12 @@ func (kb *kubernetesBackupper) FinalizeBackup(
 			if item.groupResource == kuberesource.DataUploads {
 				unstructuredDataUploads = append(unstructuredDataUploads, unstructured)
 			}
+			if item.groupResource == kuberesource.VolumeSnapshots {
+				unstructuredVolumeSnapshots = append(unstructuredVolumeSnapshots, unstructured)
+			}
+			if item.groupResource == kuberesource.VolumeSnapshotContents {
+				unstructuredVolumeSnapshotContents = append(unstructuredVolumeSnapshotContents, unstructured)
+			}
 
 			backedUp, itemFiles := kb.finalizeItem(log, item.groupResource, itemBackupper, &unstructured, item.preferredGVR)
 			if backedUp {
@@ -1224,7 +1233,16 @@ func (kb *kubernetesBackupper) FinalizeBackup(
 		return err
 	}
 
-	if err := updateVolumeInfos(volumeInfos, unstructuredDataUploads, asyncBIAOperations, log); err != nil {
+	volumeInfos, err = updateVolumeInfos(
+		volumeInfos,
+		unstructuredDataUploads,
+		unstructuredVolumeSnapshots,
+		unstructuredVolumeSnapshotContents,
+		asyncBIAOperations,
+		kb.kbClient,
+		log,
+	)
+	if err != nil {
 		log.WithError(err).Errorf("fail to update VolumeInfos for backup %s", backupRequest.Name)
 		return err
 	}
@@ -1301,47 +1319,119 @@ func NewTarWriter(writer *tar.Writer) tarWriter {
 	}
 }
 
-// updateVolumeInfos update the VolumeInfos according to the AsyncOperations
+// updateVolumeInfos updates or creates the VolumeInfos according to the AsyncOperations
 func updateVolumeInfos(
 	volumeInfos []*volume.BackupVolumeInfo,
-	unstructuredItems []unstructured.Unstructured,
+	unstructuredDataUploads []unstructured.Unstructured,
+	unstructuredVolumeSnapshots []unstructured.Unstructured,
+	unstructuredVolumeSnapshotContents []unstructured.Unstructured,
 	operations []*itemoperation.BackupOperation,
+	client kbclient.Client,
 	log logrus.FieldLogger,
-) error {
-	for _, unstructured := range unstructuredItems {
+) ([]*volume.BackupVolumeInfo, error) {
+	for _, u := range unstructuredDataUploads {
 		var dataUpload velerov2alpha1.DataUpload
-		err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructured.UnstructuredContent(), &dataUpload)
+		err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.UnstructuredContent(), &dataUpload)
 		if err != nil {
 			log.WithError(err).Errorf("fail to convert DataUpload: %s/%s",
-				unstructured.GetNamespace(), unstructured.GetName())
-			return err
+				u.GetNamespace(), u.GetName())
+			return nil, err
 		}
 
+		matchIndex := -1
 		for index := range volumeInfos {
 			if volumeInfos[index].PVCName == dataUpload.Spec.SourcePVC &&
-				volumeInfos[index].PVCNamespace == dataUpload.Spec.SourceNamespace &&
-				volumeInfos[index].SnapshotDataMovementInfo != nil {
+				volumeInfos[index].PVCNamespace == dataUpload.Spec.SourceNamespace {
+				matchIndex = index
+				break
+			}
+		}
+
+		if matchIndex >= 0 {
+			if volumeInfos[matchIndex].SnapshotDataMovementInfo != nil {
 				if dataUpload.Status.CompletionTimestamp != nil {
-					volumeInfos[index].CompletionTimestamp = dataUpload.Status.CompletionTimestamp
+					volumeInfos[matchIndex].CompletionTimestamp = dataUpload.Status.CompletionTimestamp
 				}
-				volumeInfos[index].SnapshotDataMovementInfo.SnapshotHandle = dataUpload.Status.SnapshotID
-				volumeInfos[index].SnapshotDataMovementInfo.RetainedSnapshot = dataUpload.Spec.CSISnapshot.VolumeSnapshot
-				volumeInfos[index].SnapshotDataMovementInfo.Size = dataUpload.Status.Progress.TotalBytes
-				volumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
-				volumeInfos[index].SnapshotDataMovementInfo.SourceSize = dataUpload.Status.SourceSize
-				volumeInfos[index].SnapshotDataMovementInfo.Phase = dataUpload.Status.Phase
-				volumeInfos[index].FallbackFull = dataUpload.Status.FallbackFull
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.SnapshotHandle = dataUpload.Status.SnapshotID
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.RetainedSnapshot = dataUpload.Spec.CSISnapshot.VolumeSnapshot
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.Size = dataUpload.Status.Progress.TotalBytes
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.SourceSize = dataUpload.Status.SourceSize
+				volumeInfos[matchIndex].SnapshotDataMovementInfo.Phase = dataUpload.Status.Phase
+				volumeInfos[matchIndex].FallbackFull = dataUpload.Status.FallbackFull
 
 				if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
-					volumeInfos[index].Result = volume.VolumeResultSucceeded
+					volumeInfos[matchIndex].Result = volume.VolumeResultSucceeded
 				} else {
-					volumeInfos[index].Result = volume.VolumeResultFailed
+					volumeInfos[matchIndex].Result = volume.VolumeResultFailed
 				}
 			}
+		} else {
+			var matchingOp *itemoperation.BackupOperation
+			for _, op := range operations {
+				if op.Spec.ResourceIdentifier.GroupResource.String() == kuberesource.PersistentVolumeClaims.String() &&
+					op.Spec.ResourceIdentifier.Namespace == dataUpload.Spec.SourceNamespace &&
+					op.Spec.ResourceIdentifier.Name == dataUpload.Spec.SourcePVC {
+					matchingOp = op
+					break
+				}
+				for _, item := range op.Spec.PostOperationItems {
+					if item.GroupResource.String() == "datauploads.velero.io" &&
+						item.Namespace == dataUpload.Namespace &&
+						item.Name == dataUpload.Name {
+						matchingOp = op
+						break
+					}
+				}
+				if matchingOp != nil {
+					break
+				}
+			}
+
+			var pv *corev1api.PersistentVolume
+			pvName := ""
+			if client != nil {
+				pvc := &corev1api.PersistentVolumeClaim{}
+				if err := client.Get(context.TODO(), kbclient.ObjectKey{
+					Namespace: dataUpload.Spec.SourceNamespace,
+					Name:      dataUpload.Spec.SourcePVC,
+				}, pvc); err == nil {
+					pvName = pvc.Spec.VolumeName
+					if pvName != "" {
+						pvObj := &corev1api.PersistentVolume{}
+						if err := client.Get(context.TODO(), kbclient.ObjectKey{Name: pvName}, pvObj); err == nil {
+							pv = pvObj
+						}
+					}
+				}
+			}
+
+			volumeInfo := volume.NewBackupVolumeInfoFromDataUpload(&dataUpload, matchingOp, pv, pvName)
+			volumeInfos = append(volumeInfos, volumeInfo)
 		}
 	}
 
-	// Update CSI snapshot VolumeInfo's CompletionTimestamp by the operation update time.
+	vsMap := make(map[string]*snapshotv1api.VolumeSnapshot)
+	for _, u := range unstructuredVolumeSnapshots {
+		var vs snapshotv1api.VolumeSnapshot
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.UnstructuredContent(), &vs); err != nil {
+			log.WithError(err).Warnf("fail to convert VolumeSnapshot: %s/%s", u.GetNamespace(), u.GetName())
+			continue
+		}
+		vsMap[vs.Namespace+"/"+vs.Name] = &vs
+	}
+
+	vscMap := make(map[string]*snapshotv1api.VolumeSnapshotContent)
+	for _, u := range unstructuredVolumeSnapshotContents {
+		var vsc snapshotv1api.VolumeSnapshotContent
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.UnstructuredContent(), &vsc); err != nil {
+			log.WithError(err).Warnf("fail to convert VolumeSnapshotContent: %s", u.GetName())
+			continue
+		}
+		vscMap[vsc.Name] = &vsc
+	}
+
+	// Update existing CSI snapshot VolumeInfo's CompletionTimestamp by the operation update time.
 	for volumeIndex := range volumeInfos {
 		if volumeInfos[volumeIndex].BackupMethod == volume.CSISnapshot &&
 			volumeInfos[volumeIndex].CSISnapshotInfo != nil {
@@ -1365,7 +1455,152 @@ func updateVolumeInfos(
 		}
 	}
 
-	return nil
+	// For CSI snapshots that are not in volumeInfos yet:
+	// Find operations for VolumeSnapshots
+	for _, op := range operations {
+		if op.Spec.ResourceIdentifier.GroupResource.String() != kuberesource.VolumeSnapshots.String() {
+			continue
+		}
+
+		alreadyExists := false
+		for _, vi := range volumeInfos {
+			if vi.CSISnapshotInfo != nil && vi.CSISnapshotInfo.OperationID == op.Spec.OperationID {
+				alreadyExists = true
+				break
+			}
+		}
+		if alreadyExists {
+			continue
+		}
+
+		vsKey := op.Spec.ResourceIdentifier.Namespace + "/" + op.Spec.ResourceIdentifier.Name
+		vs := vsMap[vsKey]
+		if vs == nil && client != nil {
+			vsObj := &snapshotv1api.VolumeSnapshot{}
+			if err := client.Get(context.TODO(), kbclient.ObjectKey{
+				Namespace: op.Spec.ResourceIdentifier.Namespace,
+				Name:      op.Spec.ResourceIdentifier.Name,
+			}, vsObj); err == nil {
+				vs = vsObj
+				vsMap[vsKey] = vs
+			}
+		}
+		if vs == nil {
+			log.Warnf("Cannot find VolumeSnapshot %s for operation %s", vsKey, op.Spec.OperationID)
+			continue
+		}
+
+		var vsc *snapshotv1api.VolumeSnapshotContent
+		vscName := ""
+		if vs.Status != nil && vs.Status.BoundVolumeSnapshotContentName != nil {
+			vscName = *vs.Status.BoundVolumeSnapshotContentName
+		}
+		if vscName != "" {
+			vsc = vscMap[vscName]
+			if vsc == nil && client != nil {
+				vscObj := &snapshotv1api.VolumeSnapshotContent{}
+				if err := client.Get(context.TODO(), kbclient.ObjectKey{Name: vscName}, vscObj); err == nil {
+					vsc = vscObj
+					vscMap[vscName] = vsc
+				}
+			}
+		}
+
+		var pv *corev1api.PersistentVolume
+		pvName := ""
+		pvcName := ""
+		if vs.Spec.Source.PersistentVolumeClaimName != nil {
+			pvcName = *vs.Spec.Source.PersistentVolumeClaimName
+		}
+		if pvcName != "" && client != nil {
+			pvc := &corev1api.PersistentVolumeClaim{}
+			if err := client.Get(context.TODO(), kbclient.ObjectKey{
+				Namespace: vs.Namespace,
+				Name:      pvcName,
+			}, pvc); err == nil {
+				pvName = pvc.Spec.VolumeName
+				if pvName != "" {
+					pvObj := &corev1api.PersistentVolume{}
+					if err := client.Get(context.TODO(), kbclient.ObjectKey{Name: pvName}, pvObj); err == nil {
+						pv = pvObj
+					}
+				}
+			}
+		}
+
+		vi := volume.NewBackupVolumeInfoFromCSISnapshot(vs, vsc, op, pv, pvName)
+		volumeInfos = append(volumeInfos, vi)
+	}
+
+	// Also check vsMap for any VolumeSnapshots not yet in volumeInfos
+	for _, vs := range vsMap {
+		alreadyExists := false
+		for _, vi := range volumeInfos {
+			if vi.BackupMethod == volume.CSISnapshot &&
+				vi.PVCNamespace == vs.Namespace &&
+				vs.Spec.Source.PersistentVolumeClaimName != nil &&
+				vi.PVCName == *vs.Spec.Source.PersistentVolumeClaimName &&
+				!vi.SnapshotDataMoved {
+				alreadyExists = true
+				break
+			}
+		}
+		if alreadyExists {
+			continue
+		}
+
+		var matchingOp *itemoperation.BackupOperation
+		for _, op := range operations {
+			if op.Spec.ResourceIdentifier.GroupResource.String() == kuberesource.VolumeSnapshots.String() &&
+				op.Spec.ResourceIdentifier.Namespace == vs.Namespace &&
+				op.Spec.ResourceIdentifier.Name == vs.Name {
+				matchingOp = op
+				break
+			}
+		}
+
+		var vsc *snapshotv1api.VolumeSnapshotContent
+		vscName := ""
+		if vs.Status != nil && vs.Status.BoundVolumeSnapshotContentName != nil {
+			vscName = *vs.Status.BoundVolumeSnapshotContentName
+		}
+		if vscName != "" {
+			vsc = vscMap[vscName]
+			if vsc == nil && client != nil {
+				vscObj := &snapshotv1api.VolumeSnapshotContent{}
+				if err := client.Get(context.TODO(), kbclient.ObjectKey{Name: vscName}, vscObj); err == nil {
+					vsc = vscObj
+				}
+			}
+		}
+
+		var pv *corev1api.PersistentVolume
+		pvName := ""
+		pvcName := ""
+		if vs.Spec.Source.PersistentVolumeClaimName != nil {
+			pvcName = *vs.Spec.Source.PersistentVolumeClaimName
+		}
+		if pvcName != "" && client != nil {
+			pvc := &corev1api.PersistentVolumeClaim{}
+			if err := client.Get(context.TODO(), kbclient.ObjectKey{
+				Namespace: vs.Namespace,
+				Name:      pvcName,
+			}, pvc); err == nil {
+				pvName = pvc.Spec.VolumeName
+				if pvName != "" {
+					pvObj := &corev1api.PersistentVolume{}
+					if err := client.Get(context.TODO(), kbclient.ObjectKey{Name: pvName}, pvObj); err == nil {
+						pv = pvObj
+					}
+				}
+			}
+		}
+
+		vi := volume.NewBackupVolumeInfoFromCSISnapshot(vs, vsc, matchingOp, pv, pvName)
+		volumeInfos = append(volumeInfos, vi)
+	}
+
+	return volumeInfos, nil
 }
 
 func putVolumeInfos(
