@@ -123,11 +123,15 @@ Before using Volume Group Snapshots with Velero, ensure your environment meets t
 - Check your version: `kubectl version --short`
 
 ### 2. External-Snapshotter Version
-Velero 1.18.1+ uses the VolumeGroupSnapshot v1beta2 API. This requires external-snapshotter v8.2.0 or later, which introduced v1beta2 support. Older versions of external-snapshotter only ship v1beta1 CRDs and are not compatible with VGS in Velero 1.18.1+.
+Velero detects the served VolumeGroupSnapshot API version at runtime and works with any of `groupsnapshot.storage.k8s.io/v1`, `v1beta2`, or `v1beta1`. When a cluster serves more than one, Velero prefers the newest (`v1` > `v1beta2` > `v1beta1`). The installed external-snapshotter CRDs and controllers must serve at least one of these versions.
 
 ```bash
-# Check your external-snapshotter CRD version
-kubectl get crd volumegroupsnapshotcontents.groupsnapshot.storage.k8s.io -o jsonpath='{.spec.versions[*].name}'
+# Check which group-snapshot API versions the CRDs serve
+kubectl get crd \
+  volumegroupsnapshots.groupsnapshot.storage.k8s.io \
+  volumegroupsnapshotcontents.groupsnapshot.storage.k8s.io \
+  volumegroupsnapshotclasses.groupsnapshot.storage.k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.versions[*]}{"  "}{.name}{" served="}{.served}{"\n"}{end}{end}'
 ```
 
 ### 3. VolumeGroupSnapshot CRDs
@@ -160,7 +164,7 @@ kubectl get volumegroupsnapshotclass -o wide
 **Important:** The VolumeGroupSnapshotClass must have the label `velero.io/csi-volumegroupsnapshot-class: "true"` for Velero to automatically discover and use it:
 
 ```yaml
-apiVersion: groupsnapshot.storage.k8s.io/v1beta2
+apiVersion: groupsnapshot.storage.k8s.io/v1
 kind: VolumeGroupSnapshotClass
 metadata:
   name: csi-vgs-class
@@ -503,4 +507,3 @@ kubectl patch volumesnapshotclass ocs-storagecluster-rbdplugin-snapclass \
 3. **Label Consistency:** Use consistent labeling across your organization
 4. **Backup Validation:** Always verify backup success before relying on it for disaster recovery
 5. **Storage Quotas:** Ensure sufficient storage quota for group snapshots
-

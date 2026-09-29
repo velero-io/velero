@@ -28,7 +28,7 @@ import (
 
 	logrusr "github.com/bombsimon/logrusr/v3"
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -249,7 +249,7 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		cancelFunc()
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
