@@ -341,7 +341,7 @@ func TestResolveGracefulShutdownTimeout(t *testing.T) {
 			expected: 60 * time.Second,
 		},
 		{
-			name:    "terminationGracePeriodSeconds at the kubernetes default still has the buffer subtracted",
+			name:    "terminationGracePeriodSeconds at the Kubernetes default still has the buffer subtracted",
 			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 2 * time.Second},
 			podName: "velero-abc123",
 			pod: &corev1api.Pod{
@@ -354,7 +354,7 @@ func TestResolveGracefulShutdownTimeout(t *testing.T) {
 			expected: 28 * time.Second,
 		},
 		{
-			name:    "terminationGracePeriodSeconds below the kubernetes default derives normally",
+			name:    "terminationGracePeriodSeconds below the Kubernetes default derives normally",
 			cfg:     &config.Config{GracefulShutdownSafetyBuffer: 10 * time.Second},
 			podName: "velero-abc123",
 			pod: &corev1api.Pod{
