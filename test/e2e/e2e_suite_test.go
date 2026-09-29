@@ -835,7 +835,7 @@ var _ = AfterSuite(func() {
 		),
 	).To(Succeed())
 
-	By("Delete PriorityClasses created by E2E")
+	By(fmt.Sprintf("Delete StorageClass %s created by E2E", test.StorageClassName2))
 	Expect(
 		k8s.DeleteStorageClass(
 			ctx,
@@ -855,6 +855,7 @@ var _ = AfterSuite(func() {
 		).To(Succeed())
 	}
 
+	By("Delete PriorityClasses created by E2E")
 	Expect(veleroutil.DeletePriorityClasses(
 		ctx,
 		test.VeleroCfg.ClientToInstallVelero.Kubebuilder,

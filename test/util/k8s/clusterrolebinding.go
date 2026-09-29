@@ -17,30 +17,43 @@ limitations under the License.
 package k8s
 
 import (
-	"fmt"
-	"os/exec"
-	"strings"
-
 	"context"
 
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	"github.com/cockroachdb/errors"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func KubectlDeleteClusterRoleBinding(ctx context.Context, name string) error {
-	args := []string{"delete", "clusterrolebinding", name}
-	fmt.Println(args)
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	fmt.Println(cmd)
-	_, stderr, err := veleroexec.RunCommand(cmd)
-	if strings.Contains(stderr, "NotFound") {
-		fmt.Printf("Ignore error: %v\n", stderr)
-		err = nil
+func DeleteClusterRoleBinding(ctx context.Context, client TestClient, name string) error {
+	err := client.ClientGo.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return errors.Wrapf(err, "failed to delete cluster role binding %s", name)
 	}
-	return err
+	return nil
 }
 
-func KubectlCreateClusterRoleBinding(ctx context.Context, name, clusterrole, namespace, serviceaccount string) error {
-	args := []string{"create", "clusterrolebinding", name, fmt.Sprintf("--clusterrole=%s", clusterrole), fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceaccount)}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+func CreateClusterRoleBinding(ctx context.Context, client TestClient, name, clusterrole, namespace, serviceaccount string) error {
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     clusterrole,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      serviceaccount,
+				Namespace: namespace,
+			},
+		},
+	}
+	_, err := client.ClientGo.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return errors.Wrapf(err, "failed to create cluster role binding %s", name)
+	}
+	return nil
 }

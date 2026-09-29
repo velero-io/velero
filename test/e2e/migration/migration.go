@@ -345,7 +345,9 @@ func (m *migrationE2E) Restore() error {
 
 		By("Install StorageClass for E2E.")
 		Expect(veleroutil.InstallStorageClasses(
-			m.VeleroCfg.StandbyClusterCloudProvider)).To(Succeed())
+			m.VeleroCfg.StandbyClusterCloudProvider,
+			*m.VeleroCfg.StandbyClient,
+		)).To(Succeed())
 
 		By("Install PriorityClass for E2E.")
 		Expect(veleroutil.CreatePriorityClasses(
