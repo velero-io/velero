@@ -33,7 +33,7 @@ The following is an overview of Velero's restore process that starts after you r
 
 1. The `RestoreController` then extracts the tarball of backup cluster resources to the /tmp folder and performs some pre-processing on the resources, including:
 
-    * Sorting the resources to help Velero decide the [restore order](#resource-restore-order) to use.
+    * Sorting the resources to help Velero decide the [restore order](#restore-order) to use.
 
     * Attempting to discover the resources by their Kubernetes [Group Version Resource (GVR)](https://kubernetes.io/docs/reference/using-api/api-concepts/). If a resource is not discoverable, Velero will exclude it from the restore. See more about how [Velero backs up API versions](#backed-up-api-versions).
 
@@ -56,7 +56,7 @@ The following is an overview of Velero's restore process that starts after you r
 
     * The `RestoreController` adds a `velero.io/backup-name` label with the backup name and a `velero.io/restore-name` with the restore name to the resource. This can help you easily identify restored resources and which backup they were restored from.
 
-1. The `RestoreController` creates the resource object on the target cluster. If the resource is a PV then the `RestoreController` will restore the PV data from the [durable snapshot](#durable-snapshot-pv-restore), [File System Backup](#file-system-backup-pv-restore), or [CSI snapshot](#csi-pv-restore) depending on how the PV was backed up.
+1. The `RestoreController` creates the resource object on the target cluster. If the resource is a PV then the `RestoreController` will restore the PV data from the [durable snapshot](#snapshot-pv-restore), [File System Backup](#file-system-backup-pv-restore), or [CSI snapshot](#csi-pv-restore) depending on how the PV was backed up.
 
     If the resource already exists in the target cluster, which is determined by the Kubernetes API during resource creation, the `RestoreController` will skip the resource. The only [exception](#restore-existing-resource-policy) are Service Accounts, which Velero will attempt to merge differences between the backed up ServiceAccount into the ServiceAccount on the target cluster. You can [change the default existing resource restore policy](#restore-existing-resource-policy) to update resources instead of skipping them using the `--existing-resource-policy`.
 
