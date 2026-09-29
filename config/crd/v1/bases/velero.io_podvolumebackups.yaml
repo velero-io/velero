@@ -195,6 +195,13 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              activities:
+                description: Activities contains one or more messages about what have
+                  been done for this pod volume backup.
+                items:
+                  type: string
+                nullable: true
+                type: array
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a backup was completed.
@@ -218,7 +225,8 @@ spec:
                 format: int64
                 type: integer
               message:
-                description: Message is a message about the pod volume backup's status.
+                description: Message is a message describing the pod volume backup
+                  when it reaches to a terminal status.
                 type: string
               path:
                 description: Path is the full path within the controller pod being
