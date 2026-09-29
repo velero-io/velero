@@ -1121,6 +1121,7 @@ func TestNewVolumeHelperImplWithCache(t *testing.T) {
 		name                    string
 		backup                  velerov1api.Backup
 		resourcePolicyConfigMap *corev1api.ConfigMap
+		globalPolicyConfigMap   *corev1api.ConfigMap
 		pvcPodCache             bool // whether to pass a cache
 		expectError             bool
 	}{
@@ -1205,6 +1206,74 @@ volumePolicies:
 			pvcPodCache: false,
 			expectError: true,
 		},
+		{
+			name: "creates VolumeHelper with global volume policies and per-backup policies",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+					Annotations: map[string]string{
+						velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global-policy",
+					},
+				},
+				Spec: velerov1api.BackupSpec{
+					SnapshotVolumes: ptr.To(true),
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: "ConfigMap",
+						Name: "resource-policy",
+					},
+				},
+			},
+			resourcePolicyConfigMap: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "resource-policy",
+					Namespace: "velero",
+				},
+				Data: map[string]string{
+					"policy": `version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - gp2-csi
+  action:
+    type: snapshot`,
+				},
+			},
+			globalPolicyConfigMap: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "global-policy",
+					Namespace: "velero",
+				},
+				Data: map[string]string{
+					"policy": `version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - other-csi
+  action:
+    type: skip`,
+				},
+			},
+			pvcPodCache: true,
+			expectError: false,
+		},
+		{
+			name: "fails when global resource policy ConfigMap not found",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+					Annotations: map[string]string{
+						velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "non-existent-global-policy",
+					},
+				},
+				Spec: velerov1api.BackupSpec{
+					SnapshotVolumes: ptr.To(true),
+				},
+			},
+			pvcPodCache: false,
+			expectError: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1212,6 +1281,9 @@ volumePolicies:
 			var objs []runtime.Object
 			if tc.resourcePolicyConfigMap != nil {
 				objs = append(objs, tc.resourcePolicyConfigMap)
+			}
+			if tc.globalPolicyConfigMap != nil {
+				objs = append(objs, tc.globalPolicyConfigMap)
 			}
 			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 

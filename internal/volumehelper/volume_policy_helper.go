@@ -119,7 +119,17 @@ func NewVolumeHelperImplWithCache(
 	pvcPodCache *podvolumeutil.PVCPodCache,
 	pvcMustInclusionTracker vhutil.PVCMustInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
-	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(backup, client, logger)
+	var globalCMName string
+	if backup.Annotations != nil {
+		globalCMName = backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
+		backup,
+		client,
+		globalCMName,
+		backup.Namespace,
+		logger,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get volume policies from backup")
 	}

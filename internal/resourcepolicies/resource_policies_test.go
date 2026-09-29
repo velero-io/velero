@@ -724,7 +724,7 @@ volumePolicies:
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			resPolicies, err := GetResourcePoliciesFromBackup(tc.backup, client, logger)
+			resPolicies, err := getResourcePoliciesFromBackup(tc.backup, client, logger)
 			if tc.expectedErr == "" {
 				require.NoError(t, err)
 				if tc.backup.Spec.ResourcePolicy != nil && tc.backup.Spec.ResourcePolicy.Kind == ConfigmapRefType {
@@ -3146,6 +3146,8 @@ volumePolicies:
 		globalCMName        string
 		globalCM            *corev1api.ConfigMap
 		backupRef           string
+		backupAnnotations   map[string]string
+		installNamespace    string
 		expectErr           bool
 		expectedGp2Action   VolumeActionType
 		expectedNumPolicies int
@@ -3184,6 +3186,15 @@ volumePolicies:
 			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
 			globalCMName:        "global",
 			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			expectedGp2Action:   Skip, // only global matches gp2
+			expectedNumPolicies: 2,
+		},
+		{
+			name:                "merge - global from backup annotation with empty params",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			backupAnnotations:   map[string]string{velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global"},
 			expectedGp2Action:   Skip, // only global matches gp2
 			expectedNumPolicies: 2,
 		},
@@ -3227,8 +3238,15 @@ volumePolicies:
 			}
 
 			b := backupWithPolicy(tc.backupRef)
+			if tc.backupAnnotations != nil {
+				b.Annotations = tc.backupAnnotations
+			}
 
-			p, err := GetResourcePoliciesFromBackupWithGlobal(b, client, tc.globalCMName, "velero", logrus.New())
+			ns := tc.installNamespace
+			if ns == "" && tc.backupAnnotations == nil {
+				ns = "velero"
+			}
+			p, err := GetResourcePoliciesFromBackupWithGlobal(b, client, tc.globalCMName, ns, logrus.New())
 			if tc.expectErr {
 				require.Error(t, err)
 				return

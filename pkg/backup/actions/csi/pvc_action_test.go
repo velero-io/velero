@@ -81,23 +81,24 @@ func (c *errorInjectingClient) Create(ctx context.Context, obj crclient.Object, 
 func TestExecute(t *testing.T) {
 	boolTrue := true
 	tests := []struct {
-		name                string
-		backup              *velerov1api.Backup
-		pvc                 *corev1api.PersistentVolumeClaim
-		pv                  *corev1api.PersistentVolume
-		sc                  *storagev1api.StorageClass
-		vsClass             *snapshotv1api.VolumeSnapshotClass
-		operationID         string
-		expectedErr         error
-		expectErr           bool // Use bool for cases where we just need to check for any error
-		expectedBackup      *velerov1api.Backup
-		expectedDataUpload  *velerov2alpha1.DataUpload
-		expectedPVC         *corev1api.PersistentVolumeClaim
-		resourcePolicy      *corev1api.ConfigMap
-		extraObjects        []runtime.Object
-		failVSCreate        bool
-		skipVSReadyUpdate   bool // New flag to control VS readiness
-		expectedVSClassName string
+		name                 string
+		backup               *velerov1api.Backup
+		pvc                  *corev1api.PersistentVolumeClaim
+		pv                   *corev1api.PersistentVolume
+		sc                   *storagev1api.StorageClass
+		vsClass              *snapshotv1api.VolumeSnapshotClass
+		operationID          string
+		expectedErr          error
+		expectErr            bool // Use bool for cases where we just need to check for any error
+		expectedBackup       *velerov1api.Backup
+		expectedDataUpload   *velerov2alpha1.DataUpload
+		expectedPVC          *corev1api.PersistentVolumeClaim
+		resourcePolicy       *corev1api.ConfigMap
+		globalResourcePolicy *corev1api.ConfigMap
+		extraObjects         []runtime.Object
+		failVSCreate         bool
+		skipVSReadyUpdate    bool // New flag to control VS readiness
+		expectedVSClassName  string
 	}{
 		{
 			name:   "Skip PVC BIA when backup is in finalizing phase",
@@ -229,10 +230,75 @@ func TestExecute(t *testing.T) {
 			vsClass:             builder.ForVolumeSnapshotClass("policy-selected-vsclass").Driver("hostpath").Result(),
 			expectedVSClassName: "policy-selected-vsclass",
 		},
+		{
+			name: "Global backup volume policy dataMover overrides backup.Spec.DataMover",
+			backup: builder.ForBackup("velero", "test").
+				SnapshotMoveData(true).
+				DataMover("velero-fs").
+				CSISnapshotTimeout(1 * time.Minute).
+				ObjectMeta(builder.WithAnnotations(velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation, "global-volume-policy")).
+				Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			globalResourcePolicy: builder.ForConfigMap("velero", "global-volume-policy").
+				Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"dataMover":"velero-block"}}}]}`).
+				Result(),
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
+			operationID: ".",
+			expectedDataUpload: &velerov2alpha1.DataUpload{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "DataUpload",
+					APIVersion: velerov2alpha1.SchemeGroupVersion.String(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-",
+					Namespace:    "velero",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel:       "test",
+						velerov1api.BackupUIDLabel:        "",
+						velerov1api.PVCUIDLabel:           "",
+						velerov1api.AsyncOperationIDLabel: "du-.",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "velero.io/v1",
+							Kind:       "Backup",
+							Name:       "test",
+							UID:        "",
+							Controller: &boolTrue,
+						},
+					},
+				},
+				Spec: velerov2alpha1.DataUploadSpec{
+					SnapshotType: velerov2alpha1.SnapshotTypeCSI,
+					CSISnapshot: &velerov2alpha1.CSISnapshotSpec{
+						VolumeSnapshot: "",
+						StorageClass:   "testSC",
+						SnapshotClass:  "testVSClass",
+					},
+					SourcePVC:        "testPVC",
+					SourceNamespace:  "velero",
+					DataMover:        "velero-block",
+					OperationTimeout: metav1.Duration{Duration: 1 * time.Minute},
+					ParentSnapshot:   "",
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			logger := logrus.New()
 			logger.Level = logrus.DebugLevel
 			objects := make([]runtime.Object, 0)
@@ -250,6 +316,9 @@ func TestExecute(t *testing.T) {
 			}
 			if tc.resourcePolicy != nil {
 				objects = append(objects, tc.resourcePolicy)
+			}
+			if tc.globalResourcePolicy != nil {
+				objects = append(objects, tc.globalResourcePolicy)
 			}
 			objects = append(objects, tc.extraObjects...)
 
@@ -706,12 +775,13 @@ func TestListGroupedPVCs(t *testing.T) {
 
 func TestFilterPVCsByVolumePolicy(t *testing.T) {
 	tests := []struct {
-		name            string
-		pvcs            []corev1api.PersistentVolumeClaim
-		pvs             []corev1api.PersistentVolume
-		volumePolicyStr string
-		expectCount     int
-		expectError     bool
+		name                  string
+		pvcs                  []corev1api.PersistentVolumeClaim
+		pvs                   []corev1api.PersistentVolume
+		volumePolicyStr       string
+		globalVolumePolicyStr string
+		expectCount           int
+		expectError           bool
 	}{
 		{
 			name: "All PVCs should be included when no volume policy",
@@ -917,6 +987,65 @@ volumePolicies:
 `,
 			expectCount: 1,
 		},
+		{
+			name: "Filter out NFS PVC using global volume policy annotation",
+			pvcs: []corev1api.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pvc-linstor",
+						Namespace: "ns-1",
+						Labels:    map[string]string{"app.kubernetes.io/instance": "myapp"},
+					},
+					Spec: corev1api.PersistentVolumeClaimSpec{
+						VolumeName:       "pv-linstor",
+						StorageClassName: ptr.To("sc-linstor"),
+					},
+					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pvc-nfs",
+						Namespace: "ns-1",
+						Labels:    map[string]string{"app.kubernetes.io/instance": "myapp"},
+					},
+					Spec: corev1api.PersistentVolumeClaimSpec{
+						VolumeName:       "pv-nfs",
+						StorageClassName: ptr.To("sc-nfs"),
+					},
+					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
+				},
+			},
+			pvs: []corev1api.PersistentVolume{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pv-linstor"},
+					Spec: corev1api.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1api.PersistentVolumeSource{
+							CSI: &corev1api.CSIPersistentVolumeSource{Driver: "linstor.csi.linbit.com"},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pv-nfs"},
+					Spec: corev1api.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1api.PersistentVolumeSource{
+							NFS: &corev1api.NFSVolumeSource{
+								Server: "nfs-server",
+								Path:   "/export",
+							},
+						},
+					},
+				},
+			},
+			globalVolumePolicyStr: `
+version: v1
+volumePolicies:
+- conditions:
+    nfs: {}
+  action:
+    type: skip
+`,
+			expectCount: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -934,6 +1063,25 @@ volumePolicies:
 					Namespace: "velero",
 				},
 				Spec: velerov1api.BackupSpec{},
+			}
+
+			// Add global volume policy ConfigMap if specified
+			if tt.globalVolumePolicyStr != "" {
+				cm := &corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "global-volume-policy",
+						Namespace: "velero",
+					},
+					Data: map[string]string{
+						"volume-policy": tt.globalVolumePolicyStr,
+					},
+				}
+				require.NoError(t, client.Create(t.Context(), cm))
+
+				if backup.Annotations == nil {
+					backup.Annotations = make(map[string]string)
+				}
+				backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = "global-volume-policy"
 			}
 
 			// Add volume policy ConfigMap if specified
@@ -1519,7 +1667,11 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 				crClient: client,
 			}
 
-			vsMap, err := action.waitForVGSAssociatedVS(t.Context(), tt.groupedPVCs, vgs, 2*time.Second)
+			timeout := 2 * time.Second
+			if tt.expectErr {
+				timeout = 20 * time.Millisecond
+			}
+			vsMap, err := action.waitForVGSAssociatedVS(t.Context(), tt.groupedPVCs, vgs, timeout)
 
 			if tt.expectErr {
 				if err == nil {
@@ -1922,7 +2074,11 @@ func TestWaitForVGSCBinding(t *testing.T) {
 				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgs.DeepCopy()),
 			}
 
-			err := action.waitForVGSCBinding(t.Context(), tt.vgs, 1*time.Second)
+			timeout := 1 * time.Second
+			if tt.expectErr {
+				timeout = 20 * time.Millisecond
+			}
+			err := action.waitForVGSCBinding(t.Context(), tt.vgs, timeout)
 
 			if tt.expectErr {
 				require.Error(t, err)

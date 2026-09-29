@@ -76,9 +76,15 @@ func ShouldPerformSnapshotWithVolumeHelper(
 	}
 
 	// Otherwise, create a new VolumeHelper (original behavior for third-party plugins)
-	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(
+	var globalCMName string
+	if backup.Annotations != nil {
+		globalCMName = backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
 		backup,
 		crClient,
+		globalCMName,
+		backup.Namespace,
 		logger,
 	)
 	if err != nil {

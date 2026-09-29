@@ -37,6 +37,7 @@ func TestShouldPerformSnapshotWithBackup(t *testing.T) {
 		name         string
 		pvc          *corev1api.PersistentVolumeClaim
 		pv           *corev1api.PersistentVolume
+		configMaps   []*corev1api.ConfigMap
 		backup       *velerov1api.Backup
 		wantSnapshot bool
 		wantError    bool
@@ -122,12 +123,117 @@ func TestShouldPerformSnapshotWithBackup(t *testing.T) {
 			wantSnapshot: false,
 			wantError:    false,
 		},
+		{
+			name: "Honors global volume policy from backup annotation to skip snapshot",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "test-pv",
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimBound,
+				},
+			},
+			pv: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pv",
+				},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1api.PersistentVolumeSource{
+						CSI: &corev1api.CSIPersistentVolumeSource{
+							Driver: "test-driver",
+						},
+					},
+					ClaimRef: &corev1api.ObjectReference{
+						Namespace: "default",
+						Name:      "test-pvc",
+					},
+				},
+			},
+			configMaps: []*corev1api.ConfigMap{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "global-policy",
+						Namespace: "velero",
+					},
+					Data: map[string]string{
+						"policy": `version: v1
+volumePolicies:
+- conditions:
+    csi:
+      driver: test-driver
+  action:
+    type: skip`,
+					},
+				},
+			},
+			backup: &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+					Annotations: map[string]string{
+						velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global-policy",
+					},
+				},
+			},
+			wantSnapshot: false,
+			wantError:    false,
+		},
+		{
+			name: "Fails when global volume policy ConfigMap not found",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "test-pv",
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimBound,
+				},
+			},
+			pv: &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pv",
+				},
+				Spec: corev1api.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1api.PersistentVolumeSource{
+						CSI: &corev1api.CSIPersistentVolumeSource{
+							Driver: "test-driver",
+						},
+					},
+					ClaimRef: &corev1api.ObjectReference{
+						Namespace: "default",
+						Name:      "test-pvc",
+					},
+				},
+			},
+			backup: &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+					Annotations: map[string]string{
+						velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "non-existent-global-policy",
+					},
+				},
+			},
+			wantSnapshot: false,
+			wantError:    true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create fake client with PV and PVC
-			client := velerotest.NewFakeControllerRuntimeClient(t, tt.pv, tt.pvc)
+			// Create fake client with PV and PVC and ConfigMaps
+			objs := []runtime.Object{tt.pv, tt.pvc}
+			for _, cm := range tt.configMaps {
+				objs = append(objs, cm)
+			}
+			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 
 			// Convert PVC to unstructured
 			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tt.pvc)
