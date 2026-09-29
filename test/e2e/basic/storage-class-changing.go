@@ -47,6 +47,9 @@ func (s *StorageClasssChanging) Init() error {
 		Text: "Change the storage class of persistent volumes and persistent" +
 			" volume claims during restores",
 	}
+	if StorageClassName2 == "" {
+		Skip("this case needs a second StorageClass; set --storage-class-2 to run it")
+	}
 	s.srcStorageClass = StorageClassName
 	s.desStorageClass = StorageClassName2
 	s.labels = map[string]string{"velero.io/change-storage-class": "RestoreItemAction",

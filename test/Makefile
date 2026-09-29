@@ -181,6 +181,18 @@ COMMON_ARGS := --velerocli=$(VELERO_CLI) \
 	--has-vsphere-plugin=$(HAS_VSPHERE_PLUGIN) \
 	--item-block-worker-count=$(ITEM_BLOCK_WORKER_COUNT)
 
+# Names of existing StorageClasses to run against. Deliberately left undefined:
+# unset means the tests create and delete their own, which is the default
+# behaviour. Setting one hands ownership of that class to the caller. Setting
+# STORAGE_CLASS_2 to the empty string runs without a second StorageClass, and
+# the cases that need one skip.
+ifneq ($(origin STORAGE_CLASS),undefined)
+COMMON_ARGS += --storage-class=$(STORAGE_CLASS)
+endif
+ifneq ($(origin STORAGE_CLASS_2),undefined)
+COMMON_ARGS += --storage-class-2=$(STORAGE_CLASS_2)
+endif
+
 # Make sure ginkgo is in $GOBIN
 .PHONY:ginkgo
 ginkgo: ${GOBIN}/ginkgo

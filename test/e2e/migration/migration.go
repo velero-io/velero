@@ -463,21 +463,15 @@ func (m *migrationE2E) Clean() error {
 		m.VeleroCfg.ClusterToInstallVelero = m.VeleroCfg.StandbyClusterName
 
 		By("Delete StorageClasses created by E2E")
-		if err := k8sutil.DeleteStorageClass(
-			m.Ctx,
-			*m.VeleroCfg.ClientToInstallVelero,
-			test.StorageClassName,
-		); err != nil {
-			fmt.Println("Fail to delete StorageClass1: ", err)
-			return
-		}
-		if err := k8sutil.DeleteStorageClass(
-			m.Ctx,
-			*m.VeleroCfg.ClientToInstallVelero,
-			test.StorageClassName2,
-		); err != nil {
-			fmt.Println("Fail to delete StorageClass2: ", err)
-			return
+		for _, name := range test.StorageClassesOwnedByE2E() {
+			if err := k8sutil.DeleteStorageClass(
+				m.Ctx,
+				*m.VeleroCfg.ClientToInstallVelero,
+				name,
+			); err != nil {
+				fmt.Printf("Fail to delete StorageClass %s: %v\n", name, err)
+				return
+			}
 		}
 
 		By("Delete PriorityClasses created by E2E")

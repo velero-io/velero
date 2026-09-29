@@ -59,6 +59,10 @@ func (r *ResourcePoliciesCase) Init() error {
 	// generate random number as UUIDgen and set one default timeout duration
 	r.TestCase.Init()
 
+	if StorageClassName2 == "" {
+		Skip("this case needs a second StorageClass; set --storage-class-2 to run it")
+	}
+
 	// generate variable names based on CaseBaseName + UUIDgen
 	r.CaseBaseName = "resource-policies-" + r.UUIDgen
 	r.BackupName = "backup-" + r.CaseBaseName

@@ -39,10 +39,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/mod/semver"
 	schedulingv1api "k8s.io/api/scheduling/v1"
+	storagev1api "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -1501,41 +1503,87 @@ func GetVeleroPodName(ctx context.Context) ([]string, error) {
 	return common.GetListByCmdPipes(ctx, cmds)
 }
 
-// InstallStorageClasses create the "e2e-storage-class" and "e2e-storage-class-2"
-// StorageClasses for E2E tests.
+// InstallStorageClasses creates the two StorageClasses the E2E tests use, both
+// from the provider's definition under testdata/storage-class.
 //
-// e2e-storage-class is the default StorageClass for E2E.
-// e2e-storage-class-2 is used for the StorageClass mapping test case.
+// StorageClassName is the default StorageClass for E2E.
+// StorageClassName2 is used for the StorageClass mapping test cases.
+// Both names are configurable; see test/types.go.
 // Kibishii StorageClass is not covered here.
 func InstallStorageClasses(provider string) error {
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Minute*5)
 	defer ctxCancel()
 
-	storageClassFilePath := fmt.Sprintf("../testdata/storage-class/%s.yaml", provider)
-
-	if err := InstallStorageClass(ctx, storageClassFilePath); err != nil {
-		return err
+	storageClasses := []struct {
+		name     string
+		provided bool
+	}{
+		{StorageClassName, StorageClassNameProvided},
+		{StorageClassName2, StorageClassName2Provided},
 	}
-	content, err := os.ReadFile(storageClassFilePath)
+
+	// A provided StorageClass belongs to whoever set it up, so only check that
+	// it is there. An empty second name means the suite runs without one, and
+	// the cases that need it skip.
+	var content []byte
+	for _, sc := range storageClasses {
+		if sc.name == "" {
+			continue
+		}
+		if sc.provided {
+			exists, err := StorageClassExists(ctx, *VeleroCfg.ClientToInstallVelero, sc.name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return errors.Errorf("storage class %s was configured but does not exist in the cluster; create it first or drop the flag to let the tests create their own", sc.name)
+			}
+			continue
+		}
+
+		if content == nil {
+			storageClassFilePath := fmt.Sprintf("../testdata/storage-class/%s.yaml", provider)
+			var err error
+			if content, err = os.ReadFile(storageClassFilePath); err != nil {
+				return errors.Wrapf(err, "failed to get %s when install storage class", storageClassFilePath)
+			}
+		}
+		// The name in the file is ignored: the StorageClasses are created from
+		// the same definition, renamed to the configured names, so that
+		// overriding them changes what is created as well as what the tests
+		// look for.
+		if err := installStorageClassAs(ctx, content, sc.name); err != nil {
+			return errors.Wrapf(err, "failed to install storage class %s", sc.name)
+		}
+	}
+	return nil
+}
+
+// installStorageClassAs applies the StorageClass definition in content under the
+// given name.
+func installStorageClassAs(ctx context.Context, content []byte, name string) error {
+	sc := new(storagev1api.StorageClass)
+	if err := yaml.Unmarshal(content, sc); err != nil {
+		return errors.Wrap(err, "failed to unmarshal the storage class definition")
+	}
+	sc.Name = name
+
+	renamed, err := yaml.Marshal(sc)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get %s when install storage class", storageClassFilePath)
+		return errors.Wrap(err, "failed to marshal the storage class definition")
 	}
-
-	// Replace the name to e2e-storage-class-2
-	newContent := strings.ReplaceAll(
-		string(content),
-		fmt.Sprintf("name: %s", StorageClassName),
-		fmt.Sprintf("name: %s", StorageClassName2),
-	)
 
 	tmpFile, err := os.CreateTemp("", "sc-file")
 	if err != nil {
-		return errors.Wrapf(err, "failed to create temp file  when install storage class")
+		return errors.Wrap(err, "failed to create temp file when install storage class")
 	}
-
 	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.WriteString(newContent); err != nil {
+
+	if _, err := tmpFile.Write(renamed); err != nil {
 		return errors.Wrapf(err, "failed to write content into temp file %s when install storage class", tmpFile.Name())
+	}
+	if err := tmpFile.Close(); err != nil {
+		return errors.Wrapf(err, "failed to close temp file %s when install storage class", tmpFile.Name())
 	}
 	return InstallStorageClass(ctx, tmpFile.Name())
 }

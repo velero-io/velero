@@ -25,11 +25,36 @@ import (
 	"github.com/vmware-tanzu/velero/test/util/k8s"
 )
 
-// e2e-storage-class is the default StorageClass for E2E.
-const StorageClassName = "e2e-storage-class"
+// StorageClassName is the default StorageClass for E2E. Override it with the
+// --storage-class flag or the E2E_STORAGE_CLASS environment variable.
+var StorageClassName = "e2e-storage-class"
 
-// e2e-storage-class-2 is used for the StorageClass mapping test case.
-const StorageClassName2 = "e2e-storage-class-2"
+// StorageClassName2 is used for the StorageClass mapping test cases. Override it
+// with the --storage-class-2 flag or the E2E_STORAGE_CLASS_2 environment variable,
+// or set it to the empty string to run without a second StorageClass.
+var StorageClassName2 = "e2e-storage-class-2"
+
+// StorageClassNameProvided and StorageClassName2Provided record whether the name
+// came from a flag or the environment. A provided StorageClass belongs to
+// whoever set it up: the suite neither creates nor deletes it, and fails early
+// if it is missing. Unset, the suite creates and deletes its own as before.
+var (
+	StorageClassNameProvided  bool
+	StorageClassName2Provided bool
+)
+
+// StorageClassesOwnedByE2E returns the StorageClasses the suite created itself,
+// which are the only ones it may delete.
+func StorageClassesOwnedByE2E() []string {
+	var owned []string
+	if StorageClassName != "" && !StorageClassNameProvided {
+		owned = append(owned, StorageClassName)
+	}
+	if StorageClassName2 != "" && !StorageClassName2Provided {
+		owned = append(owned, StorageClassName2)
+	}
+	return owned
+}
 
 const FeatureCSI = "EnableCSI"
 const VanillaZFS = "vanilla-zfs"
