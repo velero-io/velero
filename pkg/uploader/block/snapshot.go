@@ -135,7 +135,7 @@ func snapshotSource(
 
 	snap, backupSize, err := u.Backup(source, parentBackup.parentObject, bitmap.Iterator(), uploaderCfg)
 	if err != nil {
-		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to run uploader backup for si %v", source)
+		return "", 0, 0, fallback, errors.Wrapf(err, "failed to run uploader backup for si %v", source)
 	}
 
 	if snap.Tags == nil {
@@ -152,11 +152,11 @@ func snapshotSource(
 
 	snapID, err := rep.SaveSnapshot(ctx, snap)
 	if err != nil {
-		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to save snapshot %v", snap)
+		return "", 0, 0, fallback, errors.Wrapf(err, "failed to save snapshot %v", snap)
 	}
 
 	if err = rep.Flush(ctx); err != nil {
-		return "", 0, 0, fallback, errors.Wrapf(err, "Failed to flush repository")
+		return "", 0, 0, fallback, errors.Wrapf(err, "failed to flush repository")
 	}
 
 	log.Infof("Created snapshot with root %v and ID %v in %v", snap.RootObject, snapID, time.Since(snapshotStartTime).Truncate(time.Second))
@@ -209,7 +209,7 @@ func getParentBackupInfo(ctx context.Context, rep udmrepo.BackupRepo, forceFull 
 	}
 
 	if previous.Tags[uploader.CBTVolumeIDTag] != volumeID {
-		return parentBackupInfo{}, errors.Errorf("VolumeID %s from parent snapshot %s is not expected as %s", previous.Tags[uploader.CBTVolumeIDTag], previous.ID, volumeID)
+		return parentBackupInfo{}, errors.Errorf("volumeID %s from parent snapshot %s is not expected as %s", previous.Tags[uploader.CBTVolumeIDTag], previous.ID, volumeID)
 	}
 
 	obj, err := loadObjectFromSnapshot(ctx, rep, previous)
@@ -232,7 +232,7 @@ func Restore(ctx context.Context, blkUp Uploader, rep udmrepo.BackupRepo, snapsh
 
 	snapshot, err := rep.GetSnapshot(ctx, udmrepo.ID(snapshotID))
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "Unable to load snapshot %v", snapshotID)
+		return 0, 0, false, errors.Wrapf(err, "unable to load snapshot %v", snapshotID)
 	}
 	log.Infof("Restore from snapshot %s, incremental %v, cbt source %v, description %s, created time %v, tags %v", snapshotID, incremental, cbtSource, snapshot.Description, snapshot.EndTime, snapshot.Tags)
 

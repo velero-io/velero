@@ -272,7 +272,7 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		lister := r.newQueuedBackupsLister(allBackups)
 		if r.backupTracker.RunningCount() >= r.concurrentBackups {
-			log.Debugf("%v concurrent backups are already running, leaving %v queued", r.concurrentBackups, backup.Name)
+			log.Infof("%v concurrent backups are already running, leaving %v queued", r.concurrentBackups, backup.Name)
 			return ctrl.Result{}, nil
 		}
 		earlierBackups := lister.earlierThan(backup.Status.QueuePosition)
@@ -294,10 +294,15 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		original := backup.DeepCopy()
 		backup.Status.Phase = velerov1api.BackupPhaseReadyToStart
 		backup.Status.QueuePosition = 0
+		// Record ReadyToStart before patching: patching first would let
+		// backupReconciler pick up the change and complete the backup
+		// (Add then deferred Delete) before this call, leaking a
+		// tracker entry that nothing would ever clean up.
+		r.backupTracker.AddReadyToStart(backup.Namespace, backup.Name)
 		if err := kube.PatchResource(original, backup, r.Client); err != nil {
+			r.backupTracker.Delete(backup.Namespace, backup.Name)
 			return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", backup.Status.Phase)
 		}
-		r.backupTracker.AddReadyToStart(backup.Namespace, backup.Name)
 		log.Debug("Updating queuePosition for remaining queued backups")
 		queuedBackups := lister.orderedQueued()
 		newQueuePos := 1
@@ -306,7 +311,7 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				original := queuedBackup.DeepCopy()
 				queuedBackup.Status.QueuePosition = newQueuePos
 				if err := kube.PatchResource(original, &queuedBackup, r.Client); err != nil {
-					log.WithError(errors.Wrapf(err, "error updating Backup %s queuePosition to %v", queuedBackup.Name, newQueuePos))
+					log.WithError(err).Errorf("error updating Backup %s queuePosition to %v", queuedBackup.Name, newQueuePos)
 					return ctrl.Result{}, nil
 				}
 				newQueuePos++

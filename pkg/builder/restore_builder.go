@@ -179,6 +179,12 @@ func (b *RestoreBuilder) ItemOperationTimeout(timeout time.Duration) *RestoreBui
 	return b
 }
 
+// CSISnapshotTimeout sets the Restore's CSISnapshotTimeout
+func (b *RestoreBuilder) CSISnapshotTimeout(timeout time.Duration) *RestoreBuilder {
+	b.object.Spec.CSISnapshotTimeout.Duration = timeout
+	return b
+}
+
 // ResourcePoliciesConfigmap sets the Restore's resource policies configmap.
 func (b *RestoreBuilder) ResourcePoliciesConfigmap(name string) *RestoreBuilder {
 	b.object.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{

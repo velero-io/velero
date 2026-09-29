@@ -16,7 +16,11 @@ limitations under the License.
 
 package types
 
-import "github.com/vmware-tanzu/velero/pkg/util/kube"
+import (
+	corev1api "k8s.io/api/core/v1"
+
+	"github.com/vmware-tanzu/velero/pkg/util/kube"
+)
 
 type JobConfigs struct {
 	// LoadAffinities is the config for repository maintenance job load affinity.
@@ -39,4 +43,10 @@ type JobConfigs struct {
 	// PodLabels are labels to be added to maintenance job pods.
 	// Note: This is only read from the global configuration, not per-repository
 	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// Tolerations are tolerations to be added to repository maintenance job pods.
+	// Note: This is only read from the global configuration, not per-repository
+	// These are merged with (and deduplicated against) any Velero deployment tolerations
+	// whose key is in the in-tree third-party toleration allowlist, and the default Windows toleration.
+	Tolerations []corev1api.Toleration `json:"tolerations,omitempty"`
 }

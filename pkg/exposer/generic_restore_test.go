@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
@@ -2245,6 +2246,198 @@ func TestCreateRestorePod(t *testing.T) {
 			}
 			if test.expectedNodeSelector != nil {
 				assert.Equal(t, test.expectedNodeSelector, pod.Spec.NodeSelector)
+			}
+		})
+	}
+}
+
+func TestGenericRestoreCleanUp(t *testing.T) {
+	ownerObject := corev1api.ObjectReference{
+		Kind:       "Restore",
+		Namespace:  "velero",
+		Name:       "restore-item",
+		UID:        "owner-uid",
+		APIVersion: "velero.io/v1",
+	}
+
+	tests := []struct {
+		name                 string
+		param                *GenericRestoreCleanUpParam
+		ctrlClientObjects    []crclient.Object
+		expectSnapshotExists bool
+	}{
+		{
+			name: "param has nil snapshot: pod, pvcs, pvs, secrets, cms cleaned up",
+			param: &GenericRestoreCleanUpParam{
+				Snapshot: nil,
+			},
+		},
+		{
+			name: "param snapshot with CleanUp false: snapshot is not deleted",
+			param: &GenericRestoreCleanUpParam{
+				Snapshot: &velerov2alpha1api.CSISnapshotSpec{
+					VolumeSnapshot:          "test-vs",
+					VolumeSnapshotNamespace: "velero",
+					CleanUp:                 false,
+				},
+			},
+			ctrlClientObjects: []crclient.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs",
+						Namespace: "velero",
+					},
+				},
+			},
+			expectSnapshotExists: true,
+		},
+		{
+			name: "param snapshot with CleanUp true: snapshot is deleted",
+			param: &GenericRestoreCleanUpParam{
+				Snapshot: &velerov2alpha1api.CSISnapshotSpec{
+					VolumeSnapshot:          "test-vs",
+					VolumeSnapshotNamespace: "velero",
+					CleanUp:                 true,
+				},
+			},
+			ctrlClientObjects: []crclient.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs",
+						Namespace: "velero",
+					},
+				},
+			},
+			expectSnapshotExists: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			restorePod := &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "restore-item",
+					Namespace: "velero",
+				},
+			}
+			restorePVC := &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "restore-item",
+					Namespace: "velero",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "pv-restore",
+				},
+			}
+			restorePV := &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pv-restore",
+				},
+			}
+			cachePVC := &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "restore-item-cache",
+					Namespace: "velero",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "pv-cache",
+				},
+			}
+			cachePV := &corev1api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pv-cache",
+				},
+			}
+			secret := &corev1api.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "owned-secret",
+					Namespace: "velero",
+					Labels:    map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)},
+				},
+			}
+			cm := &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "owned-cm",
+					Namespace: "velero",
+					Labels:    map[string]string{BackupPVCSecretLabel: string(ownerObject.UID)},
+				},
+			}
+			unrelatedSecret := &corev1api.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-secret",
+					Namespace: "velero",
+					Labels:    map[string]string{BackupPVCSecretLabel: "other-uid"},
+				},
+			}
+			unrelatedCM := &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "other-cm",
+					Namespace: "velero",
+					Labels:    map[string]string{BackupPVCSecretLabel: "other-uid"},
+				},
+			}
+
+			fakeKubeClient := fake.NewSimpleClientset(
+				restorePod, restorePVC, restorePV, cachePVC, cachePV,
+				secret, cm, unrelatedSecret, unrelatedCM,
+			)
+
+			runtimeObjs := make([]runtime.Object, len(tc.ctrlClientObjects))
+			for i, obj := range tc.ctrlClientObjects {
+				runtimeObjs[i] = obj
+			}
+			fakeCtrlClient := velerotest.NewFakeControllerRuntimeClient(t, runtimeObjs...)
+
+			e := &genericRestoreExposer{
+				kubeClient: fakeKubeClient,
+				ctrlClient: fakeCtrlClient,
+				log:        velerotest.NewLogger(),
+			}
+
+			e.CleanUp(t.Context(), ownerObject, tc.param)
+
+			// Verify restore pod is deleted
+			_, err := fakeKubeClient.CoreV1().Pods("velero").Get(t.Context(), "restore-item", metav1.GetOptions{})
+			require.True(t, apierrors.IsNotFound(err), "restore pod should be deleted")
+
+			// Verify restore PVC is deleted and PV reclaim policy is set to Delete
+			_, err = fakeKubeClient.CoreV1().PersistentVolumeClaims("velero").Get(t.Context(), "restore-item", metav1.GetOptions{})
+			require.True(t, apierrors.IsNotFound(err), "restore PVC should be deleted")
+			retrievedPV, err := fakeKubeClient.CoreV1().PersistentVolumes().Get(t.Context(), "pv-restore", metav1.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, corev1api.PersistentVolumeReclaimDelete, retrievedPV.Spec.PersistentVolumeReclaimPolicy)
+
+			// Verify cache PVC is deleted and cache PV reclaim policy is set to Delete
+			_, err = fakeKubeClient.CoreV1().PersistentVolumeClaims("velero").Get(t.Context(), "restore-item-cache", metav1.GetOptions{})
+			require.True(t, apierrors.IsNotFound(err), "cache PVC should be deleted")
+			retrievedCachePV, err := fakeKubeClient.CoreV1().PersistentVolumes().Get(t.Context(), "pv-cache", metav1.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, corev1api.PersistentVolumeReclaimDelete, retrievedCachePV.Spec.PersistentVolumeReclaimPolicy)
+
+			// Verify owned secrets and configmaps are deleted
+			_, err = fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "owned-secret", metav1.GetOptions{})
+			require.True(t, apierrors.IsNotFound(err), "owned secret should be deleted")
+			_, err = fakeKubeClient.CoreV1().ConfigMaps("velero").Get(t.Context(), "owned-cm", metav1.GetOptions{})
+			require.True(t, apierrors.IsNotFound(err), "owned configmap should be deleted")
+
+			// Verify unrelated secrets and configmaps are preserved
+			_, err = fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "other-secret", metav1.GetOptions{})
+			require.NoError(t, err, "unrelated secret should not be deleted")
+			_, err = fakeKubeClient.CoreV1().ConfigMaps("velero").Get(t.Context(), "other-cm", metav1.GetOptions{})
+			require.NoError(t, err, "unrelated configmap should not be deleted")
+
+			// Verify VolumeSnapshot state if applicable
+			if tc.param.Snapshot != nil {
+				vs := &snapshotv1api.VolumeSnapshot{}
+				err = fakeCtrlClient.Get(t.Context(), crclient.ObjectKey{
+					Namespace: tc.param.Snapshot.VolumeSnapshotNamespace,
+					Name:      tc.param.Snapshot.VolumeSnapshot,
+				}, vs)
+				if tc.expectSnapshotExists {
+					require.NoError(t, err, "VolumeSnapshot should still exist")
+				} else {
+					require.True(t, apierrors.IsNotFound(err), "VolumeSnapshot should be deleted")
+				}
 			}
 		})
 	}

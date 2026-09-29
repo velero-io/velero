@@ -107,6 +107,7 @@ type restoreReconciler struct {
 	metrics                     *metrics.ServerMetrics
 	logFormat                   logging.Format
 	clock                       clock.WithTickerAndDelayedExecution
+	defaultCSISnapshotTimeout   time.Duration
 	defaultItemOperationTimeout time.Duration
 	disableInformerCache        bool
 
@@ -133,6 +134,7 @@ func NewRestoreReconciler(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	logFormat logging.Format,
+	defaultCSISnapshotTimeout time.Duration,
 	defaultItemOperationTimeout time.Duration,
 	disableInformerCache bool,
 	globalCrClient client.Client,
@@ -149,6 +151,7 @@ func NewRestoreReconciler(
 		metrics:                     metrics,
 		logFormat:                   logFormat,
 		clock:                       &clock.RealClock{},
+		defaultCSISnapshotTimeout:   defaultCSISnapshotTimeout,
 		defaultItemOperationTimeout: defaultItemOperationTimeout,
 		disableInformerCache:        disableInformerCache,
 
@@ -249,6 +252,10 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		restore.Status.StartTimestamp = &metav1.Time{Time: r.clock.Now()}
 		restore.Status.Phase = api.RestorePhaseInProgress
+	}
+	if restore.Spec.CSISnapshotTimeout.Duration == 0 {
+		// set default CSI snapshot timeout
+		restore.Spec.CSISnapshotTimeout.Duration = r.defaultCSISnapshotTimeout
 	}
 	if restore.Spec.ItemOperationTimeout.Duration == 0 {
 		// set default item operation timeout

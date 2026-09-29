@@ -257,6 +257,9 @@ func getJobConfig(
 				repoMaintenanceJobConfig,
 				repoJobConfigKey)
 		}
+
+		// Tolerations are only read from global config, not per-repository
+		result.Tolerations = nil
 	}
 
 	if _, ok := cm.Data[GlobalKeyForRepoMaintenanceJobCM]; ok {
@@ -301,6 +304,11 @@ func getJobConfig(
 		// Pod's annotations are only read from global config, not per-repository
 		if len(globalResult.PodAnnotations) > 0 {
 			result.PodAnnotations = globalResult.PodAnnotations
+		}
+
+		// Tolerations are only read from global config, not per-repository
+		if len(globalResult.Tolerations) > 0 {
+			result.Tolerations = globalResult.Tolerations
 		}
 	}
 
@@ -481,33 +489,45 @@ func StartNewJob(
 	return maintenanceJob.Name, nil
 }
 
-// buildTolerationsForMaintenanceJob builds the tolerations for maintenance jobs.
-// It includes the required Windows toleration for backward compatibility and filters
-// tolerations from the Velero deployment to only include those with keys that are
-// in the ThirdPartyTolerations allowlist, following the same pattern as labels and annotations.
-func buildTolerationsForMaintenanceJob(deployment *appsv1api.Deployment) []corev1api.Toleration {
-	// Start with the Windows toleration for backward compatibility
+// buildTolerationsForMaintenanceJob builds the tolerations for maintenance jobs:
+// the explicitly configured tolerations (sourced from the maintenance job ConfigMap),
+// plus the required Windows toleration for backward compatibility, plus any toleration
+// on the Velero deployment whose key is in util.ThirdPartyTolerations. The combined
+// list is deduplicated by kube.DeduplicateTolerations.
+//
+// configuredTolerations is appended first so it wins: DeduplicateTolerations
+// keeps only the first occurrence of each exact (Key, Operator, Value, Effect) combination,
+// so an allowlisted deployment toleration or default Windows toleration identical to one
+// already set in the ConfigMap is dropped as a duplicate rather than overriding it.
+func buildTolerationsForMaintenanceJob(deployment *appsv1api.Deployment, configuredTolerations []corev1api.Toleration) []corev1api.Toleration {
 	windowsToleration := corev1api.Toleration{
 		Key:      "os",
 		Operator: "Equal",
 		Effect:   "NoSchedule",
 		Value:    "windows",
 	}
-	result := []corev1api.Toleration{windowsToleration}
 
-	// Filter tolerations from the Velero deployment to only include allowed ones
-	// Only tolerations that exist on the deployment AND have keys in the allowlist are inherited
-	deploymentTolerations := veleroutil.GetTolerationsFromVeleroServer(deployment)
-	for _, k := range util.ThirdPartyTolerations {
-		for _, toleration := range deploymentTolerations {
-			if toleration.Key == k {
-				result = append(result, toleration)
-				break // Only add the first matching toleration for each allowed key
-			}
+	var deploymentTolerations []corev1api.Toleration
+	if deployment != nil {
+		deploymentTolerations = veleroutil.GetTolerationsFromVeleroServer(deployment)
+	}
+
+	merged := make([]corev1api.Toleration, 0, len(configuredTolerations)+1+len(deploymentTolerations))
+	merged = append(merged, configuredTolerations...)
+	merged = append(merged, windowsToleration)
+
+	allowedTolerations := make(map[string]struct{}, len(util.ThirdPartyTolerations))
+	for _, allowed := range util.ThirdPartyTolerations {
+		allowedTolerations[allowed] = struct{}{}
+	}
+
+	for _, t := range deploymentTolerations {
+		if _, ok := allowedTolerations[t.Key]; ok {
+			merged = append(merged, t)
 		}
 	}
 
-	return result
+	return kube.DeduplicateTolerations(merged)
 }
 
 func getPriorityClassName(ctx context.Context, cli client.Client, config *velerotypes.JobConfigs, logger logrus.FieldLogger) string {
@@ -658,6 +678,11 @@ func buildJob(
 	args = append(args, fmt.Sprintf("--log-level=%s", logLevel.String()))
 	args = append(args, fmt.Sprintf("--log-format=%s", logFormat.String()))
 
+	var configuredTolerations []corev1api.Toleration
+	if config != nil && len(config.Tolerations) > 0 {
+		configuredTolerations = config.Tolerations
+	}
+
 	// build the maintenance job
 	job := &batchv1api.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -698,7 +723,7 @@ func buildJob(
 					SecurityContext:    podSecurityContext,
 					Volumes:            volumes,
 					ServiceAccountName: serviceAccount,
-					Tolerations:        buildTolerationsForMaintenanceJob(deployment),
+					Tolerations:        buildTolerationsForMaintenanceJob(deployment, configuredTolerations),
 					ImagePullSecrets:   imagePullSecrets,
 				},
 			},

@@ -751,6 +751,7 @@ func initPodVolumeRestoreReconcilerWithError(objects []runtime.Object, cliObj []
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // tolerations
 	), nil
 }
 
@@ -1335,6 +1336,7 @@ func TestPodVolumeRestoreSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
@@ -1510,7 +1512,7 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 			progress := &test.progress
 
 			r.OnDataPathProgress(ctx, namespace, pvrName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				updatedPVR := &velerov1api.PodVolumeRestore{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, updatedPVR))
 				if progress.TotalBytes != -1 {
@@ -1524,7 +1526,12 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 					assert.Equal(t, int64(0), updatedPVR.Status.Progress.BytesDone) // assuming default or original value
 				}
 				if progress.Message != "" {
-					assert.Contains(t, updatedPVR.Status.Message, progress.Message)
+					assert.Contains(t, updatedPVR.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataPathProgress(ctx, namespace, pvrName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, updatedPVR))
+					assert.Equal(t, []string{progress.Message}, updatedPVR.Status.Activities)
 				}
 			}
 		})

@@ -60,8 +60,9 @@ const (
 	// the default TTL for a backup
 	defaultBackupTTL = 30 * 24 * time.Hour
 
-	defaultCSISnapshotTimeout   = 10 * time.Minute
-	defaultItemOperationTimeout = 4 * time.Hour
+	defaultBackupCSISnapshotTimeout  = 10 * time.Minute
+	defaultRestoreCSISnapshotTimeout = 30 * time.Minute
+	defaultItemOperationTimeout      = 4 * time.Hour
 
 	resourceTimeout = defaultResourceTerminatingTimeout
 
@@ -178,7 +179,8 @@ type Config struct {
 	DefaultBackupTTL                    time.Duration
 	DefaultVGSLabelKey                  string
 	StoreValidationFrequency            time.Duration
-	DefaultCSISnapshotTimeout           time.Duration
+	DefaultBackupCSISnapshotTimeout     time.Duration
+	DefaultRestoreCSISnapshotTimeout    time.Duration
 	DefaultItemOperationTimeout         time.Duration
 	ResourceTimeout                     time.Duration
 	RestoreResourcePriorities           types.Priorities
@@ -269,36 +271,37 @@ func (f *gracefulShutdownSafetyBufferValue) Type() string {
 
 func GetDefaultConfig() *Config {
 	config := &Config{
-		PluginDir:                      "/plugins",
-		MetricsAddress:                 defaultMetricsAddress,
-		DefaultBackupLocation:          "default",
-		DefaultVolumeSnapshotLocations: flag.NewMap().WithKeyValueDelimiter(':'),
-		BackupSyncPeriod:               defaultBackupSyncPeriod,
-		DefaultBackupTTL:               defaultBackupTTL,
-		DefaultVGSLabelKey:             velerov1api.DefaultVGSLabelKey,
-		DefaultCSISnapshotTimeout:      defaultCSISnapshotTimeout,
-		DefaultItemOperationTimeout:    defaultItemOperationTimeout,
-		ResourceTimeout:                resourceTimeout,
-		StoreValidationFrequency:       defaultStoreValidationFrequency,
-		PodVolumeOperationTimeout:      defaultPodVolumeOperationTimeout,
-		RestoreResourcePriorities:      defaultRestorePriorities,
-		ClientQPS:                      defaultClientQPS,
-		ClientBurst:                    defaultClientBurst,
-		ClientPageSize:                 defaultClientPageSize,
-		ProfilerAddress:                defaultProfilerAddress,
-		ResourceTerminatingTimeout:     defaultResourceTerminatingTimeout,
-		LogLevel:                       logging.LogLevelFlag(logrus.InfoLevel),
-		LogFormat:                      logging.NewFormatFlag(),
-		DefaultVolumesToFsBackup:       podvolumeconfigs.DefaultVolumesToFsBackup,
-		UploaderType:                   uploader.KopiaType,
-		MaxConcurrentK8SConnections:    defaultMaxConcurrentK8SConnections,
-		DefaultSnapshotMoveData:        false,
-		DisableInformerCache:           defaultDisableInformerCache,
-		ScheduleSkipImmediately:        false,
-		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
-		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
-		ConcurrentBackups:              DefaultConcurrentBackups,
-		GracefulShutdownSafetyBuffer:   defaultGracefulShutdownSafetyBuffer,
+		PluginDir:                        "/plugins",
+		MetricsAddress:                   defaultMetricsAddress,
+		DefaultBackupLocation:            "default",
+		DefaultVolumeSnapshotLocations:   flag.NewMap().WithKeyValueDelimiter(':'),
+		BackupSyncPeriod:                 defaultBackupSyncPeriod,
+		DefaultBackupTTL:                 defaultBackupTTL,
+		DefaultVGSLabelKey:               velerov1api.DefaultVGSLabelKey,
+		DefaultBackupCSISnapshotTimeout:  defaultBackupCSISnapshotTimeout,
+		DefaultRestoreCSISnapshotTimeout: defaultRestoreCSISnapshotTimeout,
+		DefaultItemOperationTimeout:      defaultItemOperationTimeout,
+		ResourceTimeout:                  resourceTimeout,
+		StoreValidationFrequency:         defaultStoreValidationFrequency,
+		PodVolumeOperationTimeout:        defaultPodVolumeOperationTimeout,
+		RestoreResourcePriorities:        defaultRestorePriorities,
+		ClientQPS:                        defaultClientQPS,
+		ClientBurst:                      defaultClientBurst,
+		ClientPageSize:                   defaultClientPageSize,
+		ProfilerAddress:                  defaultProfilerAddress,
+		ResourceTerminatingTimeout:       defaultResourceTerminatingTimeout,
+		LogLevel:                         logging.LogLevelFlag(logrus.InfoLevel),
+		LogFormat:                        logging.NewFormatFlag(),
+		DefaultVolumesToFsBackup:         podvolumeconfigs.DefaultVolumesToFsBackup,
+		UploaderType:                     uploader.KopiaType,
+		MaxConcurrentK8SConnections:      defaultMaxConcurrentK8SConnections,
+		DefaultSnapshotMoveData:          false,
+		DisableInformerCache:             defaultDisableInformerCache,
+		ScheduleSkipImmediately:          false,
+		CredentialsDirectory:             credentials.DefaultStoreDirectory(),
+		ItemBlockWorkerCount:             DefaultItemBlockWorkerCount,
+		ConcurrentBackups:                DefaultConcurrentBackups,
+		GracefulShutdownSafetyBuffer:     defaultGracefulShutdownSafetyBuffer,
 	}
 
 	return config

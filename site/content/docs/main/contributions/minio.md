@@ -12,7 +12,7 @@ For additional functionality with this setup, see the section below on how to [e
 
 See [Set up Velero on your platform][3] for how to configure Velero for a production environment.
 
-If you encounter issues with installing or configuring, see [Debugging Installation Issues](debugging-install.md).
+If you encounter issues with installing or configuring, see [Debugging Installation Issues](../debugging-install.md).
 
 ## Prerequisites
 

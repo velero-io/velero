@@ -1426,6 +1426,7 @@ func (in *RestoreSpec) DeepCopyInto(out *RestoreSpec) {
 		**out = **in
 	}
 	in.Hooks.DeepCopyInto(&out.Hooks)
+	out.CSISnapshotTimeout = in.CSISnapshotTimeout
 	out.ItemOperationTimeout = in.ItemOperationTimeout
 	if in.ResourceModifier != nil {
 		in, out := &in.ResourceModifier, &out.ResourceModifier

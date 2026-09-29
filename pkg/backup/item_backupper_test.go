@@ -180,33 +180,41 @@ func Test_zoneFromPVNodeAffinity(t *testing.T) {
 	}
 }
 
-func TestGetPVName(t *testing.T) {
+func TestGetVolumeTrackingInfo(t *testing.T) {
 	testcases := []struct {
 		name          string
 		obj           metav1.Object
 		groupResource schema.GroupResource
 		pvName        string
+		pvcName       string
+		pvcNamespace  string
 		hasErr        bool
 	}{
 		{
 			name:          "pv should return pv name",
-			obj:           builder.ForPersistentVolume("test-pv").Result(),
+			obj:           builder.ForPersistentVolume("test-pv").ClaimRef("ns", "pvc-1").Result(),
 			groupResource: kuberesource.PersistentVolumes,
 			pvName:        "test-pv",
+			pvcName:       "pvc-1",
+			pvcNamespace:  "ns",
 			hasErr:        false,
 		},
 		{
-			name:          "pvc without volumeName should return error",
+			name:          "pvc without volumeName should return pvc info",
 			obj:           builder.ForPersistentVolumeClaim("ns", "pvc-1").Result(),
 			groupResource: kuberesource.PersistentVolumeClaims,
 			pvName:        "",
-			hasErr:        true,
+			pvcName:       "pvc-1",
+			pvcNamespace:  "ns",
+			hasErr:        false,
 		},
 		{
-			name:          "pvc with volumeName should return pv name",
+			name:          "pvc with volumeName should return pv name and pvc info",
 			obj:           builder.ForPersistentVolumeClaim("ns", "pvc-1").VolumeName("test-pv-2").Result(),
 			groupResource: kuberesource.PersistentVolumeClaims,
 			pvName:        "test-pv-2",
+			pvcName:       "pvc-1",
+			pvcNamespace:  "ns",
 			hasErr:        false,
 		},
 		{
@@ -214,6 +222,8 @@ func TestGetPVName(t *testing.T) {
 			obj:           builder.ForPod("ns", "pod1").Result(),
 			groupResource: kuberesource.Pods,
 			pvName:        "",
+			pvcName:       "",
+			pvcNamespace:  "",
 			hasErr:        false,
 		},
 	}
@@ -225,8 +235,10 @@ func TestGetPVName(t *testing.T) {
 				o = &unstructured.Unstructured{Object: data}
 				require.NoError(t, err)
 			}
-			name, err2 := getPVName(o, tc.groupResource)
-			assert.Equal(t, tc.pvName, name)
+			pvName, pvcName, pvcNamespace, err2 := getVolumeTrackingInfo(o, tc.groupResource)
+			assert.Equal(t, tc.pvName, pvName)
+			assert.Equal(t, tc.pvcName, pvcName)
+			assert.Equal(t, tc.pvcNamespace, pvcNamespace)
 			assert.Equal(t, tc.hasErr, err2 != nil)
 		})
 	}
@@ -373,28 +385,36 @@ func TestGetMatchAction_PendingLostPVC(t *testing.T) {
 	}
 }
 
-func TestTrackSkippedPV_PendingLostPVC(t *testing.T) {
+func TestTrackSkippedVolume_PendingLostPVC(t *testing.T) {
 	testCases := []struct {
-		name string
-		pvc  *corev1api.PersistentVolumeClaim
+		name               string
+		pvc                *corev1api.PersistentVolumeClaim
+		expectWarningLog   bool
+		expectDebugMessage string
 	}{
 		{
 			name: "Pending PVC should log at info level",
 			pvc: builder.ForPersistentVolumeClaim("ns", "pending-pvc").
 				Phase(corev1api.ClaimPending).
 				Result(),
+			expectWarningLog:   false,
+			expectDebugMessage: "unable to get volume tracking info for ClaimPending PVC, skip tracking.",
 		},
 		{
 			name: "Lost PVC should log at info level",
 			pvc: builder.ForPersistentVolumeClaim("ns", "lost-pvc").
 				Phase(corev1api.ClaimLost).
 				Result(),
+			expectWarningLog:   false,
+			expectDebugMessage: "unable to get volume tracking info for ClaimLost PVC, skip tracking.",
 		},
 		{
 			name: "Bound PVC without VolumeName should log at info level",
 			pvc: builder.ForPersistentVolumeClaim("ns", "bound-pvc").
 				Phase(corev1api.ClaimBound).
 				Result(),
+			expectWarningLog:   false,
+			expectDebugMessage: "unable to get volume tracking info for ClaimBound PVC, skip tracking.",
 		},
 	}
 
@@ -402,7 +422,7 @@ func TestTrackSkippedPV_PendingLostPVC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ib := &itemBackupper{
 				backupRequest: &Request{
-					SkippedPVTracker: NewSkipPVTracker(),
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
 				},
 			}
 
@@ -411,22 +431,40 @@ func TestTrackSkippedPV_PendingLostPVC(t *testing.T) {
 			logger := logrus.New()
 			logger.SetOutput(logOutput)
 			logger.SetLevel(logrus.DebugLevel)
+			logger.SetFormatter(&logrus.TextFormatter{
+				DisableColors:    true,
+				DisableTimestamp: true,
+				DisableQuote:     true,
+			})
 
 			// Convert PVC to unstructured
 			pvcData, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.pvc)
 			require.NoError(t, err)
 			obj := &unstructured.Unstructured{Object: pvcData}
 
-			ib.trackSkippedPV(obj, kuberesource.PersistentVolumeClaims, "", "test reason", logger)
+			ib.trackSkippedVolume(obj, kuberesource.PersistentVolumeClaims, "", "test reason", logger)
 
 			logStr := logOutput.String()
-			assert.Contains(t, logStr, "level=info")
-			assert.Contains(t, logStr, "unable to get PV name, skip tracking.")
+			// Since we now track Pending/Lost PVCs, there won't be an error from getVolumeTrackingInfo
+			// and therefore no debug/info log about skipping tracking.
+			// Instead, we can verify that the tracker actually contains the PVC.
+			assert.NotContains(t, logStr, "unable to get volume tracking info")
+
+			// Verify it was tracked
+			summary := ib.backupRequest.SkippedVolumeTracker.Summary()
+			found := false
+			for _, v := range summary {
+				if v.PVCName == tc.pvc.Name && v.PVCNamespace == tc.pvc.Namespace {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found)
 		})
 	}
 }
 
-func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
+func TestUnTrackSkippedVolume_PendingLostPVC(t *testing.T) {
 	testCases := []struct {
 		name               string
 		pvc                *corev1api.PersistentVolumeClaim
@@ -439,7 +477,7 @@ func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
 				Phase(corev1api.ClaimPending).
 				Result(),
 			expectWarningLog:   false,
-			expectDebugMessage: "unable to get PV name for Pending PVC, skip untracking.",
+			expectDebugMessage: "unable to get volume tracking info for ClaimPending PVC, skip untracking.",
 		},
 		{
 			name: "Lost PVC should log at debug level, not warning",
@@ -447,15 +485,15 @@ func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
 				Phase(corev1api.ClaimLost).
 				Result(),
 			expectWarningLog:   false,
-			expectDebugMessage: "unable to get PV name for Lost PVC, skip untracking.",
+			expectDebugMessage: "unable to get volume tracking info for ClaimLost PVC, skip untracking.",
 		},
 		{
-			name: "Bound PVC without VolumeName should log warning",
+			name: "Bound PVC without VolumeName should log at debug level, not warning",
 			pvc: builder.ForPersistentVolumeClaim("ns", "bound-pvc").
 				Phase(corev1api.ClaimBound).
 				Result(),
-			expectWarningLog:   true,
-			expectDebugMessage: "",
+			expectWarningLog:   false,
+			expectDebugMessage: "unable to get volume tracking info for ClaimBound PVC, skip untracking.",
 		},
 	}
 
@@ -463,7 +501,7 @@ func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ib := &itemBackupper{
 				backupRequest: &Request{
-					SkippedPVTracker: NewSkipPVTracker(),
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
 				},
 			}
 
@@ -472,25 +510,23 @@ func TestUnTrackSkippedPV_PendingLostPVC(t *testing.T) {
 			logger := logrus.New()
 			logger.SetOutput(logOutput)
 			logger.SetLevel(logrus.DebugLevel)
+			logger.SetFormatter(&logrus.TextFormatter{
+				DisableColors:    true,
+				DisableTimestamp: true,
+				DisableQuote:     true,
+			})
 
 			// Convert PVC to unstructured
 			pvcData, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.pvc)
 			require.NoError(t, err)
 			obj := &unstructured.Unstructured{Object: pvcData}
 
-			ib.unTrackSkippedPV(obj, kuberesource.PersistentVolumeClaims, logger)
+			ib.unTrackSkippedVolume(obj, kuberesource.PersistentVolumeClaims, logger)
 
 			logStr := logOutput.String()
-			if tc.expectWarningLog {
-				assert.Contains(t, logStr, "level=warning")
-				assert.Contains(t, logStr, "unable to get PV name, skip untracking.")
-			} else {
-				assert.NotContains(t, logStr, "level=warning")
-				if tc.expectDebugMessage != "" {
-					assert.Contains(t, logStr, "level=debug")
-					assert.Contains(t, logStr, tc.expectDebugMessage)
-				}
-			}
+			// Since we now track Pending/Lost PVCs, there won't be an error from getVolumeTrackingInfo
+			// and therefore no debug/warning log about skipping untracking.
+			assert.NotContains(t, logStr, "unable to get volume tracking info")
 		})
 	}
 }
@@ -534,7 +570,7 @@ func baseRequest() *Request {
 		Backup:                    builder.ForBackup("velero", "test-backup").Result(),
 		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().Includes("*"),
 		ResourceIncludesExcludes:  includeAllIE{},
-		SkippedPVTracker:          NewSkipPVTracker(),
+		SkippedVolumeTracker:      NewSkipVolumeTracker(),
 	}
 }
 
@@ -667,7 +703,7 @@ func TestItemInclusionChecks_GlobalExclusion_OverridesNamespaceFilter(t *testing
 		Backup:                    builder.ForBackup("velero", "test-backup").Result(),
 		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().Includes("*"),
 		ResourceIncludesExcludes:  excludeSecretsIE,
-		SkippedPVTracker:          NewSkipPVTracker(),
+		SkippedVolumeTracker:      NewSkipVolumeTracker(),
 		// namespacedFilterPolicies says to back up Secrets in ns-a
 		NamespacedFilterMap: map[string]*ResolvedNamespaceFilter{
 			"ns-a": {

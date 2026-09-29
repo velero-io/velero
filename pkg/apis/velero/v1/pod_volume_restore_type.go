@@ -88,7 +88,7 @@ type PodVolumeRestoreStatus struct {
 	// +optional
 	Phase PodVolumeRestorePhase `json:"phase,omitempty"`
 
-	// Message is a message about the pod volume restore's status.
+	// Message is a message describing the pod volume restore when it reaches to a terminal status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -127,6 +127,11 @@ type PodVolumeRestoreStatus struct {
 
 	// FallbackFull indicates whether the incremental restore has fallen back to full restore
 	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains one or more messages about what have been done for this pod volume restore.
+	// +optional
+	// +nullable
+	Activities []string `json:"activities,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.

@@ -17,6 +17,7 @@ package resourcepolicies
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/scheme"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -2480,6 +2482,279 @@ includeExcludePolicy:
 	require.NotNil(t, iePolicy)
 	assert.Equal(t, []string{"ClusterRole"}, iePolicy.IncludedClusterScopedResources)
 	assert.Equal(t, []string{"ClusterRoleBinding"}, iePolicy.ExcludedClusterScopedResources)
+}
+
+func TestIncludeExcludePolicyValidateNamespacesByLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  IncludeExcludePolicy
+		wantErr string
+	}{
+		{
+			name:   "no label selector fields set is valid",
+			policy: IncludeExcludePolicy{},
+		},
+		{
+			name: "valid included and excluded selectors",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform", "team=infra"},
+				ExcludedNamespacesByLabel: []string{"env=dev"},
+			},
+		},
+		{
+			name: "valid AND logic",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"tier=critical", "compliance=pci"},
+				LabelSelectorLogic:        "AND",
+			},
+		},
+		{
+			name: "empty string in includedNamespacesByLabel is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{""},
+			},
+			wantErr: "includedNamespacesByLabel: label selector cannot be empty",
+		},
+		{
+			name: "whitespace-only string in excludedNamespacesByLabel is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespacesByLabel: []string{"   "},
+			},
+			wantErr: "excludedNamespacesByLabel: label selector cannot be empty",
+		},
+		{
+			name: "invalid selector syntax is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"=="},
+			},
+			wantErr: "includedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "invalid operator is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespacesByLabel: []string{"env >> prod"},
+			},
+			wantErr: "excludedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "malformed 'in' clause without parens is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"env in prod"},
+			},
+			wantErr: "includedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "invalid labelSelectorLogic is rejected",
+			policy: IncludeExcludePolicy{
+				LabelSelectorLogic: "XOR",
+			},
+			wantErr: `labelSelectorLogic must be "OR" or "AND", got "XOR"`,
+		},
+		{
+			name: "lowercase labelSelectorLogic is accepted",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform"},
+				LabelSelectorLogic:        "and",
+			},
+		},
+		{
+			name: "mixed-case labelSelectorLogic is accepted",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform"},
+				LabelSelectorLogic:        "Or",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.Validate()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveNamespacesByLabel(t *testing.T) {
+	nsWith := func(name string, labels map[string]string) *corev1api.Namespace {
+		return &corev1api.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		}
+	}
+
+	namespaces := []crclient.Object{
+		nsWith("platform-prod", map[string]string{"team": "platform", "env": "prod"}),
+		nsWith("platform-dev", map[string]string{"team": "platform", "env": "dev"}),
+		nsWith("infra", map[string]string{"team": "infra"}),
+		nsWith("confidential", map[string]string{"confidential": "true"}),
+		nsWith("unlabeled", nil),
+	}
+
+	newClient := func() crclient.Client {
+		return fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(namespaces...).Build()
+	}
+
+	t.Run("OR logic across included selectors", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "team=infra"}, nil, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"platform-prod", "platform-dev", "infra"}, included)
+		assert.Empty(t, excluded)
+	})
+
+	t.Run("AND logic across included selectors", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "env=prod"}, nil, "AND")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, included)
+	})
+
+	t.Run("AND logic across excluded selectors", func(t *testing.T) {
+		// labelSelectorLogic applies independently to each list - covers the excluded half
+		// of the contract, not just included (which the case above already covers).
+		_, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"team=platform", "env=prod"}, "AND")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, excluded)
+	})
+
+	t.Run("AND logic matching is case-insensitive", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "env=prod"}, nil, "and")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, included)
+	})
+
+	t.Run("excluded resolved independently of included", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"confidential=true"}, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+		assert.Equal(t, []string{"confidential"}, excluded)
+	})
+
+	t.Run("configured selector matching zero namespaces returns empty, not all", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=nonexistent"}, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+	})
+
+	t.Run("empty selector lists return empty sets", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(), nil, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+		assert.Empty(t, excluded)
+	})
+
+	t.Run("selector on a label key no namespace carries at all resolves to empty", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"nonexistent-key=anything"}, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+	})
+
+	t.Run("existence-check selector (!key) matches namespaces missing that label", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"!confidential"}, nil, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"platform-prod", "platform-dev", "infra", "unlabeled"}, included)
+	})
+
+	// ResolveNamespacesByLabel is exported and does not itself call Validate() - the
+	// production path always validates first, but a malformed selector reaching this function
+	// directly must return an error, not a silent empty result. Silently treating a malformed
+	// *excluded* selector as "no matches" would be fail-open: a namespace meant to be excluded
+	// would be backed up instead.
+	t.Run("malformed included selector returns an error, not a silent empty result", func(t *testing.T) {
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"=="}, nil, "")
+		require.Error(t, err)
+	})
+
+	t.Run("malformed excluded selector returns an error, not a silent empty result", func(t *testing.T) {
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"=="}, "")
+		require.Error(t, err)
+	})
+
+	t.Run("empty-string included selector returns an error, not a silent match-everything", func(t *testing.T) {
+		// k8s labels.Parse("") succeeds and returns a selector that matches everything, so
+		// without validateLabelSelectors' explicit empty check, this would silently include
+		// every namespace instead of failing.
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{""}, nil, "")
+		require.Error(t, err)
+	})
+
+	t.Run("empty-string excluded selector returns an error, not a silent match-everything", func(t *testing.T) {
+		// Same gap as above, but fail-open for excludes: a silently-everything-matching
+		// excluded selector would exclude every namespace instead of failing loudly.
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{""}, "")
+		require.Error(t, err)
+	})
+
+	t.Run("invalid logic value returns an error, not a silent fall-through to OR", func(t *testing.T) {
+		// ResolveNamespacesByLabel is exported and does not itself call Validate() - a
+		// garbage logic value reaching this function directly must be rejected, not silently
+		// treated as OR (the exact-match comparison a garbage value would otherwise fail,
+		// widening an intended AND into an OR is fail-open the same way a swallowed selector
+		// parse error is).
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform"}, nil, "XOR")
+		require.Error(t, err)
+	})
+}
+
+// TestResolveNamespacesByLabel_ManyNamespaces is a correctness-at-scale check against a
+// cluster with thousands of namespaces - not a timing assertion (BenchmarkResolveNamespacesByLabel
+// below covers actual performance).
+func TestResolveNamespacesByLabel_ManyNamespaces(t *testing.T) {
+	fakeClient := manyNamespacesClient()
+
+	included, _, err := ResolveNamespacesByLabel(context.Background(), fakeClient, []string{"team=platform"}, nil, "")
+
+	require.NoError(t, err)
+	assert.Len(t, included, manyNamespacesMatching)
+}
+
+// manyNamespacesTotal/manyNamespacesMatching/manyNamespacesClient back both
+// TestResolveNamespacesByLabel_ManyNamespaces (correctness at scale) and
+// BenchmarkResolveNamespacesByLabel (`go test -bench`, not part of a normal `go test` run and
+// so can't flake CI the way a fixed wall-clock assertion in a regular test can).
+const (
+	manyNamespacesTotal    = 5000
+	manyNamespacesMatching = 137
+)
+
+func manyNamespacesClient() crclient.Client {
+	objs := make([]crclient.Object, 0, manyNamespacesTotal)
+	for i := range manyNamespacesTotal {
+		nsLabels := map[string]string{"team": "other"}
+		if i < manyNamespacesMatching {
+			nsLabels = map[string]string{"team": "platform"}
+		}
+		objs = append(objs, &corev1api.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("ns-%d", i), Labels: nsLabels},
+		})
+	}
+
+	return fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objs...).Build()
+}
+
+func BenchmarkResolveNamespacesByLabel(b *testing.B) {
+	fakeClient := manyNamespacesClient()
+
+	for range b.N {
+		if _, _, err := ResolveNamespacesByLabel(context.Background(), fakeClient, []string{"team=platform"}, nil, ""); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestFirstMatchSemantics(t *testing.T) {

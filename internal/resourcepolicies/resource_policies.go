@@ -223,13 +223,190 @@ type IncludeExcludePolicy struct {
 	ExcludedClusterScopedResources   []string `yaml:"excludedClusterScopedResources"`
 	IncludedNamespaceScopedResources []string `yaml:"includedNamespaceScopedResources"`
 	ExcludedNamespaceScopedResources []string `yaml:"excludedNamespaceScopedResources"`
+
+	// IncludedNamespacesByLabel and ExcludedNamespacesByLabel are lists of Kubernetes
+	// label selector strings (same syntax as `kubectl get ns -l <selector>`, parsed via
+	// labels.Parse). At backup time, each selector is evaluated against the live namespace
+	// list to dynamically resolve which namespaces to include/exclude, without requiring
+	// namespaces to be enumerated by name in BackupSpec.
+	IncludedNamespacesByLabel []string `yaml:"includedNamespacesByLabel,omitempty"`
+	ExcludedNamespacesByLabel []string `yaml:"excludedNamespacesByLabel,omitempty"`
+
+	// LabelSelectorLogic controls how multiple entries within IncludedNamespacesByLabel are
+	// combined with each other, and independently how multiple entries within
+	// ExcludedNamespacesByLabel are combined with each other: "OR" (default) matches a
+	// namespace against any entry in the list; "AND" requires a namespace to match every
+	// entry in the list. Empty string is treated as "OR". Matching is case-insensitive
+	// ("and"/"Or" are accepted the same as "AND"/"OR"). This is unrelated to the
+	// comma-separated AND semantics within a single selector string, which is standard
+	// labels.Parse syntax.
+	LabelSelectorLogic string `yaml:"labelSelectorLogic,omitempty"`
 }
 
 func (p *IncludeExcludePolicy) Validate() error {
 	if err := p.validateIncludeExclude(p.IncludedClusterScopedResources, p.ExcludedClusterScopedResources); err != nil {
 		return err
 	}
-	return p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources)
+	if err := p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources); err != nil {
+		return err
+	}
+	if err := validateLabelSelectors(p.IncludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("includedNamespacesByLabel: %w", err)
+	}
+	if err := validateLabelSelectors(p.ExcludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("excludedNamespacesByLabel: %w", err)
+	}
+	return validateLabelSelectorLogic(p.LabelSelectorLogic)
+}
+
+// validateLabelSelectors returns an error if any selector string is empty/whitespace-only
+// (which labels.Parse would otherwise silently accept as labels.Everything(), matching
+// every namespace) or fails to parse as a Kubernetes label selector.
+func validateLabelSelectors(selectors []string) error {
+	for _, s := range selectors {
+		if strings.TrimSpace(s) == "" {
+			return fmt.Errorf("label selector cannot be empty")
+		}
+		if _, err := labels.Parse(s); err != nil {
+			return fmt.Errorf("invalid label selector %q: %w", s, err)
+		}
+	}
+	return nil
+}
+
+func validateLabelSelectorLogic(logic string) error {
+	switch strings.ToUpper(logic) {
+	case "", "OR", "AND":
+		return nil
+	default:
+		return fmt.Errorf("labelSelectorLogic must be \"OR\" or \"AND\", got %q", logic)
+	}
+}
+
+// ResolveNamespacesByLabel lists all cluster namespaces and returns two independently
+// resolved name sets: those matching includedSelectors, and those matching
+// excludedSelectors, combined per logic ("OR": any selector in the list matches; "AND":
+// every selector in the list matches; "" defaults to "OR", case-insensitive). It performs no
+// cross-suppression between the two sets - the caller decides how to combine them with
+// BackupSpec.IncludedNamespaces/ExcludedNamespaces. Although the production path already
+// validates selectors and logic before reaching here (see validateLabelSelectors/
+// validateLabelSelectorLogic, called from Validate()), this function re-validates both on
+// entry since it is exported: an empty-string selector parses successfully as "match
+// everything" (k8s labels.Parse("") is not an error), so skipping this check would let a
+// malformed excludedSelectors entry silently exclude nothing instead of failing loudly -
+// fail-open, since a namespace meant to be excluded would be backed up instead.
+func ResolveNamespacesByLabel(
+	ctx context.Context,
+	client crclient.Client,
+	includedSelectors []string,
+	excludedSelectors []string,
+	logic string,
+) ([]string, []string, error) {
+	if err := validateLabelSelectorLogic(logic); err != nil {
+		return nil, nil, err
+	}
+	if err := validateLabelSelectors(includedSelectors); err != nil {
+		return nil, nil, errors.Wrap(err, "includedNamespacesByLabel")
+	}
+	if err := validateLabelSelectors(excludedSelectors); err != nil {
+		return nil, nil, errors.Wrap(err, "excludedNamespacesByLabel")
+	}
+
+	nsList := &corev1api.NamespaceList{}
+	if err := client.List(ctx, nsList); err != nil {
+		return nil, nil, errors.Wrap(err, "listing namespaces")
+	}
+
+	matchSet := func(selectors []string) ([]string, error) {
+		result := sets.NewString()
+		if len(selectors) == 0 {
+			return result.List(), nil
+		}
+		// Matches validateLabelSelectorLogic's case-insensitive acceptance - "and"/"Or" etc.
+		// are as valid as "AND"/"OR", so the actual matching must normalize the same way.
+		isAND := strings.EqualFold(logic, "AND")
+		parsedSelectors := make([]labels.Selector, 0, len(selectors))
+		for _, sel := range selectors {
+			parsed, err := labels.Parse(sel)
+			if err != nil {
+				return nil, fmt.Errorf("invalid label selector %q: %w", sel, err)
+			}
+			parsedSelectors = append(parsedSelectors, parsed)
+		}
+		for _, ns := range nsList.Items {
+			nsLabels := labels.Set(ns.Labels)
+			if isAND {
+				allMatch := true
+				for _, parsed := range parsedSelectors {
+					if !parsed.Matches(nsLabels) {
+						allMatch = false
+						break
+					}
+				}
+				if allMatch {
+					result.Insert(ns.Name)
+				}
+			} else { // "OR" (default, including "")
+				for _, parsed := range parsedSelectors {
+					if parsed.Matches(nsLabels) {
+						result.Insert(ns.Name)
+						break
+					}
+				}
+			}
+		}
+		return result.List(), nil
+	}
+
+	included, err := matchSet(includedSelectors)
+	if err != nil {
+		return nil, nil, err
+	}
+	excluded, err := matchSet(excludedSelectors)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return included, excluded, nil
+}
+
+// NoNamespaceMatchesPattern is a namespace glob pattern guaranteed to match zero real
+// namespaces - Kubernetes namespace names are RFC 1123 labels that must start and end with an
+// alphanumeric character, so no real namespace can ever start with '-' - while still being
+// recognized as a wildcard pattern by wildcard.ShouldExpandWildcards/ExpandWildcards.
+//
+// This matters because a plain empty []string in BackupSpec.IncludedNamespaces is Velero's
+// long-standing "include everything" default everywhere else: wildcard.ShouldExpandWildcards
+// explicitly treats len(includes)==0 as "equivalent to * (match all) - don't expand". Reusing
+// that same empty representation to mean the opposite - "a configured includedNamespacesByLabel
+// selector currently matches zero namespaces, so include nothing" - would silently expand to
+// "back up every namespace" instead, exactly the opposite of the intended fail-safe. Routing
+// through the wildcard-expansion path instead uses the mechanism
+// collections.NamespaceIncludesExcludes.ShouldInclude already relies on for "include nothing":
+// it returns false for everything once wildcard expansion ran and the expanded includes list
+// came back empty, which only happens when the includes list contained an actual wildcard
+// pattern (not a plain empty list).
+//
+// This must be a pattern collections.ValidateNamespaceIncludesExcludes actually accepts, not
+// just wildcard.ValidateNamespaceName in isolation: that function replaces glob metacharacters
+// (*, ?, [, ]) with a placeholder letter before checking the result against Kubernetes' own
+// RFC 1123 namespace-name rules, so a pattern like "[A-Z]*" becomes "xA-Zxx" - the literal
+// uppercase A and Z survive that substitution and fail RFC 1123 (lowercase only), even though
+// wildcard.ValidateNamespaceName alone would accept it as a syntactically valid glob. "[-]*"
+// substitutes to "x-xx", which is a valid RFC 1123 label, so it passes both checks - confirmed
+// empirically against collections.ValidateNamespaceIncludesExcludes directly, not just reasoned
+// through the substitution rule.
+const NoNamespaceMatchesPattern = "[-]*"
+
+// RepresentNamespaceSelection returns resolved as an effective IncludedNamespaces value,
+// substituting NoNamespaceMatchesPattern when resolved is empty so that "the selector matched
+// nothing" is represented unambiguously downstream - see NoNamespaceMatchesPattern's doc
+// comment for why a plain empty slice cannot be used for this.
+func RepresentNamespaceSelection(resolved []string) []string {
+	if len(resolved) == 0 {
+		return []string{NoNamespaceMatchesPattern}
+	}
+	return resolved
 }
 
 func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList []string) error {

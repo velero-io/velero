@@ -170,6 +170,47 @@ func TestPodActionExecute(t *testing.T) {
 			},
 		},
 		{
+			name: "ephemeralContainer volumeMounts matching prefix <service account name>-token- should be deleted",
+			obj: corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-1"},
+				Spec: corev1api.PodSpec{
+					ServiceAccountName: "foo",
+					Volumes: []corev1api.Volume{
+						{Name: "foo"},
+						{Name: "foo-token-foo"},
+					},
+					EphemeralContainers: []corev1api.EphemeralContainer{
+						{
+							EphemeralContainerCommon: corev1api.EphemeralContainerCommon{
+								VolumeMounts: []corev1api.VolumeMount{
+									{Name: "foo"},
+									{Name: "foo-token-foo"},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedRes: corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-1"},
+				Spec: corev1api.PodSpec{
+					ServiceAccountName: "foo",
+					Volumes: []corev1api.Volume{
+						{Name: "foo"},
+					},
+					EphemeralContainers: []corev1api.EphemeralContainer{
+						{
+							EphemeralContainerCommon: corev1api.EphemeralContainerCommon{
+								VolumeMounts: []corev1api.VolumeMount{
+									{Name: "foo"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "containers and initContainers with no volume mounts should not error",
 			obj: corev1api.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod-1"},

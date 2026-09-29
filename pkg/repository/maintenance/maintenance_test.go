@@ -546,8 +546,8 @@ func TestGetJobConfig(t *testing.T) {
 					Name:      repoMaintenanceJobConfig,
 				},
 				Data: map[string]string{
-					GlobalKeyForRepoMaintenanceJobCM: "{\"keepLatestMaintenanceJobs\":1,\"podResources\":{\"cpuRequest\":\"50m\",\"cpuLimit\":\"100m\",\"memoryRequest\":\"50Mi\",\"memoryLimit\":\"100Mi\"},\"loadAffinity\":[{\"nodeSelector\":{\"matchExpressions\":[{\"key\":\"cloud.google.com/machine-family\",\"operator\":\"In\",\"values\":[\"n2\"]}]}}],\"priorityClassName\":\"global-priority\",\"podAnnotations\":{\"global-key\":\"global-value\"},\"podLabels\":{\"global-key\":\"global-value\"}}",
-					"test-default-kopia":             "{\"podResources\":{\"cpuRequest\":\"100m\",\"cpuLimit\":\"200m\",\"memoryRequest\":\"100Mi\",\"memoryLimit\":\"200Mi\"},\"loadAffinity\":[{\"nodeSelector\":{\"matchExpressions\":[{\"key\":\"cloud.google.com/machine-family\",\"operator\":\"In\",\"values\":[\"e2\"]}]}}],\"priorityClassName\":\"specific-priority\",\"podAnnotations\":{\"specific-key\":\"specific-value\"},\"podLabels\":{\"specific-key\":\"specific-value\"}}",
+					GlobalKeyForRepoMaintenanceJobCM: "{\"keepLatestMaintenanceJobs\":1,\"podResources\":{\"cpuRequest\":\"50m\",\"cpuLimit\":\"100m\",\"memoryRequest\":\"50Mi\",\"memoryLimit\":\"100Mi\"},\"loadAffinity\":[{\"nodeSelector\":{\"matchExpressions\":[{\"key\":\"cloud.google.com/machine-family\",\"operator\":\"In\",\"values\":[\"n2\"]}]}}],\"priorityClassName\":\"global-priority\",\"podAnnotations\":{\"global-key\":\"global-value\"},\"podLabels\":{\"global-key\":\"global-value\"},\"tolerations\":[{\"key\":\"global-taint\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}",
+					"test-default-kopia":             "{\"podResources\":{\"cpuRequest\":\"100m\",\"cpuLimit\":\"200m\",\"memoryRequest\":\"100Mi\",\"memoryLimit\":\"200Mi\"},\"loadAffinity\":[{\"nodeSelector\":{\"matchExpressions\":[{\"key\":\"cloud.google.com/machine-family\",\"operator\":\"In\",\"values\":[\"e2\"]}]}}],\"priorityClassName\":\"specific-priority\",\"podAnnotations\":{\"specific-key\":\"specific-value\"},\"podLabels\":{\"specific-key\":\"specific-value\"},\"tolerations\":[{\"key\":\"specific-taint\",\"operator\":\"Equal\",\"value\":\"dedicated\",\"effect\":\"NoSchedule\"}]}",
 				},
 			},
 			expectedConfig: &velerotypes.JobConfigs{
@@ -574,6 +574,79 @@ func TestGetJobConfig(t *testing.T) {
 				PriorityClassName: "global-priority",
 				PodAnnotations:    map[string]string{"global-key": "global-value"},
 				PodLabels:         map[string]string{"global-key": "global-value"},
+				Tolerations: []corev1api.Toleration{
+					{
+						Key:      "global-taint",
+						Operator: corev1api.TolerationOpExists,
+						Effect:   corev1api.TaintEffectNoSchedule,
+					},
+				},
+			},
+			expectedError: nil,
+		},
+		{
+			name: "Find config with tolerations in global section",
+			repoJobConfig: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: veleroNamespace,
+					Name:      repoMaintenanceJobConfig,
+				},
+				Data: map[string]string{
+					GlobalKeyForRepoMaintenanceJobCM: "{\"tolerations\":[{\"key\":\"global-taint\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}",
+				},
+			},
+			expectedConfig: &velerotypes.JobConfigs{
+				Tolerations: []corev1api.Toleration{
+					{
+						Key:      "global-taint",
+						Operator: corev1api.TolerationOpExists,
+						Effect:   corev1api.TaintEffectNoSchedule,
+					},
+				},
+			},
+			expectedError: nil,
+		},
+		{
+			name: "Tolerations in specific config should be ignored",
+			repoJobConfig: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: veleroNamespace,
+					Name:      repoMaintenanceJobConfig,
+				},
+				Data: map[string]string{
+					"test-default-kopia": "{\"podResources\":{\"cpuRequest\":\"100m\"},\"tolerations\":[{\"key\":\"specific-taint\",\"operator\":\"Equal\",\"value\":\"dedicated\",\"effect\":\"NoSchedule\"}]}",
+				},
+			},
+			expectedConfig: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest: "100m",
+				},
+			},
+			expectedError: nil,
+		},
+		{
+			name: "Global tolerations apply when specific config does not specify global configs",
+			repoJobConfig: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: veleroNamespace,
+					Name:      repoMaintenanceJobConfig,
+				},
+				Data: map[string]string{
+					GlobalKeyForRepoMaintenanceJobCM: "{\"tolerations\":[{\"key\":\"global-taint\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}]}",
+					"test-default-kopia":             "{\"podResources\":{\"cpuRequest\":\"100m\"}}",
+				},
+			},
+			expectedConfig: &velerotypes.JobConfigs{
+				PodResources: &kube.PodResources{
+					CPURequest: "100m",
+				},
+				Tolerations: []corev1api.Toleration{
+					{
+						Key:      "global-taint",
+						Operator: corev1api.TolerationOpExists,
+						Effect:   corev1api.TaintEffectNoSchedule,
+					},
+				},
 			},
 			expectedError: nil,
 		},
@@ -1937,11 +2010,13 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 	testCases := []struct {
 		name                  string
 		deploymentTolerations []corev1api.Toleration
+		configuredTolerations []corev1api.Toleration
 		expectedTolerations   []corev1api.Toleration
 	}{
 		{
 			name:                  "no tolerations should only include Windows toleration",
 			deploymentTolerations: nil,
+			configuredTolerations: nil,
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 			},
@@ -1949,12 +2024,13 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 		{
 			name:                  "empty tolerations should only include Windows toleration",
 			deploymentTolerations: []corev1api.Toleration{},
+			configuredTolerations: []corev1api.Toleration{},
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 			},
 		},
 		{
-			name: "non-allowed toleration should not be inherited",
+			name: "non-allowed deployment toleration should not be inherited",
 			deploymentTolerations: []corev1api.Toleration{
 				{
 					Key:      "vng-ondemand",
@@ -1963,12 +2039,13 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 					Value:    "amd64",
 				},
 			},
+			configuredTolerations: nil,
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 			},
 		},
 		{
-			name: "allowed toleration should be inherited",
+			name: "allowed deployment tolerations should be inherited",
 			deploymentTolerations: []corev1api.Toleration{
 				{
 					Key:      "kubernetes.azure.com/scalesetpriority",
@@ -1976,7 +2053,13 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 					Effect:   "NoSchedule",
 					Value:    "spot",
 				},
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
 			},
+			configuredTolerations: nil,
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 				{
@@ -1985,29 +2068,35 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 					Effect:   "NoSchedule",
 					Value:    "spot",
 				},
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
 			},
 		},
 		{
-			name: "mixed allowed and non-allowed tolerations should only inherit allowed",
+			name: "mixed allowed and non-allowed deployment tolerations should only inherit allowed",
 			deploymentTolerations: []corev1api.Toleration{
 				{
-					Key:      "vng-ondemand", // not in allowlist
+					Key:      "vng-ondemand",
 					Operator: "Equal",
 					Effect:   "NoSchedule",
 					Value:    "amd64",
 				},
 				{
-					Key:      "CriticalAddonsOnly", // in allowlist
+					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
 					Effect:   "NoSchedule",
 				},
 				{
-					Key:      "custom-key", // not in allowlist
+					Key:      "custom-key",
 					Operator: "Equal",
-					Effect:   "NoSchedule",
+					Effect:   "NoExecute",
 					Value:    "custom-value",
 				},
 			},
+			configuredTolerations: nil,
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 				{
@@ -2018,14 +2107,100 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple allowed tolerations should all be inherited",
-			deploymentTolerations: []corev1api.Toleration{
+			name:                  "configured tolerations should be included along with Windows toleration",
+			deploymentTolerations: nil,
+			configuredTolerations: []corev1api.Toleration{
 				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
+					Key:      "dedicated",
 					Operator: "Equal",
 					Effect:   "NoSchedule",
-					Value:    "spot",
+					Value:    "backup",
 				},
+			},
+			expectedTolerations: []corev1api.Toleration{
+				{
+					Key:      "dedicated",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "backup",
+				},
+				windowsToleration,
+			},
+		},
+		{
+			name: "configured tolerations merged with allowed deployment tolerations and Windows toleration",
+			deploymentTolerations: []corev1api.Toleration{
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+				{
+					Key:      "unallowed-key",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+			},
+			configuredTolerations: []corev1api.Toleration{
+				{
+					Key:      "karpenter.sh/nodepool",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "maintenance",
+				},
+			},
+			expectedTolerations: []corev1api.Toleration{
+				{
+					Key:      "karpenter.sh/nodepool",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "maintenance",
+				},
+				windowsToleration,
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+			},
+		},
+		{
+			name:                  "duplicate tolerations in configured list should be deduplicated",
+			deploymentTolerations: nil,
+			configuredTolerations: []corev1api.Toleration{
+				{
+					Key:      "dedicated",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "backup",
+				},
+				{
+					Key:      "dedicated",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "backup",
+				},
+			},
+			expectedTolerations: []corev1api.Toleration{
+				{
+					Key:      "dedicated",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "backup",
+				},
+				windowsToleration,
+			},
+		},
+		{
+			name: "configured toleration duplicate of allowed deployment toleration keeps configured",
+			deploymentTolerations: []corev1api.Toleration{
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+			},
+			configuredTolerations: []corev1api.Toleration{
 				{
 					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
@@ -2033,18 +2208,22 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 				},
 			},
 			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
-				{
-					Key:      "kubernetes.azure.com/scalesetpriority",
-					Operator: "Equal",
-					Effect:   "NoSchedule",
-					Value:    "spot",
-				},
 				{
 					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
 					Effect:   "NoSchedule",
 				},
+				windowsToleration,
+			},
+		},
+		{
+			name:                  "configured toleration duplicate of Windows toleration keeps configured",
+			deploymentTolerations: nil,
+			configuredTolerations: []corev1api.Toleration{
+				windowsToleration,
+			},
+			expectedTolerations: []corev1api.Toleration{
+				windowsToleration,
 			},
 		},
 	}
@@ -2052,53 +2231,26 @@ func TestBuildTolerationsForMaintenanceJob(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create a deployment with the specified tolerations
-			deployment := &appsv1api.Deployment{
-				Spec: appsv1api.DeploymentSpec{
-					Template: corev1api.PodTemplateSpec{
-						Spec: corev1api.PodSpec{
-							Tolerations: tc.deploymentTolerations,
+			var deployment *appsv1api.Deployment
+			if tc.deploymentTolerations != nil {
+				deployment = &appsv1api.Deployment{
+					Spec: appsv1api.DeploymentSpec{
+						Template: corev1api.PodTemplateSpec{
+							Spec: corev1api.PodSpec{
+								Tolerations: tc.deploymentTolerations,
+							},
 						},
 					},
-				},
+				}
 			}
 
-			result := buildTolerationsForMaintenanceJob(deployment)
+			result := buildTolerationsForMaintenanceJob(deployment, tc.configuredTolerations)
 			assert.Equal(t, tc.expectedTolerations, result)
 		})
 	}
 }
 
 func TestBuildJobWithTolerationsInheritance(t *testing.T) {
-	// Define allowed tolerations that would be set on Velero deployment
-	allowedTolerations := []corev1api.Toleration{
-		{
-			Key:      "kubernetes.azure.com/scalesetpriority",
-			Operator: "Equal",
-			Effect:   "NoSchedule",
-			Value:    "spot",
-		},
-		{
-			Key:      "CriticalAddonsOnly",
-			Operator: "Exists",
-			Effect:   "NoSchedule",
-		},
-	}
-
-	// Mixed tolerations (allowed and non-allowed)
-	mixedTolerations := []corev1api.Toleration{
-		{
-			Key:      "vng-ondemand", // not in allowlist
-			Operator: "Equal",
-			Effect:   "NoSchedule",
-			Value:    "amd64",
-		},
-		{
-			Key:      "CriticalAddonsOnly", // in allowlist
-			Operator: "Exists",
-			Effect:   "NoSchedule",
-		},
-	}
-
 	// Windows toleration that should always be present
 	windowsToleration := corev1api.Toleration{
 		Key:      "os",
@@ -2110,6 +2262,7 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 	testCases := []struct {
 		name                  string
 		deploymentTolerations []corev1api.Toleration
+		jobConfig             *velerotypes.JobConfigs
 		expectedTolerations   []corev1api.Toleration
 	}{
 		{
@@ -2120,8 +2273,21 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 			},
 		},
 		{
-			name:                  "allowed tolerations should be inherited along with Windows toleration",
-			deploymentTolerations: allowedTolerations,
+			name: "allowed tolerations should be inherited along with Windows toleration",
+			deploymentTolerations: []corev1api.Toleration{
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "spot",
+				},
+				{
+					Key:      "custom-taint",
+					Operator: "Equal",
+					Effect:   "NoExecute",
+					Value:    "dedicated",
+				},
+			},
 			expectedTolerations: []corev1api.Toleration{
 				windowsToleration,
 				{
@@ -2130,6 +2296,35 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 					Effect:   "NoSchedule",
 					Value:    "spot",
 				},
+			},
+		},
+		{
+			name: "configured tolerations should be applied to job",
+			deploymentTolerations: []corev1api.Toleration{
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+			},
+			jobConfig: &velerotypes.JobConfigs{
+				Tolerations: []corev1api.Toleration{
+					{
+						Key:      "karpenter.sh/nodepool",
+						Operator: "Equal",
+						Effect:   "NoSchedule",
+						Value:    "maintenance",
+					},
+				},
+			},
+			expectedTolerations: []corev1api.Toleration{
+				{
+					Key:      "karpenter.sh/nodepool",
+					Operator: "Equal",
+					Effect:   "NoSchedule",
+					Value:    "maintenance",
+				},
+				windowsToleration,
 				{
 					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
@@ -2138,15 +2333,30 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 			},
 		},
 		{
-			name:                  "mixed tolerations should only inherit allowed ones",
-			deploymentTolerations: mixedTolerations,
-			expectedTolerations: []corev1api.Toleration{
-				windowsToleration,
+			name: "duplicate tolerations between configured and deployment should be deduplicated",
+			deploymentTolerations: []corev1api.Toleration{
 				{
 					Key:      "CriticalAddonsOnly",
 					Operator: "Exists",
 					Effect:   "NoSchedule",
 				},
+			},
+			jobConfig: &velerotypes.JobConfigs{
+				Tolerations: []corev1api.Toleration{
+					{
+						Key:      "CriticalAddonsOnly",
+						Operator: "Exists",
+						Effect:   "NoSchedule",
+					},
+				},
+			},
+			expectedTolerations: []corev1api.Toleration{
+				{
+					Key:      "CriticalAddonsOnly",
+					Operator: "Exists",
+					Effect:   "NoSchedule",
+				},
+				windowsToleration,
 			},
 		},
 	}
@@ -2199,7 +2409,10 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(localScheme).WithObjects(deployment).Build()
 
 			// Create minimal job configs and resources
-			jobConfig := &velerotypes.JobConfigs{}
+			jobConfig := tc.jobConfig
+			if jobConfig == nil {
+				jobConfig = &velerotypes.JobConfigs{}
+			}
 			logLevel := logrus.InfoLevel
 			logFormat := logging.NewFormatFlag()
 			logFormat.Set("text")

@@ -68,6 +68,11 @@ spec:
                   BackupName is the unique name of the Velero backup to restore
                   from.
                 type: string
+              csiSnapshotTimeout:
+                description: |-
+                  CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot ready to use during creation, before returning error as timeout.
+                  The default value is 30 minute.
+                type: string
               excludedNamespaces:
                 description: |-
                   ExcludedNamespaces contains a list of namespaces that are not

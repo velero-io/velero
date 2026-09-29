@@ -1,0 +1,1 @@
+Fix the PodVolumeBackup Node print column to read the node from spec instead of status

@@ -194,7 +194,7 @@ func deleteNodePorts(service *corev1api.Service) error {
 							// unnamed port
 							unnamedPortInts.Insert(nodePortInt)
 						} else {
-							explicitNodePorts.Insert(portName.(string))
+							explicitNodePorts.Insert(fmt.Sprint(portName))
 						}
 					}
 				}

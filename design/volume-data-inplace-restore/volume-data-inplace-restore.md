@@ -242,6 +242,8 @@ The "in use" semantics align with the Kubernetes `pvc-protection` controller: Po
 
 The check runs on both restore paths before any side effect on the existing PVC/PV: in the PVC CSI RIA before deleting the existing PVC, and before creating the `PodVolumeRestore` on the file system path. On the file system path, Pods gated by this restore's `restore-wait` init container (identified by the restore UID in its args, and not yet terminated) are exempted: they must mount the PVC for the node-agent to restore the data, and they cannot write to the volume until this restore's `PodVolumeRestore`s complete. Leftover Pods, controller-recreated Pods, and Pods gated by a different restore still block.
 
+On the file system path the check also covers the case where the backed-up Pod itself still exists in the cluster: `PodVolumeRestore`s are only created for a Pod that Velero creates, so an existing Pod would otherwise cause the volume data restore to be skipped silently while the Pod keeps consuming the PVC. In this case Velero reports a pre-flight error for the Pod instead of the plain "already exists" warning.
+
 This check is a fail-fast validation, not an atomic guarantee; the `pvc-protection` finalizer remains the actual safety gate for PVC deletion. A residual `VolumeAttachment` check (e.g. a `Failed` Pod imposed by the control plane after a non-graceful node shutdown, where the node never unmounted the volume) may be added as a future enhancement.
 
 #### 2. PVC is Bound to the Original PV

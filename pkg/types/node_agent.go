@@ -17,6 +17,7 @@ limitations under the License.
 package types
 
 import (
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -142,4 +143,9 @@ type NodeAgentConfigs struct {
 
 	// CSISnapshotMetadataServiceConfigs is the config for CSI snapshot metadata service
 	CSISnapshotMetadataServiceConfigs *CSISnapshotMetadataService `json:"csiSnapshotMetadataServiceConfigs,omitempty"`
+
+	// Tolerations are tolerations to be added to pods created by node-agent, i.e., data mover pods.
+	// These are merged with (and deduplicated against) any node-agent DaemonSet tolerations
+	// whose key is in util.ThirdPartyTolerations.
+	Tolerations []corev1api.Toleration `json:"tolerations,omitempty"`
 }

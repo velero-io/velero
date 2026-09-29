@@ -120,6 +120,11 @@ type RestoreSpec struct {
 	// +nullable
 	ExistingVolumeDataPolicy VolumeDataPolicyType `json:"existingVolumeDataPolicy,omitempty"`
 
+	// CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot ready to use during creation, before returning error as timeout.
+	// The default value is 30 minute.
+	// +optional
+	CSISnapshotTimeout metav1.Duration `json:"csiSnapshotTimeout,omitempty"`
+
 	// ItemOperationTimeout specifies the time used to wait for RestoreItemAction operations
 	// The default value is 4 hour.
 	// +optional

@@ -270,7 +270,8 @@ func initDataUploaderReconcilerWithError(needError ...error) (*DataUploadReconci
 		"",  // dataMovePriorityClass
 		nil, // podLabels
 		nil, // podAnnotations
-		nil,
+		nil, // snapshotMetadataServiceConfigs
+		nil, // tolerations
 	), nil
 }
 
@@ -850,7 +851,7 @@ func TestOnDataUploadProgress(t *testing.T) {
 
 			// Call the OnDataUploadProgress function
 			r.OnDataUploadProgress(ctx, namespace, duName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				// Get the updated DataUpload object from the fake client
 				updatedDu := &velerov2alpha1api.DataUpload{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
@@ -866,7 +867,12 @@ func TestOnDataUploadProgress(t *testing.T) {
 					assert.Equal(t, int64(0), updatedDu.Status.Progress.BytesDone) // assuming default or original value
 				}
 				if progress.Message != "" {
-					assert.Contains(t, updatedDu.Status.Message, progress.Message)
+					assert.Contains(t, updatedDu.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataUploadProgress(ctx, namespace, duName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
+					assert.Equal(t, []string{progress.Message}, updatedDu.Status.Activities)
 				}
 			}
 		})
@@ -1565,7 +1571,8 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 				"upload-priority",
 				tt.args.customLabels,
 				tt.args.customAnnotations,
-				nil,
+				nil, // snapshotMetadataServiceConfigs
+				nil, // tolerations
 			)
 
 			// Act

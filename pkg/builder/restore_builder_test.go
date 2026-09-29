@@ -18,6 +18,7 @@ package builder
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -33,4 +34,12 @@ func TestRestoreBuilder_ResourcePoliciesConfigmap(t *testing.T) {
 	assert.Equal(t, "configmap", restore.Spec.ResourcePolicy.Kind)
 	assert.Equal(t, "my-policy-cm", restore.Spec.ResourcePolicy.Name)
 	assert.Equal(t, (*string)(nil), restore.Spec.ResourcePolicy.APIGroup)
+}
+
+func TestRestoreBuilder_CSISnapshotTimeout(t *testing.T) {
+	restore := ForRestore("velero", "my-restore").
+		CSISnapshotTimeout(25 * time.Minute).
+		Result()
+
+	assert.Equal(t, 25*time.Minute, restore.Spec.CSISnapshotTimeout.Duration)
 }

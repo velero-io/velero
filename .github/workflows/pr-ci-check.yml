@@ -28,7 +28,7 @@ jobs:
       - name: Make ci
         run: make ci
       - name: Upload test coverage
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out

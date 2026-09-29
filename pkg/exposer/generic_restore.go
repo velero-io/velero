@@ -512,7 +512,7 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
-	if param.Snapshot != nil {
+	if param.Snapshot != nil && param.Snapshot.CleanUp {
 		kube.EnsureDeleteVolumeSnapshotIfAny(ctx, e.ctrlClient, param.Snapshot.VolumeSnapshotNamespace,
 			param.Snapshot.VolumeSnapshot, 0, e.log)
 	}
@@ -842,7 +842,7 @@ func (e *genericRestoreExposer) createRestorePod(
 			Operator: metav1.LabelSelectorOpIn,
 		})
 
-		toleration = append(toleration, []corev1api.Toleration{
+		toleration = kube.DeduplicateTolerations(append(toleration, []corev1api.Toleration{
 			{
 				Key:      "os",
 				Operator: "Equal",
@@ -855,7 +855,7 @@ func (e *genericRestoreExposer) createRestorePod(
 				Effect:   "NoExecute",
 				Value:    "windows",
 			},
-		}...)
+		}...))
 	} else {
 		userID := int64(0)
 		securityCtx = &corev1api.PodSecurityContext{

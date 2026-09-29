@@ -44,7 +44,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
-	k8sfake "k8s.io/client-go/kubernetes/fake"
 	kubetesting "k8s.io/client-go/testing"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -450,6 +449,99 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			want: map[*test.APIResource][]string{
 				test.Pods():        {"ns-1/pod-1"},
 				test.Deployments(): {"ns-2/deploy-2"},
+				test.PVs():         {"/pv-1"},
+			},
+		},
+		{
+			name: "notin label selector excludes matching resources",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"1"}},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPersistentVolume("pv-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-2/pod-2"},
+				test.Deployments(): {"ns-1/deploy-1"},
+				test.PVs():         {"/pv-2"},
+			},
+		},
+		{
+			name: "in label selector only restores matching resources",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpIn, Values: []string{"1", "2"}},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").ObjectMeta(builder.WithLabels("pr-label", "3")).Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+					builder.ForPersistentVolume("pv-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-1/pod-1"},
+				test.Deployments(): {"ns-2/deploy-2"},
+				test.PVs():         {"/pv-1"},
+			},
+		},
+		{
+			name: "doesnotexist label selector only restores resources without the label key",
+			restore: defaultRestore().LabelSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: "pr-label", Operator: metav1.LabelSelectorOpDoesNotExist},
+			}}).Result(),
+			backup: defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("deployments.apps",
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").ObjectMeta(builder.WithLabels("pr-label", "2")).Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("other-label", "x")).Result(),
+					builder.ForPersistentVolume("pv-2").ObjectMeta(builder.WithLabels("pr-label", "1")).Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.Deployments(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods():        {"ns-2/pod-2"},
+				test.Deployments(): {"ns-1/deploy-1"},
 				test.PVs():         {"/pv-1"},
 			},
 		},
@@ -2891,11 +2983,9 @@ func TestRestoreInplaceSelectedNodeCarrierAnnotation(t *testing.T) {
 				// action proves the carrier survives the real strip regardless of action order.
 				&pluggableAction{
 					executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
-						clientset := k8sfake.NewSimpleClientset()
 						return riav1.NewPVCAction(
 							h.log,
-							clientset.CoreV1().ConfigMaps("velero"),
-							clientset.CoreV1().Nodes(),
+							nil,
 						).Execute(input)
 					},
 				},
@@ -4243,6 +4333,99 @@ func TestRestoreWithPodVolume(t *testing.T) {
 	}
 }
 
+// TestRestoreInplaceExistingPodWithPodVolumeBackups verifies that an in-place
+// restore reports an error when the backed-up pod has PodVolumeBackups to
+// restore but already exists in the cluster: the PodVolumeRestores are never
+// created for an existing pod, so the volume data restore must not be skipped
+// silently. A regular restore keeps the plain "already exists" warning.
+func TestRestoreInplaceExistingPodWithPodVolumeBackups(t *testing.T) {
+	pvbs := []*velerov1api.PodVolumeBackup{
+		builder.ForPodVolumeBackup("velero", "pvb-1").PodName("pod-1").PodNamespace("ns-1").Volume("data").SnapshotID("foo").Result(),
+	}
+	backedUpPod := builder.ForPod("ns-1", "pod-1").
+		Volumes(builder.ForVolume("data").PersistentVolumeClaimSource("pvc-1").Result()).
+		Result()
+	existingPod := backedUpPod.DeepCopy()
+	existingPod.Spec.NodeName = "node-1"
+
+	tests := []struct {
+		name         string
+		restore      *velerov1api.Restore
+		pvbs         []*velerov1api.PodVolumeBackup
+		wantErrs     bool
+		wantWarnings bool
+		wantPVBSkip  bool
+	}{
+		{
+			name:     "in-place restore with an existing pod consuming the backed-up volumes fails the pre-flight check",
+			restore:  defaultRestore().ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull)).Result(),
+			pvbs:     pvbs,
+			wantErrs: true,
+		},
+		{
+			name:     "in-place restore with existingResourcePolicy=update and an existing pod still fails the pre-flight check",
+			restore:  defaultRestore().ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull)).ExistingResourcePolicy(string(velerov1api.ResourcePolicyTypeUpdate)).Result(),
+			pvbs:     pvbs,
+			wantErrs: true,
+		},
+		{
+			name:         "in-place restore with an existing pod without PodVolumeBackups only warns",
+			restore:      defaultRestore().ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeIncremental)).Result(),
+			pvbs:         nil,
+			wantWarnings: true,
+		},
+		{
+			name:         "regular restore with an existing pod warns that the PodVolumeBackups are not restored",
+			restore:      defaultRestore().Result(),
+			pvbs:         pvbs,
+			wantWarnings: true,
+			wantPVBSkip:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			restorer := new(uploadermocks.Restorer)
+			defer restorer.AssertExpectations(t)
+			h.restorer.podVolumeRestorerFactory = &fakePodVolumeRestorerFactory{restorer: restorer}
+
+			h.AddItems(t, test.Pods(existingPod))
+
+			tarball := test.NewTarWriter(t)
+			tarball.AddItems("pods", backedUpPod)
+
+			warnings, errs := h.restorer.Restore(
+				&Request{
+					Log:              h.log,
+					Restore:          tc.restore,
+					Backup:           defaultBackup().Result(),
+					PodVolumeBackups: tc.pvbs,
+					BackupReader:     tarball.Done(),
+				},
+				nil,
+				nil,
+			)
+
+			if tc.wantErrs {
+				require.Len(t, errs.Namespaces["ns-1"], 1)
+				assert.Contains(t, errs.Namespaces["ns-1"][0], "in-place restore pre-flight check failed")
+				assert.Contains(t, errs.Namespaces["ns-1"][0], "pod ns-1/pod-1 already exists")
+			} else {
+				assert.Empty(t, errs.Namespaces)
+			}
+			if tc.wantPVBSkip {
+				require.Len(t, warnings.Namespaces["ns-1"], 2)
+				assert.Contains(t, warnings.Namespaces["ns-1"][0], "PodVolumeBackups will not be restored")
+				assert.Contains(t, warnings.Namespaces["ns-1"][1], "already exists")
+			} else if tc.wantWarnings {
+				require.Len(t, warnings.Namespaces["ns-1"], 1)
+				assert.Contains(t, warnings.Namespaces["ns-1"][0], "already exists")
+			}
+		})
+	}
+}
+
 func TestResetMetadata(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -5204,6 +5387,33 @@ func TestRestoreInplaceSourceSizeCarrierAnnotation(t *testing.T) {
 		got, err := h.DynamicClient.Resource(test.PVCs().GVR()).Namespace("ns-1").Get(t.Context(), "pvc-1", metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreSourceSizeAnnotation)
+	})
+
+	t.Run("volume handle from volume info is carried to RIAs and stripped from the cluster object", func(t *testing.T) {
+		h := newHarness(t)
+		h.AddItems(t, test.PVCs())
+		var seen string
+		capture := &pluggableAction{
+			executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+				item := input.Item.(*unstructured.Unstructured)
+				seen = item.GetAnnotations()[velerov1api.InplaceRestoreVolumeHandleAnnotation]
+				return &velero.RestoreItemActionExecuteOutput{UpdatedItem: item}, nil
+			},
+		}
+
+		warnings, errs := h.restorer.Restore(
+			newRequest(t, h, map[string]volume.BackupVolumeInfo{
+				"pv-1": {PVCNamespace: "ns-1", PVCName: "pvc-1", PVInfo: &volume.PVInfo{VolumeHandle: "vol-1"}},
+			}),
+			[]riav2.RestoreItemAction{capture},
+			nil,
+		)
+		assertEmptyResults(t, warnings, errs)
+		assert.Equal(t, "vol-1", seen)
+
+		got, err := h.DynamicClient.Resource(test.PVCs().GVR()).Namespace("ns-1").Get(t.Context(), "pvc-1", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreVolumeHandleAnnotation)
 	})
 
 	t.Run("no carrier when the volume info has no source size", func(t *testing.T) {

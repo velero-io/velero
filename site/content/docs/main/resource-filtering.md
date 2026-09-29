@@ -32,7 +32,7 @@ Note: `*` alone is reserved for empty fields, which means all namespaces.
 * Restore two namespaces and their objects.
 
   ```bash
-  velero restore create <backup-name> --include-namespaces <namespace1>,<namespace2>
+  velero restore create --from-backup <backup-name> --include-namespaces <namespace1>,<namespace2>
   ```
 
 ### --include-resources
@@ -48,7 +48,7 @@ Kubernetes resources to include in the backup, formatted as resource.group, such
 * Restore all deployments and configmaps in the cluster.
 
   ```bash
-  velero restore create <backup-name> --include-resources deployments,configmaps
+  velero restore create --from-backup <backup-name> --include-resources deployments,configmaps
   ```
 
 * Backup the deployments in a namespace.
@@ -82,7 +82,7 @@ Includes cluster-scoped resources. Cannot work with `--include-cluster-scoped-re
 * Restore only namespaced resources in the cluster.
 
   ```bash
-  velero restore create <backup-name> --include-cluster-resources=false
+  velero restore create --from-backup <backup-name> --include-cluster-resources=false
   ```
 
 * Backup a namespace and include cluster-scoped resources.
@@ -102,6 +102,30 @@ Includes cluster-scoped resources. Cannot work with `--include-cluster-scoped-re
   ```bash
   velero backup create <backup-name> --selector "<key> notin (<value>)"
   ```
+
+The same selector syntax works on restore. Set-based selectors are useful for phased restores: restore labeled resources first, then everything else.
+
+* Restore only resources matching the label selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector <key>=<value>
+  ```
+
+* Restore everything in the backup except resources matching the selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector "<key> notin (<value>)"
+  ```
+
+  `notin` also matches resources that don't have the `<key>` label at all: this restores resources whose `<key>` label has any other value, as well as resources without the `<key>` label.
+
+* Restore only resources that do not have a particular label key.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector '!<key>'
+  ```
+
+Note: resources pulled in as dependencies of selected items by restore item actions (for example, a restored pod's service account or persistent volume claims) are restored even if the label selector would exclude them.
 
 For more information read the [Kubernetes label selector documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors)
 
@@ -175,7 +199,7 @@ See [Namespace Glob Patterns](namespace-glob-patterns.md) for more details on su
 * Exclude two namespaces during a restore.
 
   ```bash
-  velero restore create <backup-name> --exclude-namespaces <namespace1>,<namespace2>
+  velero restore create --from-backup <backup-name> --exclude-namespaces <namespace1>,<namespace2>
   ```
 
 ### --exclude-resources
@@ -242,6 +266,7 @@ Resource policies support both **Backup** and **Restore** operations, though cer
 | `clusterScopedFilterPolicy` | Fine-grained cluster-scoped filter overlays with per-kind label selectors and resource name patterns. | **Backup** & **Restore** | [Fine-Grained Backup Filters](fine-grained-backup-filters.md) / [Fine-Grained Restore Filters](fine-grained-restore-filters.md) |
 | `volumePolicies` | Rules to control volume data backup methods (`skip`, `snapshot`, `fs-backup`) based on conditions. | **Backup** only | See [VolumePolicy](#volumepolicy-backup-only) |
 | `includeExcludePolicy` | Reusable scoped resource include/exclude filters. | **Backup** only | See [IncludeExcludePolicy](#includeexcludepolicy-backup-only) |
+| `includeExcludePolicy.includedNamespacesByLabel` / `excludedNamespacesByLabel` / `labelSelectorLogic` | Dynamically include/exclude whole namespaces by label selector; `labelSelectorLogic` picks OR (default, any entry matches) or AND (every entry must match) across multiple entries in the same list. | **Backup** only | See [Namespace selection by label](#namespace-selection-by-label-backup-only) |
 
 ### Creating and referencing resource policies
 
@@ -399,6 +424,101 @@ velero backup create <backup-name> --resource-policies-configmap my-policy --inc
 ```
 The backup will include all resources in namespace `my-workload-ns`, including `configmap` and `event`, and all CRDs and
 `apiservices` in the cluster.
+
+### Namespace selection by label (Backup only)
+`includedNamespacesByLabel` and `excludedNamespacesByLabel` let you dynamically include or exclude entire namespaces from
+a backup based on Kubernetes label selectors applied to the namespace objects themselves, without enumerating namespace
+names in `BackupSpec` or a schedule. This is useful when namespaces are created and labeled dynamically and you don't want
+to update `--include-namespaces`/`--exclude-namespaces` (or a schedule) every time.
+
+Both fields live in `includeExcludePolicy`, alongside the resource-scoped filters above, and are lists of Kubernetes label
+selector strings (same syntax as `kubectl get ns -l <selector>`). A realistic policy commonly sets both together — include
+any namespace opted into a schedule by team, but always exclude confidential ones regardless of team:
+
+```yaml
+version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+    - "velero-backup-schedule=weekly"
+    - "team=platform"
+  excludedNamespacesByLabel:
+    - "confidential=true"
+```
+
+With the policy above, a namespace labeled `velero-backup-schedule=weekly` AND `confidential=true` is still excluded —
+`excludedNamespacesByLabel` always wins (see [Precedence](#precedence) below).
+
+By default, multiple entries within `includedNamespacesByLabel` (and, independently, within `excludedNamespacesByLabel`)
+are OR'd together: a namespace matching *any* entry in the list is included/excluded. Set `labelSelectorLogic: "AND"` to
+require a namespace to match *every* entry in the list instead:
+
+```yaml
+version: v1
+includeExcludePolicy:
+  labelSelectorLogic: "AND"
+  includedNamespacesByLabel:
+    - "tier=critical"
+    - "compliance=pci"
+```
+
+(A single selector string can already express AND via comma-separated requirements, e.g. `"tier=critical,compliance=pci"`
+— that's standard `labels.Parse` syntax and unrelated to `labelSelectorLogic`, which only controls how *separate list
+entries* combine.)
+
+#### Precedence
+
+- If `includedNamespacesByLabel` is configured and `BackupSpec.IncludedNamespaces` was left empty (the common case — a
+  schedule with no explicit namespace list), the namespaces resolved by label become the entire inclusion baseline
+  instead of "all namespaces." If the selector currently matches nothing, the backup selects nothing — it does not fall
+  back to "everything."
+- If `BackupSpec.IncludedNamespaces` is also set explicitly, the label-resolved namespaces are added to that list. An
+  explicit `--include-namespaces '*'` is treated the same way as any other explicit value here — it is **preserved**,
+  not narrowed down to just the label matches, since `*` already means "every namespace" regardless of what else is in
+  the list.
+- `excludedNamespacesByLabel` always subtracts from the effective set, the same way `--exclude-namespaces` does, whether
+  or not `includedNamespacesByLabel` is configured.
+- `BackupSpec.LabelSelector`/`--selector` is unaffected by any of this — it continues to filter individual resources, not
+  namespaces. A namespace selected via `includedNamespacesByLabel` gets its own `Namespace` object backed up even if that
+  namespace doesn't separately match `--selector`; resources inside it are still filtered by `--selector` as usual. This
+  matches how an explicitly-named `--include-namespaces` entry already behaves today.
+
+This union-vs-replacement distinction is subtle but matters in practice — the same `includedNamespacesByLabel` policy
+produces a different effective namespace set depending on what else is configured on the backup:
+
+| `BackupSpec.IncludedNamespaces` | `includedNamespacesByLabel` matches | Effective included namespaces |
+| --- | --- | --- |
+| *(empty)* | `team-a`, `team-b` | `team-a`, `team-b` (**replaces** the "all namespaces" default) |
+| `ops` | `team-a`, `team-b` | `ops`, `team-a`, `team-b` (**unions** with the explicit list) |
+| `*` (explicit) | `team-a`, `team-b` | `*` (**preserved as-is** — already "every namespace", not narrowed) |
+| *(empty)* | *(no matches yet)* | *(none)* — not "all namespaces" |
+
+Selectors are evaluated once, when the backup starts — a namespace labeled to match *after* that point isn't picked up
+until the next backup runs. The resolved names are written into the created Backup's own `spec.includedNamespaces` (and
+`spec.excludedNamespaces`), so `velero backup describe` and `kubectl get backup <name> -o yaml` show exactly which
+namespaces were actually selected. When a selector matches nothing, that field shows the internal `[-]*` pattern
+(`resourcepolicies.NoNamespaceMatchesPattern`) rather than an actual namespace name — a placeholder namespace glob
+guaranteed to match nothing, not a sign anything went wrong.
+
+#### Limitations
+
+- Not usable in a `RestoreSpec.ResourcePolicy` ConfigMap — like the rest of `includeExcludePolicy`, a ConfigMap containing
+  these fields is rejected for Restore.
+- Not honored in the global `--global-backup-volume-policies-configmap`; set these on a per-backup (or per-schedule) ResourcePolicy
+  ConfigMap referenced via `--resource-policies-configmap` / `BackupSpec.ResourcePolicy`.
+- An empty (or whitespace-only) selector string is rejected at validation time rather than silently matching every
+  namespace.
+- `labelSelectorLogic` applies the same OR/AND choice to both `includedNamespacesByLabel` and
+  `excludedNamespacesByLabel` when both are set — there's no way to set AND for one and OR for the other. Setting
+  `"AND"` to narrow which namespaces are included also requires *every* `excludedNamespacesByLabel` entry to match
+  before a namespace is excluded, which excludes fewer namespaces than the OR default. If you rely on
+  `excludedNamespacesByLabel` as a safety net, keep it to a single selector entry (comma-separated requirements
+  within that one entry already express AND, independent of `labelSelectorLogic`) so its behavior doesn't change
+  based on how `includedNamespacesByLabel` is tuned.
+- Narrowing `BackupSpec.IncludedNamespaces` from "all namespaces" down to a resolved subset — whether via
+  `includedNamespacesByLabel` or a plain explicit namespace list — also stops cluster-scoped resources (CRDs,
+  ClusterRoles, StorageClasses, etc.) from being backed up by default, per Velero's existing
+  `IncludeClusterResources` auto-detection (unset means "only include cluster-scoped resources on a full,
+  all-namespaces backup"). Set `includeClusterResources: true` on the backup explicitly if you still want them.
 
 ### VolumePolicy (Backup only)
 VolumePolicy is a data structure to control how velero handle the volumes matching certain conditions.

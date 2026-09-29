@@ -51,7 +51,7 @@ spec:
       name: Age
       type: date
     - description: Name of the node where the PodVolumeBackup is processed
-      jsonPath: .status.node
+      jsonPath: .spec.node
       name: Node
       type: string
     - description: The type of the uploader to handle data transfer

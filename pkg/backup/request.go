@@ -90,7 +90,7 @@ type Request struct {
 	MustIncludeAdditionalItemPVCs *backedUpItemsMap
 	itemOperationsList            *[]*itemoperation.BackupOperation
 	ResPolicies                   *resourcepolicies.Policies
-	SkippedPVTracker              *skipPVTracker
+	SkippedVolumeTracker          *skipVolumeTracker
 	VolumesInformation            volume.BackupVolumesInformation
 	WorkerPool                    *ItemBlockWorkerPool
 
@@ -139,13 +139,18 @@ func (r *Request) BackupResourceList() map[string][]string {
 }
 
 func (r *Request) FillVolumesInformation() {
-	skippedPVMap := make(map[string]string)
+	var skippedVolumes []volume.SkippedVolume
 
-	for _, skippedPV := range r.SkippedPVTracker.Summary() {
-		skippedPVMap[skippedPV.Name] = skippedPV.SerializeSkipReasons()
+	for _, skippedVolume := range r.SkippedVolumeTracker.Summary() {
+		skippedVolumes = append(skippedVolumes, volume.SkippedVolume{
+			PVName:       skippedVolume.PVName,
+			PVCName:      skippedVolume.PVCName,
+			PVCNamespace: skippedVolume.PVCNamespace,
+			Reasons:      skippedVolume.SerializeSkipReasons(),
+		})
 	}
 
-	r.VolumesInformation.SkippedPVs = skippedPVMap
+	r.VolumesInformation.SkippedVolumes = skippedVolumes
 	r.VolumesInformation.NativeSnapshots = r.VolumeSnapshots.Get()
 	r.VolumesInformation.PodVolumeBackups = r.PodVolumeBackups
 	r.VolumesInformation.BackupOperations = *r.GetItemOperationsList()

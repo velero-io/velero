@@ -98,7 +98,7 @@ type PodVolumeBackupStatus struct {
 	// +optional
 	SnapshotID string `json:"snapshotID,omitempty"`
 
-	// Message is a message about the pod volume backup's status.
+	// Message is a message describing the pod volume backup when it reaches to a terminal status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -144,6 +144,11 @@ type PodVolumeBackupStatus struct {
 
 	// FallbackFull indicates whether the incremental backup has fallen back to full backup
 	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains one or more messages about what have been done for this pod volume backup.
+	// +optional
+	// +nullable
+	Activities []string `json:"activities,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,
@@ -158,7 +163,7 @@ type PodVolumeBackupStatus struct {
 // +kubebuilder:printcolumn:name="Incremental Bytes",type="integer",format="int64",JSONPath=".status.incrementalBytes",description="Incremental bytes",priority=10
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where this backup should be stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this PodVolumeBackup was created"
-// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the PodVolumeBackup is processed"
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".spec.node",description="Name of the node where the PodVolumeBackup is processed"
 // +kubebuilder:printcolumn:name="Uploader",type="string",JSONPath=".spec.uploaderType",description="The type of the uploader to handle data transfer"
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true

@@ -367,6 +367,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			inplace: true,
 			kubeClientObj: []runtime.Object{
 				createNodeAgentDaemonset(),
+				createPVObj(1, false),
 				createPVCObj(1),
 				func() *corev1api.Pod {
 					pod := builder.ForPod("fake-ns", "other-pod").
@@ -398,6 +399,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			inplace: true,
 			kubeClientObj: []runtime.Object{
 				createNodeAgentDaemonset(),
+				createPVObj(1, false),
 				createPVCObj(1),
 				createGatedPodObj("old-restore-uid", 1),
 			},
@@ -423,6 +425,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			inplace: true,
 			kubeClientObj: []runtime.Object{
 				createNodeAgentDaemonset(),
+				createPVObj(1, false),
 				createPVCObj(1),
 			},
 			ctlClientObj: []runtime.Object{
@@ -441,6 +444,72 @@ func TestRestorePodVolumes(t *testing.T) {
 			},
 		},
 		{
+			// The PV was recreated under a new name by a previous in-place restore
+			// (block data mover on a file system volume) but is the same CSI volume.
+			name: "in-place restore proceeds when the PVC is bound to the backed-up volume under a recreated PV name",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				createNodeObj(),
+				func() *corev1api.PersistentVolume {
+					pv := createPVObj(1, false)
+					pv.Spec.CSI = &corev1api.CSIPersistentVolumeSource{Driver: "fake.csi", VolumeHandle: "vol-1"}
+					return pv
+				}(),
+				createPVCObj(1),
+				createGatedPodObj("fake-restore-uid", 1),
+				createNodeAgentPodObj(true),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos: map[string]volume.BackupVolumeInfo{
+				"backed-up-pv": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1", PVInfo: &volume.PVInfo{VolumeHandle: "vol-1"}},
+			},
+			runtimeScheme: scheme,
+			retPVRs: []*velerov1api.PodVolumeRestore{
+				completedPVR,
+			},
+		},
+		{
+			name: "in-place restore blocked when the PVC is bound to a different CSI volume",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				func() *corev1api.PersistentVolume {
+					pv := createPVObj(1, false)
+					pv.Spec.CSI = &corev1api.CSIPersistentVolumeSource{Driver: "fake.csi", VolumeHandle: "vol-other"}
+					return pv
+				}(),
+				createPVCObj(1),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos: map[string]volume.BackupVolumeInfo{
+				"fake-pv-1": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1", PVInfo: &volume.PVInfo{VolumeHandle: "vol-1"}},
+			},
+			runtimeScheme: scheme,
+			errs: []expectError{
+				{
+					err:        "in-place restore pre-flight check failed, skipping volume data restore: PVC fake-ns/fake-pvc-1 is bound to volume vol-other (PV fake-pv-1), but was bound to volume vol-1 (PV fake-pv-1) at backup time",
+					prefixOnly: true,
+				},
+			},
+		},
+		{
 			name: "in-place restore blocked when the PVC is too small for the source volume",
 			pvbs: []*velerov1api.PodVolumeBackup{
 				createPVBObj(true, true, 1, "kopia"),
@@ -448,6 +517,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			inplace: true,
 			kubeClientObj: []runtime.Object{
 				createNodeAgentDaemonset(),
+				createPVObj(1, false),
 				func() *corev1api.PersistentVolumeClaim {
 					pvc := createPVCObj(1)
 					pvc.Status.Capacity = corev1api.ResourceList{corev1api.ResourceStorage: resource.MustParse("100Mi")}
@@ -479,6 +549,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			inplace: true,
 			kubeClientObj: []runtime.Object{
 				createNodeAgentDaemonset(),
+				createPVObj(1, false),
 				createNodeObj(),
 				createPVCObj(1),
 				createGatedPodObj("fake-restore-uid", 1),

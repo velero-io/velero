@@ -1,0 +1,1 @@
+Add configurable tolerations to the repository maintenance job ConfigMap (global section); deployment tolerations matching the third-party allowlist (kubernetes.azure.com/scalesetpriority, CriticalAddonsOnly) and Windows toleration continue to be inherited and merged with configured tolerations.

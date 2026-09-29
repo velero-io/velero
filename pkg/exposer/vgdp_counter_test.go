@@ -1,6 +1,8 @@
 package exposer
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,23 +21,23 @@ import (
 func TestIsConstrained(t *testing.T) {
 	tests := []struct {
 		name          string
-		counter       VgdpCounter
+		counter       *VgdpCounter
 		kubeClientObj []client.Object
 		getErr        bool
 		expected      bool
 	}{
 		{
 			name:     "no change, constrained",
-			counter:  VgdpCounter{},
+			counter:  &VgdpCounter{},
 			expected: true,
 		},
 		{
 			name:    "no change, not constrained",
-			counter: VgdpCounter{allowedQueueLength: 1},
+			counter: &VgdpCounter{allowedQueueLength: 1},
 		},
 		{
 			name: "change in du, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				duState:            dynamicQueueLength{0, 1},
 			},
@@ -43,7 +45,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in du, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				duState:            dynamicQueueLength{0, 1},
 			},
@@ -54,7 +56,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 			},
@@ -62,7 +64,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 			},
@@ -73,7 +75,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvb, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvbState:           dynamicQueueLength{0, 1},
 			},
@@ -81,7 +83,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvb, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvbState:           dynamicQueueLength{0, 1},
 			},
@@ -92,7 +94,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvr, get failed",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvrState:           dynamicQueueLength{0, 1},
 			},
@@ -100,7 +102,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in pvr, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				pvrState:           dynamicQueueLength{0, 1},
 			},
@@ -111,7 +113,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in du, pvb, not constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 3,
 				duState:            dynamicQueueLength{0, 1},
 				pvbState:           dynamicQueueLength{0, 1},
@@ -123,7 +125,7 @@ func TestIsConstrained(t *testing.T) {
 		},
 		{
 			name: "change in dd, pvr, constrained",
-			counter: VgdpCounter{
+			counter: &VgdpCounter{
 				allowedQueueLength: 1,
 				ddState:            dynamicQueueLength{0, 1},
 				pvrState:           dynamicQueueLength{0, 1},
@@ -177,4 +179,29 @@ func TestIsConstrained(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVgdpCounterConcurrentIsConstrained(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	require.NoError(t, velerov2alpha1api.AddToScheme(scheme))
+
+	counter := &VgdpCounter{
+		allowedQueueLength: 10,
+		client:             fake.NewClientBuilder().WithScheme(scheme).Build(),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				atomic.AddUint64(&counter.duState.changeID, 1)
+				atomic.AddUint64(&counter.ddState.changeID, 1)
+				counter.IsConstrained(t.Context(), velerotest.NewLogger())
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -109,7 +109,7 @@ type DataDownloadStatus struct {
 	// +optional
 	Phase DataDownloadPhase `json:"phase,omitempty"`
 
-	// Message is a message about the DataDownload's status.
+	// Message is a message describing the DataDownload when it reaches to a terminal status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -152,6 +152,11 @@ type DataDownloadStatus struct {
 
 	// FallbackFull indicates whether the incremental restore has fallen back to full restore
 	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains one or more messages about what have been done for this DataDownload.
+	// +optional
+	// +nullable
+	Activities []string `json:"activities,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.
@@ -162,7 +167,8 @@ type DataDownloadStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="DataDownload status such as New/InProgress"
 // The "Restore Type" column is hidden by default to align with DataUpload.
-// +kubebuilder:printcolumn:name="Restore Type",type="string",JSONPath=".spec.restoreType",description="Restore type such as Full/Incremental",priority=10
+// +kubebuilder:printcolumn:name="Requested Restore Type",type="string",JSONPath=".spec.restoreType",description="Requested restore type such as Full/Incremental",priority=10
+// +kubebuilder:printcolumn:name="Fallback Full",type="boolean",JSONPath=".status.fallbackFull",description="Whether the incremental restore has fallen back to full restore",priority=10
 // +kubebuilder:printcolumn:name="Started",type="date",JSONPath=".status.startTimestamp",description="Time duration since this DataDownload was started"
 // +kubebuilder:printcolumn:name="Bytes Done",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Completed bytes"
 // +kubebuilder:printcolumn:name="Total Bytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Total bytes"

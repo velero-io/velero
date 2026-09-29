@@ -136,9 +136,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 
 	schedule := &api.Schedule{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: f.Namespace(),
-			Name:      o.BackupOptions.Name,
-			Labels:    o.BackupOptions.Labels.Data(),
+			Namespace:   f.Namespace(),
+			Name:        o.BackupOptions.Name,
+			Labels:      o.BackupOptions.Labels.Data(),
+			Annotations: o.BackupOptions.Annotations.Data(),
 		},
 		Spec: api.ScheduleSpec{
 			Template: api.BackupSpec{
@@ -163,6 +164,7 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 				ItemOperationTimeout:             metav1.Duration{Duration: o.BackupOptions.ItemOperationTimeout},
 				DataMover:                        o.BackupOptions.DataMover,
 				SnapshotMoveData:                 o.BackupOptions.SnapshotMoveData.Value,
+				BackupType:                       api.BackupType(o.BackupOptions.BackupType),
 			},
 			Schedule:                   o.Schedule,
 			UseOwnerReferencesInBackup: &o.UseOwnerReferencesInBackup,

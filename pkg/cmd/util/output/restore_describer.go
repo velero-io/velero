@@ -118,35 +118,17 @@ func DescribeRestore(
 		d.Println()
 		d.Printf("Namespaces:\n")
 		var s string
-		if len(restore.Spec.IncludedNamespaces) == 0 {
+		s = JoinStringWithFallback(restore.Spec.IncludedNamespaces, "all namespaces found in the backup")
+		if s == "*" {
 			s = "all namespaces found in the backup"
-		} else if len(restore.Spec.IncludedNamespaces) == 1 && restore.Spec.IncludedNamespaces[0] == "*" {
-			s = "all namespaces found in the backup"
-		} else {
-			s = strings.Join(restore.Spec.IncludedNamespaces, ", ")
 		}
 		d.Printf("\tIncluded:\t%s\n", s)
-		if len(restore.Spec.ExcludedNamespaces) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(restore.Spec.ExcludedNamespaces, ", ")
-		}
-		d.Printf("\tExcluded:\t%s\n", s)
+		d.Printf("\tExcluded:\t%s\n", JoinStringWithFallback(restore.Spec.ExcludedNamespaces, emptyDisplay))
 
 		d.Println()
 		d.Printf("Resources:\n")
-		if len(restore.Spec.IncludedResources) == 0 {
-			s = "*"
-		} else {
-			s = strings.Join(restore.Spec.IncludedResources, ", ")
-		}
-		d.Printf("\tIncluded:\t%s\n", s)
-		if len(restore.Spec.ExcludedResources) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(restore.Spec.ExcludedResources, ", ")
-		}
-		d.Printf("\tExcluded:\t%s\n", s)
+		d.Printf("\tIncluded:\t%s\n", JoinStringWithFallback(restore.Spec.IncludedResources, "*"))
+		d.Printf("\tExcluded:\t%s\n", JoinStringWithFallback(restore.Spec.ExcludedResources, emptyDisplay))
 
 		d.Printf("\tCluster-scoped:\t%s\n", BoolPointerString(restore.Spec.IncludeClusterResources, "excluded", "included", "auto"))
 

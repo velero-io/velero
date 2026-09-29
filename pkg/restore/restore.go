@@ -1644,16 +1644,22 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	// newly provisioned PVC to a stale node.
 	stripInplaceRestoreCarrierAnnotations(obj)
 
-	// Carry the source volume size from the backup volume info to the PVC CSI RIA, which has no
-	// access to the volume info, so it can run the in-place restore capacity pre-flight check.
+	// Carry backup volume info the PVC CSI RIA needs for the in-place restore pre-flight
+	// checks but has no access to: the source volume size and the backed-up volume handle.
 	if groupResource == kuberesource.PersistentVolumeClaims {
 		pvName, _, _ := unstructured.NestedString(obj.Object, "spec", "volumeName")
-		if sourceSize := ctx.backupVolumeInfoMap[pvName].SourceSize(); sourceSize > 0 {
-			annotations := obj.GetAnnotations()
-			if annotations == nil {
-				annotations = map[string]string{}
-			}
+		volumeInfo := ctx.backupVolumeInfoMap[pvName]
+		annotations := obj.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		if sourceSize := volumeInfo.SourceSize(); sourceSize > 0 {
 			annotations[velerov1api.InplaceRestoreSourceSizeAnnotation] = strconv.FormatInt(sourceSize, 10)
+		}
+		if volumeInfo.PVInfo != nil && volumeInfo.PVInfo.VolumeHandle != "" {
+			annotations[velerov1api.InplaceRestoreVolumeHandleAnnotation] = volumeInfo.PVInfo.VolumeHandle
+		}
+		if len(annotations) > 0 {
 			obj.SetAnnotations(annotations)
 		}
 	}
@@ -1939,6 +1945,31 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		itemStatus := ctx.restoredItems[itemKey]
 		itemStatus.itemExists = itemExists
 		ctx.restoredItems[itemKey] = itemStatus
+
+		// PodVolumeRestores are only created for pods Velero creates, so an
+		// existing pod silently skips the volume data restore. For an in-place
+		// restore this fails the pre-flight check: the pod is still consuming
+		// the PVCs that were supposed to be restored in place. Otherwise it is
+		// only worth a warning.
+		if newGR == kuberesource.Pods {
+			pod := new(corev1api.Pod)
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pod); err != nil {
+				errs.Add(namespace, err)
+				return warnings, errs, itemExists
+			}
+			if len(podvolume.GetVolumeBackupsForPod(ctx.podVolumeBackups, pod, originalNamespace)) > 0 {
+				if ctx.restore.IsVolumeDataInplaceRestore() {
+					err := errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: pod %s already exists and is still using the backed-up volumes: delete the pod and its owning workload and retry", kube.NamespaceAndName(obj))
+					restoreLogger.Error(err.Error())
+					errs.Add(namespace, err)
+				} else {
+					err := errors.Errorf("skipping volume data restore: pod %s already exists, its PodVolumeBackups will not be restored", kube.NamespaceAndName(obj))
+					restoreLogger.Warn(err.Error())
+					warnings.Add(namespace, err)
+				}
+			}
+		}
+
 		// Remove insubstantial metadata.
 		fromCluster, err = resetMetadataAndStatus(fromCluster)
 		if err != nil {
@@ -2526,6 +2557,7 @@ func resetMetadataAndStatus(obj *unstructured.Unstructured) (*unstructured.Unstr
 var inplaceRestoreCarrierAnnotations = []string{
 	velerov1api.InplaceRestoreSelectedNodeAnnotation,
 	velerov1api.InplaceRestoreSourceSizeAnnotation,
+	velerov1api.InplaceRestoreVolumeHandleAnnotation,
 }
 
 func stripInplaceRestoreCarrierAnnotations(obj metav1.Object) {

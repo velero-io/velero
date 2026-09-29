@@ -28,6 +28,8 @@ import (
 func TestGetDefaultConfig(t *testing.T) {
 	config := GetDefaultConfig()
 	assert.Equal(t, 1, config.ItemBlockWorkerCount)
+	assert.Equal(t, 10*time.Minute, config.DefaultBackupCSISnapshotTimeout)
+	assert.Equal(t, 30*time.Minute, config.DefaultRestoreCSISnapshotTimeout)
 }
 
 func TestBindFlags(t *testing.T) {

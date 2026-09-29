@@ -95,6 +95,10 @@ spec:
                   of the CSI snapshot.
                 nullable: true
                 properties:
+                  cleanUp:
+                    description: CleanUp indicates request to clean up the volume
+                      snapshot after the backup/restore is completed.
+                    type: boolean
                   driver:
                     description: Driver is the driver used by the VolumeSnapshotContent
                     type: string

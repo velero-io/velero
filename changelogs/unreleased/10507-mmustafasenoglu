@@ -1,0 +1,1 @@
+Add --wait flag to velero install to wait for Velero deployment to be ready

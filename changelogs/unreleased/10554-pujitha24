@@ -1,0 +1,1 @@
+Propagate caller context in repository manager Forget/BatchForget, and fix BatchForget returning a nil error instead of the real connection error

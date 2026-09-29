@@ -112,6 +112,7 @@ func TestFetchBackupInfo(t *testing.T) {
 				NewFakeSingleObjectBackupStoreGetter(backupStore),
 				metrics.NewServerMetrics(),
 				formatFlag,
+				30*time.Minute,
 				60*time.Minute,
 				false,
 				fakeGlobalClient,
@@ -194,6 +195,7 @@ func TestProcessQueueItemSkips(t *testing.T) {
 				nil, // backupStoreGetter
 				metrics.NewServerMetrics(),
 				formatFlag,
+				30*time.Minute,
 				60*time.Minute,
 				false,
 				fakeGlobalClient,
@@ -207,6 +209,96 @@ func TestProcessQueueItemSkips(t *testing.T) {
 			}})
 
 			assert.Equal(t, test.expectError, err != nil)
+		})
+	}
+}
+
+func TestRestoreReconcile_CSISnapshotTimeoutDefaulting(t *testing.T) {
+	formatFlag := logging.FormatText
+	defaultCSITimeout := 45 * time.Minute
+
+	tests := []struct {
+		name               string
+		initialCSITimeout  time.Duration
+		expectedCSITimeout time.Duration
+	}{
+		{
+			name:               "CSISnapshotTimeout is 0, should default",
+			initialCSITimeout:  0,
+			expectedCSITimeout: defaultCSITimeout,
+		},
+		{
+			name:               "CSISnapshotTimeout is set, should be preserved",
+			initialCSITimeout:  15 * time.Minute,
+			expectedCSITimeout: 15 * time.Minute,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+			fakeGlobalClient := velerotest.NewFakeControllerRuntimeClient(t)
+			restorer := &fakeRestorer{kbClient: fakeClient}
+			backupStore := &persistencemocks.BackupStore{}
+			pluginManager := &pluginmocks.Manager{}
+
+			restore := builder.ForRestore("velero", "restore-1").
+				Phase(velerov1api.RestorePhaseNew).
+				Backup("backup-1").
+				CSISnapshotTimeout(tc.initialCSITimeout).
+				ItemOperationTimeout(60 * time.Minute).
+				Result()
+
+			require.NoError(t, fakeClient.Create(t.Context(), restore))
+
+			r := NewRestoreReconciler(
+				t.Context(),
+				velerov1api.DefaultNamespace,
+				restorer,
+				fakeClient,
+				velerotest.NewLogger(),
+				logrus.InfoLevel,
+				func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+				NewFakeSingleObjectBackupStoreGetter(backupStore),
+				metrics.NewServerMetrics(),
+				formatFlag,
+				defaultCSITimeout,
+				60*time.Minute,
+				false,
+				fakeGlobalClient,
+				10*time.Minute,
+				"",
+			)
+
+			location := builder.ForBackupStorageLocation("velero", "default").Provider("myCloud").Bucket("bucket").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+			require.NoError(t, fakeClient.Create(t.Context(), location))
+
+			backup := defaultBackup().ObjectMeta(builder.WithName("backup-1")).StorageLocation("default").Phase(velerov1api.BackupPhaseCompleted).Result()
+			require.NoError(t, fakeClient.Create(t.Context(), backup))
+
+			backupStore.On("GetBackupContents", "backup-1").Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+			backupStore.On("GetCSIVolumeSnapshots", "backup-1").Return([]*snapshotv1api.VolumeSnapshot{}, nil)
+			backupStore.On("GetBackupVolumeInfos", "backup-1").Return([]*volume.BackupVolumeInfo{}, nil)
+			backupStore.On("GetBackupVolumeSnapshots", "backup-1").Return([]*volume.Snapshot{}, nil)
+			backupStore.On("PutRestoreLog", "backup-1", "restore-1", mock.Anything).Return(nil)
+			backupStore.On("PutRestoreResults", "backup-1", "restore-1", mock.Anything).Return(nil)
+			backupStore.On("PutRestoredResourceList", "restore-1", mock.Anything).Return(nil)
+			backupStore.On("PutRestoreItemOperations", mock.Anything, mock.Anything).Return(nil)
+			backupStore.On("PutRestoreVolumeInfo", "restore-1", mock.Anything).Return(nil)
+
+			pluginManager.On("GetRestoreItemActionsV2").Return(nil, nil)
+			pluginManager.On("CleanupClients").Return()
+
+			restorer.On("RestoreWithResolvers", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+				mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(results.Result{}, results.Result{})
+
+			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{
+				Namespace: "velero",
+				Name:      "restore-1",
+			}})
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedCSITimeout, restorer.calledWithArg.Spec.CSISnapshotTimeout.Duration)
 		})
 	}
 }
@@ -610,6 +702,7 @@ func TestRestoreReconcile(t *testing.T) {
 				NewFakeSingleObjectBackupStoreGetter(backupStore),
 				metrics.NewServerMetrics(),
 				formatFlag,
+				30*time.Minute,
 				60*time.Minute,
 				false,
 				fakeGlobalClient,
@@ -799,6 +892,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 		NewFakeSingleObjectBackupStoreGetter(backupStore),
 		metrics.NewServerMetrics(),
 		formatFlag,
+		30*time.Minute,
 		60*time.Minute,
 		false,
 		fakeGlobalClient,
@@ -896,6 +990,7 @@ func TestValidateAndCompleteWithResourcePolicySpecified(t *testing.T) {
 		NewFakeSingleObjectBackupStoreGetter(backupStore),
 		metrics.NewServerMetrics(),
 		formatFlag,
+		30*time.Minute,
 		60*time.Minute,
 		false,
 		fakeGlobalClient,
@@ -1026,6 +1121,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 		NewFakeSingleObjectBackupStoreGetter(backupStore),
 		metrics.NewServerMetrics(),
 		formatFlag,
+		30*time.Minute,
 		60*time.Minute,
 		false,
 		fakeGlobalClient,
@@ -1174,6 +1270,7 @@ func TestValidateAndCompleteWithDefaultResourceModifier(t *testing.T) {
 			NewFakeSingleObjectBackupStoreGetter(backupStore),
 			metrics.NewServerMetrics(),
 			formatFlag,
+			30*time.Minute,
 			60*time.Minute,
 			false,
 			fakeGlobalClient,
@@ -1417,7 +1514,7 @@ func TestMostRecentCompletedBackup(t *testing.T) {
 }
 
 func NewRestore(ns, name, backup, includeNS, includeResource string, phase velerov1api.RestorePhase) *builder.RestoreBuilder {
-	restore := builder.ForRestore(ns, name).Phase(phase).Backup(backup).ItemOperationTimeout(60 * time.Minute)
+	restore := builder.ForRestore(ns, name).Phase(phase).Backup(backup).ItemOperationTimeout(60 * time.Minute).CSISnapshotTimeout(30 * time.Minute)
 
 	if includeNS != "" {
 		restore = restore.IncludedNamespaces(includeNS)
