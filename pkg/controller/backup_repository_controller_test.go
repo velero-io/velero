@@ -46,6 +46,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	batchv1api "k8s.io/api/batch/v1"
 )
@@ -1773,4 +1774,128 @@ func getMaintenanceDurationCount(t *testing.T, m *metrics.ServerMetrics, repoNam
 		}
 	}
 	return 0
+}
+
+func TestInvalidateBackupReposForBSL(t *testing.T) {
+	bsl := &velerov1api.BackupStorageLocation{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "bsl-1",
+		},
+	}
+
+	matchingRepo := &velerov1api.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "matching-repo",
+			Labels: map[string]string{
+				velerov1api.StorageLocationLabel: "bsl-1",
+			},
+		},
+		Status: velerov1api.BackupRepositoryStatus{
+			Phase: velerov1api.BackupRepositoryPhaseReady,
+		},
+	}
+
+	otherRepo := &velerov1api.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "other-repo",
+			Labels: map[string]string{
+				velerov1api.StorageLocationLabel: "bsl-2",
+			},
+		},
+		Status: velerov1api.BackupRepositoryStatus{
+			Phase: velerov1api.BackupRepositoryPhaseReady,
+		},
+	}
+
+	t.Run("matching repos are invalidated and returned as requests", func(t *testing.T) {
+		crClient := velerotest.NewFakeControllerRuntimeClient(t, bsl, matchingRepo.DeepCopy(), otherRepo.DeepCopy())
+		r := NewBackupRepoReconciler(
+			velerov1api.DefaultNamespace,
+			velerotest.NewLogger(),
+			crClient,
+			nil,
+			time.Duration(0),
+			"",
+			"",
+			logrus.InfoLevel,
+			nil,
+			nil,
+		)
+
+		reqs := r.invalidateBackupReposForBSL(t.Context(), bsl)
+		require.Len(t, reqs, 1)
+		require.Equal(t, types.NamespacedName{Namespace: velerov1api.DefaultNamespace, Name: "matching-repo"}, reqs[0].NamespacedName)
+
+		updatedRepo := &velerov1api.BackupRepository{}
+		err := crClient.Get(t.Context(), client.ObjectKey{Namespace: velerov1api.DefaultNamespace, Name: "matching-repo"}, updatedRepo)
+		require.NoError(t, err)
+		require.Equal(t, velerov1api.BackupRepositoryPhaseNotReady, updatedRepo.Status.Phase)
+		require.Equal(t, "re-establish on BSL change, create or delete", updatedRepo.Status.Message)
+
+		unaffectedRepo := &velerov1api.BackupRepository{}
+		err = crClient.Get(t.Context(), client.ObjectKey{Namespace: velerov1api.DefaultNamespace, Name: "other-repo"}, unaffectedRepo)
+		require.NoError(t, err)
+		require.Equal(t, velerov1api.BackupRepositoryPhaseReady, unaffectedRepo.Status.Phase)
+	})
+
+	t.Run("returns empty requests when listing fails due to context cancellation", func(t *testing.T) {
+		crClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+			WithRuntimeObjects(bsl, matchingRepo.DeepCopy()).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					return client.List(ctx, list, opts...)
+				},
+			}).Build()
+
+		r := NewBackupRepoReconciler(
+			velerov1api.DefaultNamespace,
+			velerotest.NewLogger(),
+			crClient,
+			nil,
+			time.Duration(0),
+			"",
+			"",
+			logrus.InfoLevel,
+			nil,
+			nil,
+		)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		reqs := r.invalidateBackupReposForBSL(ctx, bsl)
+		require.Empty(t, reqs)
+	})
+
+	t.Run("skips request when patching fails", func(t *testing.T) {
+		crClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+			WithRuntimeObjects(bsl, matchingRepo.DeepCopy()).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					return errors.New("simulated patch failure")
+				},
+			}).Build()
+
+		r := NewBackupRepoReconciler(
+			velerov1api.DefaultNamespace,
+			velerotest.NewLogger(),
+			crClient,
+			nil,
+			time.Duration(0),
+			"",
+			"",
+			logrus.InfoLevel,
+			nil,
+			nil,
+		)
+
+		reqs := r.invalidateBackupReposForBSL(t.Context(), bsl)
+		require.Empty(t, reqs)
+	})
 }

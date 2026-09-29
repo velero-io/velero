@@ -146,7 +146,7 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 			velerov1api.StorageLocationLabel: label.GetValidName(bsl.Name),
 		}).AsSelector(),
 	}
-	if err := r.List(context.TODO(), list, options); err != nil {
+	if err := r.List(ctx, list, options); err != nil {
 		r.logger.WithField("BSL", bsl.Name).WithError(err).Error("unable to list BackupRepositories")
 		return []reconcile.Request{}
 	}
@@ -154,7 +154,7 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 	requests := []reconcile.Request{}
 	for i := range list.Items {
 		r.logger.WithField("BSL", bsl.Name).Infof("Invalidating Backup Repository %s", list.Items[i].Name)
-		if err := r.patchBackupRepository(context.Background(), &list.Items[i], repoNotReady("re-establish on BSL change, create or delete")); err != nil {
+		if err := r.patchBackupRepository(ctx, &list.Items[i], repoNotReady("re-establish on BSL change, create or delete")); err != nil {
 			r.logger.WithField("BSL", bsl.Name).WithError(err).Errorf("fail to patch BackupRepository %s", list.Items[i].Name)
 			continue
 		}
