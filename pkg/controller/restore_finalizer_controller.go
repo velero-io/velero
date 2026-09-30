@@ -601,6 +601,7 @@ func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
 		return errs
 	}
 	for _, dataDownload := range dataDownloads.Items {
+		found := false
 		for index := range ctx.restoreVolumeInfos {
 			if ctx.restoreVolumeInfos[index].PVCName == dataDownload.Spec.TargetVolume.PVC &&
 				ctx.restoreVolumeInfos[index].PVCNamespace == dataDownload.Spec.TargetVolume.Namespace &&
@@ -609,7 +610,21 @@ func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataDownload.Status.IncrementalBytes
 				ctx.restoreVolumeInfos[index].FallbackFull = dataDownload.Status.FallbackFull
 				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Phase = dataDownload.Status.Phase
+				found = true
+				break
 			}
+		}
+		if !found {
+			pvName := dataDownload.Spec.TargetVolume.PV
+			pvc := &corev1api.PersistentVolumeClaim{}
+			if err := ctx.crClient.Get(context.Background(), client.ObjectKey{
+				Namespace: dataDownload.Spec.TargetVolume.Namespace,
+				Name:      dataDownload.Spec.TargetVolume.PVC,
+			}, pvc); err == nil && pvc.Spec.VolumeName != "" {
+				pvName = pvc.Spec.VolumeName
+			}
+			newVI := volume.NewRestoreVolumeInfoFromDataDownload(&dataDownload, pvName)
+			ctx.restoreVolumeInfos = append(ctx.restoreVolumeInfos, newVI)
 		}
 	}
 

@@ -1346,41 +1346,7 @@ func TestRestoreVolumeInfoResult(t *testing.T) {
 				},
 				pvrs: []*velerov1api.PodVolumeRestore{},
 			},
-			expectResultValues: []RestoreVolumeInfo{
-				{
-					PVCName:           "testPVC",
-					PVCNamespace:      "testNS",
-					PVName:            "testPV",
-					RestoreMethod:     CSISnapshot,
-					SnapshotDataMoved: true,
-					RestoreType:       "Incremental",
-					SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
-						DataMover:       "velero",
-						UploaderType:    velerov1api.BackupRepositoryTypeKopia,
-						SnapshotHandle:  "dd-snap-001",
-						OperationID:     "dd-operation-001",
-						Phase:           velerov2alpha1.DataDownloadPhaseCompleted,
-						Size:            2048,
-						IncrementalSize: ptr.To(int64(512)),
-					},
-				},
-				{
-					PVCName:           "testPVC2",
-					PVCNamespace:      "testNS",
-					PVName:            "testPV2",
-					RestoreMethod:     CSISnapshot,
-					SnapshotDataMoved: true,
-					RestoreType:       "Full",
-					SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
-						DataMover:      "velero",
-						UploaderType:   velerov1api.BackupRepositoryTypeKopia,
-						SnapshotHandle: "dd-snap-002",
-						OperationID:    "dd-operation-002",
-						Phase:          velerov2alpha1.DataDownloadPhaseCompleted,
-						Size:           4096,
-					},
-				},
-			},
+			expectResultValues: []RestoreVolumeInfo{},
 		},
 	}
 	for _, tc := range tests {
@@ -1723,4 +1689,142 @@ func TestNewPVInfo(t *testing.T) {
 
 	localPV := builder.ForPersistentVolume("pv-2").ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result()
 	require.Equal(t, &PVInfo{ReclaimPolicy: "Delete"}, newPVInfo(localPV))
+}
+
+func TestNewRestoreVolumeInfoFromDataDownload(t *testing.T) {
+	dd := builder.ForDataDownload("velero", "test-dd").
+		ObjectMeta(builder.WithLabels(velerov1api.AsyncOperationIDLabel, "dd-op-1")).
+		SnapshotID("snap-123").
+		TargetVolume(velerov2alpha1.TargetVolumeSpec{
+			PVC:       "test-pvc",
+			PV:        "test-pv",
+			Namespace: "test-ns",
+		}).
+		Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+		Progress(veleroshared.DataMoveOperationProgress{TotalBytes: 2048}).
+		IncrementalBytes(512).
+		RestoreType("Incremental").
+		FallbackFull(true).
+		Result()
+
+	info := NewRestoreVolumeInfoFromDataDownload(dd, "custom-pv")
+	require.NotNil(t, info)
+	assert.Equal(t, "custom-pv", info.PVName)
+	assert.Equal(t, "test-pvc", info.PVCName)
+	assert.Equal(t, "test-ns", info.PVCNamespace)
+	assert.True(t, info.SnapshotDataMoved)
+	assert.Equal(t, CSISnapshot, info.RestoreMethod)
+	assert.Equal(t, "Incremental", info.RestoreType)
+	assert.True(t, info.FallbackFull)
+	require.NotNil(t, info.SnapshotDataMovementInfo)
+	assert.Equal(t, "velero", info.SnapshotDataMovementInfo.DataMover)
+	assert.Equal(t, velerov1api.BackupRepositoryTypeKopia, info.SnapshotDataMovementInfo.UploaderType)
+	assert.Equal(t, "snap-123", info.SnapshotDataMovementInfo.SnapshotHandle)
+	assert.Equal(t, "dd-op-1", info.SnapshotDataMovementInfo.OperationID)
+	assert.Equal(t, int64(2048), info.SnapshotDataMovementInfo.Size)
+	assert.Equal(t, ptr.To(int64(512)), info.SnapshotDataMovementInfo.IncrementalSize)
+	assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, info.SnapshotDataMovementInfo.Phase)
+}
+
+func TestNewBackupVolumeInfoFromDataUpload(t *testing.T) {
+	now := metav1.Now()
+	du := builder.ForDataUpload("velero", "test-du").
+		SourcePVC("test-pvc").
+		SourceNamespace("test-ns").
+		DataMover("velero").
+		SnapshotID("snap-456").
+		CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1", Driver: "driver.csi"}).
+		Phase(velerov2alpha1.DataUploadPhaseCompleted).
+		Progress(veleroshared.DataMoveOperationProgress{TotalBytes: 4096}).
+		IncrementalBytes(1024).
+		StartTimestamp(&now).
+		CompletionTimestamp(&now).
+		Result()
+	du.Status.FallbackFull = false
+
+	op := &itemoperation.BackupOperation{
+		Spec: itemoperation.BackupOperationSpec{
+			OperationID: "op-1",
+		},
+	}
+	pv := builder.ForPersistentVolume("test-pv").ReclaimPolicy(corev1api.PersistentVolumeReclaimDelete).Result()
+
+	info := NewBackupVolumeInfoFromDataUpload(du, op, pv, "test-pv")
+	require.NotNil(t, info)
+	assert.Equal(t, CSISnapshot, info.BackupMethod)
+	assert.Equal(t, "test-pvc", info.PVCName)
+	assert.Equal(t, "test-ns", info.PVCNamespace)
+	assert.Equal(t, "test-pv", info.PVName)
+	assert.True(t, info.SnapshotDataMoved)
+	assert.False(t, info.Skipped)
+	assert.Equal(t, VolumeResultSucceeded, info.Result)
+	assert.Equal(t, &now, info.StartTimestamp)
+	assert.Equal(t, &now, info.CompletionTimestamp)
+	require.NotNil(t, info.SnapshotDataMovementInfo)
+	assert.Equal(t, "velero", info.SnapshotDataMovementInfo.DataMover)
+	assert.Equal(t, velerov1api.BackupRepositoryTypeKopia, info.SnapshotDataMovementInfo.UploaderType)
+	assert.Equal(t, "op-1", info.SnapshotDataMovementInfo.OperationID)
+	assert.Equal(t, "snap-456", info.SnapshotDataMovementInfo.SnapshotHandle)
+	assert.Equal(t, "vs-1", info.SnapshotDataMovementInfo.RetainedSnapshot)
+	assert.Equal(t, int64(4096), info.SnapshotDataMovementInfo.Size)
+	assert.Equal(t, ptr.To(int64(1024)), info.SnapshotDataMovementInfo.IncrementalSize)
+	assert.Equal(t, velerov2alpha1.DataUploadPhaseCompleted, info.SnapshotDataMovementInfo.Phase)
+	require.NotNil(t, info.PVInfo)
+	assert.Equal(t, "Delete", info.PVInfo.ReclaimPolicy)
+}
+
+func TestNewBackupVolumeInfoFromCSISnapshot(t *testing.T) {
+	now := metav1.Now()
+	vscName := "test-vsc"
+	snapshotHandle := "snap-handle-789"
+	driver := "test.csi.driver"
+
+	vs := builder.ForVolumeSnapshot("test-ns", "test-vs").
+		SourcePVC("test-pvc").
+		Status().
+		BoundVolumeSnapshotContentName(vscName).
+		RestoreSize("1Gi").
+		ReadyToUse(true).
+		Result()
+	vs.Status.CreationTime = &now
+
+	vsc := builder.ForVolumeSnapshotContent(vscName).
+		Driver(driver).
+		Status(&snapshotv1api.VolumeSnapshotContentStatus{
+			SnapshotHandle: &snapshotHandle,
+		}).
+		Result()
+
+	op := &itemoperation.BackupOperation{
+		Spec: itemoperation.BackupOperationSpec{
+			OperationID: "op-csi-1",
+		},
+		Status: itemoperation.OperationStatus{
+			Updated: &now,
+		},
+	}
+
+	pv := builder.ForPersistentVolume("test-pv").ReclaimPolicy(corev1api.PersistentVolumeReclaimRetain).Result()
+
+	info := NewBackupVolumeInfoFromCSISnapshot(vs, vsc, op, pv, "test-pv")
+	require.NotNil(t, info)
+	assert.Equal(t, CSISnapshot, info.BackupMethod)
+	assert.Equal(t, "test-pvc", info.PVCName)
+	assert.Equal(t, "test-ns", info.PVCNamespace)
+	assert.Equal(t, "test-pv", info.PVName)
+	assert.False(t, info.SnapshotDataMoved)
+	assert.False(t, info.Skipped)
+	assert.True(t, info.PreserveLocalSnapshot)
+	assert.Equal(t, VolumeResultSucceeded, info.Result)
+	assert.Equal(t, &now, info.StartTimestamp)
+	assert.Equal(t, &now, info.CompletionTimestamp)
+	require.NotNil(t, info.CSISnapshotInfo)
+	assert.Equal(t, vscName, info.CSISnapshotInfo.VSCName)
+	assert.Equal(t, int64(1073741824), info.CSISnapshotInfo.Size)
+	assert.Equal(t, driver, info.CSISnapshotInfo.Driver)
+	assert.Equal(t, snapshotHandle, info.CSISnapshotInfo.SnapshotHandle)
+	assert.Equal(t, "op-csi-1", info.CSISnapshotInfo.OperationID)
+	assert.True(t, *info.CSISnapshotInfo.ReadyToUse)
+	require.NotNil(t, info.PVInfo)
+	assert.Equal(t, "Retain", info.PVInfo.ReclaimPolicy)
 }
