@@ -40,6 +40,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/vmware-tanzu/velero/pkg/util/csi"
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
 
@@ -104,8 +105,25 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.WithError(err).Error("Error getting Backup")
 		return ctrl.Result{}, errors.WithStack(err)
 	}
-
 	switch backup.Status.Phase {
+	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed:
+		// Terminal status is persisted only after the finalized archive has been
+		// uploaded. Run group cleanup on this subsequent reconciliation so a
+		// cleanup failure/restart retries deletion, not archive generation using
+		// snapshots that may already have been deleted.
+		if backup.Annotations[velerov1api.VolumeGroupSnapshotBackupAnnotation] == "true" &&
+			backup.Annotations[velerov1api.VolumeGroupSnapshotCleanupCompletedAnnotation] != "true" {
+			if err := csi.CleanupBackupVolumeGroupSnapshots(ctx, backup, r.globalCRClient, log); err != nil {
+				return ctrl.Result{}, err
+			}
+			base := backup.DeepCopy()
+			if backup.Annotations == nil {
+				backup.Annotations = map[string]string{}
+			}
+			backup.Annotations[velerov1api.VolumeGroupSnapshotCleanupCompletedAnnotation] = "true"
+			return ctrl.Result{}, r.client.Patch(ctx, backup, kbclient.MergeFrom(base))
+		}
+		return ctrl.Result{}, nil
 	case velerov1api.BackupPhaseFinalizing, velerov1api.BackupPhaseFinalizingPartiallyFailed:
 		// only process backups finalizing after  plugin operations are complete
 	default:

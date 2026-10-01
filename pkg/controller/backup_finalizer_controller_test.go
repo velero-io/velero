@@ -22,10 +22,13 @@ import (
 	"testing"
 	"time"
 
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,6 +46,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 func mockBackupFinalizerReconciler(fakeClient kbclient.Client, fakeGlobalClient kbclient.Client, fakeClock *testclocks.FakeClock) (*backupFinalizerReconciler, *fakeBackupper) {
@@ -60,6 +64,82 @@ func mockBackupFinalizerReconciler(fakeClient kbclient.Client, fakeGlobalClient 
 		10*time.Minute,
 	), backupper
 }
+
+func TestBackupFinalizerReconcileRunsTerminalVGSCleanup(t *testing.T) {
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").
+		ObjectMeta(builder.WithUID("backup-uid"), builder.WithAnnotations(velerov1api.VolumeGroupSnapshotBackupAnnotation, "true")).
+		Phase(velerov1api.BackupPhaseCompleted).Result()
+	client := velerotest.NewFakeControllerRuntimeClient(t, backup)
+	reconciler := &backupFinalizerReconciler{
+		client:         client,
+		globalCRClient: velerotest.NewFakeControllerRuntimeClient(t, backup),
+		log:            logrus.New(),
+	}
+
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: backup.Namespace,
+		Name:      backup.Name,
+	}})
+	require.NoError(t, err)
+
+	updated := &velerov1api.Backup{}
+	require.NoError(t, client.Get(t.Context(), kbclient.ObjectKeyFromObject(backup), updated))
+	require.Empty(t, updated.Finalizers)
+	require.Equal(t, "true", updated.Annotations[velerov1api.VolumeGroupSnapshotCleanupCompletedAnnotation])
+}
+
+func TestBackupFinalizerReconcileCleansVGSAfterFailedBackup(t *testing.T) {
+	contentName := "group-content"
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-failed").
+		ObjectMeta(builder.WithUID("backup-uid"), builder.WithAnnotations(velerov1api.VolumeGroupSnapshotBackupAnnotation, "true")).
+		Phase(velerov1api.BackupPhaseFailed).Result()
+	group := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "group",
+			Namespace: "app",
+			UID:       "group-uid",
+			Labels: map[string]string{
+				velerov1api.BackupNameLabel: "backup-failed",
+				velerov1api.BackupUIDLabel:  "backup-uid",
+			},
+		},
+		Status: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotStatus{
+			BoundVolumeGroupSnapshotContentName: &contentName,
+		},
+	}
+	content := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: contentName},
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
+			DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+			VolumeGroupSnapshotRef: corev1api.ObjectReference{
+				Name:      group.Name,
+				Namespace: group.Namespace,
+				UID:       group.UID,
+			},
+		},
+	}
+	client := velerotest.NewFakeControllerRuntimeClient(t, backup)
+	globalClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, group, content)
+	reconciler := &backupFinalizerReconciler{
+		client:         client,
+		globalCRClient: globalClient,
+		log:            logrus.New(),
+	}
+
+	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: backup.Namespace,
+		Name:      backup.Name,
+	}})
+	require.NoError(t, err)
+
+	updated := &velerov1api.Backup{}
+	require.NoError(t, client.Get(t.Context(), kbclient.ObjectKeyFromObject(backup), updated))
+	_, err = csi.GetVGS(t.Context(), globalClient, group.Namespace, group.Name)
+	require.Error(t, err)
+	_, err = csi.GetVGSC(t.Context(), globalClient, contentName)
+	require.Error(t, err)
+}
+
 func TestBackupFinalizerReconcile(t *testing.T) {
 	fakeClock := testclocks.NewFakeClock(time.Now())
 	metav1Now := metav1.NewTime(fakeClock.Now())
