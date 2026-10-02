@@ -17,11 +17,48 @@ limitations under the License.
 package velero
 
 import (
+	"context"
+	"fmt"
+
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/install"
 )
+
+// GetVeleroServerDeployment finds the Velero server deployment by label selector
+// instead of by hardcoded name, to support custom deployment names.
+func GetVeleroServerDeployment(ctx context.Context, cli ctrlclient.Client, namespace string) (*appsv1api.Deployment, error) {
+	deployList := new(appsv1api.DeploymentList)
+	labelSelector := ctrlclient.MatchingLabels(install.Labels())
+	if err := cli.List(ctx, deployList, ctrlclient.InNamespace(namespace), labelSelector); err != nil {
+		return nil, err
+	}
+	for i := range deployList.Items {
+		for _, container := range deployList.Items[i].Spec.Template.Spec.Containers {
+			if container.Name == "velero" {
+				return &deployList.Items[i], nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("velero server deployment not found in namespace %q", namespace)
+}
+
+// getVeleroContainer returns the container named "velero" from the deployment,
+// or the first container if no container is named "velero".
+func getVeleroContainer(deployment *appsv1api.Deployment) *corev1api.Container {
+	for i := range deployment.Spec.Template.Spec.Containers {
+		if deployment.Spec.Template.Spec.Containers[i].Name == "velero" {
+			return &deployment.Spec.Template.Spec.Containers[i]
+		}
+	}
+	if len(deployment.Spec.Template.Spec.Containers) > 0 {
+		return &deployment.Spec.Template.Spec.Containers[0]
+	}
+	return nil
+}
 
 // GetNodeSelectorFromVeleroServer get the node selector from the Velero server deployment
 func GetNodeSelectorFromVeleroServer(deployment *appsv1api.Deployment) map[string]string {
@@ -40,27 +77,24 @@ func GetAffinityFromVeleroServer(deployment *appsv1api.Deployment) *corev1api.Af
 
 // GetEnvVarsFromVeleroServer get the environment variables from the Velero server deployment
 func GetEnvVarsFromVeleroServer(deployment *appsv1api.Deployment) []corev1api.EnvVar {
-	for _, container := range deployment.Spec.Template.Spec.Containers {
-		// We only have one container in the Velero server deployment
-		return container.Env
+	if c := getVeleroContainer(deployment); c != nil {
+		return c.Env
 	}
 	return nil
 }
 
 // GetEnvFromSourcesFromVeleroServer get the environment sources from the Velero server deployment
 func GetEnvFromSourcesFromVeleroServer(deployment *appsv1api.Deployment) []corev1api.EnvFromSource {
-	for _, container := range deployment.Spec.Template.Spec.Containers {
-		// We only have one container in the Velero server deployment
-		return container.EnvFrom
+	if c := getVeleroContainer(deployment); c != nil {
+		return c.EnvFrom
 	}
 	return nil
 }
 
 // GetVolumeMountsFromVeleroServer get the volume mounts from the Velero server deployment
 func GetVolumeMountsFromVeleroServer(deployment *appsv1api.Deployment) []corev1api.VolumeMount {
-	for _, container := range deployment.Spec.Template.Spec.Containers {
-		// We only have one container in the Velero server deployment
-		return container.VolumeMounts
+	if c := getVeleroContainer(deployment); c != nil {
+		return c.VolumeMounts
 	}
 	return nil
 }
@@ -72,9 +106,8 @@ func GetPodSecurityContextsFromVeleroServer(deployment *appsv1api.Deployment) *c
 
 // GetContainerSecurityContextsFromVeleroServer get the security context from the Velero server deployment
 func GetContainerSecurityContextsFromVeleroServer(deployment *appsv1api.Deployment) *corev1api.SecurityContext {
-	for _, container := range deployment.Spec.Template.Spec.Containers {
-		// We only have one container in the Velero server deployment
-		return container.SecurityContext
+	if c := getVeleroContainer(deployment); c != nil {
+		return c.SecurityContext
 	}
 	return nil
 }
@@ -94,9 +127,12 @@ func GetImagePullSecretsFromVeleroServer(deployment *appsv1api.Deployment) []cor
 	return deployment.Spec.Template.Spec.ImagePullSecrets
 }
 
-// getVeleroServerImage get the image of the Velero server deployment
+// GetVeleroServerImage get the image of the Velero server deployment
 func GetVeleroServerImage(deployment *appsv1api.Deployment) string {
-	return deployment.Spec.Template.Spec.Containers[0].Image
+	if c := getVeleroContainer(deployment); c != nil {
+		return c.Image
+	}
+	return ""
 }
 
 // GetVeleroServerLables get the labels of the Velero server deployment
