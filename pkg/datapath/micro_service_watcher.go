@@ -60,30 +60,31 @@ const (
 )
 
 type microServiceBRWatcher struct {
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	log                 logrus.FieldLogger
-	client              client.Client
-	kubeClient          kubernetes.Interface
-	mgr                 manager.Manager
-	namespace           string
-	callbacks           Callbacks
-	taskName            string
-	taskType            string
-	thisPod             string
-	thisContainer       string
-	associatedObject    string
-	eventCh             chan *corev1api.Event
-	podCh               chan *corev1api.Pod
-	startedFromEvent    atomic.Bool
-	terminatedFromEvent atomic.Bool
-	wgWatcher           sync.WaitGroup
-	eventInformer       ctrlcache.Informer
-	podInformer         ctrlcache.Informer
-	eventHandler        cache.ResourceEventHandlerRegistration
-	podHandler          cache.ResourceEventHandlerRegistration
-	watcherLock         sync.Mutex
-	eventMessages       sync.Map
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	log                  logrus.FieldLogger
+	client               client.Client
+	kubeClient           kubernetes.Interface
+	mgr                  manager.Manager
+	namespace            string
+	callbacks            Callbacks
+	taskName             string
+	taskType             string
+	thisPod              string
+	thisContainer        string
+	associatedObject     string
+	eventCh              chan *corev1api.Event
+	podCh                chan *corev1api.Pod
+	startedFromEvent     atomic.Bool
+	terminatedFromEvent  atomic.Bool
+	podDeletedByInformer bool
+	wgWatcher            sync.WaitGroup
+	eventInformer        ctrlcache.Informer
+	podInformer          ctrlcache.Informer
+	eventHandler         cache.ResourceEventHandlerRegistration
+	podHandler           cache.ResourceEventHandlerRegistration
+	watcherLock          sync.Mutex
+	eventMessages        sync.Map
 }
 
 func newMicroServiceBRWatcher(client client.Client, kubeClient kubernetes.Interface, mgr manager.Manager, taskType string, taskName string, namespace string,
@@ -155,6 +156,7 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 					ms.podCh <- pod
 				}
 			},
+			DeleteFunc: ms.handlePodDelete,
 		},
 	)
 	if err != nil {
@@ -257,6 +259,37 @@ var funcGetProgressFromMessage = getProgressFromMessage
 
 var eventWaitTimeout = time.Minute
 
+// handlePodDelete is the pod informer's DeleteFunc. It exists because nothing else
+// detects the data path pod disappearing: a force-delete, or the node controller
+// force-removing an orphaned pod once its node is confirmed gone, produces neither a
+// Succeeded/Failed status update (the UpdateFunc handler's only trigger) nor any event
+// the reconciler's own watch would catch.
+func (ms *microServiceBRWatcher) handlePodDelete(obj any) {
+	pod, ok := obj.(*corev1api.Pod)
+	if !ok {
+		// A watch that misses the delete event (e.g. a relist after a disconnect)
+		// surfaces it as a DeletedFinalStateUnknown wrapping the last known object
+		// instead of the object itself.
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+		pod, ok = tombstone.Obj.(*corev1api.Pod)
+		if !ok {
+			return
+		}
+	}
+
+	if pod.Namespace != ms.namespace || pod.Name != ms.thisPod {
+		return
+	}
+
+	ms.watcherLock.Lock()
+	ms.podDeletedByInformer = true
+	ms.watcherLock.Unlock()
+	ms.podCh <- pod
+}
+
 func (ms *microServiceBRWatcher) startWatch() {
 	ms.wgWatcher.Add(1)
 
@@ -301,9 +334,22 @@ func (ms *microServiceBRWatcher) startWatch() {
 			}
 		}
 
-		terminateMessage := funcGetPodTerminationMessage(lastPod, ms.thisContainer)
-
 		logger := ms.log.WithField("data path pod", lastPod.Name)
+
+		ms.watcherLock.Lock()
+		podDeleted := ms.podDeletedByInformer
+		ms.watcherLock.Unlock()
+
+		var terminateMessage string
+		if podDeleted {
+			// The pod's last cached state is typically still Running with no container
+			// termination reported -- funcGetPodTerminationMessage would return "" here,
+			// which is exactly the blank error message this synthesizes past.
+			terminateMessage = fmt.Sprintf("data path pod %s was deleted before reaching a terminal phase", lastPod.Name)
+			logger.Warn("data path pod was deleted before a terminal phase was observed; treating as failed")
+		} else {
+			terminateMessage = funcGetPodTerminationMessage(lastPod, ms.thisContainer)
+		}
 
 		logger.Infof("Finish waiting data path pod, phase %s, message %s", lastPod.Status.Phase, terminateMessage)
 
@@ -323,12 +369,12 @@ func (ms *microServiceBRWatcher) startWatch() {
 
 		logger.Info("Calling callback on data path pod termination")
 
-		if lastPod.Status.Phase == corev1api.PodSucceeded {
+		if !podDeleted && lastPod.Status.Phase == corev1api.PodSucceeded {
 			result := funcGetResultFromMessage(ms.taskType, terminateMessage, ms.log)
 			ms.callbacks.OnProgress(ms.ctx, ms.namespace, ms.taskName, getCompletionProgressFromResult(ms.taskType, result))
 			ms.callbacks.OnCompleted(ms.ctx, ms.namespace, ms.taskName, result)
 		} else {
-			if strings.HasSuffix(terminateMessage, ErrCancelled) {
+			if !podDeleted && strings.HasSuffix(terminateMessage, ErrCancelled) {
 				ms.callbacks.OnCancelled(ms.ctx, ms.namespace, ms.taskName)
 			} else if terminateMessage != "" {
 				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(terminateMessage))
