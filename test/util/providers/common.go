@@ -29,6 +29,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerotest "github.com/vmware-tanzu/velero/test"
+	csi "github.com/vmware-tanzu/velero/test/util/csi"
 	velero "github.com/vmware-tanzu/velero/test/util/velero"
 )
 
@@ -142,6 +143,13 @@ func CheckSnapshotsInProvider(
 		fmt.Printf("Skip snapshot check for vSphere environment that doesn't have Velero vSphere plugin.")
 		return nil
 	}
+	if veleroCfg.CloudProvider == velerotest.Kind {
+		if err := checkSnapshotsOnKind(veleroCfg, backupName, snapshotCheckPoint); err != nil {
+			return errors.Wrapf(err, "|| UNEXPECTED || - Snapshots are not as expected after backup %s", backupName)
+		}
+		fmt.Printf("|| EXPECTED || - Snapshots of backup %s are as expected on %s\n", backupName, veleroCfg.CloudProvider)
+		return nil
+	}
 	if veleroCfg.CloudCredentialsFile == "" {
 		return errors.New(fmt.Sprintf("|| ERROR || - Please provide credential file of cloud %s \n", veleroCfg.CloudProvider))
 	}
@@ -172,6 +180,46 @@ func CheckSnapshotsInProvider(
 	}
 
 	fmt.Printf("|| EXPECTED || - Snapshots of backup %s exist in provider %s\n", backupName, veleroCfg.CloudProvider)
+	return nil
+}
+
+// checkSnapshotsOnKind verifies a backup's CSI snapshots on a kind cluster,
+// which has no cloud snapshot API to ask.
+//
+// While a backup is being created its VolumeSnapshotContents exist only
+// briefly, so they cannot be counted afterwards the way the cloud providers
+// count snapshots. The count is settled before this runs in any case:
+// BuildSnapshotCheckPointFromVolumeInfo returns an error when a volume is not
+// ready to use, and again when the number of snapshots does not match the
+// number expected. What it does not look at is the handle it recorded, so a
+// volume reported ready with an empty snapshot handle passes today. That is
+// what is checked here.
+//
+// A backup expected to have no snapshots left, after its deletion, is checked
+// the other way round: nothing for it may remain in the cluster.
+func checkSnapshotsOnKind(
+	veleroCfg velerotest.VeleroConfig,
+	backupName string,
+	snapshotCheckPoint velerotest.SnapshotCheckPoint,
+) error {
+	if snapshotCheckPoint.ExpectCount == 0 {
+		index := map[string]string{"backupNameLabel": backupName}
+		if snapshotCheckPoint.NamespaceBackedUp != "" {
+			index["namespace"] = snapshotCheckPoint.NamespaceBackedUp
+		}
+		_, err := csi.CheckVolumeSnapshotCR(*veleroCfg.DefaultClient, index, 0)
+		return err
+	}
+
+	for i, handle := range snapshotCheckPoint.SnapshotIDList {
+		if handle == "" {
+			return errors.Errorf(
+				"CSI snapshot %d of %d was reported ready with an empty snapshot handle",
+				i+1,
+				len(snapshotCheckPoint.SnapshotIDList),
+			)
+		}
+	}
 	return nil
 }
 
