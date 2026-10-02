@@ -9,6 +9,7 @@ env:
   BITNAMI_CONTAINERS_COMMIT: 19fb570e551f15ab0c8264aafa93774266761b8d
   # vmware-tanzu-experiments/distributed-data-generator: main as of 2025-07-15
   KIBISHII_COMMIT: bce0469e5f9dd33f31432fab22ff90ad6f2b45ca
+  KIND_VERSION: "v0.32.0"
 on:
   push:
   pull_request:
@@ -194,11 +195,62 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
+      # kind-action's own kind installer (kind.sh's call_curl) downloads without
+      # curl's -f/--fail flag, so a transient HTTP error page from GitHub's
+      # release CDN is saved as if it were the real binary/checksum file instead
+      # of triggering a retry: sha256sum then fails with "no properly formatted
+      # checksum lines found" or a checksum mismatch, unrelated to the PR under
+      # test. Pre-populate kind-action's cache path ourselves with a properly
+      # verified binary so it skips its own (flaky) install step entirely.
+      - name: Install kind (retry + verify checksum, works around helm/kind-action#165-class flakiness)
+        run: |
+          set -euo pipefail
+          arch=amd64
+          dir="${RUNNER_TOOL_CACHE}/kind/${KIND_VERSION}/${arch}/kind/bin"
+          mkdir -p "$dir"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+                 -o "$dir/kind" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${arch}" \
+               && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+                 -o "$dir/kind.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${arch}.sha256sum" \
+               && (cd "$dir" && sed "s/kind-linux-${arch}/kind/" kind.sha256sum | sha256sum -c); then
+              chmod +x "$dir/kind"
+              rm -f "$dir/kind.sha256sum"
+              break
+            fi
+            echo "kind download/verify attempt ${attempt} failed" >&2
+            if [ "$attempt" = 5 ]; then
+              echo "::error::failed to download and verify kind ${KIND_VERSION} after 5 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
         with:
           cluster_name: "kind"
-          version: "v0.32.0"
+          version: "${{ env.KIND_VERSION }}"
           node_image: "kindest/node:v${{ matrix.k8s }}"
+      # The e2e install code sets ImagePullPolicy: IfNotPresent for the plugin
+      # container whenever VELERO_IMAGE isn't tagged "latest" (which it never is
+      # here), so kubelet skips the network pull once the image is already
+      # loaded onto the node. velero/velero-plugin-for-aws:latest was previously
+      # left to be pulled live from Docker Hub inside the kind node at pod
+      # start, which intermittently failed ("trying and failing to pull image")
+      # and made BeforeSuite abort before any test ran, unrelated to the PR
+      # under test.
+      - name: Preload AWS plugin image into kind (avoid in-cluster pull flakiness)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            docker pull velero/velero-plugin-for-aws:latest && break
+            echo "docker pull attempt ${attempt} failed" >&2
+            if [ "$attempt" = 5 ]; then
+              echo "::error::failed to pull velero/velero-plugin-for-aws:latest after 5 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+          kind load docker-image velero/velero-plugin-for-aws:latest --name kind
       - name: Fetch built CLI
         id: cli-cache
         uses: actions/cache/restore@v6
