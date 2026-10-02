@@ -36,6 +36,7 @@ import (
 	. "github.com/vmware-tanzu/velero/test/e2e/basic"
 	. "github.com/vmware-tanzu/velero/test/e2e/basic/api-group"
 	. "github.com/vmware-tanzu/velero/test/e2e/basic/backup-volume-info"
+	. "github.com/vmware-tanzu/velero/test/e2e/basic/crd-schema-check"
 	. "github.com/vmware-tanzu/velero/test/e2e/basic/resources-check"
 	. "github.com/vmware-tanzu/velero/test/e2e/bsl-mgmt"
 	. "github.com/vmware-tanzu/velero/test/e2e/migration"
@@ -437,6 +438,12 @@ var _ = Describe(
 	"Storage class of persistent volumes and persistent volume claims can be changed during restores",
 	Label("Basic", "StorageClass"),
 	StorageClasssChangingTest,
+)
+
+var _ = Describe(
+	"The --crd-schema-check server flag controls startup behavior on CRD schema mismatch",
+	Label("Basic", "CRDSchemaCheck"),
+	CRDSchemaCheckTest,
 )
 
 var _ = Describe(
