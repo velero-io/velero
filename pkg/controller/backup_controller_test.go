@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -46,6 +47,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -2335,7 +2337,7 @@ func TestValidateAndGetSnapshotLocations(t *testing.T) {
 				require.NoError(t, c.kbClient.Create(t.Context(), location))
 			}
 
-			providerLocations, errs := c.validateAndGetSnapshotLocations(backup)
+			providerLocations, errs := c.validateAndGetSnapshotLocations(t.Context(), backup)
 			if test.expectedSuccess {
 				for _, err := range errs {
 					require.NoError(t, errors.New(err), "validateAndGetSnapshotLocations unexpected error: %v", err)
@@ -2355,6 +2357,31 @@ func TestValidateAndGetSnapshotLocations(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("returns error when context is canceled", func(t *testing.T) {
+		backup := defaultBackup().Phase(velerov1api.BackupPhaseNew).VolumeSnapshotLocations("aws-us-west-1").Result()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		crClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, client kbclient.WithWatch, key kbclient.ObjectKey, obj kbclient.Object, opts ...kbclient.GetOption) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					return client.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+
+		c := &backupReconciler{
+			logger:   velerotest.NewLogger(),
+			kbClient: crClient,
+		}
+
+		_, errs := c.validateAndGetSnapshotLocations(ctx, backup)
+		require.NotEmpty(t, errs)
+		require.Contains(t, errs[0], "context canceled")
+	})
 }
 
 // Test_getLastSuccessBySchedule verifies that the getLastSuccessBySchedule helper function correctly returns
