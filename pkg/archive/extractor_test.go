@@ -174,6 +174,37 @@ func TestUnzipAndExtractBackupRejectsManySmallFiles(t *testing.T) {
 	require.Contains(t, err.Error(), "decompressed backup exceeds maximum allowed size")
 }
 
+func TestSanitizeArchivePath(t *testing.T) {
+	const destDir = "/tmp/velero-restore"
+	tests := []struct {
+		name       string
+		sourcePath string
+		wantPath   string
+		wantErr    bool
+	}{
+		{"regular nested entry stays inside destDir", "resources/pods/ns/a.json", destDir + "/resources/pods/ns/a.json", false},
+		{"parent traversal escapes destDir", "../../../etc/passwd", "", true},
+		{"sibling directory sharing the destDir name prefix escapes", "../velero-restore-evil/x.json", "", true},
+		// An entry naming destDir itself is contained, so it is accepted and resolves to
+		// destDir. Nothing escapes; a regular-file entry like this just fails later on the
+		// directory when it is created.
+		{"entry naming destDir itself resolves to destDir", ".", destDir, false},
+		{"entry with an empty name resolves to destDir", "", destDir, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			targetPath, err := sanitizeArchivePath(destDir, tc.sourcePath)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "invalid archive path")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPath, targetPath)
+		})
+	}
+}
+
 func createArchive(files []string, fs filesystem.Interface) (string, error) {
 	outName := "output.tar.gz"
 	out, err := fs.Create(outName)
