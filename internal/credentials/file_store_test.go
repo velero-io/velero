@@ -17,6 +17,7 @@ limitations under the License.
 package credentials
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,7 @@ func TestNamespacedFileStore(t *testing.T) {
 			fileStore, err := NewNamespacedFileStore(client, tc.namespace, tc.fsRoot, fs)
 			require.NoError(t, err)
 
-			path, err := fileStore.Path(tc.secretSelector)
+			path, err := fileStore.Path(context.Background(), tc.secretSelector)
 
 			if tc.wantErr != "" {
 				require.EqualError(t, err, tc.wantErr)

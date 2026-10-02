@@ -85,7 +85,7 @@ func (bp *blockProvider) GetPassword(param any) (string, error) {
 	if bp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
-	rawPass, err := bp.credGetter.FromSecret.Get(repokeys.RepoKeySelector())
+	rawPass, err := bp.credGetter.FromSecret.Get(context.TODO(), repokeys.RepoKeySelector())
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}
