@@ -153,7 +153,6 @@ func (r *Request) FillVolumesInformation() {
 	r.VolumesInformation.SkippedVolumes = skippedVolumes
 	r.VolumesInformation.NativeSnapshots = r.VolumeSnapshots.Get()
 	r.VolumesInformation.PodVolumeBackups = r.PodVolumeBackups
-	r.VolumesInformation.BackupOperations = *r.GetItemOperationsList()
 	r.VolumesInformation.BackupName = r.Backup.Name
 }
 

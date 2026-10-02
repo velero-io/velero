@@ -943,7 +943,7 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 			backup.Status.VolumeSnapshotsCompleted++
 		}
 	}
-	volumeSnapshots, volumeSnapshotContents, volumeSnapshotClasses := pkgbackup.GetBackupCSIResources(b.kbClient, b.globalCRClient, backup.Backup, backupLog)
+	volumeSnapshots, _, volumeSnapshotClasses := pkgbackup.GetBackupCSIResources(b.kbClient, b.globalCRClient, backup.Backup, backupLog)
 	// Update CSIVolumeSnapshotsAttempted
 	backup.Status.CSIVolumeSnapshotsAttempted = len(volumeSnapshots)
 
@@ -1014,7 +1014,7 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	if logFile, err := backupLog.GetPersistFile(); err != nil {
 		fatalErrs = append(fatalErrs, errors.Wrap(err, "error getting backup log file"))
 	} else {
-		if errs := persistBackup(backup, backupFile, logFile, backupStore, volumeSnapshots, volumeSnapshotContents, volumeSnapshotClasses, results, b.globalCRClient, backupLog); len(errs) > 0 {
+		if errs := persistBackup(backup, backupFile, logFile, backupStore, volumeSnapshotClasses, results, b.globalCRClient, backupLog); len(errs) > 0 {
 			fatalErrs = append(fatalErrs, errs...)
 		}
 	}
@@ -1070,8 +1070,6 @@ func recordBackupMetrics(log logrus.FieldLogger, backup *velerov1api.Backup, bac
 func persistBackup(backup *pkgbackup.Request,
 	backupContents, backupLog *os.File,
 	backupStore persistence.BackupStore,
-	csiVolumeSnapshots []snapshotv1api.VolumeSnapshot,
-	csiVolumeSnapshotContents []snapshotv1api.VolumeSnapshotContent,
 	csiVolumeSnapshotClasses []snapshotv1api.VolumeSnapshotClass,
 	results map[string]results.Result,
 	crClient kbclient.Client,
@@ -1119,9 +1117,6 @@ func persistBackup(backup *pkgbackup.Request,
 	backup.FillVolumesInformation()
 
 	volumeInfoJSON, errs := encode.ToJSONGzip(backup.VolumesInformation.Result(
-		csiVolumeSnapshots,
-		csiVolumeSnapshotContents,
-		csiVolumeSnapshotClasses,
 		crClient,
 		logger,
 	), "backup volumes information")

@@ -601,16 +601,31 @@ func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
 		return errs
 	}
 	for _, dataDownload := range dataDownloads.Items {
-		for index := range ctx.restoreVolumeInfos {
-			if ctx.restoreVolumeInfos[index].PVCName == dataDownload.Spec.TargetVolume.PVC &&
-				ctx.restoreVolumeInfos[index].PVCNamespace == dataDownload.Spec.TargetVolume.Namespace &&
-				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo != nil {
-				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Size = dataDownload.Status.Progress.TotalBytes
-				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataDownload.Status.IncrementalBytes
-				ctx.restoreVolumeInfos[index].FallbackFull = dataDownload.Status.FallbackFull
-				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Phase = dataDownload.Status.Phase
+		pvName := dataDownload.Spec.TargetVolume.PV
+		pvc := &corev1api.PersistentVolumeClaim{}
+		if err := ctx.crClient.Get(context.Background(), client.ObjectKey{
+			Namespace: dataDownload.Spec.TargetVolume.Namespace,
+			Name:      dataDownload.Spec.TargetVolume.PVC,
+		}, pvc); err == nil && pvc.Spec.VolumeName != "" {
+			pvName = pvc.Spec.VolumeName
+		}
+
+		alreadyExists := false
+		for _, vi := range ctx.restoreVolumeInfos {
+			if (dataDownload.Spec.TargetVolume.PVC != "" && vi.PVCName == dataDownload.Spec.TargetVolume.PVC && vi.PVCNamespace == dataDownload.Spec.TargetVolume.Namespace) ||
+				(pvName != "" && vi.PVName == pvName) {
+				alreadyExists = true
+				break
 			}
 		}
+		if alreadyExists {
+			ctx.logger.Warnf("VolumeInfo already exists for PVC %s/%s, PV %s, skip generating RestoreVolumeInfo from DataDownload %s/%s",
+				dataDownload.Spec.TargetVolume.Namespace, dataDownload.Spec.TargetVolume.PVC, pvName, dataDownload.Namespace, dataDownload.Name)
+			continue
+		}
+
+		newVI := volume.NewRestoreVolumeInfoFromDataDownload(&dataDownload, pvName)
+		ctx.restoreVolumeInfos = append(ctx.restoreVolumeInfos, newVI)
 	}
 
 	buffer := new(bytes.Buffer)

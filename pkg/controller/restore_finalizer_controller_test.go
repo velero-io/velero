@@ -1205,77 +1205,38 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 func TestUpdateVolumeInfos(t *testing.T) {
 	tests := []struct {
-		name                 string
-		restore              *velerov1api.Restore
-		restoreVolumeInfos   []*volume.RestoreVolumeInfo
-		dataDownloads        []*velerov2alpha1.DataDownload
-		listErr              error
-		putErr               error
-		expectedSize         int64
-		expectedIncrSize     *int64
-		expectedPhase        velerov2alpha1.DataDownloadPhase
-		expectedFallbackFull bool
-		expectErrs           bool
-		expectErrMsg         string
+		name               string
+		restore            *velerov1api.Restore
+		restoreVolumeInfos []*volume.RestoreVolumeInfo
+		dataDownloads      []*velerov2alpha1.DataDownload
+		listErr            error
+		putErr             error
+		expectErrs         bool
+		expectErrMsg       string
 	}{
 		{
-			name:    "successful update of restore volume infos from data downloads",
+			name:    "successful generation of restore volume infos from data downloads",
 			restore: builder.ForRestore("velero", "restore-1").Result(),
 			restoreVolumeInfos: []*volume.RestoreVolumeInfo{
 				{
-					PVCName:      "pvc-1",
-					PVCNamespace: "ns-1",
-					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
-						DataMover: "velero",
-						Size:      0,
-						Phase:     "",
-					},
-				},
-				{
-					PVCName:                  "pvc-2",
-					PVCNamespace:             "ns-2",
-					SnapshotDataMovementInfo: nil,
-				},
-				{
-					PVCName:      "pvc-3",
-					PVCNamespace: "ns-3",
-					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
-						DataMover: "velero",
-						Size:      100,
-						Phase:     velerov2alpha1.DataDownloadPhaseCompleted,
-					},
-				},
-				{
-					PVCName:      "pvc-4",
-					PVCNamespace: "ns-4",
-					FallbackFull: true,
-					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
-						DataMover: "velero",
-						Size:      0,
-						Phase:     "",
-					},
+					PVCName:       "pvc-existing",
+					PVCNamespace:  "ns-existing",
+					PVName:        "pv-existing",
+					RestoreMethod: volume.NativeSnapshot,
 				},
 			},
 			dataDownloads: []*velerov2alpha1.DataDownload{
 				builder.ForDataDownload("velero", "dd-1").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
-					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1"}).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1", PV: "pv-1"}).
 					TotalBytes(4096).
 					IncrementalBytes(1024).
 					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
 					FallbackFull(true).
 					Result(),
-				builder.ForDataDownload("velero", "dd-2").
-					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
-					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-2", Namespace: "ns-2"}).
-					TotalBytes(2048).
-					IncrementalBytes(512).
-					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
-					FallbackFull(true).
-					Result(),
 				builder.ForDataDownload("velero", "dd-other-restore").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-other"})).
-					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-3", Namespace: "ns-3"}).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-3", Namespace: "ns-3", PV: "pv-3"}).
 					TotalBytes(9999).
 					IncrementalBytes(8888).
 					Phase(velerov2alpha1.DataDownloadPhaseFailed).
@@ -1283,18 +1244,20 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					Result(),
 				builder.ForDataDownload("velero", "dd-4").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
-					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-4", Namespace: "ns-4"}).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-4", Namespace: "ns-4", PV: "pv-4"}).
 					TotalBytes(1024).
 					IncrementalBytes(256).
 					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
 					FallbackFull(false).
 					Result(),
+				builder.ForDataDownload("velero", "dd-existing").
+					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-existing", Namespace: "ns-existing", PV: "pv-existing"}).
+					TotalBytes(2048).
+					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+					Result(),
 			},
-			expectedSize:         4096,
-			expectedIncrSize:     ptr.To(int64(1024)),
-			expectedPhase:        velerov2alpha1.DataDownloadPhaseCompleted,
-			expectedFallbackFull: true,
-			expectErrs:           false,
+			expectErrs: false,
 		},
 		{
 			name:    "failed to list data downloads",
@@ -1303,9 +1266,6 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				{
 					PVCName:      "pvc-1",
 					PVCNamespace: "ns-1",
-					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
-						DataMover: "velero",
-					},
 				},
 			},
 			listErr:      errors.New("list error"),
@@ -1319,9 +1279,6 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				{
 					PVCName:      "pvc-1",
 					PVCNamespace: "ns-1",
-					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
-						DataMover: "velero",
-					},
 				},
 			},
 			putErr:       errors.New("put error"),
@@ -1376,21 +1333,32 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				assert.Contains(t, errs.Namespaces["cluster"][0], tc.expectErrMsg)
 			} else {
 				assert.True(t, errs.IsEmpty())
-				assert.Equal(t, tc.expectedSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Size)
-				assert.Equal(t, tc.expectedIncrSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.IncrementalSize)
-				assert.Equal(t, tc.expectedPhase, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Phase)
-				assert.Equal(t, tc.expectedFallbackFull, ctx.restoreVolumeInfos[0].FallbackFull)
-				// pvc-2 had nil SnapshotDataMovementInfo and should remain nil, FallbackFull should remain false
-				assert.Nil(t, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo)
-				assert.False(t, ctx.restoreVolumeInfos[1].FallbackFull)
-				// pvc-3 belonged to another restore and should be untouched
-				assert.Equal(t, int64(100), ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.Size)
+				require.Len(t, ctx.restoreVolumeInfos, 3)
+
+				assert.Equal(t, "pvc-existing", ctx.restoreVolumeInfos[0].PVCName)
+				assert.Equal(t, volume.NativeSnapshot, ctx.restoreVolumeInfos[0].RestoreMethod)
+
+				assert.Equal(t, "pvc-1", ctx.restoreVolumeInfos[1].PVCName)
+				assert.Equal(t, "ns-1", ctx.restoreVolumeInfos[1].PVCNamespace)
+				assert.Equal(t, "pv-1", ctx.restoreVolumeInfos[1].PVName)
+				assert.True(t, ctx.restoreVolumeInfos[1].SnapshotDataMoved)
+				assert.Equal(t, volume.CSISnapshot, ctx.restoreVolumeInfos[1].RestoreMethod)
+				assert.True(t, ctx.restoreVolumeInfos[1].FallbackFull)
+				require.NotNil(t, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo)
+				assert.Equal(t, int64(4096), ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo.Size)
+				assert.Equal(t, ptr.To(int64(1024)), ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo.IncrementalSize)
+				assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo.Phase)
+
+				assert.Equal(t, "pvc-4", ctx.restoreVolumeInfos[2].PVCName)
+				assert.Equal(t, "ns-4", ctx.restoreVolumeInfos[2].PVCNamespace)
+				assert.Equal(t, "pv-4", ctx.restoreVolumeInfos[2].PVName)
+				assert.True(t, ctx.restoreVolumeInfos[2].SnapshotDataMoved)
+				assert.Equal(t, volume.CSISnapshot, ctx.restoreVolumeInfos[2].RestoreMethod)
 				assert.False(t, ctx.restoreVolumeInfos[2].FallbackFull)
-				// pvc-4 had FallbackFull updated to false from data download
-				assert.Equal(t, int64(1024), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Size)
-				assert.Equal(t, ptr.To(int64(256)), ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.IncrementalSize)
-				assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, ctx.restoreVolumeInfos[3].SnapshotDataMovementInfo.Phase)
-				assert.False(t, ctx.restoreVolumeInfos[3].FallbackFull)
+				require.NotNil(t, ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo)
+				assert.Equal(t, int64(1024), ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.Size)
+				assert.Equal(t, ptr.To(int64(256)), ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.IncrementalSize)
+				assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, ctx.restoreVolumeInfos[2].SnapshotDataMovementInfo.Phase)
 
 				// Verify the content uploaded to backup store can be decoded and matches
 				require.NotEmpty(t, uploadedData)
@@ -1404,4 +1372,70 @@ func TestUpdateVolumeInfos(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateVolumeInfosCreatesNewVolumeInfoWhenNotPreExisting(t *testing.T) {
+	restore := builder.ForRestore("velero", "restore-1").Result()
+	clientBuilder := velerotest.NewFakeControllerRuntimeClientBuilder(t)
+	fakeClient := clientBuilder.Build()
+
+	pvc := builder.ForPersistentVolumeClaim("ns-1", "pvc-1").VolumeName("pv-1").Result()
+	require.NoError(t, fakeClient.Create(t.Context(), pvc))
+
+	dd := builder.ForDataDownload("velero", "dd-1").
+		ObjectMeta(builder.WithLabelsMap(map[string]string{
+			velerov1api.RestoreNameLabel:       "restore-1",
+			velerov1api.AsyncOperationIDLabel: "op-1",
+		})).
+		TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1", PV: "pv-fallback"}).
+		TotalBytes(4096).
+		IncrementalBytes(1024).
+		Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+		FallbackFull(false).
+		Result()
+	require.NoError(t, fakeClient.Create(t.Context(), dd))
+
+	backupStore := &persistencemocks.BackupStore{}
+	var uploadedData []byte
+	backupStore.On("PutRestoreVolumeInfo", restore.Name, mock.Anything).Run(func(args mock.Arguments) {
+		reader, ok := args.Get(1).(io.Reader)
+		require.True(t, ok)
+		data, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		uploadedData = data
+	}).Return(nil)
+
+	ctx := &finalizerContext{
+		logger:             velerotest.NewLogger(),
+		restore:            restore,
+		crClient:           fakeClient,
+		backupStore:        backupStore,
+		restoreVolumeInfos: []*volume.RestoreVolumeInfo{},
+	}
+
+	errs := ctx.updateVolumeInfos()
+	assert.True(t, errs.IsEmpty())
+	require.Len(t, ctx.restoreVolumeInfos, 1)
+
+	info := ctx.restoreVolumeInfos[0]
+	assert.Equal(t, "pvc-1", info.PVCName)
+	assert.Equal(t, "ns-1", info.PVCNamespace)
+	assert.Equal(t, "pv-1", info.PVName)
+	assert.True(t, info.SnapshotDataMoved)
+	assert.Equal(t, volume.CSISnapshot, info.RestoreMethod)
+	require.NotNil(t, info.SnapshotDataMovementInfo)
+	assert.Equal(t, int64(4096), info.SnapshotDataMovementInfo.Size)
+	assert.Equal(t, ptr.To(int64(1024)), info.SnapshotDataMovementInfo.IncrementalSize)
+	assert.Equal(t, velerov2alpha1.DataDownloadPhaseCompleted, info.SnapshotDataMovementInfo.Phase)
+	assert.Equal(t, "op-1", info.SnapshotDataMovementInfo.OperationID)
+	assert.False(t, info.FallbackFull)
+
+	require.NotEmpty(t, uploadedData)
+	gzr, err := gzip.NewReader(bytes.NewReader(uploadedData))
+	require.NoError(t, err)
+	defer gzr.Close()
+
+	var decoded []*volume.RestoreVolumeInfo
+	require.NoError(t, json.NewDecoder(gzr).Decode(&decoded))
+	assert.Equal(t, ctx.restoreVolumeInfos, decoded)
 }
