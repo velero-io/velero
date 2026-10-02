@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-argocd
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Argo CD ApplicationSets, Applications, and child resources tracked via ownerReferences.
+  inScope: |
+    - group: argoproj.io
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: networking.k8s.io
+      kind: Ingress
+
+  # 2. specRefPaths: Empty (Argo CD references projects, repos, and clusters by name/URL).
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Left empty pending upstream Argo CD pause annotation adoption.
+  # Spec-field mutations (spec.syncPolicy.automated) are permanently excluded from Velero core.
+  quiesceOnRestore: ""

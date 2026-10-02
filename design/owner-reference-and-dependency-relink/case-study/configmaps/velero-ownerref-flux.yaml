@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-flux
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Flux v2 GitOps toolkit controllers, Kustomize/Helm releases, sources, and chart generation.
+  inScope: |
+    - group: kustomize.toolkit.fluxcd.io
+    - group: helm.toolkit.fluxcd.io
+    - group: source.toolkit.fluxcd.io
+    - group: notification.toolkit.fluxcd.io
+    - group: image.toolkit.fluxcd.io
+
+  # 2. specRefPaths: Empty (Flux v2 references sources by name/namespace, not UID).
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Native Flux pause annotations injected during Phase 1A create.
+  quiesceOnRestore: |
+    - group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      annotationKey: kustomize.toolkit.fluxcd.io/reconcile
+      annotationValue: "disabled"
+    - group: helm.toolkit.fluxcd.io
+      kind: HelmRelease
+      annotationKey: helm.toolkit.fluxcd.io/reconcile
+      annotationValue: "disabled"
+    - group: source.toolkit.fluxcd.io
+      kind: GitRepository
+      annotationKey: source.toolkit.fluxcd.io/reconcile
+      annotationValue: "disabled"
+    - group: source.toolkit.fluxcd.io
+      kind: HelmRepository
+      annotationKey: source.toolkit.fluxcd.io/reconcile
+      annotationValue: "disabled"
+    - group: source.toolkit.fluxcd.io
+      kind: OCIRepository
+      annotationKey: source.toolkit.fluxcd.io/reconcile
+      annotationValue: "disabled"
