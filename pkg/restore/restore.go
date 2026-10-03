@@ -1970,6 +1970,18 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			}
 		}
 
+		// Snapshot-based volume data is never restored into an existing PVC:
+		// the existing PVC is left untouched. Warn so the user knows the
+		// volume data was not restored rather than assuming it was.
+		if newGR == kuberesource.PersistentVolumeClaims {
+			if info, ok := backupVolumeInfoForPVC(ctx.backupVolumeInfoMap, originalNamespace, obj.GetName()); ok &&
+				(info.BackupMethod == volume.CSISnapshot || info.BackupMethod == volume.NativeSnapshot) {
+				err := errors.Errorf("skipping volume data restore: PVC %s already exists, its backed-up volume data will not be restored to it", kube.NamespaceAndName(obj))
+				restoreLogger.Warn(err.Error())
+				warnings.Add(namespace, err)
+			}
+		}
+
 		// Remove insubstantial metadata.
 		fromCluster, err = resetMetadataAndStatus(fromCluster)
 		if err != nil {
@@ -2304,6 +2316,17 @@ func remapClaimRefNS(ctx *restoreContext, obj *unstructured.Unstructured) (bool,
 	}
 	ctx.log.Debug("Persistent volume's namespace was updated")
 	return true, nil
+}
+
+// backupVolumeInfoForPVC returns the backup volume info of the PV the given
+// source-namespace PVC was bound to at backup time.
+func backupVolumeInfoForPVC(infos map[string]volume.BackupVolumeInfo, pvcNamespace, pvcName string) (volume.BackupVolumeInfo, bool) {
+	for _, info := range infos {
+		if info.PVCNamespace == pvcNamespace && info.PVCName == pvcName {
+			return info, true
+		}
+	}
+	return volume.BackupVolumeInfo{}, false
 }
 
 // restorePodVolumeBackups restores the PodVolumeBackups for the given restored pod

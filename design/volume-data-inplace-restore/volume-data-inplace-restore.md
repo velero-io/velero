@@ -244,6 +244,8 @@ The check runs on both restore paths before any side effect on the existing PVC/
 
 On the file system path the check also covers the case where the backed-up Pod itself still exists in the cluster: `PodVolumeRestore`s are only created for a Pod that Velero creates, so an existing Pod would otherwise cause the volume data restore to be skipped silently while the Pod keeps consuming the PVC. In this case Velero reports a pre-flight error for the Pod instead of the plain "already exists" warning.
 
+Similarly, when a PVC whose volume was backed up by a snapshot (CSI or native) already exists and is left untouched, Velero reports a warning for the PVC so the user knows the volume data was not restored.
+
 This check is a fail-fast validation, not an atomic guarantee; the `pvc-protection` finalizer remains the actual safety gate for PVC deletion. A residual `VolumeAttachment` check (e.g. a `Failed` Pod imposed by the control plane after a non-graceful node shutdown, where the node never unmounted the volume) may be added as a future enhancement.
 
 #### 2. PVC is Bound to the Original PV
