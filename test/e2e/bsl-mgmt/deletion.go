@@ -335,12 +335,22 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 					backupName1, BackupObjectsPrefix)).To(Succeed())
 			})
 
-			// TODO: Choose additional BSL to be deleted as an new test case
-			// By(fmt.Sprintf("Backup %s should still exist in cloud object store", backupName_2), func() {
-			// 	Expect(ObjectsShouldBeInBucket(veleroCfg.ObjectStoreProvider, veleroCfg.AdditionalBSLCredentials,
-			// 		veleroCfg.AdditionalBSLBucket, veleroCfg.AdditionalBSLPrefix, veleroCfg.AdditionalBSLConfig,
-			// 		backupName_2, BackupObjectsPrefix)).To(Succeed())
-			// })
+			By(fmt.Sprintf("Delete the additional backup location - %s", backupLocation2), func() {
+				Expect(DeleteBslResource(context.Background(), veleroCfg.VeleroCLI, backupLocation2)).To(Succeed())
+				Expect(WaitForBackupsToBeDeleted(context.Background(), backupsInBSL2, 10*time.Minute, &veleroCfg)).To(Succeed())
+			})
+
+			By("Get all backups from 2 BSLs after deleting both of them", func() {
+				backupsAfterDel, err := GetAllBackups(context.Background(), veleroCfg.VeleroCLI)
+				Expect(err).To(Succeed())
+				Expect(backupsAfterDel).Should(BeEmpty())
+			})
+
+			By(fmt.Sprintf("Backup %s should still exist in cloud object store after additional bsl deletion", backupName2), func() {
+				Expect(ObjectsShouldBeInBucket(veleroCfg.ObjectStoreProvider, veleroCfg.AdditionalBSLCredentials,
+					veleroCfg.AdditionalBSLBucket, veleroCfg.AdditionalBSLPrefix, veleroCfg.AdditionalBSLConfig,
+					backupName2, BackupObjectsPrefix)).To(Succeed())
+			})
 
 			if useVolumeSnapshots {
 				if veleroCfg.HasVspherePlugin {
@@ -398,9 +408,9 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 					Expect(BackupRepositoriesCountShouldBe(context.Background(),
 						veleroCfg.VeleroNamespace, bslDeletionTestNs+"-"+backupLocation1, 0)).To(Succeed())
 				})
-				By(fmt.Sprintf("BackupRepositories for BSL %s should still exist in Velero namespace", backupLocation2), func() {
+				By(fmt.Sprintf("BackupRepositories for BSL %s should be deleted in Velero namespace", backupLocation2), func() {
 					Expect(BackupRepositoriesCountShouldBe(context.Background(),
-						veleroCfg.VeleroNamespace, bslDeletionTestNs+"-"+backupLocation2, 1)).To(Succeed())
+						veleroCfg.VeleroNamespace, bslDeletionTestNs+"-"+backupLocation2, 0)).To(Succeed())
 				})
 			}
 			fmt.Printf("|| EXPECTED || - Backup deletion test completed successfully\n")
