@@ -91,6 +91,11 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
 )
 
+// defaultGracefulShutdownTimeout matches controller-runtime's own default
+// (defaultGracefulShutdownPeriod), used whenever the manager's shutdown timeout
+// can't be derived from the server's own pod.
+const defaultGracefulShutdownTimeout = 30 * time.Second
+
 func NewCommand(f client.Factory) *cobra.Command {
 	config := config.GetDefaultConfig()
 
@@ -265,6 +270,8 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 	ctrl.SetLogger(logrusr.New(logger))
 	klog.SetLogger(logrusr.New(logger)) // klog.Logger is used by k8s.io/client-go
 
+	gracefulShutdownTimeout := resolveGracefulShutdownTimeout(ctx, kubeClient, f.Namespace(), config, logger)
+
 	var mgr manager.Manager
 	retry := 10
 	for {
@@ -275,6 +282,7 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 					f.Namespace(): {},
 				},
 			},
+			GracefulShutdownTimeout: &gracefulShutdownTimeout,
 		})
 		if err == nil {
 			break
@@ -443,6 +451,68 @@ func (s *server) namespaceExists(namespace string) error {
 
 	s.logger.WithField("namespace", namespace).Info("Namespace exists")
 	return nil
+}
+
+// resolveGracefulShutdownTimeout determines how long the manager waits for in-flight
+// controller work to finish before force-exiting on shutdown. Precedence: an explicit,
+// already-validated --graceful-shutdown-timeout flag wins; otherwise it's derived from the
+// server's own pod's terminationGracePeriodSeconds minus the configured safety buffer;
+// otherwise it falls back to defaultGracefulShutdownTimeout.
+func resolveGracefulShutdownTimeout(
+	ctx context.Context,
+	kubeClient kubernetes.Interface,
+	namespace string,
+	cfg *config.Config,
+	logger logrus.FieldLogger,
+) time.Duration {
+	if cfg.GracefulShutdownTimeout > 0 {
+		return cfg.GracefulShutdownTimeout
+	}
+
+	terminationGracePeriod, err := selfTerminationGracePeriod(ctx, kubeClient, namespace)
+	if err != nil {
+		logger.WithError(err).Warnf("Could not determine this pod's terminationGracePeriodSeconds, falling back to the default graceful shutdown timeout of %s", defaultGracefulShutdownTimeout)
+		return defaultGracefulShutdownTimeout
+	}
+
+	derived := terminationGracePeriod - cfg.GracefulShutdownSafetyBuffer
+	if derived <= 0 {
+		// The configured safety buffer doesn't fit within terminationGracePeriodSeconds.
+		// Fall back to the pod's own grace period as-is (zero margin) rather than a flat
+		// default: that preserves as much of the operator's configured
+		// terminationGracePeriodSeconds as possible, and it still never exceeds what
+		// Kubernetes will actually allow before force-killing the pod.
+		logger.Warnf("Derived graceful shutdown timeout (%s terminationGracePeriodSeconds - %s safety buffer) is not positive, falling back to terminationGracePeriodSeconds (%s) with no safety margin", terminationGracePeriod, cfg.GracefulShutdownSafetyBuffer, terminationGracePeriod)
+		return terminationGracePeriod
+	}
+
+	logger.WithFields(logrus.Fields{
+		"gracefulShutdownTimeout": derived,
+		"terminationGracePeriod":  terminationGracePeriod,
+		"safetyBuffer":            cfg.GracefulShutdownSafetyBuffer,
+	}).Info("Resolved graceful shutdown timeout")
+
+	return derived
+}
+
+// selfTerminationGracePeriod returns the terminationGracePeriodSeconds configured on the
+// server's own pod, identified via the POD_NAME Downward API environment variable.
+func selfTerminationGracePeriod(ctx context.Context, kubeClient kubernetes.Interface, namespace string) (time.Duration, error) {
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		return 0, errors.New("POD_NAME environment variable is not set")
+	}
+
+	pod, err := kubeClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return 0, errors.WithStack(err)
+	}
+
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		return 0, errors.New("pod's terminationGracePeriodSeconds is not set")
+	}
+
+	return time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second, nil
 }
 
 // initDiscoveryHelper instantiates the server's discovery helper and spawns a
