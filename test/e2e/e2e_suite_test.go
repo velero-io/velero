@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -552,6 +553,11 @@ var _ = Describe(
 )
 var _ = Describe(
 	"",
+	Label("BackupVolumeInfo", "CSIVolumeGroupSnapshot"),
+	CSIVolumeGroupSnapshotVolumeInfoTest,
+)
+var _ = Describe(
+	"",
 	Label("BackupVolumeInfo", "NativeSnapshot"),
 	NativeSnapshotVolumeInfoTest,
 )
@@ -789,6 +795,16 @@ func TestE2e(t *testing.T) {
 	testSuitePassed = RunSpecs(t, "E2e Suite")
 }
 
+// volumeGroupSnapshotClassFile returns the VolumeGroupSnapshotClass test data
+// for the provider under test, or the empty string when it has none.
+func volumeGroupSnapshotClassFile() string {
+	path := fmt.Sprintf("../testdata/volume-group-snapshot-class/%s.yaml", test.VeleroCfg.CloudProvider)
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
 var _ = BeforeSuite(func() {
 	By("Install StorageClass for E2E.")
 	Expect(veleroutil.InstallStorageClasses(test.VeleroCfg.CloudProvider)).To(Succeed())
@@ -802,6 +818,13 @@ var _ = BeforeSuite(func() {
 				fmt.Sprintf("../testdata/volume-snapshot-class/%s.yaml", test.VeleroCfg.CloudProvider),
 			),
 		).To(Succeed())
+
+		// Only some providers have a VolumeGroupSnapshotClass to install, so
+		// the VolumeGroupSnapshot cases only run where the test data exists.
+		if path := volumeGroupSnapshotClassFile(); path != "" {
+			By("Install VolumeGroupSnapshotClass for E2E.")
+			Expect(k8s.KubectlApplyByFile(context.Background(), path)).To(Succeed())
+		}
 	}
 
 	By("Install PriorityClasses for E2E.")
@@ -853,6 +876,11 @@ var _ = AfterSuite(func() {
 				fmt.Sprintf("../testdata/volume-snapshot-class/%s.yaml", test.VeleroCfg.CloudProvider),
 			),
 		).To(Succeed())
+
+		if path := volumeGroupSnapshotClassFile(); path != "" {
+			By("Delete VolumeGroupSnapshotClass created by E2E")
+			Expect(k8s.KubectlDeleteByFile(ctx, path)).To(Succeed())
+		}
 	}
 
 	By("Delete PriorityClasses created by E2E")
