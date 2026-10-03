@@ -48,6 +48,10 @@ builds:
 archives:
   - name_template: "{{ .ProjectName }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
     wrap_in_directory: true
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     files:
       - LICENSE
       - examples/**/*
