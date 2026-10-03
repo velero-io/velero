@@ -37,6 +37,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/install"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -330,7 +331,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		Plugins:                          o.Plugins,
 		NoDefaultBackupLocation:          o.NoDefaultBackupLocation,
 		CACertData:                       caCertData,
-		Features:                         strings.Split(o.Features, ","),
+		Features:                         util.SplitAndTrimCSV(o.Features),
 		DefaultVolumesToFsBackup:         o.DefaultVolumesToFsBackup,
 		UploaderType:                     o.UploaderType,
 		DefaultSnapshotMoveData:          o.DefaultSnapshotMoveData,

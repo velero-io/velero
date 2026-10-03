@@ -19,6 +19,7 @@ package util
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 func Contains(slice []string, key string) bool {
@@ -28,6 +29,22 @@ func Contains(slice []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// SplitAndTrimCSV splits a comma-separated string, trims whitespace from each
+// entry, and drops empty entries. This makes values like
+// "EnableCSI, EnableAPIGroupVersions" parse as the intended names.
+func SplitAndTrimCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // GenerateSha256FromRestoreUIDAndVsName Use the restore UID and the VS Name to generate

@@ -39,6 +39,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/discovery"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 )
 
@@ -346,16 +347,7 @@ func getOrderedResourcesForType(
 	if !ok || len(orderStr) == 0 {
 		return nil
 	}
-	parts := strings.Split(orderStr, ",")
-	orders := make([]string, 0, len(parts))
-	for _, part := range parts {
-		name := strings.TrimSpace(part)
-		if name == "" {
-			continue
-		}
-		orders = append(orders, name)
-	}
-	return orders
+	return util.SplitAndTrimCSV(orderStr)
 }
 
 // getResourceItems collects all relevant items for a given group-version-resource.
