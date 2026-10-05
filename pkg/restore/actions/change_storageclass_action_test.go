@@ -69,6 +69,20 @@ func TestChangeStorageClassActionExecute(t *testing.T) {
 			want:         builder.ForPersistentVolumeClaim("velero", "pvc-1").StorageClass("storageclass-2").Result(),
 		},
 		{
+			name: "the beta storage class annotation of a persistent volume claim is updated along with the spec",
+			pvOrPvcOrSTS: builder.ForPersistentVolumeClaim("velero", "pvc-1").
+				ObjectMeta(builder.WithAnnotations("volume.beta.kubernetes.io/storage-class", "storageclass-1")).
+				StorageClass("storageclass-1").Result(),
+			configMap: builder.ForConfigMap("velero", "change-storage-classs").
+				ObjectMeta(builder.WithLabels("velero.io/plugin-config", "", "velero.io/change-storage-class", "RestoreItemAction")).
+				Data("storageclass-1", "storageclass-2").
+				Result(),
+			storageClass: builder.ForStorageClass("storageclass-2").Result(),
+			want: builder.ForPersistentVolumeClaim("velero", "pvc-1").
+				ObjectMeta(builder.WithAnnotations("volume.beta.kubernetes.io/storage-class", "storageclass-2")).
+				StorageClass("storageclass-2").Result(),
+		},
+		{
 			name:         "when no config map exists for the plugin, the item is returned as-is",
 			pvOrPvcOrSTS: builder.ForPersistentVolume("pv-1").StorageClass("storageclass-1").Result(),
 			configMap: builder.ForConfigMap("velero", "change-storage-classs").
