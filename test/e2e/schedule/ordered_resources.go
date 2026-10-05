@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	waitutil "k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"

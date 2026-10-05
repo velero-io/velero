@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -62,6 +62,7 @@ func NewDeleteCommand(f client.Factory, use string) *cobra.Command {
 		},
 	}
 
+	c.ValidArgsFunction = cli.CompleteScheduleNames(f)
 	o.BindFlags(c.Flags())
 	return c
 }

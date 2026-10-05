@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	clocktesting "k8s.io/utils/clock/testing"
+
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -65,6 +68,8 @@ func TestShouldProcess(t *testing.T) {
 		obj             *velerov1api.PodVolumeRestore
 		pod             *corev1api.Pod
 		shouldProcessed bool
+		expectError     bool
+		errString       string
 	}{
 		{
 			name: "InProgress phase pvr should not be processed",
@@ -200,12 +205,272 @@ func TestShouldProcess(t *testing.T) {
 			},
 			shouldProcessed: true,
 		},
+		{
+			name: "pod is in failed phase should return error",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+				},
+			},
+			shouldProcessed: false,
+			expectError:     true,
+			errString:       "unexpected state for pod",
+		},
+		{
+			name: "pod is in unknown phase should return error",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodUnknown,
+				},
+			},
+			shouldProcessed: false,
+			expectError:     true,
+			errString:       "unexpected state for pod",
+		},
+		{
+			name: "pod with no init containers should return error",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: controllerNode,
+				},
+			},
+			shouldProcessed: false,
+			expectError:     true,
+			errString:       "no restore-wait init container",
+		},
+		{
+			name: "pod init container statuses are not fully populated yet should skip",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: controllerNode,
+					InitContainers: []corev1api.Container{
+						{
+							Name: restorehelper.WaitInitContainer,
+						},
+					},
+				},
+				Status: corev1api.PodStatus{
+					InitContainerStatuses: []corev1api.ContainerStatus{},
+				},
+			},
+			shouldProcessed: false,
+		},
+		{
+			name: "restore-wait init container has already completed should return error",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: controllerNode,
+					InitContainers: []corev1api.Container{
+						{
+							Name: restorehelper.WaitInitContainer,
+						},
+					},
+				},
+				Status: corev1api.PodStatus{
+					InitContainerStatuses: []corev1api.ContainerStatus{
+						{
+							State: corev1api.ContainerState{
+								Terminated: &corev1api.ContainerStateTerminated{
+									ExitCode: 0,
+								},
+							},
+						},
+					},
+				},
+			},
+			shouldProcessed: false,
+			expectError:     true,
+			errString:       "restore-wait init container has already completed",
+		},
+		{
+			name: "restore-wait init container is in unrecoverable waiting state should return error",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: controllerNode,
+					InitContainers: []corev1api.Container{
+						{
+							Name: restorehelper.WaitInitContainer,
+						},
+					},
+				},
+				Status: corev1api.PodStatus{
+					InitContainerStatuses: []corev1api.ContainerStatus{
+						{
+							State: corev1api.ContainerState{
+								Waiting: &corev1api.ContainerStateWaiting{
+									Reason: "ImagePullBackOff",
+								},
+							},
+						},
+					},
+				},
+			},
+			shouldProcessed: false,
+			expectError:     true,
+			errString:       "is in unrecoverable waiting state with reason ImagePullBackOff",
+		},
+		{
+			name: "restore-wait init container is in normal waiting state should skip",
+			obj: &velerov1api.PodVolumeRestore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "velero",
+					Name:      "pvr-1",
+				},
+				Spec: velerov1api.PodVolumeRestoreSpec{
+					Pod: corev1api.ObjectReference{
+						Namespace: "ns-1",
+						Name:      "pod-1",
+					},
+				},
+				Status: velerov1api.PodVolumeRestoreStatus{
+					Phase: "",
+				},
+			},
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ns-1",
+					Name:      "pod-1",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: controllerNode,
+					InitContainers: []corev1api.Container{
+						{
+							Name: restorehelper.WaitInitContainer,
+						},
+					},
+				},
+				Status: corev1api.PodStatus{
+					InitContainerStatuses: []corev1api.ContainerStatus{
+						{
+							State: corev1api.ContainerState{
+								Waiting: &corev1api.ContainerStateWaiting{
+									Reason: "ContainerCreating",
+								},
+							},
+						},
+					},
+				},
+			},
+			shouldProcessed: false,
+		},
 	}
 
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {
-			ctx := t.Context()
-
 			var objs []runtime.Object
 			if ts.obj != nil {
 				objs = append(objs, ts.obj)
@@ -221,179 +486,30 @@ func TestShouldProcess(t *testing.T) {
 				clock:  &clocks.RealClock{},
 			}
 
-			shouldProcess, _, _ := shouldProcess(ctx, c.client, c.logger, ts.obj)
+			if !isPVRNew(ts.obj) {
+				require.False(t, ts.shouldProcessed)
+				return
+			}
+
+			if ts.pod == nil {
+				_, err := getTargetPod(context.Background(), c.client, c.logger, ts.obj)
+				if ts.expectError {
+					require.Error(t, err)
+				}
+				require.False(t, ts.shouldProcessed)
+				return
+			}
+
+			shouldProcess, err := shouldProcess(ts.pod, c.logger)
 			require.Equal(t, ts.shouldProcessed, shouldProcess)
-		})
-	}
-}
-
-func TestIsInitContainerRunning(t *testing.T) {
-	tests := []struct {
-		name     string
-		pod      *corev1api.Pod
-		expected bool
-	}{
-		{
-			name: "pod with no init containers should return false",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-			},
-			expected: false,
-		},
-		{
-			name: "pod with running init container that's not restore init should return false",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-				Spec: corev1api.PodSpec{
-					InitContainers: []corev1api.Container{
-						{
-							Name: "non-restore-init",
-						},
-					},
-				},
-				Status: corev1api.PodStatus{
-					InitContainerStatuses: []corev1api.ContainerStatus{
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-					},
-				},
-			},
-			expected: false,
-		},
-		{
-			name: "pod with running init container that's not first should still work",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-				Spec: corev1api.PodSpec{
-					InitContainers: []corev1api.Container{
-						{
-							Name: "non-restore-init",
-						},
-						{
-							Name: restorehelper.WaitInitContainer,
-						},
-					},
-				},
-				Status: corev1api.PodStatus{
-					InitContainerStatuses: []corev1api.ContainerStatus{
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-					},
-				},
-			},
-			expected: true,
-		},
-		{
-			name: "pod with init container as first initContainer that's not running should return false",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-				Spec: corev1api.PodSpec{
-					InitContainers: []corev1api.Container{
-						{
-							Name: restorehelper.WaitInitContainer,
-						},
-						{
-							Name: "non-restore-init",
-						},
-					},
-				},
-				Status: corev1api.PodStatus{
-					InitContainerStatuses: []corev1api.ContainerStatus{
-						{
-							State: corev1api.ContainerState{},
-						},
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-					},
-				},
-			},
-			expected: false,
-		},
-		{
-			name: "pod with running init container as first initContainer should return true",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-				Spec: corev1api.PodSpec{
-					InitContainers: []corev1api.Container{
-						{
-							Name: restorehelper.WaitInitContainer,
-						},
-						{
-							Name: "non-restore-init",
-						},
-					},
-				},
-				Status: corev1api.PodStatus{
-					InitContainerStatuses: []corev1api.ContainerStatus{
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-						{
-							State: corev1api.ContainerState{
-								Running: &corev1api.ContainerStateRunning{StartedAt: metav1.Time{Time: time.Now()}},
-							},
-						},
-					},
-				},
-			},
-			expected: true,
-		},
-		{
-			name: "pod with init container with empty InitContainerStatuses should return 0",
-			pod: &corev1api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "ns-1",
-					Name:      "pod-1",
-				},
-				Spec: corev1api.PodSpec{
-					InitContainers: []corev1api.Container{
-						{
-							Name: restorehelper.WaitInitContainer,
-						},
-					},
-				},
-				Status: corev1api.PodStatus{
-					InitContainerStatuses: []corev1api.ContainerStatus{},
-				},
-			},
-			expected: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.expected, isInitContainerRunning(test.pod))
+			if ts.expectError {
+				require.Error(t, err)
+				if ts.errString != "" {
+					assert.Contains(t, err.Error(), ts.errString)
+				}
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
@@ -635,6 +751,7 @@ func initPodVolumeRestoreReconcilerWithError(objects []runtime.Object, cliObj []
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // tolerations
 	), nil
 }
 
@@ -974,7 +1091,7 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledPVR[test.pvr.Name] = test.sportTime.Time
+				r.cancelledPVR.Store(test.pvr.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -996,7 +1113,7 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 				}
 
 				if test.mockStart {
-					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
+					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
 				}
 
 				if test.mockCancel {
@@ -1095,9 +1212,15 @@ func TestPodVolumeRestoreReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledPVR, test.pvr.Name)
+				_, ok := r.cancelledPVR.Load(test.pvr.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledPVR)
+				empty := true
+				r.cancelledPVR.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isPVRInFinalState(&pvr) || pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseInProgress {
@@ -1213,6 +1336,7 @@ func TestPodVolumeRestoreSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
@@ -1349,6 +1473,15 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			pvr:  pvrBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get pvr",
 			pvr:      pvrBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -1376,17 +1509,30 @@ func TestOnPodVolumeRestoreProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), pvr))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			r.OnDataPathProgress(ctx, namespace, pvrName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				updatedPVR := &velerov1api.PodVolumeRestore{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, updatedPVR))
-				assert.Equal(t, test.progress.TotalBytes, updatedPVR.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedPVR.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedPVR.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedPVR.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedPVR.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedPVR.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedPVR.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataPathProgress(ctx, namespace, pvrName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvrName, Namespace: namespace}, updatedPVR))
+					assert.Equal(t, []string{progress.Message}, updatedPVR.Status.Activities)
+				}
 			}
 		})
 	}
@@ -1798,7 +1944,7 @@ func TestResumeCancellablePodVolumeRestore(t *testing.T) {
 			}
 
 			if test.mockStart {
-				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
+				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
 			}
 
 			if test.mockClose {
@@ -1821,4 +1967,48 @@ func TestResumeCancellablePodVolumeRestore(t *testing.T) {
 			}
 		})
 	}
+}
+
+type pvrSequenceClock struct {
+	*clocktesting.FakeClock
+	mu sync.Mutex
+}
+
+func (c *pvrSequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestPodVolumeRestoreCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	pvr := builder.ForPodVolumeRestore(velerov1api.DefaultNamespace, "pvr-1").Cancel(true).Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result()
+
+	r, err := initPodVolumeRestoreReconciler(nil, []client.Object{pvr})
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledPVR.Store(pvr.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.clock = &pvrSequenceClock{FakeClock: clocktesting.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: pvr.Name, Namespace: pvr.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledPVR.Load(pvr.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

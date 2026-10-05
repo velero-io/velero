@@ -32,12 +32,20 @@ type DataDownloadSpec struct {
 	BackupStorageLocation string `json:"backupStorageLocation"`
 
 	// DataMover specifies the data mover to be used by the backup.
-	// If DataMover is "" or "velero", the built-in data mover will be used.
+	// If DataMover is "" or "velero", the built-in fs data mover will be used.
 	// +optional
 	DataMover string `json:"datamover,omitempty"`
 
 	// SnapshotID is the ID of the Velero backup snapshot to be restored from.
 	SnapshotID string `json:"snapshotID"`
+
+	// RestoreType indicates the type of the restore.
+	RestoreType string `json:"restoreType"`
+
+	// CSISnapshot provides the information of the CSI snapshot used to do the incremental restore.
+	// +optional
+	// +nullable
+	CSISnapshot *CSISnapshotSpec `json:"csiSnapshot"`
 
 	// SourceNamespace is the original namespace where the volume is backed up from.
 	// It may be different from SourcePVC's namespace if namespace is remapped during restore.
@@ -74,6 +82,10 @@ type TargetVolumeSpec struct {
 
 	// Namespace is the target namespace
 	Namespace string `json:"namespace"`
+
+	// FSType is the file system type of the target volume.
+	// +optional
+	FSType string `json:"fsType,omitempty"`
 }
 
 // DataDownloadPhase represents the lifecycle phase of a DataDownload.
@@ -97,7 +109,7 @@ type DataDownloadStatus struct {
 	// +optional
 	Phase DataDownloadPhase `json:"phase,omitempty"`
 
-	// Message is a message about the DataDownload's status.
+	// Message is a message describing the DataDownload when it reaches to a terminal status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -120,6 +132,10 @@ type DataDownloadStatus struct {
 	// +optional
 	Progress shared.DataMoveOperationProgress `json:"progress,omitempty"`
 
+	// IncrementalBytes holds the number of bytes restored incrementally since the last snapshot
+	// +optional
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+
 	// Node is name of the node where the DataDownload is processed.
 	// +optional
 	Node string `json:"node,omitempty"`
@@ -133,6 +149,14 @@ type DataDownloadStatus struct {
 	// +optional
 	// +nullable
 	AcceptedTimestamp *metav1.Time `json:"acceptedTimestamp,omitempty"`
+
+	// FallbackFull indicates whether the incremental restore has fallen back to full restore
+	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains one or more messages about what have been done for this DataDownload.
+	// +optional
+	// +nullable
+	Activities []string `json:"activities,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runtime-controller client, the genclient and k8s:deepcopy markers will no longer be needed and should be removed.
@@ -142,12 +166,18 @@ type DataDownloadStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="DataDownload status such as New/InProgress"
+// The "Restore Type" column is hidden by default to align with DataUpload.
+// +kubebuilder:printcolumn:name="Requested Restore Type",type="string",JSONPath=".spec.restoreType",description="Requested restore type such as Full/Incremental",priority=10
+// +kubebuilder:printcolumn:name="Fallback Full",type="boolean",JSONPath=".status.fallbackFull",description="Whether the incremental restore has fallen back to full restore",priority=10
 // +kubebuilder:printcolumn:name="Started",type="date",JSONPath=".status.startTimestamp",description="Time duration since this DataDownload was started"
 // +kubebuilder:printcolumn:name="Bytes Done",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Completed bytes"
 // +kubebuilder:printcolumn:name="Total Bytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Total bytes"
+// The "Incremental Bytes" column is hidden by default to align with DataUpload.
+// +kubebuilder:printcolumn:name="Incremental Bytes",type="integer",format="int64",JSONPath=".status.incrementalBytes",description="Incremental bytes",priority=10
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where the backup data is stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this DataDownload was created"
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the DataDownload is processed"
+// +kubebuilder:resource:shortName=dd
 
 // DataDownload acts as the protocol between data mover plugins and data mover controller for the datamover restore operation
 type DataDownload struct {

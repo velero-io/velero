@@ -15,13 +15,14 @@ package datamover
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/bombsimon/logrusr/v3"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	corev1api "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
 	"github.com/vmware-tanzu/velero/pkg/datamover"
@@ -56,6 +58,10 @@ type dataMoverBackupConfig struct {
 	volumeMode      string
 	duName          string
 	resourceTimeout time.Duration
+	cbtSAName       string
+	changeID        string
+	volumeID        string
+	snapshotID      string
 }
 
 func NewBackupCommand(f client.Factory) *cobra.Command {
@@ -77,12 +83,15 @@ func NewBackupCommand(f client.Factory) *cobra.Command {
 			logger.Infof("Starting Velero data-mover backup %s (%s)", buildinfo.Version, buildinfo.FormattedGitSHA())
 
 			f.SetBasename(fmt.Sprintf("%s-%s", c.Parent().Name(), c.Name()))
-			s, err := newdataMoverBackup(logger, f, config)
+			s, err := newDataMoverBackup(logger, f, config)
 			if err != nil {
 				kube.ExitPodWithMessage(logger, false, "Failed to create data mover backup, %v", err)
 			}
 
-			s.run()
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				s.run()
+			})
 		},
 	}
 
@@ -92,6 +101,10 @@ func NewBackupCommand(f client.Factory) *cobra.Command {
 	command.Flags().StringVar(&config.volumeMode, "volume-mode", config.volumeMode, "The mode of the volume to be backed up")
 	command.Flags().StringVar(&config.duName, "data-upload", config.duName, "The data upload name")
 	command.Flags().DurationVar(&config.resourceTimeout, "resource-timeout", config.resourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters.")
+	command.Flags().StringVar(&config.cbtSAName, "cbt-sa-name", config.cbtSAName, "The name of the service account used by CSI's CBT service")
+	command.Flags().StringVar(&config.changeID, "change-id", config.changeID, "The change ID of the snapshot")
+	command.Flags().StringVar(&config.volumeID, "volume-id", config.volumeID, "The volume ID of the snapshot")
+	command.Flags().StringVar(&config.snapshotID, "snapshot-id", config.snapshotID, "The ID of the snapshot")
 
 	_ = command.MarkFlagRequired("volume-path")
 	_ = command.MarkFlagRequired("volume-mode")
@@ -112,9 +125,10 @@ type dataMoverBackup struct {
 	config      dataMoverBackupConfig
 	kubeClient  kubernetes.Interface
 	dataPathMgr *datapath.Manager
+	cbtService  cbtservice.Service
 }
 
-func newdataMoverBackup(logger logrus.FieldLogger, factory client.Factory, config dataMoverBackupConfig) (*dataMoverBackup, error) {
+func newDataMoverBackup(logger logrus.FieldLogger, factory client.Factory, config dataMoverBackupConfig) (*dataMoverBackup, error) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	clientConfig, err := factory.ClientConfig()
@@ -197,6 +211,12 @@ func newdataMoverBackup(logger logrus.FieldLogger, factory client.Factory, confi
 		config:     config,
 		namespace:  factory.Namespace(),
 		nodeName:   nodeName,
+		cbtService: cbtservice.NewService(
+			logger,
+			factory.Namespace(),
+			config.cbtSAName,
+			clientConfig,
+		),
 	}
 
 	s.kubeClient, err = factory.KubeClient()
@@ -293,8 +313,25 @@ func (s *dataMoverBackup) createDataPathService() (dataPathService, error) {
 
 	repoEnsurer := repository.NewEnsurer(s.client, s.logger, s.config.resourceTimeout)
 
-	return datamover.NewBackupMicroService(s.ctx, s.client, s.kubeClient, s.config.duName, s.namespace, s.nodeName, datapath.AccessPoint{
-		ByPath:  s.config.volumePath,
-		VolMode: uploader.PersistentVolumeMode(s.config.volumeMode),
-	}, s.dataPathMgr, repoEnsurer, credGetter, duInformer, s.logger), nil
+	return datamover.NewBackupMicroService(
+		s.ctx,
+		s.client,
+		s.kubeClient,
+		s.config.duName,
+		s.namespace,
+		s.nodeName,
+		datapath.AccessPoint{
+			ByPath:  s.config.volumePath,
+			VolMode: uploader.PersistentVolumeMode(s.config.volumeMode),
+		},
+		s.dataPathMgr,
+		repoEnsurer,
+		credGetter,
+		duInformer,
+		s.config.changeID,
+		s.config.volumeID,
+		s.config.snapshotID,
+		s.cbtService,
+		s.logger,
+	), nil
 }

@@ -28,7 +28,7 @@ You also need to update `site/index.html` to have "Latest Release Information" c
 1.  Run `NEW_DOCS_VERSION=v<major.minor> VELERO_VERSION=v<full-version> make gen-docs` (e.g. `NEW_DOCS_VERSION=v1.2 VELERO_VERSION=v1.2.0 make gen-docs` or `NEW_DOCS_VERSION=v1.2-pre VELERO_VERSION=v1.2.0-beta.1 make gen-docs`).
     - Note that:
         - **NEW_DOCS_VERSION** defines the version that the docs will be tagged with (i.e. what's in the URL, what shows up in the version dropdown on the site). This should be formatted as either `v1.4` (for a GA release), or `v1.4-pre` (for an alpha/beta/RC).
-        - **VELERO_VERSION** defines the tag of Velero that any `https://github.com/vmware-tanzu/velero/...` links in the docs should redirect to.
+        - **VELERO_VERSION** defines the tag of Velero that any `https://github.com/velero-io/velero/...` links in the docs should redirect to.
 1.  Follow the additional instructions at `site/README-JEKYLL.md` to complete the docs generation process.
 1.  Do a review of the diffs, and/or run `make serve-docs` and review the site.
 1.  Submit a PR containing the changelog and the version-tagged docs.
@@ -70,7 +70,7 @@ This process is the same for both pre-release and GA, except for the fact that t
     make release
     ```
 
-1.  Navigate to the draft GitHub release, at https://github.com/vmware-tanzu/velero/releases.
+1.  Navigate to the draft GitHub release, at https://github.com/velero-io/velero/releases.
 1.  If this is a patch release (e.g. `v1.2.1`), note that the full `CHANGELOG-1.2.md` contents will be included in the body of the GitHub release. You need to delete the previous releases' content (e.g. `v1.2.0`'s changelog) so that only the latest patch release's changelog shows.
 1.  Do a quick review for formatting. **Note:** the `goreleaser` process should detect if it's a pre-release version, and check that box in the GitHub release appropriately, but it's always worth double-checking.
 1.  Publish the release.

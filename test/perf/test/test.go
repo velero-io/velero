@@ -22,9 +22,9 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	. "github.com/vmware-tanzu/velero/test"

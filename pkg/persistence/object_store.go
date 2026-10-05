@@ -25,7 +25,7 @@ import (
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -85,6 +85,7 @@ type BackupStore interface {
 	PutRestoredResourceList(restore string, results io.Reader) error
 	PutRestoreItemOperations(restore string, restoreItemOperations io.Reader) error
 	GetRestoreItemOperations(name string) ([]*itemoperation.RestoreOperation, error)
+	GetRestoreVolumeInfos(name string) ([]*volume.RestoreVolumeInfo, error)
 	PutRestoreVolumeInfo(restore string, volumeInfo io.Reader) error
 	DeleteRestore(name string) error
 	GetRestoredResourceList(name string) (map[string][]string, error)
@@ -94,6 +95,7 @@ type BackupStore interface {
 
 // DownloadURLTTL is how long a download URL is valid for.
 const DownloadURLTTL = 10 * time.Minute
+const maxDecompressedSize = 1024 * 1024 * 1024 // 1 GB
 
 type objectBackupStore struct {
 	objectStore velero.ObjectStore
@@ -163,6 +165,9 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 			objectStoreConfig[key] = val
 		}
 	}
+
+	// Delete any user-provided credentialsFile to prevent path traversal vulnerabilities
+	delete(objectStoreConfig, "credentialsFile")
 
 	// add the bucket name and prefix to the config map so that object stores
 	// can use them when initializing. The AWS object store uses the bucket
@@ -320,7 +325,8 @@ func (s *objectBackupStore) GetBackupMetadata(name string) (*velerov1api.Backup,
 	}
 	defer res.Close()
 
-	data, err := io.ReadAll(res)
+	limitReader := io.LimitReader(res, maxDecompressedSize)
+	data, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -431,7 +437,9 @@ func decode(jsongzReader io.Reader, into any) error {
 	}
 	defer gzr.Close()
 
-	if err := json.NewDecoder(gzr).Decode(into); err != nil {
+	limitReader := io.LimitReader(gzr, maxDecompressedSize)
+
+	if err := json.NewDecoder(limitReader).Decode(into); err != nil {
 		return errors.Wrap(err, "error decoding object data")
 	}
 
@@ -621,6 +629,24 @@ func (s *objectBackupStore) PutRestoreVolumeInfo(restore string, volumeInfo io.R
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getRestoreVolumeInfoKey(restore), volumeInfo)
 }
 
+func (s *objectBackupStore) GetRestoreVolumeInfos(name string) ([]*volume.RestoreVolumeInfo, error) {
+	volumeInfos := make([]*volume.RestoreVolumeInfo, 0)
+
+	res, err := tryGet(s.objectStore, s.bucket, s.layout.getRestoreVolumeInfoKey(name))
+	if err != nil {
+		return volumeInfos, err
+	}
+	if res == nil {
+		return volumeInfos, nil
+	}
+	defer res.Close()
+
+	if err := decode(res, &volumeInfos); err != nil {
+		return volumeInfos, err
+	}
+
+	return volumeInfos, nil
+}
 func (s *objectBackupStore) PutBackupItemOperations(backup string, backupItemOperations io.Reader) error {
 	return seekAndPutObject(s.objectStore, s.bucket, s.layout.getBackupItemOperationsKey(backup), backupItemOperations)
 }

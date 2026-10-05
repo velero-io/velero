@@ -28,6 +28,10 @@ import (
 // +kubebuilder:resource:shortName=ssr
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="The status of the server status request"
+// +kubebuilder:printcolumn:name="Server Version",type="string",JSONPath=".status.serverVersion",description="The Velero server version"
+// +kubebuilder:printcolumn:name="Processed",type="date",JSONPath=".status.processedTimestamp",description="The time the request was processed by the controller"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ServerStatusRequest is a request to access current status information about
 // the Velero server.

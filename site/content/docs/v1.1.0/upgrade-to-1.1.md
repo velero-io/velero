@@ -25,4 +25,4 @@ kubectl patch deployment/velero -n <YOUR_NAMESPACE> \
 -p='[{"op":"add","path":"/spec/template/spec/containers/0/env/0","value":{"name":"VELERO_NAMESPACE", "valueFrom":{"fieldRef":{"fieldPath":"metadata.namespace"}}}}]'
 ```
 
-[1]: https://github.com/vmware-tanzu/velero/releases/tag/v1.0.0
+[1]: https://github.com/velero-io/velero/releases/tag/v1.0.0

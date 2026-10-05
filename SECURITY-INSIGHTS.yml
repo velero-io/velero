@@ -1,0 +1,101 @@
+header:
+  schema-version: 2.2.0
+  last-updated: '2026-09-02'
+  last-reviewed: '2026-09-02'
+  url: https://github.com/velero-io/velero/blob/main/SECURITY-INSIGHTS.yml
+  comment: |
+    OpenSSF Security Insights manifest for the Velero project.
+
+project:
+  name: Velero
+  homepage: https://velero.io
+  roadmap: https://github.com/velero-io/velero/blob/main/ROADMAP.md
+  administrators:
+    - name: Scott Seago
+      affiliation: Red Hat
+      primary: false
+    - name: Daniel Jiang
+      affiliation: Broadcom
+      primary: true
+    - name: Wenkai Yin
+      affiliation: Broadcom
+      primary: false
+    - name: Xun Jiang
+      affiliation: Broadcom
+      primary: false
+    - name: Shubham Pampattiwar
+      affiliation: Red Hat
+      primary: false
+    - name: Yonghui Li
+      affiliation: Broadcom
+      primary: false
+    - name: Anshul Ahuja
+      affiliation: Microsoft Azure
+      primary: false
+    - name: Tiger Kaovilai
+      affiliation: Red Hat
+      primary: false
+  documentation:
+    detailed-guide: https://velero.io/docs/
+  repositories:
+    - name: velero
+      url: https://github.com/velero-io/velero
+      comment: |
+        velero is the core repository for the Velero project.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    contact:
+      name: Velero Security Team
+      email: cncf-velero-security@lists.cncf.io
+      primary: true
+    comment: |
+      Report vulnerabilities privately to the Velero Security Team by email or
+      via GitHub private vulnerability reporting on the repository Security tab.
+      See the security policy for full details.
+
+repository:
+  url: https://github.com/velero-io/velero
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  core-team:
+    - name: Scott Seago
+      affiliation: Red Hat
+      primary: false
+    - name: Daniel Jiang
+      affiliation: Broadcom
+      primary: true
+    - name: Wenkai Yin
+      affiliation: Broadcom
+      primary: false
+    - name: Xun Jiang
+      affiliation: Broadcom
+      primary: false
+    - name: Shubham Pampattiwar
+      affiliation: Red Hat
+      primary: false
+    - name: Yonghui Li
+      affiliation: Broadcom
+      primary: false
+    - name: Anshul Ahuja
+      affiliation: Microsoft Azure
+      primary: false
+    - name: Tiger Kaovilai
+      affiliation: Red Hat
+      primary: false
+  license:
+    url: https://github.com/velero-io/velero/blob/main/LICENSE
+    expression: Apache-2.0
+  documentation:
+    contributing-guide: https://velero.io/docs/main/start-contributing/
+    governance: https://github.com/velero-io/.github/blob/main/GOVERNANCE.md
+    security-policy: https://github.com/velero-io/.github/blob/main/SECURITY.md
+    dependency-management-policy: https://github.com/velero-io/velero/blob/main/site/content/docs/main/development.md#dependency-management
+  security:
+    assessments:
+      self:
+        comment: |
+          A formal third-party security assessment has not yet been completed.
+          The project follows the CNCF security disclosure and response process
+          documented in the security policy.

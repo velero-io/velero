@@ -11,10 +11,32 @@ spec:
     kind: Backup
     listKind: BackupList
     plural: backups
+    shortNames:
+    - bak
     singular: backup
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: Backup status such as New/InProgress
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - description: Total number of errors logged during the backup
+      jsonPath: .status.errors
+      name: Errors
+      type: integer
+    - description: Total number of warnings logged during the backup
+      jsonPath: .status.warnings
+      name: Warnings
+      type: integer
+    - description: The time the backup was started
+      jsonPath: .status.startTimestamp
+      name: Started
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
@@ -41,6 +63,13 @@ spec:
           spec:
             description: BackupSpec defines the specification for a Velero backup.
             properties:
+              backupType:
+                description: BackupType specifies how volume data is backed up, with
+                  possible values including Full and Incremental.
+                enum:
+                - Full
+                - Incremental
+                type: string
               csiSnapshotTimeout:
                 description: |-
                   CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot status turns to
@@ -50,7 +79,7 @@ spec:
               datamover:
                 description: |-
                   DataMover specifies the data mover to be used by the backup.
-                  If DataMover is "" or "velero", the built-in data mover will be used.
+                  If DataMover is "" or "velero", the default built-in data mover will be used.
                 type: string
               defaultVolumesToFsBackup:
                 description: |-
@@ -384,6 +413,11 @@ spec:
                 x-kubernetes-map-type: atomic
               metadata:
                 properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
                   labels:
                     additionalProperties:
                       type: string
@@ -674,3 +708,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

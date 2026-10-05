@@ -1,0 +1,1 @@
+Fix issue #9816, add cli support for backup with ClusterScopedFilterPolicy and NamespacedFilterPolicies

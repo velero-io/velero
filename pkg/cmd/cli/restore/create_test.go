@@ -68,6 +68,7 @@ func TestCreateCommand(t *testing.T) {
 		includeNamespaces := "app1,app2"
 		excludeNamespaces := "pod1,pod2,pod3"
 		existingResourcePolicy := "none"
+		existingVolumeDataPolicy := "none"
 		includeResources := "sc,sts"
 		excludeResources := "job"
 		statusIncludeResources := "sc,sts"
@@ -77,7 +78,10 @@ func TestCreateCommand(t *testing.T) {
 		includeClusterResources := "true"
 		allowPartiallyFailed := "true"
 		itemOperationTimeout := "10m0s"
+		resourceModifierConfigMap := "modifier-cm"
+		ResourcePoliciesConfigMap := "policies-cm"
 		writeSparseFiles := "true"
+		deleteExtraFiles := "true"
 		parallel := 2
 		flags := new(pflag.FlagSet)
 		o := NewCreateOptions()
@@ -90,6 +94,7 @@ func TestCreateCommand(t *testing.T) {
 		flags.Parse([]string{"--labels", labels})
 		flags.Parse([]string{"--annotations", annotations})
 		flags.Parse([]string{"--existing-resource-policy", existingResourcePolicy})
+		flags.Parse([]string{"--existing-volume-data-policy", existingVolumeDataPolicy})
 		flags.Parse([]string{"--include-namespaces", includeNamespaces})
 		flags.Parse([]string{"--exclude-namespaces", excludeNamespaces})
 		flags.Parse([]string{"--include-resources", includeResources})
@@ -101,7 +106,11 @@ func TestCreateCommand(t *testing.T) {
 		flags.Parse([]string{"--include-cluster-resources", includeClusterResources})
 		flags.Parse([]string{"--allow-partially-failed", allowPartiallyFailed})
 		flags.Parse([]string{"--item-operation-timeout", itemOperationTimeout})
+		flags.Parse([]string{"--resource-modifier-configmap", resourceModifierConfigMap})
+		flags.Parse([]string{"--resource-policies-configmap", ResourcePoliciesConfigMap})
+		flags.Parse([]string{"--skip-default-resource-modifier"})
 		flags.Parse([]string{"--write-sparse-files", writeSparseFiles})
+		flags.Parse([]string{"--delete-extra-files", deleteExtraFiles})
 		flags.Parse([]string{"--parallel-files-download", "2"})
 		client := velerotest.NewFakeControllerRuntimeClient(t).(kbclient.WithWatch)
 
@@ -129,6 +138,7 @@ func TestCreateCommand(t *testing.T) {
 		require.Equal(t, includeNamespaces, o.IncludeNamespaces.String())
 		require.Equal(t, excludeNamespaces, o.ExcludeNamespaces.String())
 		require.Equal(t, existingResourcePolicy, o.ExistingResourcePolicy)
+		require.Equal(t, existingVolumeDataPolicy, o.ExistingVolumeDataPolicy)
 		require.Equal(t, includeResources, o.IncludeResources.String())
 		require.Equal(t, excludeResources, o.ExcludeResources.String())
 
@@ -139,8 +149,12 @@ func TestCreateCommand(t *testing.T) {
 		require.Equal(t, includeClusterResources, o.IncludeClusterResources.String())
 		require.Equal(t, allowPartiallyFailed, o.AllowPartiallyFailed.String())
 		require.Equal(t, itemOperationTimeout, o.ItemOperationTimeout.String())
+		require.Equal(t, resourceModifierConfigMap, o.ResourceModifierConfigMap)
+		require.Equal(t, ResourcePoliciesConfigMap, o.ResourcePoliciesConfigMap)
+		require.True(t, o.SkipDefaultResourceModifier)
 		require.Equal(t, writeSparseFiles, o.WriteSparseFiles.String())
 		require.Equal(t, parallel, o.ParallelFilesDownload)
+		require.Equal(t, deleteExtraFiles, o.DeleteExtraFiles.String())
 	})
 
 	t.Run("create a restore from schedule", func(t *testing.T) {
@@ -188,5 +202,38 @@ func TestCreateCommand(t *testing.T) {
 		require.NoError(t, o.Complete(nil, f))
 		err := o.Validate(c, []string{}, f)
 		require.Equal(t, "backups.velero.io \"not-exist\" not found", err.Error())
+	})
+
+	t.Run("create a restore with resource policies configmap", func(t *testing.T) {
+		f := &factorymocks.Factory{}
+		c := NewCreateCommand(f, "")
+		require.Equal(t, "Create a restore", c.Short)
+		flags := new(pflag.FlagSet)
+		o := NewCreateOptions()
+		o.BindFlags(flags)
+
+		backupName := "backup-with-policies"
+		ResourcePoliciesConfigMap := "test-policies-cm"
+		flags.Parse([]string{"--from-backup", backupName})
+		flags.Parse([]string{"--resource-policies-configmap", ResourcePoliciesConfigMap})
+
+		kbclient := velerotest.NewFakeControllerRuntimeClient(t).(kbclient.WithWatch)
+		backup := builder.ForBackup(cmdtest.VeleroNameSpace, backupName).Phase(velerov1api.BackupPhaseCompleted).Result()
+		require.NoError(t, kbclient.Create(t.Context(), backup, &controllerclient.CreateOptions{}))
+
+		f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+		f.On("KubebuilderWatchClient").Return(kbclient, nil)
+
+		require.NoError(t, o.Complete(args, f))
+		require.NoError(t, o.Validate(c, []string{}, f))
+		require.NoError(t, o.Run(c, f))
+
+		// Verify the created restore object
+		createdRestore := &velerov1api.Restore{}
+		err := kbclient.Get(t.Context(), controllerclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: name}, createdRestore)
+		require.NoError(t, err)
+		require.NotNil(t, createdRestore.Spec.ResourcePolicy)
+		require.Equal(t, "configmap", createdRestore.Spec.ResourcePolicy.Kind)
+		require.Equal(t, ResourcePoliciesConfigMap, createdRestore.Spec.ResourcePolicy.Name)
 	})
 }

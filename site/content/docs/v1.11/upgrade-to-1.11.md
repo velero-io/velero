@@ -15,7 +15,7 @@ If you're not yet running at least Velero v1.6, see the following:
 - [Upgrading to v1.9][4]
 - [Upgrading to v1.10][5]
 
-Before upgrading, check the [Velero compatibility matrix](https://github.com/vmware-tanzu/velero#velero-compatibility-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
+Before upgrading, check the [Velero compatibility matrix](https://github.com/velero-io/velero#velero-compatibility-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
 ## Instructions
 

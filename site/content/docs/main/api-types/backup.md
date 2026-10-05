@@ -178,6 +178,13 @@ spec:
         # processed. Only "exec" hooks are supported.
         post:
           # Same content as pre above.
+  # BackupType specifies how volume data is backed up, with possible values including Full and Incremental.
+	# BackupType is optional. If it's not set, it will default to Full.
+  # BackupType is only meaningful for data mover backup, including CSI snapshot fs backup, CSI snapshot block backup, and fs backup.
+  # For CSI only backup and Velero native backup, backupType doesn't take effect.
+  # Full means data mover will forcefully upload all data in volumes.
+  # Incremental means data mover will only upload data change since last snapshot. 
+  backupType: Full
 # Status about the Backup. Users should not set any data here.
 status:
   # The version of this Backup. The only version supported is 1.

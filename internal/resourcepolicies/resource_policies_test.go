@@ -16,14 +16,29 @@ limitations under the License.
 package resourcepolicies
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes/scheme"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
 )
+
+func pvcVolumeMode(mode corev1api.PersistentVolumeMode) *corev1api.PersistentVolumeMode {
+	return &mode
+}
 
 func TestLoadResourcePolicies(t *testing.T) {
 	testCases := []struct {
@@ -157,6 +172,64 @@ volumePolicies:
       type: skip
 `,
 			wantErr: false,
+		},
+		{
+			name: "supported format pvcVolumeMode",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcVolumeMode: Block
+    action:
+      type: skip
+`,
+			wantErr: false,
+		},
+		{
+			name: "error format of pvcVolumeMode (not a string)",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcVolumeMode:
+        - Block
+    action:
+      type: skip
+`,
+			wantErr: true,
+		},
+		{
+			name: "supported format pvcAccessModes",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcAccessModes:
+        - ReadWriteOnce
+    action:
+      type: skip
+`,
+			wantErr: false,
+		},
+		{
+			name: "error format of pvcAccessModes (not a list)",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcAccessModes: ReadWriteOnce
+    action:
+      type: skip
+`,
+			wantErr: true,
+		},
+		{
+			name: "error format of pvcAccessModes (list with non-string)",
+			yamlData: `version: v1
+volumePolicies:
+  - conditions:
+      pvcAccessModes:
+        - 123
+    action:
+      type: skip
+`,
+			wantErr: true,
 		},
 	}
 	for _, tc := range testCases {
@@ -353,14 +426,20 @@ func TestGetResourceMatchedAction(t *testing.T) {
 }
 
 func TestGetResourcePoliciesFromConfig(t *testing.T) {
-	// Create a test ConfigMap
-	cm := &corev1api.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-configmap",
-			Namespace: "test-namespace",
-		},
-		Data: map[string]string{
-			"test-data": `version: v1
+	testCases := []struct {
+		name        string
+		cm          *corev1api.ConfigMap
+		expectedErr string
+	}{
+		{
+			name: "valid configmap",
+			cm: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-configmap",
+					Namespace: "test-namespace",
+				},
+				Data: map[string]string{
+					"test-data": `version: v1
 volumePolicies:
   - conditions:
       capacity: '0,10Gi'
@@ -381,63 +460,457 @@ volumePolicies:
     action:
       type: skip
 `,
+				},
+			},
+			expectedErr: "",
+		},
+		{
+			name:        "nil configmap",
+			cm:          nil,
+			expectedErr: "could not parse config from nil configmap",
+		},
+		{
+			name: "empty data configmap",
+			cm: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-configmap",
+					Namespace: "test-namespace",
+				},
+				Data: map[string]string{},
+			},
+			expectedErr: "illegal resource policies test-namespace/test-configmap configmap",
+		},
+		{
+			name: "multiple data configmap",
+			cm: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-configmap",
+					Namespace: "test-namespace",
+				},
+				Data: map[string]string{
+					"data1": "value1",
+					"data2": "value2",
+				},
+			},
+			expectedErr: "illegal resource policies test-namespace/test-configmap configmap",
+		},
+		{
+			name: "invalid yaml data",
+			cm: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-configmap",
+					Namespace: "test-namespace",
+				},
+				Data: map[string]string{
+					"test-data": `version: v1
+volumePolicies:
+  - conditions:
+      capacity: '0,10Gi'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: skip
+    invalid-key: value
+`,
+				},
+			},
+			expectedErr: "failed to decode yaml data into resource policies",
+		},
+		{
+			name: "build policy error",
+			cm: &corev1api.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-configmap",
+					Namespace: "test-namespace",
+				},
+				Data: map[string]string{
+					"test-data": `version: v1
+volumePolicies:
+  - conditions:
+      capacity: 'invalid-capacity'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: skip
+`,
+				},
+			},
+			expectedErr: "wrong format of Capacity invalid-capacity",
 		},
 	}
 
-	// Call the function and check for errors
-	resPolicies, err := getResourcePoliciesFromConfig(cm)
-	require.NoError(t, err)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resPolicies, err := getResourcePoliciesFromConfig(tc.cm)
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.Equal(t, "v1", resPolicies.version)
+				assert.Len(t, resPolicies.volumePolicies, 3)
+			} else {
+				require.ErrorContains(t, err, tc.expectedErr)
+				assert.Nil(t, resPolicies)
+			}
+		})
+	}
+}
 
-	// Check that the returned resourcePolicies object contains the expected data
-	assert.Equal(t, "v1", resPolicies.version)
-
-	assert.Len(t, resPolicies.volumePolicies, 3)
-
-	policies := ResourcePolicies{
-		Version: "v1",
-		VolumePolicies: []VolumePolicy{
-			{
-				Conditions: map[string]any{
-					"capacity": "0,10Gi",
-					"csi": map[string]any{
-						"driver": "disks.csi.driver",
-					},
-				},
-				Action: Action{
-					Type: Skip,
-				},
-			},
-			{
-				Conditions: map[string]any{
-					"csi": map[string]any{
-						"driver":           "files.csi.driver",
-						"volumeAttributes": map[string]string{"protocol": "nfs"},
-					},
-				},
-				Action: Action{
-					Type: Skip,
-				},
-			},
-			{
-				Conditions: map[string]any{
-					"pvcLabels": map[string]string{
-						"environment": "production",
-					},
-				},
-				Action: Action{
-					Type: Skip,
-				},
-			},
+func TestGetResourcePoliciesFromBackup(t *testing.T) {
+	validCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v1
+volumePolicies:
+  - conditions:
+      capacity: '0,10Gi'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: skip
+`,
 		},
 	}
 
-	p := &Policies{}
-	err = p.BuildPolicy(&policies)
-	if err != nil {
-		t.Fatalf("failed to build policy: %v", err)
+	invalidActionCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid-action-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v1
+volumePolicies:
+  - conditions:
+      capacity: '0,10Gi'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: invalid-action
+`,
+		},
 	}
 
-	assert.Equal(t, p, resPolicies)
+	invalidVersionCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid-version-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v2
+volumePolicies:
+  - conditions:
+      capacity: '0,10Gi'
+      csi:
+        driver: disks.csi.driver
+    action:
+      type: skip
+`,
+		},
+	}
+
+	emptyCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty-configmap",
+			Namespace: "test-namespace",
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(validCM, invalidActionCM, invalidVersionCM, emptyCM).Build()
+	logger := logrus.New()
+
+	testCases := []struct {
+		name        string
+		backup      velerov1api.Backup
+		expectedErr string
+	}{
+		{
+			name: "valid configmap",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "test-configmap",
+					},
+				},
+			},
+			expectedErr: "",
+		},
+		{
+			name: "invalid kind",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: "Secret",
+						Name: "test-configmap",
+					},
+				},
+			},
+			expectedErr: "",
+		},
+		{
+			name: "configmap not found",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "non-existent-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to get ResourcePolicies test-namespace/non-existent-configmap ConfigMap",
+		},
+		{
+			name: "invalid action configmap",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "invalid-action-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to validate ResourcePolicies in ConfigMap test-namespace/test-backup",
+		},
+		{
+			name: "invalid version configmap",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "invalid-version-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to validate ResourcePolicies in ConfigMap test-namespace/test-backup",
+		},
+		{
+			name: "empty configmap",
+			backup: velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-backup",
+				},
+				Spec: velerov1api.BackupSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "empty-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to read the ResourcePolicies from ConfigMap test-namespace/test-backup",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resPolicies, err := getResourcePoliciesFromBackup(tc.backup, client, logger)
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				if tc.backup.Spec.ResourcePolicy != nil && tc.backup.Spec.ResourcePolicy.Kind == ConfigmapRefType {
+					assert.NotNil(t, resPolicies)
+				} else {
+					assert.Nil(t, resPolicies)
+				}
+			} else {
+				require.ErrorContains(t, err, tc.expectedErr)
+				assert.Nil(t, resPolicies)
+			}
+		})
+	}
+}
+
+func TestGetResourcePoliciesFromRestore(t *testing.T) {
+	validCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v1
+namespacedFilterPolicies:
+  - namespaces: ["default"]
+    resourceFilters:
+      - kinds: ["Pod"]
+`,
+		},
+	}
+
+	invalidNfpCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid-action-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v1
+namespacedFilterPolicies:
+  - namespaces: []
+    resourceFilters:
+      - kinds: ["Pod"]
+`,
+		},
+	}
+
+	invalidVersionCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid-version-configmap",
+			Namespace: "test-namespace",
+		},
+		Data: map[string]string{
+			"test-data": `version: v2
+namespacedFilterPolicies:
+  - namespaces: ["default"]
+    resourceFilters:
+      - kinds: ["Pod"]
+`,
+		},
+	}
+
+	emptyCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty-configmap",
+			Namespace: "test-namespace",
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(validCM, invalidNfpCM, invalidVersionCM, emptyCM).Build()
+	logger := logrus.New()
+
+	testCases := []struct {
+		name        string
+		restore     *velerov1api.Restore
+		expectedErr string
+	}{
+		{
+			name: "valid configmap",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "test-configmap",
+					},
+				},
+			},
+			expectedErr: "",
+		},
+		{
+			name: "invalid kind",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: "Secret",
+						Name: "test-configmap",
+					},
+				},
+			},
+			expectedErr: "invalid ResourcePolicy kind \"Secret\", only \"configmap\" is supported",
+		},
+		{
+			name: "configmap not found",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "non-existent-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to get ResourcePolicies test-namespace/non-existent-configmap ConfigMap",
+		},
+		{
+			name: "invalid action configmap",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "invalid-action-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to validate ResourcePolicies in ConfigMap test-namespace/invalid-action-configmap",
+		},
+		{
+			name: "invalid version configmap",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "invalid-version-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to validate ResourcePolicies in ConfigMap test-namespace/invalid-version-configmap",
+		},
+		{
+			name: "empty configmap",
+			restore: &velerov1api.Restore{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-restore",
+				},
+				Spec: velerov1api.RestoreSpec{
+					ResourcePolicy: &corev1api.TypedLocalObjectReference{
+						Kind: ConfigmapRefType,
+						Name: "empty-configmap",
+					},
+				},
+			},
+			expectedErr: "fail to read the ResourcePolicies from ConfigMap test-namespace/empty-configmap",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resPolicies, err := GetResourcePoliciesFromRestore(context.Background(), tc.restore, client, logger)
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				assert.NotNil(t, resPolicies)
+			} else {
+				require.ErrorContains(t, err, tc.expectedErr)
+				assert.Nil(t, resPolicies)
+			}
+		})
+	}
 }
 
 func TestGetMatchAction(t *testing.T) {
@@ -1046,6 +1519,271 @@ volumePolicies:
 			},
 			skip: true,
 		},
+		{
+			name: "PVC volume mode matching - Block volume mode should skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: Block
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-block",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeBlock),
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC volume mode matching - Filesystem volume mode should not skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: Block
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-filesystem",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeFilesystem),
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC volume mode matching - nil volume mode should not match Filesystem",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: Filesystem
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-without-volume-mode",
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC volume mode matching - unknown condition value should not match empty volume mode",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: foo
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-without-volume-mode",
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC volume mode matching - omitted condition should not restrict volume mode",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-block-rwo",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode:  pvcVolumeMode(corev1api.PersistentVolumeBlock),
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce},
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC volume mode matching - non-PVC volume should not match",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: Filesystem
+  action:
+    type: skip`,
+			vol: nil,
+			podVol: &corev1api.Volume{
+				Name: "empty-dir-volume",
+				VolumeSource: corev1api.VolumeSource{
+					EmptyDir: &corev1api.EmptyDirVolumeSource{},
+				},
+			},
+			pvc:  nil,
+			skip: false,
+		},
+		{
+			name: "PVC access modes matching - non-PVC volume should not match",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol: nil,
+			podVol: &corev1api.Volume{
+				Name: "configmap-volume",
+				VolumeSource: corev1api.VolumeSource{
+					ConfigMap: &corev1api.ConfigMapVolumeSource{},
+				},
+			},
+			pvc:  nil,
+			skip: false,
+		},
+
+		{
+			name: "PVC access modes matching - ReadWriteOnce should skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-rwo",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce},
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC access modes matching - extra PVC access mode should not skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-rwo-rom",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce, corev1api.ReadOnlyMany},
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC access modes matching - ReadWriteMany should not skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-rwx",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteMany},
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC access modes matching - exact access mode set should match regardless of order",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadWriteMany", "ReadOnlyMany"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-rom-rwx",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadOnlyMany, corev1api.ReadWriteMany},
+				},
+			},
+			skip: true,
+		},
+		{
+			name: "PVC access modes matching - missing one configured access mode should not skip",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcAccessModes: ["ReadOnlyMany", "ReadWriteMany"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-rwx",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteMany},
+				},
+			},
+			skip: false,
+		},
+		{
+			name: "PVC access modes matching - Combined with volume mode",
+			yamlData: `version: v1
+volumePolicies:
+- conditions:
+   pvcVolumeMode: Block
+   pvcAccessModes: ["ReadWriteOnce"]
+  action:
+    type: skip`,
+			vol:    nil,
+			podVol: nil,
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "pvc-block-rwo",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode:  pvcVolumeMode(corev1api.PersistentVolumeBlock),
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce},
+				},
+			},
+			skip: true,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1119,28 +1857,36 @@ func TestGetMatchAction_Errors(t *testing.T) {
 
 func TestParsePVC(t *testing.T) {
 	tests := []struct {
-		name           string
-		pvc            *corev1api.PersistentVolumeClaim
-		expectedLabels map[string]string
-		expectedPhase  string
-		expectErr      bool
+		name                string
+		pvc                 *corev1api.PersistentVolumeClaim
+		expectedLabels      map[string]string
+		expectedPhase       string
+		expectedVolumeMode  string
+		expectedAccessModes []string
+		expectErr           bool
 	}{
 		{
-			name: "valid PVC with labels and Pending phase",
+			name: "valid PVC with labels, Pending phase, Block volume mode, and access modes",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"env": "prod"},
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode:  pvcVolumeMode(corev1api.PersistentVolumeBlock),
+					AccessModes: []corev1api.PersistentVolumeAccessMode{corev1api.ReadWriteOnce, corev1api.ReadOnlyMany},
 				},
 				Status: corev1api.PersistentVolumeClaimStatus{
 					Phase: corev1api.ClaimPending,
 				},
 			},
-			expectedLabels: map[string]string{"env": "prod"},
-			expectedPhase:  "Pending",
-			expectErr:      false,
+			expectedLabels:      map[string]string{"env": "prod"},
+			expectedPhase:       "Pending",
+			expectedVolumeMode:  "Block",
+			expectedAccessModes: []string{"ReadWriteOnce", "ReadOnlyMany"},
+			expectErr:           false,
 		},
 		{
-			name: "valid PVC with Bound phase",
+			name: "valid PVC with Bound phase and nil volume mode",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{},
@@ -1149,27 +1895,52 @@ func TestParsePVC(t *testing.T) {
 					Phase: corev1api.ClaimBound,
 				},
 			},
-			expectedLabels: nil,
-			expectedPhase:  "Bound",
-			expectErr:      false,
+			expectedLabels:      nil,
+			expectedPhase:       "Bound",
+			expectedVolumeMode:  "",
+			expectedAccessModes: nil,
+			expectErr:           false,
 		},
 		{
-			name: "valid PVC with Lost phase",
+			name: "valid PVC with Lost phase and Filesystem volume mode",
 			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeFilesystem),
+				},
 				Status: corev1api.PersistentVolumeClaimStatus{
 					Phase: corev1api.ClaimLost,
 				},
 			},
-			expectedLabels: nil,
-			expectedPhase:  "Lost",
-			expectErr:      false,
+			expectedLabels:      nil,
+			expectedPhase:       "Lost",
+			expectedVolumeMode:  "Filesystem",
+			expectedAccessModes: nil,
+			expectErr:           false,
 		},
 		{
-			name:           "nil PVC pointer",
-			pvc:            (*corev1api.PersistentVolumeClaim)(nil),
-			expectedLabels: nil,
-			expectedPhase:  "",
-			expectErr:      false,
+			name: "valid PVC with unknown non-nil volume mode",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: pvcVolumeMode(corev1api.PersistentVolumeMode("foo")),
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimBound,
+				},
+			},
+			expectedLabels:      nil,
+			expectedPhase:       "Bound",
+			expectedVolumeMode:  "foo",
+			expectedAccessModes: nil,
+			expectErr:           false,
+		},
+		{
+			name:                "nil PVC pointer",
+			pvc:                 (*corev1api.PersistentVolumeClaim)(nil),
+			expectedLabels:      nil,
+			expectedPhase:       "",
+			expectedVolumeMode:  "",
+			expectedAccessModes: nil,
+			expectErr:           false,
 		},
 	}
 
@@ -1180,6 +1951,8 @@ func TestParsePVC(t *testing.T) {
 
 			assert.Equal(t, tc.expectedLabels, s.pvcLabels)
 			assert.Equal(t, tc.expectedPhase, s.pvcPhase)
+			assert.Equal(t, tc.expectedVolumeMode, s.pvcVolumeMode)
+			assert.Equal(t, tc.expectedAccessModes, s.pvcAccessModes)
 		})
 	}
 }
@@ -1239,6 +2012,1405 @@ func TestPVCPhaseMatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := tc.condition.match(tc.volume)
 			assert.Equal(t, tc.expectedMatch, result)
+		})
+	}
+}
+
+func TestNamespacedFilterPolicies(t *testing.T) {
+	testCases := []struct {
+		name     string
+		yamlData string
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name: "valid namespacedFilterPolicies with multiple kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["frontend", "backend"]
+  resourceFilters:
+  - kinds: ["Pod", "ConfigMap"]
+    labelSelector:
+      matchLabels:
+        app: web
+    names: ["app-*"]
+  - kinds: ["Secret"]
+    excludedNames: ["temp-*"]`,
+			wantErr: false,
+		},
+		{
+			name: "valid namespacedFilterPolicies with glob patterns",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["team-*"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    orLabelSelectors:
+    - matchLabels:
+        env: prod
+    - matchLabels:
+        env: staging`,
+			wantErr: false,
+		},
+		{
+			name: "valid - overlapping patterns allowed (first-match semantics)",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["team-frontend-*"]
+  resourceFilters:
+  - kinds: ["Pod", "ConfigMap", "Secret"]
+- namespaces: ["team-*"]
+  resourceFilters:
+  - kinds: ["Deployment", "Service"]`,
+			wantErr: false,
+		},
+		{
+			name: "invalid - no namespaces",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: []
+  resourceFilters:
+  - kinds: ["Pod"]`,
+			wantErr: true,
+			errMsg:  "at least one namespace must be specified",
+		},
+		{
+			name: "invalid - no resourceFilters",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters: []`,
+			wantErr: true,
+			errMsg:  "at least one resourceFilter must be specified",
+		},
+		{
+			name: "valid - asterisk catch-all",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["*"]
+    labelSelector:
+      matchLabels:
+        app: web`,
+			wantErr: false,
+		},
+		{
+			name: "invalid - multiple asterisk kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["*"]
+    labelSelector:
+      matchLabels:
+        app: web
+  - kinds: ["*"]
+    labelSelector:
+      matchLabels:
+        app: db`,
+			wantErr: true,
+			errMsg:  "only one catch-all resource filter is allowed",
+		},
+		{
+			name: "invalid - empty and asterisk kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: []
+    labelSelector:
+      matchLabels:
+        app: web
+  - kinds: ["*"]
+    labelSelector:
+      matchLabels:
+        app: db`,
+			wantErr: true,
+			errMsg:  "only one catch-all resource filter is allowed",
+		},
+		{
+			name: "invalid - multiple empty kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: []
+    labelSelector:
+      matchLabels:
+        app: web
+  - kinds: []
+    labelSelector:
+      matchLabels:
+        app: db`,
+			wantErr: true,
+			errMsg:  "only one catch-all resource filter is allowed",
+		},
+		{
+			name: "invalid - names with empty kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: []
+    names: ["app-*"]
+    labelSelector:
+      matchLabels:
+        app: web`,
+			wantErr: true,
+			errMsg:  "names or excludedNames cannot be specified for catch-all filters",
+		},
+		{
+			name: "invalid - excludedNames with empty kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: []
+    excludedNames: ["app-*"]
+    labelSelector:
+      matchLabels:
+        app: web`,
+			wantErr: true,
+			errMsg:  "names or excludedNames cannot be specified for catch-all filters",
+		},
+		{
+			name: "valid - no label selectors with catch-all",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["*"]`,
+			wantErr: false,
+		},
+		{
+			name: "invalid - duplicate kinds",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["Pod"]
+  - kinds: ["Pod", "ConfigMap"]`,
+			wantErr: true,
+			errMsg:  "kind \"Pod\" appears in both resourceFilters",
+		},
+		{
+			name: "invalid - both labelSelector and orLabelSelectors",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchLabels:
+        app: web
+    orLabelSelectors:
+    - matchLabels:
+        env: prod`,
+			wantErr: true,
+			errMsg:  "labelSelector and orLabelSelectors cannot co-exist",
+		},
+		{
+			name: "invalid - bad glob pattern in names",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    names: ["[invalid"]`,
+			wantErr: true,
+			errMsg:  "invalid glob pattern",
+		},
+		{
+			name: "invalid - bad glob pattern in excludedNames",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["test"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    excludedNames: ["[invalid"]`,
+			wantErr: true,
+			errMsg:  "invalid glob pattern",
+		},
+		{
+			name: "invalid - duplicate namespace pattern",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["production"]
+  resourceFilters:
+  - kinds: ["Pod"]
+- namespaces: ["production"]
+  resourceFilters:
+  - kinds: ["ConfigMap"]`,
+			wantErr: true,
+			errMsg:  "duplicate namespace pattern",
+		},
+		{
+			name: "invalid - bad namespace pattern",
+			yamlData: `version: v1
+namespacedFilterPolicies:
+- namespaces: ["prod**uction"]
+  resourceFilters:
+  - kinds: ["Pod"]`,
+			wantErr: true,
+			errMsg:  "wildcard pattern contains consecutive asterisks",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resPolicies, err := unmarshalResourcePolicies(&tc.yamlData)
+			require.NoError(t, err) // Unmarshal should always succeed for our test cases
+
+			policies := &Policies{}
+			err = policies.BuildPolicy(resPolicies)
+			require.NoError(t, err) // BuildPolicy should always succeed for our test cases
+
+			err = policies.Validate()
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.errMsg != "" {
+					assert.Contains(t, err.Error(), tc.errMsg)
+				}
+			} else {
+				require.NoError(t, err)
+
+				// Verify that we can retrieve the policies
+				nfPolicies := policies.GetNamespacedFilterPolicies()
+				assert.GreaterOrEqual(t, len(nfPolicies), 1) // Valid test cases have at least 1 policy
+			}
+		})
+	}
+}
+
+func TestNamespacedFilterPoliciesAccessor(t *testing.T) {
+	yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["frontend"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchLabels:
+        app: web`
+
+	resPolicies, err := unmarshalResourcePolicies(&yamlData)
+	require.NoError(t, err)
+
+	policies := &Policies{}
+	err = policies.BuildPolicy(resPolicies)
+	require.NoError(t, err)
+
+	nfPolicies := policies.GetNamespacedFilterPolicies()
+	require.Len(t, nfPolicies, 1)
+
+	policy := nfPolicies[0]
+	assert.Equal(t, []string{"frontend"}, policy.Namespaces)
+	assert.Len(t, policy.ResourceFilters, 1)
+
+	rf := policy.ResourceFilters[0]
+	assert.Equal(t, []string{"Pod"}, rf.Kinds)
+	assert.Equal(t, &PolicyLabelSelector{MatchLabels: map[string]string{"app": "web"}}, rf.LabelSelector)
+}
+
+func TestPolicyLabelSelectorSetBased(t *testing.T) {
+	t.Run("yaml decode matchLabels and matchExpressions", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchLabels:
+        app: web
+      matchExpressions:
+      - key: environment
+        operator: In
+        values: [prod, staging]
+      - key: do-not-backup
+        operator: DoesNotExist`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+
+		rf := policies.GetNamespacedFilterPolicies()[0].ResourceFilters[0]
+		require.NotNil(t, rf.LabelSelector)
+		assert.Equal(t, map[string]string{"app": "web"}, rf.LabelSelector.MatchLabels)
+		require.Len(t, rf.LabelSelector.MatchExpressions, 2)
+		assert.Equal(t, "environment", rf.LabelSelector.MatchExpressions[0].Key)
+		assert.Equal(t, "In", rf.LabelSelector.MatchExpressions[0].Operator)
+		assert.Equal(t, []string{"prod", "staging"}, rf.LabelSelector.MatchExpressions[0].Values)
+		assert.Equal(t, "do-not-backup", rf.LabelSelector.MatchExpressions[1].Key)
+		assert.Equal(t, "DoesNotExist", rf.LabelSelector.MatchExpressions[1].Operator)
+	})
+
+	t.Run("empty labelSelector is no filter", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector: {}`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+
+		rf := policies.GetNamespacedFilterPolicies()[0].ResourceFilters[0]
+		assert.False(t, IsPresentLabelSelector(rf.LabelSelector))
+	})
+
+	t.Run("invalid operator rejected", func(t *testing.T) {
+		yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["ns1"]
+  resourceFilters:
+  - kinds: ["Pod"]
+    labelSelector:
+      matchExpressions:
+      - key: environment
+        operator: Equals
+        values: [prod]`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		err = policies.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid label selector")
+	})
+
+	t.Run("NotIn Exists operators validate", func(t *testing.T) {
+		yamlData := `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    labelSelector:
+      matchExpressions:
+      - key: tier
+        operator: NotIn
+        values: [debug]
+      - key: managed-by
+        operator: Exists`
+
+		resPolicies, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+
+		policies := &Policies{}
+		require.NoError(t, policies.BuildPolicy(resPolicies))
+		require.NoError(t, policies.Validate())
+	})
+
+	t.Run("ToMetaV1LabelSelector and IsPresentLabelSelector", func(t *testing.T) {
+		assert.False(t, IsPresentLabelSelector(nil))
+		assert.False(t, IsPresentLabelSelector(&PolicyLabelSelector{}))
+		assert.True(t, IsPresentLabelSelector(&PolicyLabelSelector{MatchLabels: map[string]string{"a": "b"}}))
+
+		ls := ToMetaV1LabelSelector(&PolicyLabelSelector{
+			MatchLabels: map[string]string{"app": "web"},
+			MatchExpressions: []PolicyLabelSelectorRequirement{
+				{Key: "env", Operator: "In", Values: []string{"prod"}},
+			},
+		})
+		require.NotNil(t, ls)
+		assert.Equal(t, map[string]string{"app": "web"}, ls.MatchLabels)
+		require.Len(t, ls.MatchExpressions, 1)
+		assert.Equal(t, metav1.LabelSelectorOpIn, ls.MatchExpressions[0].Operator)
+
+		assert.Nil(t, ToMetaV1LabelSelector(nil))
+
+		sel, err := SelectorFromPolicyLabelSelector(&PolicyLabelSelector{
+			MatchLabels: map[string]string{"app": "web"},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, sel)
+		assert.True(t, sel.Matches(labels.Set{"app": "web"}))
+
+		emptySel, err := SelectorFromPolicyLabelSelector(&PolicyLabelSelector{})
+		require.NoError(t, err)
+		assert.Nil(t, emptySel)
+	})
+}
+
+func TestClusterScopedFilterPoliciesAccessor(t *testing.T) {
+	yamlData := `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]`
+
+	resPolicies, err := unmarshalResourcePolicies(&yamlData)
+	require.NoError(t, err)
+
+	policies := &Policies{}
+	err = policies.BuildPolicy(resPolicies)
+	require.NoError(t, err)
+
+	csfPolicy := policies.GetClusterScopedFilterPolicy()
+	require.NotNil(t, csfPolicy)
+	assert.Len(t, csfPolicy.ResourceFilters, 1)
+
+	rf := csfPolicy.ResourceFilters[0]
+	assert.Equal(t, []string{"ClusterRole"}, rf.Kinds)
+	assert.Equal(t, []string{"my-app-*"}, rf.Names)
+}
+
+func TestIncludeExcludePolicyAccessor(t *testing.T) {
+	yamlData := `version: v1
+includeExcludePolicy:
+  includedClusterScopedResources:
+  - ClusterRole
+  excludedClusterScopedResources:
+  - ClusterRoleBinding`
+
+	resPolicies, err := unmarshalResourcePolicies(&yamlData)
+	require.NoError(t, err)
+
+	policies := &Policies{}
+	err = policies.BuildPolicy(resPolicies)
+	require.NoError(t, err)
+
+	iePolicy := policies.GetIncludeExcludePolicy()
+	require.NotNil(t, iePolicy)
+	assert.Equal(t, []string{"ClusterRole"}, iePolicy.IncludedClusterScopedResources)
+	assert.Equal(t, []string{"ClusterRoleBinding"}, iePolicy.ExcludedClusterScopedResources)
+}
+
+func TestIncludeExcludePolicyValidateNamespacesByLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  IncludeExcludePolicy
+		wantErr string
+	}{
+		{
+			name:   "no label selector fields set is valid",
+			policy: IncludeExcludePolicy{},
+		},
+		{
+			name: "valid included and excluded selectors",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform", "team=infra"},
+				ExcludedNamespacesByLabel: []string{"env=dev"},
+			},
+		},
+		{
+			name: "valid AND logic",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"tier=critical", "compliance=pci"},
+				LabelSelectorLogic:        "AND",
+			},
+		},
+		{
+			name: "empty string in includedNamespacesByLabel is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{""},
+			},
+			wantErr: "includedNamespacesByLabel: label selector cannot be empty",
+		},
+		{
+			name: "whitespace-only string in excludedNamespacesByLabel is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespacesByLabel: []string{"   "},
+			},
+			wantErr: "excludedNamespacesByLabel: label selector cannot be empty",
+		},
+		{
+			name: "invalid selector syntax is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"=="},
+			},
+			wantErr: "includedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "invalid operator is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespacesByLabel: []string{"env >> prod"},
+			},
+			wantErr: "excludedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "malformed 'in' clause without parens is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"env in prod"},
+			},
+			wantErr: "includedNamespacesByLabel: invalid label selector",
+		},
+		{
+			name: "invalid labelSelectorLogic is rejected",
+			policy: IncludeExcludePolicy{
+				LabelSelectorLogic: "XOR",
+			},
+			wantErr: `labelSelectorLogic must be "OR" or "AND", got "XOR"`,
+		},
+		{
+			name: "lowercase labelSelectorLogic is accepted",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform"},
+				LabelSelectorLogic:        "and",
+			},
+		},
+		{
+			name: "mixed-case labelSelectorLogic is accepted",
+			policy: IncludeExcludePolicy{
+				IncludedNamespacesByLabel: []string{"team=platform"},
+				LabelSelectorLogic:        "Or",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.Validate()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveNamespacesByLabel(t *testing.T) {
+	nsWith := func(name string, labels map[string]string) *corev1api.Namespace {
+		return &corev1api.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		}
+	}
+
+	namespaces := []crclient.Object{
+		nsWith("platform-prod", map[string]string{"team": "platform", "env": "prod"}),
+		nsWith("platform-dev", map[string]string{"team": "platform", "env": "dev"}),
+		nsWith("infra", map[string]string{"team": "infra"}),
+		nsWith("confidential", map[string]string{"confidential": "true"}),
+		nsWith("unlabeled", nil),
+	}
+
+	newClient := func() crclient.Client {
+		return fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(namespaces...).Build()
+	}
+
+	t.Run("OR logic across included selectors", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "team=infra"}, nil, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"platform-prod", "platform-dev", "infra"}, included)
+		assert.Empty(t, excluded)
+	})
+
+	t.Run("AND logic across included selectors", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "env=prod"}, nil, "AND")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, included)
+	})
+
+	t.Run("AND logic across excluded selectors", func(t *testing.T) {
+		// labelSelectorLogic applies independently to each list - covers the excluded half
+		// of the contract, not just included (which the case above already covers).
+		_, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"team=platform", "env=prod"}, "AND")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, excluded)
+	})
+
+	t.Run("AND logic matching is case-insensitive", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform", "env=prod"}, nil, "and")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"platform-prod"}, included)
+	})
+
+	t.Run("excluded resolved independently of included", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"confidential=true"}, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+		assert.Equal(t, []string{"confidential"}, excluded)
+	})
+
+	t.Run("configured selector matching zero namespaces returns empty, not all", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=nonexistent"}, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+	})
+
+	t.Run("empty selector lists return empty sets", func(t *testing.T) {
+		included, excluded, err := ResolveNamespacesByLabel(context.Background(), newClient(), nil, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+		assert.Empty(t, excluded)
+	})
+
+	t.Run("selector on a label key no namespace carries at all resolves to empty", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"nonexistent-key=anything"}, nil, "")
+		require.NoError(t, err)
+		assert.Empty(t, included)
+	})
+
+	t.Run("existence-check selector (!key) matches namespaces missing that label", func(t *testing.T) {
+		included, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"!confidential"}, nil, "")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"platform-prod", "platform-dev", "infra", "unlabeled"}, included)
+	})
+
+	// ResolveNamespacesByLabel is exported and does not itself call Validate() - the
+	// production path always validates first, but a malformed selector reaching this function
+	// directly must return an error, not a silent empty result. Silently treating a malformed
+	// *excluded* selector as "no matches" would be fail-open: a namespace meant to be excluded
+	// would be backed up instead.
+	t.Run("malformed included selector returns an error, not a silent empty result", func(t *testing.T) {
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"=="}, nil, "")
+		require.Error(t, err)
+	})
+
+	t.Run("malformed excluded selector returns an error, not a silent empty result", func(t *testing.T) {
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{"=="}, "")
+		require.Error(t, err)
+	})
+
+	t.Run("empty-string included selector returns an error, not a silent match-everything", func(t *testing.T) {
+		// k8s labels.Parse("") succeeds and returns a selector that matches everything, so
+		// without validateLabelSelectors' explicit empty check, this would silently include
+		// every namespace instead of failing.
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{""}, nil, "")
+		require.Error(t, err)
+	})
+
+	t.Run("empty-string excluded selector returns an error, not a silent match-everything", func(t *testing.T) {
+		// Same gap as above, but fail-open for excludes: a silently-everything-matching
+		// excluded selector would exclude every namespace instead of failing loudly.
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			nil, []string{""}, "")
+		require.Error(t, err)
+	})
+
+	t.Run("invalid logic value returns an error, not a silent fall-through to OR", func(t *testing.T) {
+		// ResolveNamespacesByLabel is exported and does not itself call Validate() - a
+		// garbage logic value reaching this function directly must be rejected, not silently
+		// treated as OR (the exact-match comparison a garbage value would otherwise fail,
+		// widening an intended AND into an OR is fail-open the same way a swallowed selector
+		// parse error is).
+		_, _, err := ResolveNamespacesByLabel(context.Background(), newClient(),
+			[]string{"team=platform"}, nil, "XOR")
+		require.Error(t, err)
+	})
+}
+
+// TestResolveNamespacesByLabel_ManyNamespaces is a correctness-at-scale check against a
+// cluster with thousands of namespaces - not a timing assertion (BenchmarkResolveNamespacesByLabel
+// below covers actual performance).
+func TestResolveNamespacesByLabel_ManyNamespaces(t *testing.T) {
+	fakeClient := manyNamespacesClient()
+
+	included, _, err := ResolveNamespacesByLabel(context.Background(), fakeClient, []string{"team=platform"}, nil, "")
+
+	require.NoError(t, err)
+	assert.Len(t, included, manyNamespacesMatching)
+}
+
+// manyNamespacesTotal/manyNamespacesMatching/manyNamespacesClient back both
+// TestResolveNamespacesByLabel_ManyNamespaces (correctness at scale) and
+// BenchmarkResolveNamespacesByLabel (`go test -bench`, not part of a normal `go test` run and
+// so can't flake CI the way a fixed wall-clock assertion in a regular test can).
+const (
+	manyNamespacesTotal    = 5000
+	manyNamespacesMatching = 137
+)
+
+func manyNamespacesClient() crclient.Client {
+	objs := make([]crclient.Object, 0, manyNamespacesTotal)
+	for i := range manyNamespacesTotal {
+		nsLabels := map[string]string{"team": "other"}
+		if i < manyNamespacesMatching {
+			nsLabels = map[string]string{"team": "platform"}
+		}
+		objs = append(objs, &corev1api.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("ns-%d", i), Labels: nsLabels},
+		})
+	}
+
+	return fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objs...).Build()
+}
+
+func BenchmarkResolveNamespacesByLabel(b *testing.B) {
+	fakeClient := manyNamespacesClient()
+
+	for range b.N {
+		if _, _, err := ResolveNamespacesByLabel(context.Background(), fakeClient, []string{"team=platform"}, nil, ""); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestFirstMatchSemantics(t *testing.T) {
+	yamlData := `version: v1
+namespacedFilterPolicies:
+- namespaces: ["team-frontend-*", "specific-ns"]
+  resourceFilters:
+  - kinds: ["Pod", "ConfigMap", "Secret"]
+- namespaces: ["team-*", "another-pattern"]
+  resourceFilters:
+  - kinds: ["Deployment", "Service"]`
+
+	resPolicies, err := unmarshalResourcePolicies(&yamlData)
+	require.NoError(t, err)
+
+	policies := &Policies{}
+	err = policies.BuildPolicy(resPolicies)
+	require.NoError(t, err)
+
+	err = policies.Validate()
+	require.NoError(t, err)
+
+	nfPolicies := policies.GetNamespacedFilterPolicies()
+	require.Len(t, nfPolicies, 2)
+
+	// Verify the first policy has the more specific patterns
+	policy1 := nfPolicies[0]
+	assert.Equal(t, []string{"team-frontend-*", "specific-ns"}, policy1.Namespaces)
+	assert.Equal(t, []string{"Pod", "ConfigMap", "Secret"}, policy1.ResourceFilters[0].Kinds)
+
+	// Verify the second policy has the broader patterns
+	policy2 := nfPolicies[1]
+	assert.Equal(t, []string{"team-*", "another-pattern"}, policy2.Namespaces)
+	assert.Equal(t, []string{"Deployment", "Service"}, policy2.ResourceFilters[0].Kinds)
+}
+
+func TestClusterScopedFilterPolicies(t *testing.T) {
+	testCases := []struct {
+		name     string
+		yamlData string
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name: "valid - single kind with names",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]`,
+			wantErr: false,
+		},
+		{
+			name: "valid - multi-kind with labelSelector",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole", "ClusterRoleBinding"]
+    labelSelector:
+      matchLabels:
+        app: my-app`,
+			wantErr: false,
+		},
+		{
+			name: "valid - orLabelSelectors",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["CustomResourceDefinition"]
+    orLabelSelectors:
+    - matchLabels:
+        app: my-app
+    - matchLabels:
+        app: other-app`,
+			wantErr: false,
+		},
+		{
+			name: "valid - excludedNames",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-*"]
+    excludedNames: ["my-debug-*"]`,
+			wantErr: false,
+		},
+		{
+			name: "invalid - empty resourceFilters",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters: []`,
+			wantErr: true,
+			errMsg:  "resourceFilters cannot be empty; remove the policy block entirely if it is not needed",
+		},
+		{
+			name: "invalid - empty kinds in clusterScopedFilterPolicy",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: []
+    names: ["my-app-*"]`,
+			wantErr: true,
+			errMsg:  "kinds must be specified",
+		},
+		{
+			name: "invalid - asterisk kinds (explicit catch-all) in clusterScopedFilterPolicy",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["*"]
+    labelSelector:
+      matchLabels:
+        app: my-app`,
+			wantErr: true,
+			errMsg:  "kinds must be specified",
+		},
+		{
+			name: "invalid - duplicate kinds across entries",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["my-app-*"]
+  - kinds: ["ClusterRole"]
+    labelSelector:
+      matchLabels:
+        app: other`,
+			wantErr: true,
+			errMsg:  `kind "ClusterRole" appears in both`,
+		},
+		{
+			name: "invalid - labelSelector and orLabelSelectors co-exist",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    labelSelector:
+      matchLabels:
+        app: my-app
+    orLabelSelectors:
+    - matchLabels:
+        app: other`,
+			wantErr: true,
+			errMsg:  "labelSelector and orLabelSelectors cannot co-exist",
+		},
+		{
+			name: "invalid - bad glob in names",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    names: ["[invalid"]`,
+			wantErr: true,
+			errMsg:  "invalid glob pattern",
+		},
+		{
+			name: "invalid - bad glob in excludedNames",
+			yamlData: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+  - kinds: ["ClusterRole"]
+    excludedNames: ["[bad"]`,
+			wantErr: true,
+			errMsg:  "invalid glob pattern",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resPolicies, err := unmarshalResourcePolicies(&tc.yamlData)
+			require.NoError(t, err)
+
+			policies := &Policies{}
+			err = policies.BuildPolicy(resPolicies)
+			require.NoError(t, err)
+
+			err = policies.Validate()
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestPVCVolumeModeMatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		condition     *pvcVolumeModeCondition
+		volume        *structuredVolume
+		expectedMatch bool
+	}{
+		{
+			name:          "match Block volume mode",
+			condition:     &pvcVolumeModeCondition{volumeMode: "Block"},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+		{
+			name:          "match Filesystem volume mode",
+			condition:     &pvcVolumeModeCondition{volumeMode: "Filesystem"},
+			volume:        &structuredVolume{pvcVolumeMode: "Filesystem"},
+			expectedMatch: true,
+		},
+		{
+			name:          "no match for different volume mode",
+			condition:     &pvcVolumeModeCondition{volumeMode: "Block"},
+			volume:        &structuredVolume{pvcVolumeMode: "Filesystem"},
+			expectedMatch: false,
+		},
+		{
+			name:          "case-sensitive no match for lowercase volume mode",
+			condition:     &pvcVolumeModeCondition{volumeMode: "block"},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: false,
+		},
+		{
+			name:          "no match for unknown condition value against Filesystem",
+			condition:     &pvcVolumeModeCondition{volumeMode: "foo"},
+			volume:        &structuredVolume{pvcVolumeMode: "Filesystem"},
+			expectedMatch: false,
+		},
+		{
+			name:          "match unknown condition value only when volume has same value",
+			condition:     &pvcVolumeModeCondition{volumeMode: "foo"},
+			volume:        &structuredVolume{pvcVolumeMode: "foo"},
+			expectedMatch: true,
+		},
+		{
+			name:          "no match for empty volume mode",
+			condition:     &pvcVolumeModeCondition{volumeMode: "Block"},
+			volume:        &structuredVolume{pvcVolumeMode: ""},
+			expectedMatch: false,
+		},
+		{
+			name:          "match with empty volume mode condition (always match)",
+			condition:     &pvcVolumeModeCondition{volumeMode: ""},
+			volume:        &structuredVolume{pvcVolumeMode: "Block"},
+			expectedMatch: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.condition.match(tc.volume)
+			assert.Equal(t, tc.expectedMatch, result)
+		})
+	}
+}
+
+func TestPVCAccessModesMatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		condition     *pvcAccessModesCondition
+		volume        *structuredVolume
+		expectedMatch bool
+	}{
+		{
+			name:          "match ReadWriteOnce access mode",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteOnce"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce"}},
+			expectedMatch: true,
+		},
+		{
+			name:          "match exact multiple access modes",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteOnce", "ReadOnlyMany"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce", "ReadOnlyMany"}},
+			expectedMatch: true,
+		},
+		{
+			name:          "match exact multiple access modes regardless of order",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadOnlyMany", "ReadWriteOnce"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce", "ReadOnlyMany"}},
+			expectedMatch: true,
+		},
+		{
+			name:          "no match when one of multiple access modes is missing",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteOnce", "ReadOnlyMany"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadOnlyMany"}},
+			expectedMatch: false,
+		},
+		{
+			name:          "no match when PVC has extra access modes",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteMany"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce", "ReadWriteMany"}},
+			expectedMatch: false,
+		},
+		{
+			name:          "no match for different access mode",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteOnce"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteMany"}},
+			expectedMatch: false,
+		},
+		{
+			name:          "case-sensitive no match for lowercase access mode",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"readwriteonce"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce"}},
+			expectedMatch: false,
+		},
+		{
+			name:          "no match for empty PVC access modes",
+			condition:     &pvcAccessModesCondition{accessModes: []string{"ReadWriteOnce"}},
+			volume:        &structuredVolume{pvcAccessModes: []string{}},
+			expectedMatch: false,
+		},
+		{
+			name:          "match with empty access modes list (always match)",
+			condition:     &pvcAccessModesCondition{accessModes: []string{}},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce"}},
+			expectedMatch: true,
+		},
+		{
+			name:          "match with nil access modes list (always match)",
+			condition:     &pvcAccessModesCondition{accessModes: nil},
+			volume:        &structuredVolume{pvcAccessModes: []string{"ReadWriteOnce"}},
+			expectedMatch: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.condition.match(tc.volume)
+			assert.Equal(t, tc.expectedMatch, result)
+		})
+	}
+}
+
+// ---- Global backup volume policies ----
+
+func globalPolicyConfigMap(name, data string) *corev1api.ConfigMap {
+	return &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: name},
+		Data:       map[string]string{"policies.yaml": data},
+	}
+}
+
+func backupWithPolicy(ref string) velerov1api.Backup {
+	b := velerov1api.Backup{ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "backup"}}
+	if ref != "" {
+		b.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: ConfigmapRefType, Name: ref}
+	}
+	return b
+}
+
+// firstActionFor returns the action type the policies select for a PV with the given storage
+// class, or "" when nothing matches. It exercises the compiled match logic so the tests verify
+// merge ordering rather than internal field layout.
+func firstActionFor(p *Policies, storageClass string) VolumeActionType {
+	pv := &corev1api.PersistentVolume{Spec: corev1api.PersistentVolumeSpec{StorageClassName: storageClass}}
+	vol := &structuredVolume{}
+	vol.parsePV(pv)
+	if a := p.match(vol); a != nil {
+		return a.Type
+	}
+	return ""
+}
+
+func TestGetResourcePoliciesFromBackupWithGlobal(t *testing.T) {
+	gp2Skip := `version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+`
+	gp2Snapshot := `version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: snapshot
+`
+	otherFsBackup := `version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - other
+    action:
+      type: fs-backup
+`
+
+	tests := []struct {
+		name                string
+		backupCM            *corev1api.ConfigMap
+		globalCMName        string
+		globalCM            *corev1api.ConfigMap
+		backupRef           string
+		backupAnnotations   map[string]string
+		installNamespace    string
+		expectErr           bool
+		expectedGp2Action   VolumeActionType
+		expectedNumPolicies int
+	}{
+		{
+			name:                "no global, backup only - unchanged behavior",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", gp2Snapshot),
+			expectedGp2Action:   Snapshot,
+			expectedNumPolicies: 1,
+		},
+		{
+			name:                "global only, backup has no policy",
+			globalCMName:        "global",
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			expectedGp2Action:   Skip,
+			expectedNumPolicies: 1,
+		},
+		{
+			name:                "no global configured and no backup policy",
+			expectedGp2Action:   "",
+			expectedNumPolicies: 0,
+		},
+		{
+			name:                "merge - backup policy overrides global for gp2",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", gp2Snapshot),
+			globalCMName:        "global",
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			expectedGp2Action:   Snapshot, // backup-level wins (evaluated first)
+			expectedNumPolicies: 2,
+		},
+		{
+			name:                "merge - backup inherits non-overlapping global rule",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
+			globalCMName:        "global",
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			expectedGp2Action:   Skip, // only global matches gp2
+			expectedNumPolicies: 2,
+		},
+		{
+			name:                "merge - global from backup annotation with empty params",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			backupAnnotations:   map[string]string{velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global"},
+			expectedGp2Action:   Skip, // only global matches gp2
+			expectedNumPolicies: 2,
+		},
+		{
+			name:         "global configmap missing - error",
+			globalCMName: "global",
+			expectErr:    true,
+		},
+		{
+			name:         "global configmap invalid - error",
+			globalCMName: "global",
+			globalCM:     globalPolicyConfigMap("global", "not: [valid"),
+			expectErr:    true,
+		},
+		{
+			// Parses cleanly but fails Policies.Validate() due to the unsupported version.
+			name:         "global configmap fails validation - error",
+			globalCMName: "global",
+			globalCM:     globalPolicyConfigMap("global", "version: v2\nvolumePolicies: []\n"),
+			expectErr:    true,
+		},
+		{
+			// Backup references a ResourcePolicy ConfigMap that does not exist, so resolving the
+			// backup-level policies fails before the global ones are consulted.
+			name:         "backup configmap missing - error",
+			backupRef:    "missing-backup-cm",
+			globalCMName: "global",
+			globalCM:     globalPolicyConfigMap("global", gp2Skip),
+			expectErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := velerotest.NewFakeControllerRuntimeClient(t)
+			if tc.backupCM != nil {
+				require.NoError(t, client.Create(t.Context(), tc.backupCM))
+			}
+			if tc.globalCM != nil {
+				require.NoError(t, client.Create(t.Context(), tc.globalCM))
+			}
+
+			b := backupWithPolicy(tc.backupRef)
+			if tc.backupAnnotations != nil {
+				b.Annotations = tc.backupAnnotations
+			}
+
+			ns := tc.installNamespace
+			if ns == "" && tc.backupAnnotations == nil {
+				ns = "velero"
+			}
+			p, err := GetResourcePoliciesFromBackupWithGlobal(b, client, tc.globalCMName, ns, logrus.New())
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			if tc.expectedNumPolicies == 0 {
+				assert.Nil(t, p)
+				return
+			}
+			require.NotNil(t, p)
+			assert.Len(t, p.volumePolicies, tc.expectedNumPolicies)
+			assert.Equal(t, tc.expectedGp2Action, firstActionFor(p, "gp2"))
+		})
+	}
+}
+
+func TestGetGlobalResourcePoliciesIgnoresNonVolumePolicies(t *testing.T) {
+	data := `version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+namespacedFilterPolicies:
+- namespaces: ["frontend"]
+  resourceFilters:
+  - kinds: ["Pod"]
+`
+	client := velerotest.NewFakeControllerRuntimeClient(t)
+	require.NoError(t, client.Create(t.Context(), globalPolicyConfigMap("global", data)))
+
+	p, err := GetGlobalResourcePolicies(client, "velero", "global", logrus.New())
+	require.NoError(t, err)
+	require.NotNil(t, p)
+
+	// Only volumePolicies are kept; the namespaced filter policy is dropped.
+	assert.Len(t, p.volumePolicies, 1)
+	assert.Empty(t, p.GetNamespacedFilterPolicies())
+	assert.Nil(t, p.GetIncludeExcludePolicy())
+	assert.Nil(t, p.GetClusterScopedFilterPolicy())
+}
+
+func TestActionGetDataMover(t *testing.T) {
+	testCases := []struct {
+		name              string
+		action            *Action
+		expectedDataMover string
+		expectErr         bool
+	}{
+		{
+			name:      "nil action",
+			action:    nil,
+			expectErr: true,
+		},
+		{
+			name:              "snapshot action without parameters returns default mover",
+			action:            &Action{Type: Snapshot},
+			expectedDataMover: datamover.GetDefaultBuiltInDataMover(),
+		},
+		{
+			name:              "snapshot action without dataMover parameter returns default mover",
+			action:            &Action{Type: Snapshot, Parameters: map[string]any{"other": "value"}},
+			expectedDataMover: datamover.GetDefaultBuiltInDataMover(),
+		},
+		{
+			name:              "snapshot action with velero dataMover",
+			action:            &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero"}},
+			expectedDataMover: datamover.GetDefaultBuiltInDataMover(),
+		},
+		{
+			name:              "snapshot action with velero-fs dataMover",
+			action:            &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": datamover.DataMoverTypeVeleroFs}},
+			expectedDataMover: datamover.DataMoverTypeVeleroFs,
+		},
+		{
+			name:              "snapshot action with velero-block dataMover",
+			action:            &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": datamover.DataMoverTypeVeleroBlock}},
+			expectedDataMover: datamover.DataMoverTypeVeleroBlock,
+		},
+		{
+			name:      "non-snapshot action returns error",
+			action:    &Action{Type: FSBackup, Parameters: map[string]any{"dataMover": "velero-fs"}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with non-string dataMover returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": 123}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with invalid dataMover returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "unknown"}},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataMover, err := tc.action.GetDataMover()
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedDataMover, dataMover)
+		})
+	}
+}
+
+func TestActionGetSnapshotClass(t *testing.T) {
+	testCases := []struct {
+		name          string
+		action        *Action
+		expectedClass string
+		expectErr     bool
+	}{
+		{
+			name:      "nil action",
+			action:    nil,
+			expectErr: true,
+		},
+		{
+			name:          "snapshot action without parameters",
+			action:        &Action{Type: Snapshot},
+			expectedClass: "",
+		},
+		{
+			name:          "snapshot action without snapshotClass parameter",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"other": "value"}},
+			expectedClass: "",
+		},
+		{
+			name:          "snapshot action with snapshotClass",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": "my-vsc"}},
+			expectedClass: "my-vsc",
+		},
+		{
+			name:      "non-snapshot action returns error",
+			action:    &Action{Type: FSBackup, Parameters: map[string]any{"snapshotClass": "my-vsc"}},
+			expectErr: true,
+		},
+		{
+			name:      "snapshot action with non-string snapshotClass returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": 123}},
+			expectErr: true,
+		},
+		{
+			name:          "snapshot action with both snapshotClass and dataMover",
+			action:        &Action{Type: Snapshot, Parameters: map[string]any{"snapshotClass": "my-vsc", "dataMover": "velero-fs"}},
+			expectedClass: "my-vsc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshotClass, err := tc.action.GetSnapshotClass()
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedClass, snapshotClass)
 		})
 	}
 }

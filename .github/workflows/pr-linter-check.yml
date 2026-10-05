@@ -6,6 +6,10 @@ on:
       - "site/**"
       - "design/**"
       - "**/*.md"
+
+permissions:
+  contents: read
+
 jobs:
   get-go-version:
     uses: ./.github/workflows/get-go-version.yaml
@@ -18,10 +22,10 @@ jobs:
     needs: get-go-version
     steps:
       - name: Check out the code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ needs.get-go-version.outputs.version }}
 

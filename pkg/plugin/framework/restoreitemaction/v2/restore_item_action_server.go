@@ -21,7 +21,7 @@ import (
 
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"

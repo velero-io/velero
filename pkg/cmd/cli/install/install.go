@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -42,59 +42,61 @@ import (
 
 // Options collects all the options for installing Velero into a Kubernetes cluster.
 type Options struct {
-	Namespace                       string
-	Image                           string
-	BucketName                      string
-	Prefix                          string
-	ProviderName                    string
-	PodAnnotations                  flag.Map
-	PodLabels                       flag.Map
-	ServiceAccountAnnotations       flag.Map
-	ServiceAccountName              string
-	VeleroPodCPURequest             string
-	VeleroPodMemRequest             string
-	VeleroPodCPULimit               string
-	VeleroPodMemLimit               string
-	NodeAgentPodCPURequest          string
-	NodeAgentPodMemRequest          string
-	NodeAgentPodCPULimit            string
-	NodeAgentPodMemLimit            string
-	RestoreOnly                     bool
-	SecretFile                      string
-	NoSecret                        bool
-	DryRun                          bool
-	BackupStorageConfig             flag.Map
-	VolumeSnapshotConfig            flag.Map
-	UseNodeAgent                    bool
-	UseNodeAgentWindows             bool
-	PrivilegedNodeAgent             bool
-	Wait                            bool
-	UseVolumeSnapshots              bool
-	DefaultRepoMaintenanceFrequency time.Duration
-	GarbageCollectionFrequency      time.Duration
-	PodVolumeOperationTimeout       time.Duration
-	Plugins                         flag.StringArray
-	NoDefaultBackupLocation         bool
-	CRDsOnly                        bool
-	CACertFile                      string
-	Features                        string
-	DefaultVolumesToFsBackup        bool
-	UploaderType                    string
-	DefaultSnapshotMoveData         bool
-	DisableInformerCache            bool
-	ScheduleSkipImmediately         bool
-	PodResources                    kubeutil.PodResources
-	KeepLatestMaintenanceJobs       int
-	BackupRepoConfigMap             string
-	RepoMaintenanceJobConfigMap     string
-	NodeAgentConfigMap              string
-	ItemBlockWorkerCount            int
-	ConcurrentBackups               int
-	NodeAgentDisableHostPath        bool
-	kubeletRootDir                  string
-	Apply                           bool
-	ServerPriorityClassName         string
-	NodeAgentPriorityClassName      string
+	Namespace                        string
+	Image                            string
+	BucketName                       string
+	Prefix                           string
+	ProviderName                     string
+	PodAnnotations                   flag.Map
+	PodLabels                        flag.Map
+	ServiceAccountAnnotations        flag.Map
+	ServiceAccountName               string
+	VeleroPodCPURequest              string
+	VeleroPodMemRequest              string
+	VeleroPodCPULimit                string
+	VeleroPodMemLimit                string
+	NodeAgentPodCPURequest           string
+	NodeAgentPodMemRequest           string
+	NodeAgentPodCPULimit             string
+	NodeAgentPodMemLimit             string
+	RestoreOnly                      bool
+	SecretFile                       string
+	NoSecret                         bool
+	DryRun                           bool
+	BackupStorageConfig              flag.Map
+	VolumeSnapshotConfig             flag.Map
+	UseNodeAgent                     bool
+	UseNodeAgentWindows              bool
+	PrivilegedNodeAgent              bool
+	Wait                             bool
+	UseVolumeSnapshots               bool
+	DefaultRepoMaintenanceFrequency  time.Duration
+	GarbageCollectionFrequency       time.Duration
+	PodVolumeOperationTimeout        time.Duration
+	Plugins                          flag.StringArray
+	NoDefaultBackupLocation          bool
+	CRDsOnly                         bool
+	CACertFile                       string
+	Features                         string
+	DefaultVolumesToFsBackup         bool
+	UploaderType                     string
+	DefaultSnapshotMoveData          bool
+	CSISnapshotEarlyFrequentPolling  bool
+	DisableInformerCache             bool
+	ScheduleSkipImmediately          bool
+	PodResources                     kubeutil.PodResources
+	KeepLatestMaintenanceJobs        int
+	BackupRepoConfigMap              string
+	RepoMaintenanceJobConfigMap      string
+	DefaultResourceModifierConfigMap string
+	NodeAgentConfigMap               string
+	ItemBlockWorkerCount             int
+	ConcurrentBackups                int
+	NodeAgentDisableHostPath         bool
+	kubeletRootDir                   string
+	Apply                            bool
+	ServerPriorityClassName          string
+	NodeAgentPriorityClassName       string
 }
 
 // BindFlags adds command line values to the options struct.
@@ -141,6 +143,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", o.DefaultVolumesToFsBackup, "Bool flag to configure Velero server to use pod volume file system backup by default for all volumes on all backups. Optional.")
 	flags.StringVar(&o.UploaderType, "uploader-type", o.UploaderType, fmt.Sprintf("The type of uploader to transfer the data of pod volumes, supported value: '%s'", uploader.KopiaType))
 	flags.BoolVar(&o.DefaultSnapshotMoveData, "default-snapshot-move-data", o.DefaultSnapshotMoveData, "Bool flag to configure Velero server to move data by default for all snapshots supporting data movement. Optional.")
+	flags.BoolVar(&o.CSISnapshotEarlyFrequentPolling, "csi-snapshot-early-frequent-polling", o.CSISnapshotEarlyFrequentPolling, "Bool flag to configure Velero server to use early frequent polling by default for all CSI snapshots. Optional.")
 	flags.BoolVar(&o.DisableInformerCache, "disable-informer-cache", o.DisableInformerCache, "Disable informer cache for Get calls on restore. With this enabled, it will speed up restore in cases where there are backup resources which already exist in the cluster, but for very large clusters this will increase velero memory usage. Default is false (don't disable). Optional.")
 	flags.BoolVar(&o.ScheduleSkipImmediately, "schedule-skip-immediately", o.ScheduleSkipImmediately, "Skip the first scheduled backup immediately after creating a schedule. Default is false (don't skip).")
 	flags.BoolVar(&o.NodeAgentDisableHostPath, "node-agent-disable-host-path", o.NodeAgentDisableHostPath, "Don't mount the pod volume host path to node-agent. Optional. Pod volume host path mount is required by fs-backup but could be disabled for other backup methods.")
@@ -186,6 +189,12 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 		"repo-maintenance-job-configmap",
 		o.RepoMaintenanceJobConfigMap,
 		"The name of ConfigMap containing repository maintenance Job configurations.",
+	)
+	flags.StringVar(
+		&o.DefaultResourceModifierConfigMap,
+		"default-resource-modifier-configmap",
+		o.DefaultResourceModifierConfigMap,
+		"The name of a ConfigMap in the Velero namespace containing default resource modifier rules applied to all restores.",
 	)
 	flags.StringVar(
 		&o.NodeAgentConfigMap,
@@ -238,16 +247,17 @@ func NewInstallOptions() *Options {
 		NodeAgentPodCPULimit:      install.DefaultNodeAgentPodCPULimit,
 		NodeAgentPodMemLimit:      install.DefaultNodeAgentPodMemLimit,
 		// Default to creating a VSL unless we're told otherwise
-		UseVolumeSnapshots:       true,
-		NoDefaultBackupLocation:  false,
-		CRDsOnly:                 false,
-		DefaultVolumesToFsBackup: false,
-		UploaderType:             uploader.KopiaType,
-		DefaultSnapshotMoveData:  false,
-		DisableInformerCache:     false,
-		ScheduleSkipImmediately:  false,
-		kubeletRootDir:           install.DefaultKubeletRootDir,
-		NodeAgentDisableHostPath: false,
+		UseVolumeSnapshots:              true,
+		NoDefaultBackupLocation:         false,
+		CRDsOnly:                        false,
+		DefaultVolumesToFsBackup:        false,
+		UploaderType:                    uploader.KopiaType,
+		DefaultSnapshotMoveData:         false,
+		CSISnapshotEarlyFrequentPolling: false,
+		DisableInformerCache:            false,
+		ScheduleSkipImmediately:         false,
+		kubeletRootDir:                  install.DefaultKubeletRootDir,
+		NodeAgentDisableHostPath:        false,
 	}
 }
 
@@ -295,48 +305,50 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 	}
 
 	return &install.VeleroOptions{
-		Namespace:                       o.Namespace,
-		Image:                           o.Image,
-		ProviderName:                    o.ProviderName,
-		Bucket:                          o.BucketName,
-		Prefix:                          o.Prefix,
-		PodAnnotations:                  o.PodAnnotations.Data(),
-		PodLabels:                       o.PodLabels.Data(),
-		ServiceAccountAnnotations:       o.ServiceAccountAnnotations.Data(),
-		ServiceAccountName:              o.ServiceAccountName,
-		VeleroPodResources:              veleroPodResources,
-		NodeAgentPodResources:           nodeAgentPodResources,
-		SecretData:                      secretData,
-		RestoreOnly:                     o.RestoreOnly,
-		UseNodeAgent:                    o.UseNodeAgent,
-		UseNodeAgentWindows:             o.UseNodeAgentWindows,
-		PrivilegedNodeAgent:             o.PrivilegedNodeAgent,
-		UseVolumeSnapshots:              o.UseVolumeSnapshots,
-		BSLConfig:                       o.BackupStorageConfig.Data(),
-		VSLConfig:                       o.VolumeSnapshotConfig.Data(),
-		DefaultRepoMaintenanceFrequency: o.DefaultRepoMaintenanceFrequency,
-		GarbageCollectionFrequency:      o.GarbageCollectionFrequency,
-		PodVolumeOperationTimeout:       o.PodVolumeOperationTimeout,
-		Plugins:                         o.Plugins,
-		NoDefaultBackupLocation:         o.NoDefaultBackupLocation,
-		CACertData:                      caCertData,
-		Features:                        strings.Split(o.Features, ","),
-		DefaultVolumesToFsBackup:        o.DefaultVolumesToFsBackup,
-		UploaderType:                    o.UploaderType,
-		DefaultSnapshotMoveData:         o.DefaultSnapshotMoveData,
-		DisableInformerCache:            o.DisableInformerCache,
-		ScheduleSkipImmediately:         o.ScheduleSkipImmediately,
-		PodResources:                    o.PodResources,
-		KeepLatestMaintenanceJobs:       o.KeepLatestMaintenanceJobs,
-		BackupRepoConfigMap:             o.BackupRepoConfigMap,
-		RepoMaintenanceJobConfigMap:     o.RepoMaintenanceJobConfigMap,
-		NodeAgentConfigMap:              o.NodeAgentConfigMap,
-		ItemBlockWorkerCount:            o.ItemBlockWorkerCount,
-		ConcurrentBackups:               o.ConcurrentBackups,
-		KubeletRootDir:                  o.kubeletRootDir,
-		NodeAgentDisableHostPath:        o.NodeAgentDisableHostPath,
-		ServerPriorityClassName:         o.ServerPriorityClassName,
-		NodeAgentPriorityClassName:      o.NodeAgentPriorityClassName,
+		Namespace:                        o.Namespace,
+		Image:                            o.Image,
+		ProviderName:                     o.ProviderName,
+		Bucket:                           o.BucketName,
+		Prefix:                           o.Prefix,
+		PodAnnotations:                   o.PodAnnotations.Data(),
+		PodLabels:                        o.PodLabels.Data(),
+		ServiceAccountAnnotations:        o.ServiceAccountAnnotations.Data(),
+		ServiceAccountName:               o.ServiceAccountName,
+		VeleroPodResources:               veleroPodResources,
+		NodeAgentPodResources:            nodeAgentPodResources,
+		SecretData:                       secretData,
+		RestoreOnly:                      o.RestoreOnly,
+		UseNodeAgent:                     o.UseNodeAgent,
+		UseNodeAgentWindows:              o.UseNodeAgentWindows,
+		PrivilegedNodeAgent:              o.PrivilegedNodeAgent,
+		UseVolumeSnapshots:               o.UseVolumeSnapshots,
+		BSLConfig:                        o.BackupStorageConfig.Data(),
+		VSLConfig:                        o.VolumeSnapshotConfig.Data(),
+		DefaultRepoMaintenanceFrequency:  o.DefaultRepoMaintenanceFrequency,
+		GarbageCollectionFrequency:       o.GarbageCollectionFrequency,
+		PodVolumeOperationTimeout:        o.PodVolumeOperationTimeout,
+		Plugins:                          o.Plugins,
+		NoDefaultBackupLocation:          o.NoDefaultBackupLocation,
+		CACertData:                       caCertData,
+		Features:                         strings.Split(o.Features, ","),
+		DefaultVolumesToFsBackup:         o.DefaultVolumesToFsBackup,
+		UploaderType:                     o.UploaderType,
+		DefaultSnapshotMoveData:          o.DefaultSnapshotMoveData,
+		CSISnapshotEarlyFrequentPolling:  o.CSISnapshotEarlyFrequentPolling,
+		DisableInformerCache:             o.DisableInformerCache,
+		ScheduleSkipImmediately:          o.ScheduleSkipImmediately,
+		PodResources:                     o.PodResources,
+		KeepLatestMaintenanceJobs:        o.KeepLatestMaintenanceJobs,
+		BackupRepoConfigMap:              o.BackupRepoConfigMap,
+		RepoMaintenanceJobConfigMap:      o.RepoMaintenanceJobConfigMap,
+		DefaultResourceModifierConfigMap: o.DefaultResourceModifierConfigMap,
+		NodeAgentConfigMap:               o.NodeAgentConfigMap,
+		ItemBlockWorkerCount:             o.ItemBlockWorkerCount,
+		ConcurrentBackups:                o.ConcurrentBackups,
+		KubeletRootDir:                   o.kubeletRootDir,
+		NodeAgentDisableHostPath:         o.NodeAgentDisableHostPath,
+		ServerPriorityClassName:          o.ServerPriorityClassName,
+		NodeAgentPriorityClassName:       o.NodeAgentPriorityClassName,
 	}, nil
 }
 
@@ -360,6 +372,7 @@ All namespaced resources will be placed in the 'velero' namespace by default.
 
 The '--namespace' flag can be used to specify a different namespace to install into.
 
+By default, the command returns immediately after creating resources.
 Use '--wait' to wait for the Velero Deployment to be ready before proceeding.
 
 Use '-o yaml' or '-o json' with '--dry-run' to output all generated resources as text instead of sending the resources to the server.

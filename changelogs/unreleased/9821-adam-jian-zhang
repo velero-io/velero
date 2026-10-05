@@ -1,0 +1,1 @@
+Fix issue #9811, add interface to support ClusterScopedFilterPolicy and NamespacedFilterPolicy

@@ -20,16 +20,18 @@ import (
 	"context"
 	"fmt"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	"github.com/cockroachdb/errors"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
@@ -38,6 +40,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 // volumeSnapshotRestoreItemAction is a Velero restore item
@@ -66,6 +69,9 @@ func resetVolumeSnapshotSpecForRestore(vs *snapshotv1api.VolumeSnapshot, vscName
 }
 
 func resetVolumeSnapshotAnnotation(vs *snapshotv1api.VolumeSnapshot) {
+	if vs.ObjectMeta.Annotations == nil {
+		vs.ObjectMeta.Annotations = make(map[string]string)
+	}
 	vs.ObjectMeta.Annotations[velerov1api.VSCDeletionPolicyAnnotation] =
 		string(snapshotv1api.VolumeSnapshotContentRetain)
 }
@@ -103,8 +109,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
 	// Check if VGSC already exists
-	existingVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-	err := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, existingVGSC)
+	existingVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 	if err == nil {
 		// VGSC already exists, add this snapshot handle if not already present
 		p.log.Infof("Stub VGSC %s already exists for VolumeGroupSnapshotHandle %s", vgscName, vgsh)
@@ -119,8 +124,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 
 	// Look up VolumeGroupSnapshotClass to get secret annotations
 	vgscAnnotations := map[string]string{}
-	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList{}
-	if err := p.crClient.List(ctx, vgscList); err == nil {
+	if vgscList, err := csiutil.ListVGSClasses(ctx, p.crClient); err == nil {
 		for _, vgsClass := range vgscList.Items {
 			if vgsClass.Driver == driver {
 				// Found matching class, extract secret parameters
@@ -135,7 +139,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		}
 	}
 
-	vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
+	vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vgscName,
 			Labels: map[string]string{
@@ -143,11 +147,11 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			},
 			Annotations: vgscAnnotations,
 		},
-		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
+		Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
 			DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 			Driver:         driver,
-			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{
-				GroupSnapshotHandles: &volumegroupsnapshotv1beta2.GroupSnapshotHandles{
+			Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
+				GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
 					VolumeGroupSnapshotHandle: vgsh,
 					VolumeSnapshotHandles:     []string{snapshotHandle},
 				},
@@ -159,13 +163,13 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		},
 	}
 
-	if err := p.crClient.Create(ctx, vgsc); err != nil {
+	if _, err := csiutil.CreateVGSC(ctx, p.crClient, vgsc); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			// Another VS restore created the VGSC between our Get and Create.
 			// Re-fetch and add our snapshot handle.
 			p.log.Infof("Stub VGSC %s was created by another VS restore, adding our handle", vgscName)
-			raceVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-			if getErr := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, raceVGSC); getErr != nil {
+			raceVGSC, getErr := csiutil.GetVGSC(ctx, p.crClient, vgscName)
+			if getErr != nil {
 				return errors.Wrapf(getErr, "failed to get VGSC %s after race", vgscName)
 			}
 			return p.addSnapshotHandleToVGSC(ctx, raceVGSC, snapshotHandle)
@@ -173,21 +177,21 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		return errors.Wrapf(err, "failed to create stub VGSC %s", vgscName)
 	}
 
-	// Re-fetch to get server-assigned metadata (resourceVersion) needed for patching
-	createdVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-	if err := p.crClient.Get(ctx, crclient.ObjectKey{Name: vgscName}, createdVGSC); err != nil {
-		p.log.Warnf("Failed to fetch stub VGSC %s for status patch: %v", vgscName, err)
-		return nil
-	}
-
-	// Set volumeGroupSnapshotHandle in status using Patch to avoid conflicts with the CSI controller.
-	patchBase := createdVGSC.DeepCopy()
-	if createdVGSC.Status == nil {
-		createdVGSC.Status = &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentStatus{}
-	}
-	createdVGSC.Status.VolumeGroupSnapshotHandle = &vgsh
-	if err := p.crClient.Status().Patch(ctx, createdVGSC, crclient.MergeFrom(patchBase)); err != nil {
-		p.log.Warnf("Failed to patch stub VGSC %s status: %v", vgscName, err)
+	// Set volumeGroupSnapshotHandle in status. Re-fetch inside the retry to pick up
+	// the latest resourceVersion and avoid conflicts with the CSI controller.
+	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		createdVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
+		if err != nil {
+			return err
+		}
+		if createdVGSC.Status == nil {
+			createdVGSC.Status = &volumegroupsnapshotv1.VolumeGroupSnapshotContentStatus{}
+		}
+		createdVGSC.Status.VolumeGroupSnapshotHandle = &vgsh
+		_, err = csiutil.UpdateVGSCStatus(ctx, p.crClient, createdVGSC)
+		return err
+	}); err != nil {
+		p.log.Warnf("Failed to set stub VGSC %s status: %v", vgscName, err)
 	}
 
 	p.log.Infof("Successfully created stub VGSC %s", vgscName)
@@ -198,7 +202,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 // This is needed when multiple VolumeSnapshots from the same VolumeGroupSnapshot are restored.
 func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 	ctx context.Context,
-	vgsc *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent,
+	vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent,
 	snapshotHandle string,
 ) error {
 	// Check if handle is already in the list
@@ -211,17 +215,32 @@ func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
 		}
 	}
 
-	// Add the snapshot handle to the list
-	patchBase := vgsc.DeepCopy()
-	if vgsc.Spec.Source.GroupSnapshotHandles == nil {
-		vgsc.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1beta2.GroupSnapshotHandles{}
-	}
-	vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(
-		vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles,
-		snapshotHandle,
-	)
+	// Add the snapshot handle to the list. Re-fetch inside the retry to pick up the
+	// latest resourceVersion and avoid conflicts with concurrent VS restores.
+	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest, err := csiutil.GetVGSC(ctx, p.crClient, vgsc.Name)
+		if err != nil {
+			return err
+		}
 
-	if err := p.crClient.Patch(ctx, vgsc, crclient.MergeFrom(patchBase)); err != nil {
+		if latest.Spec.Source.GroupSnapshotHandles != nil {
+			for _, handle := range latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
+				if handle == snapshotHandle {
+					return nil
+				}
+			}
+		} else {
+			latest.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1.GroupSnapshotHandles{}
+		}
+
+		latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(
+			latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles,
+			snapshotHandle,
+		)
+
+		_, err = csiutil.UpdateVGSC(ctx, p.crClient, latest)
+		return err
+	}); err != nil {
 		return errors.Wrapf(err, "failed to add snapshot handle to VGSC %s", vgsc.Name)
 	}
 
@@ -246,6 +265,10 @@ func (p *volumeSnapshotRestoreItemAction) Execute(
 		return &velero.RestoreItemActionExecuteOutput{},
 			errors.Wrapf(err, "failed to convert input.Item from unstructured")
 	}
+	// Restored group members are restored as independent VolumeSnapshots. The
+	// source VGS is not restored and cannot release source-cluster finalizers.
+	controllerutil.RemoveFinalizer(&vs, csiutil.VolumeSnapshotInGroupFinalizer)
+	controllerutil.RemoveFinalizer(&vs, csiutil.VolumeSnapshotAsSourceFinalizer)
 
 	var vsFromBackup snapshotv1api.VolumeSnapshot
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(
@@ -282,12 +305,6 @@ func (p *volumeSnapshotRestoreItemAction) Execute(
 			vs.Namespace, vs.Name)
 	}
 
-	vsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&vs)
-	if err != nil {
-		p.log.Errorf("Fail to convert VS %s to unstructured", vs.Namespace+"/"+vs.Name)
-		return nil, errors.WithStack(err)
-	}
-
 	if vsFromBackup.Status == nil ||
 		vsFromBackup.Status.BoundVolumeSnapshotContentName == nil {
 		p.log.Errorf("VS %s doesn't have bound VSC", vsFromBackup.Name)
@@ -297,6 +314,21 @@ func (p *volumeSnapshotRestoreItemAction) Execute(
 	vsc := velero.ResourceIdentifier{
 		GroupResource: kuberesource.VolumeSnapshotContents,
 		Name:          *vsFromBackup.Status.BoundVolumeSnapshotContentName,
+	}
+
+	// Force-restore the bound VSC even when restore resource filters would
+	// otherwise exclude it (mirrors backup-side must-include for CSI deps).
+	annotations := vs.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[velerov1api.MustIncludeAdditionalItemRestoreAnnotation] = "true"
+	vs.SetAnnotations(annotations)
+
+	vsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&vs)
+	if err != nil {
+		p.log.Errorf("Fail to convert VS %s to unstructured", vs.Namespace+"/"+vs.Name)
+		return nil, errors.WithStack(err)
 	}
 
 	p.log.Infof(`Returning from VolumeSnapshotRestoreItemAction with 
@@ -343,6 +375,9 @@ func NewVolumeSnapshotRestoreItemAction(
 			return nil, err
 		}
 
-		return &volumeSnapshotRestoreItemAction{logger, crClient}, nil
+		return &volumeSnapshotRestoreItemAction{
+			log:      logger,
+			crClient: crClient,
+		}, nil
 	}
 }

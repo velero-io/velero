@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,6 +60,7 @@ func NewPauseCommand(f client.Factory, use string) *cobra.Command {
 		},
 	}
 
+	c.ValidArgsFunction = cli.CompleteScheduleNames(f)
 	o.BindFlags(c.Flags())
 	pauseOpts.BindFlags(c.Flags())
 
@@ -113,6 +114,7 @@ func runPause(f client.Factory, o *cli.SelectOptions, paused bool, skipImmediate
 		res := new(velerov1api.ScheduleList)
 		err := crClient.List(context.TODO(), res, &ctrlclient.ListOptions{
 			LabelSelector: selector,
+			Namespace:     f.Namespace(),
 		})
 		if err != nil {
 			errs = append(errs, errors.WithStack(err))

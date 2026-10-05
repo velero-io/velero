@@ -47,7 +47,7 @@ When naming your plugin, keep in mind that the full name needs to conform to the
 - example-with-dash.io/azure
 ```
 
-You will need to give your plugin(s) the full name when registering them by calling the appropriate `RegisterX` function: <https://github.com/vmware-tanzu/velero/blob/0e0f357cef7cf15d4c1d291d3caafff2eeb69c1e/pkg/plugin/framework/server.go#L42-L60>
+You will need to give your plugin(s) the full name when registering them by calling the appropriate `RegisterX` function: <https://github.com/velero-io/velero/blob/0e0f357cef7cf15d4c1d291d3caafff2eeb69c1e/pkg/plugin/framework/server.go#L42-L60>
 
 ## Plugin Kinds
 
@@ -64,6 +64,49 @@ Plugin binaries are discovered by recursively reading a directory in no particul
 order in which item action plugins are invoked. However, if a single binary implements multiple item action plugins,
 they may be invoked in the order in which they are registered but it is best to not depend on this
 implementation. This is not guaranteed officially and the implementation can change at any time.
+
+### Must-include additional items (Backup Item Actions)
+
+Backup Item Actions may return `AdditionalItems` that Velero backs up as dependencies of the current item.
+By default those additional items must still pass the backup's global resource and namespace include/exclude filters.
+
+To force-backup hard dependencies despite those filters, set the following annotation on the `UpdatedItem` returned from `Execute()`:
+
+```
+backup.velero.io/must-include-additional-items: "true"
+```
+
+Behavior:
+- Only the string value `"true"` enables the bypass.
+- The annotation applies blanket to all `AdditionalItems` from that BIA invocation (not per-item).
+- Velero strips the annotation before saving the item to the backup tarball.
+- **Important Note for File System Backup (FSB):** If your plugin returns both a Pod and its associated PersistentVolumeClaims (PVCs) as `AdditionalItems`, and you expect Velero to create PodVolumeBackups (PVBs) for those PVCs using File System Backup, using this annotation ensures Velero correctly evaluates the PVCs for FSB. Velero explicitly tracks PVCs returned as additional items with this annotation, guaranteeing that PVBs are created even if the PVCs are excluded by global or fine-grained backup filters, regardless of the order they are returned in the `AdditionalItems` slice.
+
+### Must-include additional items (Restore Item Actions)
+
+Restore Item Actions may return `AdditionalItems` that Velero restores as dependencies of the current item.
+By default those additional items must still pass the restore's global resource and namespace include/exclude
+filters (and `IncludeClusterResources=false` for cluster-scoped resources).
+
+To force-restore hard dependencies despite those filters, set the following annotation on the `UpdatedItem`
+returned from `Execute()`:
+
+```
+restore.velero.io/must-include-additional-items: "true"
+```
+
+Behavior:
+- Only the string value `"true"` enables the bypass.
+- The annotation applies blanket to all `AdditionalItems` from that RIA invocation (not per-item).
+- Velero strips the annotation before applying the item to the cluster.
+- `SkipRestore: true` takes precedence: if set, the annotation is never inspected and `AdditionalItems` are not processed.
+- Must-include only bypasses filters; the additional item must still exist in the backup tarball.
+- When an additional item targets an excluded namespace, Velero may still create that target namespace so the item can be restored.
+- Cluster-scoped additional items are restored even when `IncludeClusterResources=false`.
+- Transitive force-include requires each RIA level to re-set the annotation on its own `UpdatedItem`.
+
+This mirrors the backup-side annotation `backup.velero.io/must-include-additional-items` used by Backup Item Actions.
+Installing an RIA that sets this annotation is a trust decision: the plugin can restore resources outside the operator's restore filters.
 
 ## Plugin Logging
 
@@ -117,5 +160,5 @@ Once parsed into a `[]string`, the features can then be registered using the `Ne
 
 Velero adds the `LD_LIBRARY_PATH` into the list of environment variables to provide the convenience for plugins that requires C libraries/extensions in the runtime.
 
-[1]: https://github.com/vmware-tanzu/velero-plugin-example
-[2]: https://github.com/vmware-tanzu/velero/blob/main/pkg/plugin/logger.go
+[1]: https://github.com/velero-io/velero-plugin-example
+[2]: https://github.com/velero-io/velero/blob/main/pkg/plugin/logger.go

@@ -1,0 +1,1 @@
+Fix block data mover cancellation being reported as a backup failure

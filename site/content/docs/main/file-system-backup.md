@@ -5,7 +5,7 @@ layout: docs
 
 Velero supports backing up and restoring Kubernetes volumes attached to pods from the file system of the volumes, called 
 File System Backup (FSB shortly) or Pod Volume Backup. The data movement is fulfilled by using modules from free open-source 
-backup tools [restic][1] and [kopia][2]. This support is considered beta quality. Please see the list of [limitations](#limitations) 
+backup tool [kopia][2]. This support is considered beta quality. Please see the list of [limitations](#limitations)
 to understand if it fits your use case.  
 
 Velero allows you to take snapshots of persistent volumes as part of your backups if you’re using one of
@@ -38,7 +38,6 @@ It's important to understand that File System Backup (FSB) and volume snapshots 
 This behavior is automatic and ensures optimal backup performance and storage usage.  
 
 **NOTE:** hostPath volumes are not supported, but the [local volume type][5] is supported.  
-**NOTE:** restic is under the deprecation process by following [Velero Deprecation Policy][17], for more details, see the Restic Deprecation section.
 
 ## Setup File System Backup
 
@@ -368,7 +367,98 @@ For this reason, FSB can only backup volumes that are mounted by a pod and not d
 (without running pods), some Velero users overcame this limitation running a staging pod (i.e. a busybox or alpine container 
 with an infinite sleep) to mount these PVC/PV pairs prior taking a Velero backup.  
 - Velero File System Backup expects volumes to be mounted under `<hostPath>/<pod UID>` (`hostPath` is configurable as mentioned in [Configure Node Agent DaemonSet spec](#configure-node-agent-daemonset-spec)). Some Kubernetes systems (i.e., [vCluster][11]) don't mount volumes under the `<pod UID>` sub-dir, Velero File System Backup is not working with them.  
-- File system restores of the same pod won't start until all the volumes of the pod get bound, even though some of the volumes have been bound and ready for restore. An a result, if a pod has multiple volumes, while only part of the volumes are restored by file system restore, these file system restores won't start until the other volumes are restored completely by other restore types (i.e., [CSI Snapshot Restore][12], [CSI Snapshot Data Movement][13]), the file system restores won't happen concurrently with those other types of restores.  
+- File system restores of the same pod won't start until all the volumes of the pod get bound, even though some of the volumes have been bound and ready for restore. An a result, if a pod has multiple volumes, while only part of the volumes are restored by file system restore, these file system restores won't start until the other volumes are restored completely by other restore types (i.e., [CSI Snapshot Restore][12], [CSI Snapshot Data Movement][13]), the file system restores won't happen concurrently with those other types of restores.
+- On volumes where the underlying filesystem enforces mount-constant identity (Azure Files SMB/CIFS, Azure Blob via blobfuse, GCP Cloud Storage FUSE, and similar), FSB restore's `chown`/`chmod` can report success while changing nothing, silently losing file ownership (and on FUSE mounts, permission bits) with no error surfaced anywhere. See [File Ownership and Permission Preservation](#file-ownership-and-permission-preservation) below. 
+
+## File Ownership and Permission Preservation
+
+[#file-ownership-and-permission-preservation](#file-ownership-and-permission-preservation)
+
+Some volume types enforce a **mount-constant identity**: file ownership and/or permission mode are determined
+entirely by the mount configuration rather than being stored per-file on the underlying storage. On these
+filesystems, when FSB restore runs `chown`/`chmod` as root, the system call **returns success while changing
+nothing**: the restored files simply present whatever owner/mode the mount is configured to force. Because no
+error is ever raised, this is a silent failure: the restore reports `Completed` with zero warnings, and nothing
+in the node-agent or data mover pod logs indicates a problem.
+
+This is a distinct failure mode from cases where the storage backend actively rejects the ownership change
+(for example, NFS server-side `root_squash`, which returns a real `EPERM`). That class of failure can, in
+principle, be caught by inspecting the error path. The mount-constant-identity case cannot, because there is no
+error to catch.
+
+**Affected volume types (verified or by design):**
+
+| Storage                                                        | Ownership storage                              | `chown` as root                          | `chmod` as root                          |
+| ---------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Azure Files SMB/CIFS, default or forced `uid=`/`gid=` mount options | Mount-constant                                  | Silent no-op                               | Forced by `file_mode=`/`dir_mode=`         |
+| Azure Files SMB with `idsfromsid,modefromsid` mount options      | Stored in NTFS security descriptors             | Works, persists, survives remount          | Works, persists                            |
+| Azure Blob via blobfuse (`blobfuse2`)                             | Mount-constant                                  | Silent no-op                               | Silent no-op                               |
+| Azure Blob NFSv3 (Premium)                                        | Real POSIX (server-side)                        | Works                                      | Works                                      |
+| Azure Files NFS 4.1 (Premium)                                     | Real POSIX (server-side)                        | Works                                      | Works                                      |
+| Azure Files NFS 4.1 with `rootSquashType: RootSquash`             | Real POSIX, but root is squashed                | Real `EPERM` (see NFS ownership caveat below) | Works                                      |
+| GCP Cloud Storage FUSE (`gcsfuse.csi.storage.gke.io`)             | Mount-time uid/gid/mode, not stored              | Not supported - silent-loss class          | Not supported - silent-loss class          |
+| AWS FSx for Windows (SMB, NTFS ACLs)                              | NTFS ACLs, don't map to POSIX ownership          | Doesn't map                                | Doesn't map                                |
+| AWS EFS Access Points with a `PosixUser`                          | Access Point overrides uid/gid for all operations | Neutralized server-side                    | N/A                                        |
+
+Azure Disk (block storage) and plain Azure Files/EFS without the above configurations use real POSIX semantics
+and are not affected.
+
+### Verified remediation for Azure Files SMB
+
+Add `idsfromsid,modefromsid` to the StorageClass `mountOptions`, and do **not** force `uid=`/`gid=`/`mode=`
+alongside them. This stores real per-file ownership and mode in the share's NTFS security descriptors and gives
+full fidelity across backup and restore.
+
+Caveats:
+
+- On a fresh share, the volume root receives a translated security descriptor on first mount (typically
+  `uid=0 gid=<fsGroup> mode=1707`). Non-root workloads may need a one-time root init container to `chown`/`chmod`
+  the volume root before the main container starts; this operation itself works correctly on this mount.
+- A restrictive owner/mode on the volume root can prevent Velero's FSB restore-wait init container from
+  accessing the volume if its identity doesn't match the workload's. If you hit a restore stuck at
+  `Init:0/1`, configure the restore helper's security context (`secCtxRunAsUser`, `secCtxRunAsGroup`, or `secCtx`)
+  to match your workload's UID/GID. See [Customize Restore Helper Container](#customize-restore-helper-container).
+
+As an alternative, Azure Files NFS 4.1 (Premium tier) or Azure Blob NFSv3 (Premium tier) also preserve ownership
+and mode with full fidelity, **provided you avoid `rootSquashType: RootSquash`**. Root-squashed NFS mounts
+reject root's `chown` with a real `EPERM`, which is a different (but related) failure. See the NFS ownership
+note below.
+
+### No remediation exists for blobfuse or gcsfuse
+
+For Azure Blob via blobfuse and GCP Cloud Storage FUSE, there is currently no mount option or configuration
+that preserves per-file ownership or mode. This is a limitation of the FUSE drivers themselves, not something
+Velero or its restore path can work around. If your workload depends on stat-level ownership fidelity (for
+example, databases like PostgreSQL or MySQL that refuse to start if the data directory's ownership doesn't
+match the running user), avoid these volume types for that data. Use block storage, a real POSIX-backed
+protocol (e.g. Azure Files NFS 4.1, Azure Blob NFSv3), or Azure Files SMB with `idsfromsid,modefromsid` instead.
+
+### Related: NFS root_squash ownership loss
+
+A related but mechanically distinct issue affects NFS mounts with server-side `root_squash` enabled: the
+`chown` call receives a real `EPERM` from the server, but Velero's kopia integration currently sets
+`IgnorePermissionErrors: true`, which silently discards that error. The end result looks the same to the user
+(a `Completed` restore with lost ownership), but the underlying mechanism differs. Here an error genuinely
+occurs, it is simply swallowed, whereas on mount-constant-identity filesystems no error is ever generated in
+the first place. If you're troubleshooting ownership loss on NFS-backed volumes with root squashing enabled,
+this is the more likely cause.
+
+### Diagnosing which case you're hitting
+
+Check the mount options inside the affected pod:
+
+  `mount | grep -E 'cifs|fuse|nfs'`
+
+Look for `uid=`/`gid=` (CIFS) or a FUSE filesystem type. The typical symptom in all these cases is a restore
+that reports `Completed` with no warnings, followed by an application failing immediately afterward with an
+ownership-related error, for example:
+
+  FATAL: data directory "/var/lib/postgresql/data/pgdata" has wrong ownership
+  HINT: The server must be started by the user that owns the data directory.
+
+This signature, a clean restore followed by an immediate ownership-related crash, is the indicator that
+you're affected by one of the limitations described above rather than a genuine restore failure.
+
 
 ## Customize Restore Helper Container
 
@@ -512,6 +602,12 @@ To understand which backup method was used for your volumes:
 
 **Note:** A volume appearing in the "skipped PVs" summary doesn't mean it wasn't backed up - it may have been backed up via volume snapshot instead.
 
+### Disk space issues during restore
+
+If restores fail due to "no space left on device" errors, the `--write-sparse-files` option may help in specific scenarios. However, this only works if the persistent volume had sparse files during backup that would free up enough space for the restore process. If the volume doesn't contain sparse files, this option will not resolve the disk space issue.
+
+For more information, see [Write Sparse files](restore-reference.md#write-sparse-files) in the restore documentation.
+
 ## Backup Method Decision Flow
 
 When Velero encounters a volume during backup, it follows this decision flow:
@@ -539,7 +635,7 @@ which is used to backup pod volume data
 the backup storage  
 
 For more details, refer to [kopia architecture](https://kopia.io/docs/advanced/architecture/) and 
-Velero's [Unified Repository & Kopia Integration Design](https://github.com/vmware-tanzu/velero/blob/main/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
+Velero's [Unified Repository & Kopia Integration Design](https://github.com/velero-io/velero/blob/main/design/Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md)
 
 ### Custom resource and controllers
 Velero has three custom resource definitions and associated controllers:
@@ -710,47 +806,13 @@ For Kopia repository, by default, the cache is stored in the data mover pod's ro
 - configure a limit of the cache size per backup repository, for more details, check [Backup Repository Configuration][18].  
 - configure a dedicated volume for cache data, for more details, check [Data Movement Cache Volume][22].  
 
-## Restic Deprecation  
-
-According to the [Velero Deprecation Policy][17], restic path is being deprecated starting from v1.15, specifically:
-- For 1.15 and 1.16, if restic path is used by a backup, the backup still creates and succeeds but you will see warnings
-- For 1.17 and 1.18, backups with restic path are disabled, but you are still allowed to restore from your previous restic backups
-- From 1.19, both backups and restores with restic path will be disabled, you are not able to use 1.19 or higher to restore your restic backup data
-
-From 1.17, backup from restic path is not allowed, though you can still restore from the existing backups created by restic path.  
-Velero could automatically identify the legacy backups and switch to restic path without user intervention.  
-
-### How Velero integrates with Restic
-Velero integrate Restic binary directly, so the operations are done by calling Restic commands:
-- Run `restic init` command to initialize the [restic repository](https://restic.readthedocs.io/en/latest/100_references.html#terminology)
-- Run `restic prune` command periodically to prune restic repository
-- Run `restic restore` commands to restore pod volume data
-
-For a restore from restic path, restic commands are called by the node-agent itself; whereas, for kopia path backup/restore, the data path runs in the data mover pods.  
-Restore from restic path is handled by the legacy `PodVolumeRestore` controller, so Resume and Cancellation are not supported:
-- When Velero server is restarted, the legacy `PodVolumeRestore` is left as orphan and contineue running, though the restore has already marked as `Failed`
-- When node-agent is restarted, the `PodVolumeRestore` is marked as `Failed` directly
-
-### Restic Repository 
-To support restic repository, the BackupRepository CR should be specially configured:
- - You need to set the `resticRepoPrefix` value in BackupStorageLocation. For example, on AWS, `resticRepoPrefix` is something like 
- `s3:s3-us-west-2.amazonaws.com/bucket` (note that `resticRepoPrefix` doesn't work for Kopia).
-
-Velero still effectively manage restic repository, though you cannot write any new backup to it:
-- When you delete a backup, the restic repository snapshots (if any) could be deleted from restic repository
-- Velero backup repository controller periodically runs mainteance jobs for BackupRepository CRs representing restic repositories
-
-
-
-[1]: https://github.com/restic/restic
 [2]: https://github.com/kopia/kopia
 [3]: customize-installation.md#enable-file-system-backup
-[4]: https://github.com/vmware-tanzu/velero/releases/
+[4]: https://github.com/velero-io/velero/releases/
 [5]: https://kubernetes.io/docs/concepts/storage/volumes/#local
 [6]: https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation
 [7]: https://github.com/bitsbeats/velero-pvc-watcher
 [8]: https://docs.microsoft.com/en-us/azure/aks/azure-files-dynamic-pv
-[9]: https://github.com/restic/restic/issues/1800
 [10]: customize-installation.md#default-pod-volume-backup-to-file-system-backup
 [11]: https://www.vcluster.com/
 [12]: csi.md
@@ -758,7 +820,6 @@ Velero still effectively manage restic repository, though you cannot write any n
 [14]: https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/
 [15]: customize-installation.md#customize-resource-requests-and-limits
 [16]: performance-guidance.md
-[17]: https://github.com/vmware-tanzu/velero/blob/main/GOVERNANCE.md#deprecation-policy
 [18]: backup-repository-configuration.md
 [19]: node-agent-concurrency.md
 [20]: node-agent-prepare-queue-length.md

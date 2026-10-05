@@ -24,7 +24,6 @@ import (
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/format"
-	"github.com/kopia/kopia/repo/hashing"
 	"github.com/kopia/kopia/repo/splitter"
 	"github.com/stretchr/testify/assert"
 
@@ -59,7 +58,7 @@ func TestSetupNewRepositoryOptions(t *testing.T) {
 			},
 			expected: repo.NewRepositoryOptions{
 				BlockFormat: format.ContentFormat{
-					Hash:       hashing.DefaultAlgorithm,
+					Hash:       defaultHashingAlgorithm,
 					Encryption: "fake-encrypt",
 				},
 				ObjectFormat: format.ObjectFormat{
@@ -74,7 +73,7 @@ func TestSetupNewRepositoryOptions(t *testing.T) {
 			},
 			expected: repo.NewRepositoryOptions{
 				BlockFormat: format.ContentFormat{
-					Hash:       hashing.DefaultAlgorithm,
+					Hash:       defaultHashingAlgorithm,
 					Encryption: encryption.DefaultAlgorithm,
 				},
 				ObjectFormat: format.ObjectFormat{
@@ -89,7 +88,7 @@ func TestSetupNewRepositoryOptions(t *testing.T) {
 			},
 			expected: repo.NewRepositoryOptions{
 				BlockFormat: format.ContentFormat{
-					Hash:       hashing.DefaultAlgorithm,
+					Hash:       defaultHashingAlgorithm,
 					Encryption: encryption.DefaultAlgorithm,
 				},
 				ObjectFormat: format.ObjectFormat{

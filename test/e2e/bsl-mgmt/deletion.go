@@ -41,13 +41,11 @@ const (
 	bslDeletionTestNs = "bsl-deletion"
 )
 
-// Test backup and restore of Kibishii using restic
-
 func BslDeletionWithSnapshots() {
 	BslDeletionTest(true)
 }
 
-func BslDeletionWithRestic() {
+func BslDeletionWithFSBackup() {
 	BslDeletionTest(false)
 }
 func BslDeletionTest(useVolumeSnapshots bool) {
@@ -89,7 +87,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 	})
 
 	When("kibishii is the sample workload", func() {
-		It("Local backups and restic repos (if Velero was installed with Restic) will be deleted once the corresponding backup storage location is deleted", func() {
+		It("Local backups and backup repos will be deleted once the corresponding backup storage location is deleted", func() {
 			oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 			defer ctxCancel()
 			if veleroCfg.AdditionalBSLProvider == "" {
@@ -165,7 +163,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 				)).To(Succeed())
 			})
 
-			// Restic can not backup PV only, so pod need to be labeled also
+			// FS backup can not backup PV only, so pod need to be labeled also
 			By("Label all 2 worker-pods of Kibishii", func() {
 				Expect(AddLabelToPod(context.Background(), podName1, bslDeletionTestNs, label1)).To(Succeed())
 				Expect(AddLabelToPod(context.Background(), "kibishii-deployment-1", bslDeletionTestNs, label2)).To(Succeed())
@@ -310,7 +308,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 			By(fmt.Sprintf("Get all backups from 2 BSLs %s before deleting one of them", backupLocation1), func() {
 				backupsBeforeDel, err := GetAllBackups(context.Background(), veleroCfg.VeleroCLI)
 				Expect(err).To(Succeed())
-				Expect(cmp.Diff(backupsInBsl1AndBsl2, backupsBeforeDel, cmpopts.SortSlices(less))).Should(BeEmpty())
+				Expect(cmp.Diff(backupsInBsl1AndBsl2, backupsBeforeDel, cmpopts.SortSlices(less))).To(BeEmpty())
 
 				By(fmt.Sprintf("Backup1 %s should exist in cloud object store before bsl deletion", backupName1), func() {
 					Expect(ObjectsShouldBeInBucket(veleroCfg.ObjectStoreProvider, veleroCfg.CloudCredentialsFile,
@@ -327,7 +325,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 					backupsAfterDel, err := GetAllBackups(context.Background(), veleroCfg.VeleroCLI)
 					Expect(err).To(Succeed())
 					// Default BSL is deleted, so backups in additional BSL should be left only
-					Expect(cmp.Diff(backupsInBSL2, backupsAfterDel, cmpopts.SortSlices(less))).Should(BeEmpty())
+					Expect(cmp.Diff(backupsInBSL2, backupsAfterDel, cmpopts.SortSlices(less))).To(BeEmpty())
 				})
 			})
 

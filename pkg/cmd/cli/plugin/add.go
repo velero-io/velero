@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -111,7 +111,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 			}
 
 			// add the plugin as an init container
-			plugin := *builder.ForPluginContainer(args[0], corev1api.PullPolicy(imagePullPolicyFlag.String())).Result()
+			plugin := *builder.ForPluginContainer(args[0], corev1api.PullPolicy(imagePullPolicyFlag.String()), veleroDeploy.Spec.Template.Spec.InitContainers).Result()
 
 			veleroDeploy.Spec.Template.Spec.InitContainers = append(veleroDeploy.Spec.Template.Spec.InitContainers, plugin)
 

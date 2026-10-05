@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors/errbase"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,7 +32,7 @@ const (
 
 // ErrorLocationHook is a logrus hook that attaches error location information
 // to log entries if an error is being logged and it has stack-trace information
-// (i.e. if it originates from or is wrapped by github.com/pkg/errors, or if it
+// (for example, if it carries a stack trace from wrapped errors), or if it
 // implements the errorLocationer interface, like errors returned from plugins
 // typically do).
 type ErrorLocationHook struct{}
@@ -90,8 +90,8 @@ type LocationInfo struct {
 }
 
 // GetFrameLocationInfo returns the location of a frame.
-func GetFrameLocationInfo(frame errors.Frame) LocationInfo {
-	// see https://godoc.org/github.com/pkg/errors#Frame.Format for
+func GetFrameLocationInfo(frame errbase.StackFrame) LocationInfo {
+	// see https://pkg.go.dev/github.com/cockroachdb/errors#Frame.Format for
 	// details on formatting verbs
 	functionNameAndFileAndLine := fmt.Sprintf("%+v", frame)
 
@@ -121,7 +121,7 @@ type errorLocationer interface {
 
 type stackTracer interface {
 	error
-	StackTrace() errors.StackTrace
+	StackTrace() errbase.StackTrace
 }
 
 type causer interface {

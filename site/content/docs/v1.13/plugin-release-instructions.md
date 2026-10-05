@@ -26,5 +26,5 @@ Plugins the Velero core team is responsible include all those listed in [the Vel
 1. If all e2e tests pass, go to the GitHub release page of the plugin (`https://github.com/vmware-tanzu/<plugin-name>/releases`) and manually create a release for the new tag. 
 1. Copy and paste the content of the new changelog file into the release description field.
 
-[1]: https://github.com/vmware-tanzu/velero/blob/c8dfd648bbe85db0184ea53296de4220895497e6/test/e2e/velero_utils.go#L27
-[2]: https://github.com/vmware-tanzu/velero/tree/main/test/e2e
+[1]: https://github.com/velero-io/velero/blob/c8dfd648bbe85db0184ea53296de4220895497e6/test/e2e/velero_utils.go#L27
+[2]: https://github.com/velero-io/velero/tree/main/test/e2e

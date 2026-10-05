@@ -40,7 +40,7 @@ When installing with the `--use-node-agent` flag, the node-agent will mount the 
 
 By default, `velero install` does not enable the use of File System Backup (FSB) to take backups of all pod volumes. You must apply an [annotation](file-system-backup.md/#using-opt-in-pod-volume-backup) to every pod which contains volumes for Velero to use FSB for the backup.
 
-If you are planning to only use FSB for volume backups, you can run the `velero install` command with the `--default-volumes-to-fs-backup` flag. This will default all pod volumes backups to use FSB without having to apply annotations to pods. Note that when this flag is set during install, Velero will always try to use FSB to perform the backup, even want an individual backup to use volume snapshots, by setting the `--snapshot-volumes` flag in the `backup create` command. Alternatively, you can set the  `--default-volumes-to-fs-backup` on an individual backup to to make sure Velero uses FSB for each volume being backed up.
+If you are planning to only use FSB for volume backups, you can run the `velero install` command with the `--default-volumes-to-fs-backup` flag. This will default all pod volume backups to use FSB without having to apply annotations to pods. Note that when this flag is set during install, Velero will always try to use FSB to perform the backup. If you want an individual backup to use volume snapshots instead, set the `--snapshot-volumes` flag in the `backup create` command. Alternatively, you can set the `--default-volumes-to-fs-backup` flag on an individual backup to make sure Velero uses FSB for each volume being backed up.
 
 ## Update an existing installation
 
@@ -219,7 +219,7 @@ kubectl patch daemonset node-agent -n velero --patch \
 '{"spec":{"template":{"spec":{"containers":[{"name": "node-agent", "resources": {"limits":{"cpu": "1", "memory": "1024Mi"}, "requests": {"cpu": "1", "memory": "512Mi"}}}]}}}}'
 ```
 
-Additionally, you may want to update the the default File System Backup operation timeout (default 240 minutes) to allow larger backups more time to complete. You can adjust this timeout by adding the `- --fs-backup-timeout` argument to the Velero Deployment spec.
+Additionally, you may want to update the default File System Backup operation timeout (default 240 minutes) to allow larger backups more time to complete. You can adjust this timeout by adding the `- --fs-backup-timeout` argument to the Velero Deployment spec.
 
 **NOTE:** Changes made to this timeout value will revert back to the default value if you re-run the Velero install command.
 
@@ -348,6 +348,21 @@ By default, only one backup is processed in the `InProgress` phase at a time. Th
 
 Enabling parallel backups can provide a significant performance benefit for backups which contain a large number of Kubernetes resources or ones which contain a large number of smaller volumes. Backups dominated by large volumes will not see as much benefit, since the majority of time for those backups is spent waiting for the async phase to complete. A larger `concurrent-backups` configuration may require additional memory and CPU resources for the velero container.
 
+## Limiting Resource Backup Data Cache Size
+For Kubernetes resource data (non volume data), for some operations like Restores or Backup Deletions, etc., Velero uses local cache (in the root file system of the cluster node) to download and extract the data from the backup storage location, Velero sets a limit for the cache size. If the cache size exceeds the limit, the specific operation would fail.  
+By default Velero sets the limit as 16GB, if your backup data is large, you can change the Velero server parameter `max-backup-extraction-size`. Here is an example to set the limit to 32GB:
+
+```yaml
+containers:
+  - name: velero
+    image: velero/velero:latest
+    command:
+      - /velero
+    args:
+      - server
+      - --max-backup-extraction-size=32768
+```
+
 ## Additional options
 
 Run `velero install --help` or see the [Helm chart documentation](https://vmware-tanzu.github.io/helm-charts/) for the full set of installation options.
@@ -356,7 +371,7 @@ Run `velero install --help` or see the [Helm chart documentation](https://vmware
 
 ### Enabling shell autocompletion
 
-**Velero CLI** provides autocompletion support for `Bash` and `Zsh`, which can save you a lot of typing.
+**Velero CLI** provides autocompletion support for `Bash`, `Zsh`, and `Fish`, which can save you a lot of typing. In addition to command and flag names, the CLI dynamically completes resource names (backups, restores, schedules, etc.) by querying the cluster.
 
 Below are the procedures to set up autocompletion for `Bash` (including the difference between `Linux` and `macOS`) and `Zsh`.
 
@@ -501,6 +516,7 @@ By far, `velero install` supports the following parameters to specify the extern
 * --backup-repository-configmap: [backup repository configuration document][15]
 * --node-agent-configmap: [node-agent concurrency configuration document][16], and there are some other documents specify other parts of node-agent-config.
 * --repo-maintenance-job-configmap: [repository maintenance configuration document][17]
+* --default-resource-modifier-configmap: [default restore resource modifier document][18]. When set, the referenced ConfigMap's resource modifier rules apply automatically to all restores that don't specify a per-restore modifier.
 
 From v1.17, Velero adds verification for the ConfigMaps in CLI and server side, which means `velero install` CLI will fail and velero server and node-agent pod will exit if the specified ConfigMaps don't exist or are invalid.
 
@@ -523,19 +539,20 @@ The new workflow is:
   ```
 
 
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: namespace.md
 [3]: file-system-backup.md
 [4]: on-premises.md
 [6]: velero-install.md#usage
-[7]: https://github.com/vmware-tanzu/velero/issues/2077
-[8]: https://github.com/vmware-tanzu/velero/issues/2311
+[7]: https://github.com/velero-io/velero/issues/2077
+[8]: https://github.com/velero-io/velero/issues/2311
 [9]: self-signed-certificates.md
 [10]: csi.md
-[11]: https://github.com/vmware-tanzu/velero/blob/main/pkg/apis/velero/v1/constants.go
+[11]: https://github.com/velero-io/velero/blob/main/pkg/apis/velero/v1/constants.go
 [12]: csi-snapshot-data-movement.md
 [13]: performance-guidance.md
 [14]: repository-maintenance.md
 [15]: backup-repository-configuration.md
 [16]: node-agent-concurrency.md
 [17]: repository-maintenance.md
+[18]: restore-resource-modifiers.md#default-resource-modifiers

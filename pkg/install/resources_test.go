@@ -118,6 +118,32 @@ func TestAllResources(t *testing.T) {
 	assert.Len(t, ds, 2)
 }
 
+func TestAllResourcesWithDefaultResourceModifierConfigMap(t *testing.T) {
+	option := &VeleroOptions{
+		Namespace:                        "velero",
+		SecretData:                       []byte{'a'},
+		DefaultResourceModifierConfigMap: "default-rm",
+	}
+	list := AllResources(option)
+
+	for _, item := range list.Items {
+		if item.GetKind() == "Deployment" && item.GetName() == "velero" {
+			containers, _, _ := unstructured.NestedSlice(item.Object, "spec", "template", "spec", "containers")
+			args, _, _ := unstructured.NestedStringSlice(containers[0].(map[string]any), "args")
+			found := false
+			for _, arg := range args {
+				if arg == "--default-resource-modifier-configmap=default-rm" {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "expected --default-resource-modifier-configmap=default-rm in deployment args")
+			return
+		}
+	}
+	t.Fatal("velero deployment not found in AllResources output")
+}
+
 func TestAllResourcesWithPriorityClassName(t *testing.T) {
 	testCases := []struct {
 		name                       string

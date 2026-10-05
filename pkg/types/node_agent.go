@@ -17,6 +17,7 @@ limitations under the License.
 package types
 
 import (
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -57,13 +58,44 @@ type BackupPVC struct {
 	// ignored if ReadOnly is false
 	SPCNoRelabeling bool `json:"spcNoRelabeling,omitempty"`
 
+	// ReadWriteOncePod sets the backupPVC's access mode to ReadWriteOncePod so the kubelet can use
+	// mount-level SELinux labeling (-o context) instead of per-file relabeling, when the CSI driver
+	// advertises SELinux mount support.
+	// ignored if ReadOnly is true
+	ReadWriteOncePod bool `json:"readWriteOncePod,omitempty"`
+
 	// Annotations permits setting annotations for the backupPVC
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// SecretNames is a list of secret names to copy from the source PVC namespace
+	// to the Velero namespace before creating the backupPVC. The secrets are deleted
+	// after the DataUpload completes. This is needed for CSI drivers that require
+	// namespace-scoped secrets for volume provisioning (e.g., encrypted volumes).
+	SecretNames []string `json:"secretNames,omitempty"`
+
+	// ConfigMapNames is a list of configmap names to copy from the source PVC namespace
+	// to the Velero namespace before creating the backupPVC. The configmaps are deleted
+	// after the DataUpload completes. This is needed for CSI drivers that require
+	// namespace-scoped configmaps for volume provisioning (e.g., tenant-specific
+	// Vault connection overrides for encrypted volumes).
+	ConfigMapNames []string `json:"configMapNames,omitempty"`
 }
 
 type RestorePVC struct {
 	// IgnoreDelayBinding indicates to ignore delay binding the restorePVC when it is in WaitForFirstConsumer mode
 	IgnoreDelayBinding bool `json:"ignoreDelayBinding,omitempty"`
+
+	// SecretNames is a list of secret names to copy from the target namespace to the
+	// Velero namespace before creating the restorePVC. The secrets are deleted after the
+	// DataDownload completes. This is needed for CSI drivers that require namespace-scoped
+	// secrets for volume provisioning (e.g., encrypted volumes).
+	SecretNames []string `json:"secretNames,omitempty"`
+
+	// ConfigMapNames is a list of configmap names to copy from the target namespace to the
+	// Velero namespace before creating the restorePVC. The configmaps are deleted after the
+	// DataDownload completes. This is needed for CSI drivers that require namespace-scoped
+	// configmaps for volume provisioning (e.g., tenant-specific Vault connection overrides).
+	ConfigMapNames []string `json:"configMapNames,omitempty"`
 }
 
 type CachePVC struct {
@@ -72,6 +104,10 @@ type CachePVC struct {
 
 	// ResidentThresholdInMB specifies the minimum size of the backup data to create cache PVC
 	ResidentThresholdInMB int64 `json:"residentThresholdInMB,omitempty"`
+}
+
+type CSISnapshotMetadataService struct {
+	SAName string `json:"saName,omitempty"`
 }
 
 type NodeAgentConfigs struct {
@@ -104,4 +140,12 @@ type NodeAgentConfigs struct {
 
 	// PodLabels are labels to be added to pods created by node-agent, i.e., data mover pods.
 	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// CSISnapshotMetadataServiceConfigs is the config for CSI snapshot metadata service
+	CSISnapshotMetadataServiceConfigs *CSISnapshotMetadataService `json:"csiSnapshotMetadataServiceConfigs,omitempty"`
+
+	// Tolerations are tolerations to be added to pods created by node-agent, i.e., data mover pods.
+	// These are merged with (and deduplicated against) any node-agent DaemonSet tolerations
+	// whose key is in util.ThirdPartyTolerations.
+	Tolerations []corev1api.Toleration `json:"tolerations,omitempty"`
 }

@@ -461,6 +461,36 @@ func (_m *BackupStore) GetRestoreResults(name string) (map[string]results.Result
 	return r0, r1
 }
 
+// GetRestoreVolumeInfos provides a mock function with given fields: name
+func (_m *BackupStore) GetRestoreVolumeInfos(name string) ([]*volume.RestoreVolumeInfo, error) {
+	ret := _m.Called(name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRestoreVolumeInfos")
+	}
+
+	var r0 []*volume.RestoreVolumeInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*volume.RestoreVolumeInfo, error)); ok {
+		return rf(name)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*volume.RestoreVolumeInfo); ok {
+		r0 = rf(name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*volume.RestoreVolumeInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetRestoredResourceList provides a mock function with given fields: name
 func (_m *BackupStore) GetRestoredResourceList(name string) (map[string][]string, error) {
 	ret := _m.Called(name)

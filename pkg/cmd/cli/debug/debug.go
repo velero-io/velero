@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -38,6 +38,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 )
 
 //go:embed cshd-scripts/velero.cshd
@@ -171,6 +172,10 @@ specs of resources created by velero server, and optionally the logs of backup a
 		},
 	}
 	o.bindFlags(c.Flags())
+
+	_ = c.RegisterFlagCompletionFunc("backup", cli.CompleteBackupNames(f))
+	_ = c.RegisterFlagCompletionFunc("restore", cli.CompleteRestoreNames(f))
+
 	return c
 }
 
@@ -191,7 +196,7 @@ func runCrashd(o *option) error {
 	if o.verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-	return exec.Execute("velero-debug-collector", bytes.NewReader(scriptBytes), o.asCrashdArgMap())
+	return exec.Execute("velero-debug-collector", bytes.NewReader(scriptBytes), o.asCrashdArgMap(), false)
 }
 
 func kubeconfigAndContext(fs *pflag.FlagSet) (string, string) {

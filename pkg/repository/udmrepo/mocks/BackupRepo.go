@@ -562,6 +562,74 @@ func (_c *BackupRepo_GetSnapshot_Call) RunAndReturn(run func(ctx context.Context
 	return _c
 }
 
+// ListSnapshot provides a mock function for the type BackupRepo
+func (_mock *BackupRepo) ListSnapshot(ctx context.Context, source string) ([]udmrepo.Snapshot, error) {
+	ret := _mock.Called(ctx, source)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshot")
+	}
+
+	var r0 []udmrepo.Snapshot
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]udmrepo.Snapshot, error)); ok {
+		return returnFunc(ctx, source)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []udmrepo.Snapshot); ok {
+		r0 = returnFunc(ctx, source)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]udmrepo.Snapshot)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, source)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// BackupRepo_ListSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshot'
+type BackupRepo_ListSnapshot_Call struct {
+	*mock.Call
+}
+
+// ListSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - source string
+func (_e *BackupRepo_Expecter) ListSnapshot(ctx interface{}, source interface{}) *BackupRepo_ListSnapshot_Call {
+	return &BackupRepo_ListSnapshot_Call{Call: _e.mock.On("ListSnapshot", ctx, source)}
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) Run(run func(ctx context.Context, source string)) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) Return(snapshots []udmrepo.Snapshot, err error) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Return(snapshots, err)
+	return _c
+}
+
+func (_c *BackupRepo_ListSnapshot_Call) RunAndReturn(run func(ctx context.Context, source string) ([]udmrepo.Snapshot, error)) *BackupRepo_ListSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewObjectWriter provides a mock function for the type BackupRepo
 func (_mock *BackupRepo) NewObjectWriter(ctx context.Context, opt udmrepo.ObjectWriteOptions) (udmrepo.ObjectWriter, error) {
 	ret := _mock.Called(ctx, opt)
@@ -631,8 +699,8 @@ func (_c *BackupRepo_NewObjectWriter_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // OpenObject provides a mock function for the type BackupRepo
-func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error) {
-	ret := _mock.Called(ctx, id)
+func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error) {
+	ret := _mock.Called(ctx, id, opt)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OpenObject")
@@ -640,18 +708,18 @@ func (_mock *BackupRepo) OpenObject(ctx context.Context, id udmrepo.ID) (udmrepo
 
 	var r0 udmrepo.ObjectReader
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID) (udmrepo.ObjectReader, error)); ok {
-		return returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error)); ok {
+		return returnFunc(ctx, id, opt)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID) udmrepo.ObjectReader); ok {
-		r0 = returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) udmrepo.ObjectReader); ok {
+		r0 = returnFunc(ctx, id, opt)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(udmrepo.ObjectReader)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, udmrepo.ID) error); ok {
-		r1 = returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, udmrepo.ID, udmrepo.ObjectReadOptions) error); ok {
+		r1 = returnFunc(ctx, id, opt)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -666,11 +734,12 @@ type BackupRepo_OpenObject_Call struct {
 // OpenObject is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id udmrepo.ID
-func (_e *BackupRepo_Expecter) OpenObject(ctx interface{}, id interface{}) *BackupRepo_OpenObject_Call {
-	return &BackupRepo_OpenObject_Call{Call: _e.mock.On("OpenObject", ctx, id)}
+//   - opt udmrepo.ObjectReadOptions
+func (_e *BackupRepo_Expecter) OpenObject(ctx interface{}, id interface{}, opt interface{}) *BackupRepo_OpenObject_Call {
+	return &BackupRepo_OpenObject_Call{Call: _e.mock.On("OpenObject", ctx, id, opt)}
 }
 
-func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmrepo.ID)) *BackupRepo_OpenObject_Call {
+func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions)) *BackupRepo_OpenObject_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -680,9 +749,14 @@ func (_c *BackupRepo_OpenObject_Call) Run(run func(ctx context.Context, id udmre
 		if args[1] != nil {
 			arg1 = args[1].(udmrepo.ID)
 		}
+		var arg2 udmrepo.ObjectReadOptions
+		if args[2] != nil {
+			arg2 = args[2].(udmrepo.ObjectReadOptions)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -693,7 +767,7 @@ func (_c *BackupRepo_OpenObject_Call) Return(objectReader udmrepo.ObjectReader, 
 	return _c
 }
 
-func (_c *BackupRepo_OpenObject_Call) RunAndReturn(run func(ctx context.Context, id udmrepo.ID) (udmrepo.ObjectReader, error)) *BackupRepo_OpenObject_Call {
+func (_c *BackupRepo_OpenObject_Call) RunAndReturn(run func(ctx context.Context, id udmrepo.ID, opt udmrepo.ObjectReadOptions) (udmrepo.ObjectReader, error)) *BackupRepo_OpenObject_Call {
 	_c.Call.Return(run)
 	return _c
 }

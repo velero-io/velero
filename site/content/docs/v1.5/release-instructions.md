@@ -47,7 +47,7 @@ For each major or minor release, create and publish a blog post to let folks kno
     - Remove the pre-release docs table of contents mapping entry from `site/data/toc-mapping.yml`.
     - Remove all references to the pre-release docs from `site/config.yml`.
 1. Create the "Upgrade to $major.minor" page if it does not already exist ([example](https://velero.io/docs/v1.5/upgrade-to-1.5/)).
-   If it already exists, update any usage of the previous version string within this file to use the new version string instead ([example](https://github.com/vmware-tanzu/velero/pull/2941/files#diff-d594f8fd0901fed79c39aab4b348193d)).
+   If it already exists, update any usage of the previous version string within this file to use the new version string instead ([example](https://github.com/velero-io/velero/pull/2941/files#diff-d594f8fd0901fed79c39aab4b348193d)).
    This needs to be done in both the versioned and the `main` folders.
 1. Review and submit PR
 	- Follow the additional instructions at `site/README-HUGO.md` to complete the docs generation process.
@@ -71,11 +71,11 @@ For each major or minor release, create and publish a blog post to let folks kno
 1. Create a tagged release and push it to GitHub
 	- Run `VELERO_VERSION=v1.0.0-rc.1 GITHUB_TOKEN=REDACTED ./hack/release-tools/tag-release.sh publish`.
 1. Publish the release
-	- Navigate to the draft GitHub release at https://github.com/vmware-tanzu/velero/releases and edit the release.
+	- Navigate to the draft GitHub release at https://github.com/velero-io/velero/releases and edit the release.
 	- If this is a patch release (e.g. `v1.4.1`), note that the full `CHANGELOG-1.4.md` contents will be included in the body of the GitHub release. You need to delete the previous releases' content (e.g. `v1.2.0`'s changelog) so that only the latest patch release's changelog shows.
 	- Do a quick review for formatting. 
 	- **Note:** the `goreleaser` process should have detected if it's a pre-release version and, if so, checked the box at the bottom of the GitHub release page appropriately, but it's always worth double-checking.
-	- Verify that GitHub has built and pushed all the images (it takes a while): https://github.com/vmware-tanzu/velero/actions
+	- Verify that GitHub has built and pushed all the images (it takes a while): https://github.com/velero-io/velero/actions
 	- Verify that the images are on Docker Hub: https://hub.docker.com/r/velero/velero/tags
 	- Verify that the assets were published to the GitHub release
 	- Publish the release.

@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -183,7 +183,6 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error getting backup")
 	}
-
 	// Don't allow deleting backups in read-only storage locations
 	location := &velerov1api.BackupStorageLocation{}
 	if err := r.Get(context.Background(), client.ObjectKey{
@@ -295,10 +294,16 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			err = delete.InvokeDeleteActions(deleteCtx)
 			if err != nil {
 				log.WithError(err).Error("Error invoking delete item actions")
-				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.New("error invoking delete item actions"))
+				err2 := r.patchDeleteBackupRequestWithError(ctx, dbr, errors.Wrap(err, "error invoking delete item actions"))
 				return ctrl.Result{}, err2
 			}
 		}
+	}
+
+	// VGS/VGSC resources are not stored in the Backup tarball, so clean them
+	// independently of whether DeleteItemActions used the tarball.
+	if err := csi.CleanupBackupVolumeGroupSnapshots(ctx, backup, r.Client, log); err != nil {
+		log.WithError(err).Warn("Could not clean up VolumeGroupSnapshots")
 	}
 
 	if backupStore != nil {
@@ -315,12 +320,16 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				volumeSnapshotter, ok := volumeSnapshotters[snapshot.Spec.Location]
 				if !ok {
 					if volumeSnapshotter, err = r.volumeSnapshottersForVSL(ctx, backup.Namespace, snapshot.Spec.Location, pluginManager); err != nil {
-						errs = append(errs, err.Error())
+						errs = append(errs, errors.Wrapf(err, "error getting volume snapshotter for location %q", snapshot.Spec.Location).Error())
 						continue
 					}
 					volumeSnapshotters[snapshot.Spec.Location] = volumeSnapshotter
 				}
 
+				if snapshot.Status.ProviderSnapshotID == "" {
+					log.WithField("volumeSnapshot", snapshot.Spec.PersistentVolumeName).Warn("Skipping snapshot deletion: empty ProviderSnapshotID")
+					continue
+				}
 				if err := volumeSnapshotter.DeleteSnapshot(snapshot.Status.ProviderSnapshotID); err != nil {
 					errs = append(errs, errors.Wrapf(err, "error deleting snapshot %s", snapshot.Status.ProviderSnapshotID).Error())
 				}
@@ -330,7 +339,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log.Info("Removing pod volume snapshots")
 	if deleteErrs := r.deletePodVolumeSnapshots(ctx, backup); len(deleteErrs) > 0 {
 		for _, err := range deleteErrs {
-			errs = append(errs, err.Error())
+			errs = append(errs, errors.Wrap(err, "error deleting pod volume snapshots").Error())
 		}
 	}
 
@@ -338,7 +347,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		log.Info("Removing snapshot data by data mover")
 		if deleteErrs := r.deleteMovedSnapshots(ctx, backup); len(deleteErrs) > 0 {
 			for _, err := range deleteErrs {
-				errs = append(errs, err.Error())
+				errs = append(errs, errors.Wrap(err, "error deleting moved snapshot data").Error())
 			}
 		}
 		duList := &velerov2alpha1.DataUploadList{}
@@ -350,12 +359,12 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}),
 		}); err != nil {
 			log.WithError(err).Error("Error listing datauploads")
-			errs = append(errs, err.Error())
+			errs = append(errs, errors.Wrap(err, "error listing datauploads for backup").Error())
 		} else {
 			for i := range duList.Items {
 				du := duList.Items[i]
 				if err := r.Delete(ctx, &du); err != nil {
-					errs = append(errs, err.Error())
+					errs = append(errs, errors.Wrapf(err, "error deleting dataupload %q", du.Name).Error())
 				}
 			}
 		}
@@ -364,7 +373,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if backupStore != nil && len(errs) == 0 {
 		log.Info("Removing backup from backup storage")
 		if err := backupStore.DeleteBackup(backup.Name); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, errors.Wrap(err, "error removing backup from backup storage").Error())
 		}
 	} else if len(errs) > 0 {
 		log.Info("Skipping removal of backup from backup storage due to previous errors")
@@ -531,7 +540,7 @@ func (r *backupDeletionReconciler) deleteCSIVolumeSnapshotsIfAny(ctx context.Con
 	}
 	for _, item := range vsList.Items {
 		vs := item
-		csi.CleanupVolumeSnapshot(&vs, r.Client, log)
+		csi.CleanupVolumeSnapshot(ctx, &vs, r.Client, log)
 	}
 }
 
@@ -627,7 +636,7 @@ func (r *backupDeletionReconciler) patchDeleteBackupRequest(ctx context.Context,
 func (r *backupDeletionReconciler) patchDeleteBackupRequestWithError(ctx context.Context, req *velerov1api.DeleteBackupRequest, err error) error {
 	_, err = r.patchDeleteBackupRequest(ctx, req, func(r *velerov1api.DeleteBackupRequest) {
 		r.Status.Phase = velerov1api.DeleteBackupRequestPhaseProcessed
-		r.Status.Errors = []string{err.Error()}
+		r.Status.Errors = []string{errors.WithMessage(err, "backup deletion failed").Error()}
 	})
 	return err
 }

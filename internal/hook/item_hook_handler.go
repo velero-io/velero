@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -365,6 +365,12 @@ func getPodExecHookFromAnnotations(annotations map[string]string, phase HookPhas
 
 func parseStringToCommand(commandValue string) []string {
 	var command []string
+	// An empty command means the container image's own entrypoint should be used.
+	// Callers that require a command already return early; getInitContainerFromAnnotation
+	// deliberately allows this case, so return nil rather than indexing an empty string.
+	if commandValue == "" {
+		return nil
+	}
 	// check for json array
 	if commandValue[0] == '[' {
 		if err := json.Unmarshal([]byte(commandValue), &command); err != nil {
@@ -419,7 +425,7 @@ func getInitContainerFromAnnotation(podName string, annotations map[string]strin
 		return nil
 	}
 	if command == "" {
-		log.Infof("RestoreHook init container for pod %s is using container's default entrypoint", podName, containerImage)
+		log.Infof("RestoreHook init container for pod %s is using the default entrypoint of image %s", podName, containerImage)
 	}
 	if containerName == "" {
 		uid, err := uuid.NewRandom()

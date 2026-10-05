@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,6 +32,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/datapath"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/uploader"
@@ -62,11 +63,14 @@ type RestoreMicroService struct {
 	ddHandler  cachetool.ResourceEventHandlerRegistration
 	nodeName   string
 	cacheDir   string
+
+	volumeID   string
+	cbtService cbtservice.Service
 }
 
 func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClient kubernetes.Interface, dataDownloadName string, namespace string, nodeName string,
 	sourceTargetPath datapath.AccessPoint, dataPathMgr *datapath.Manager, repoEnsurer *repository.Ensurer, cred *credentials.CredentialGetter,
-	ddInformer cache.Informer, cacheDir string, log logrus.FieldLogger) *RestoreMicroService {
+	ddInformer cache.Informer, cacheDir string, volumeID string, cbtService cbtservice.Service, log logrus.FieldLogger) *RestoreMicroService {
 	return &RestoreMicroService{
 		ctx:              ctx,
 		client:           client,
@@ -82,6 +86,8 @@ func NewRestoreMicroService(ctx context.Context, client client.Client, kubeClien
 		resultSignal:     make(chan dataPathResult),
 		ddInformer:       ddInformer,
 		cacheDir:         cacheDir,
+		volumeID:         volumeID,
+		cbtService:       cbtService,
 	}
 }
 
@@ -159,14 +165,14 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		OnProgress:  r.OnDataDownloadProgress,
 	}
 
-	fsRestore, err := r.dataPathMgr.CreateFileSystemBR(dd.Name, dataUploadDownloadRequestor, ctx, r.client, dd.Namespace, callbacks, log)
+	dp, err := r.dataPathMgr.CreateGenericDataPath(dd.Name, dataUploadDownloadRequestor, ctx, r.client, dd.Namespace, callbacks, log)
 	if err != nil {
 		return "", errors.Wrap(err, "error to create data path")
 	}
 
 	log.Debug("Found volume path")
-	if err := fsRestore.Init(ctx,
-		&datapath.FSBRInitParam{
+	if err := dp.Init(ctx,
+		&datapath.InitParam{
 			BSLName:           dd.Spec.BackupStorageLocation,
 			SourceNamespace:   dd.Spec.SourceNamespace,
 			UploaderType:      GetUploaderType(dd.Spec.DataMover),
@@ -178,19 +184,28 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		}); err != nil {
 		return "", errors.Wrap(err, "error to initialize data path")
 	}
-	log.Info("fs init")
+	log.Info("Async br init")
 
-	if err := fsRestore.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig); err != nil {
+	param := &datapath.RestoreStartParam{
+		Incremental: dd.Spec.RestoreType == string(velerov1api.VolumeDataPolicyTypeIncremental),
+		CBTService:  r.cbtService,
+	}
+	if dd.Spec.CSISnapshot != nil {
+		param.VolumeSnapshotNamespace = dd.Spec.CSISnapshot.VolumeSnapshotNamespace
+		param.VolumeSnapshotName = dd.Spec.CSISnapshot.VolumeSnapshot
+		param.VolumeID = r.volumeID
+	}
+	if err := dp.StartRestore(dd.Spec.SnapshotID, r.sourceTargetPath, dd.Spec.DataMoverConfig, param); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 
-	log.Info("Async fs restore data path started")
+	log.Info("Async restore data path started")
 	r.eventRecorder.Event(dd, false, datapath.EventReasonStarted, "Data path for %s started", dd.Name)
 
 	result := ""
 	select {
 	case <-ctx.Done():
-		err = errors.New("timed out waiting for fs restore to complete")
+		err = errors.New("timed out waiting for restore to complete")
 		break
 	case res := <-r.resultSignal:
 		err = res.err
@@ -199,7 +214,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	}
 
 	if err != nil {
-		log.WithError(err).Error("Async fs restore was not completed")
+		log.WithError(err).Error("Async restore was not completed")
 	}
 
 	r.eventRecorder.EndingEvent(dd, false, datapath.EventReasonStopped, "Data path for %s stopped", dd.Name)
@@ -234,12 +249,12 @@ func (r *RestoreMicroService) OnDataDownloadCompleted(ctx context.Context, names
 		}
 	}
 
-	log.Info("Async fs restore data path completed")
+	log.Info("Async restore data path completed")
 }
 
 func (r *RestoreMicroService) OnDataDownloadFailed(ctx context.Context, namespace string, ddName string, err error) {
 	log := r.logger.WithField("datadownload", ddName)
-	log.WithError(err).Error("Async fs restore data path failed")
+	log.WithError(err).Error("Async restore data path failed")
 
 	r.eventRecorder.Event(r.dataDownload, false, datapath.EventReasonFailed, "Data path for data download %s failed, error %v", r.dataDownloadName, err)
 	r.resultSignal <- dataPathResult{
@@ -249,7 +264,7 @@ func (r *RestoreMicroService) OnDataDownloadFailed(ctx context.Context, namespac
 
 func (r *RestoreMicroService) OnDataDownloadCancelled(ctx context.Context, namespace string, ddName string) {
 	log := r.logger.WithField("datadownload", ddName)
-	log.Warn("Async fs restore data path canceled")
+	log.Warn("Async restore data path canceled")
 
 	r.eventRecorder.Event(r.dataDownload, false, datapath.EventReasonCancelled, "Data path for data download %s canceled", ddName)
 	r.resultSignal <- dataPathResult{
@@ -272,9 +287,9 @@ func (r *RestoreMicroService) OnDataDownloadProgress(ctx context.Context, namesp
 }
 
 func (r *RestoreMicroService) closeDataPath(ctx context.Context, ddName string) {
-	fsRestore := r.dataPathMgr.GetAsyncBR(ddName)
-	if fsRestore != nil {
-		fsRestore.Close(ctx)
+	asyncBR := r.dataPathMgr.GetAsyncBR(ddName)
+	if asyncBR != nil {
+		asyncBR.Close(ctx)
 	}
 
 	r.dataPathMgr.RemoveAsyncBR(ddName)
@@ -285,11 +300,11 @@ func (r *RestoreMicroService) cancelDataDownload(dd *velerov2alpha1api.DataDownl
 
 	r.eventRecorder.Event(dd, false, datapath.EventReasonCancelling, "Canceling for data download %s", dd.Name)
 
-	fsBackup := r.dataPathMgr.GetAsyncBR(dd.Name)
-	if fsBackup == nil {
+	asyncBR := r.dataPathMgr.GetAsyncBR(dd.Name)
+	if asyncBR == nil {
 		r.OnDataDownloadCancelled(r.ctx, dd.GetNamespace(), dd.GetName())
 		r.eventRecorder.EndingEvent(dd, false, datapath.EventReasonStopped, "Data path for %s exited without start", dd.Name)
 	} else {
-		fsBackup.Cancel()
+		asyncBR.Cancel()
 	}
 }

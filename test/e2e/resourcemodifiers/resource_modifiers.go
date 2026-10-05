@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 
 	. "github.com/vmware-tanzu/velero/test/e2e/test"
 	"github.com/vmware-tanzu/velero/test/util/common"

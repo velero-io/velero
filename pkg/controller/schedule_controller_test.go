@@ -20,14 +20,14 @@ import (
 	"testing"
 	"time"
 
-	cron "github.com/robfig/cron/v3"
+	cron "github.com/netresearch/go-cron"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	testclocks "k8s.io/utils/clock/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -94,7 +94,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                "schedule with phase New and SkipImmediately gets validated and does not trigger a backup",
-			schedule:            newScheduleBuilder(velerov1.SchedulePhaseNew).CronSchedule("@every 5m").SkipImmediately(pointer.Bool(true)).Result(),
+			schedule:            newScheduleBuilder(velerov1.SchedulePhaseNew).CronSchedule("@every 5m").SkipImmediately(ptr.To(true)).Result(),
 			fakeClockTime:       "2017-01-01 12:00:00",
 			expectedPhase:       string(velerov1.SchedulePhaseEnabled),
 			expectedLastSkipped: "2017-01-01 12:00:00",
@@ -123,7 +123,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                 "schedule that's already run but has SkippedImmediately=false gets LastBackup updated",
-			schedule:             newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(pointer.Bool(false)).Result(),
+			schedule:             newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(ptr.To(false)).Result(),
 			fakeClockTime:        "2017-01-01 12:00:00",
 			expectedBackupCreate: builder.ForBackup("ns", "name-20170101120000").ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, "name")).Result(),
 			expectedLastBackup:   "2017-01-01 12:00:00",
@@ -138,7 +138,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 		},
 		{
 			name:                "schedule that's already run but has SkippedImmediately=true do not get LastBackup updated",
-			schedule:            newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(pointer.Bool(true)).Result(),
+			schedule:            newScheduleBuilder(velerov1.SchedulePhaseEnabled).CronSchedule("@every 5m").LastBackupTime("2000-01-01 00:00:00").SkipImmediately(ptr.To(true)).Result(),
 			fakeClockTime:       "2017-01-01 12:00:00",
 			expectedLastBackup:  "2000-01-01 00:00:00",
 			expectedLastSkipped: "2017-01-01 12:00:00",
@@ -216,7 +216,7 @@ func TestReconcileOfSchedule(t *testing.T) {
 			// we expect reconcile to flip SkipImmediately to false if it's true or the server is configured to skip immediately and the schedule doesn't have it set
 			if scheduleb4reconcile.Spec.SkipImmediately != nil && *scheduleb4reconcile.Spec.SkipImmediately ||
 				test.reconcilerSkipImmediately && scheduleb4reconcile.Spec.SkipImmediately == nil {
-				assert.Equal(t, schedule.Spec.SkipImmediately, pointer.Bool(false))
+				assert.Equal(t, schedule.Spec.SkipImmediately, ptr.To(false))
 			}
 
 			backups := &velerov1.BackupList{}
@@ -244,6 +244,54 @@ func TestReconcileOfSchedule(t *testing.T) {
 func parseTime(timeString string) time.Time {
 	res, _ := time.Parse("2006-01-02 15:04:05", timeString)
 	return res
+}
+
+// TestReconcileDoesNotCorruptReconcilerSkipImmediately guards against a regression where
+// aliasing &c.skipImmediately into a Schedule's spec (when SkipImmediately is nil) let a
+// subsequent write-through-pointer mutate the reconciler's own shared default field,
+// silently corrupting it for every later reconcile in the process.
+func TestReconcileDoesNotCorruptReconcilerSkipImmediately(t *testing.T) {
+	require.NoError(t, velerov1.AddToScheme(scheme.Scheme))
+
+	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+	logger := velerotest.NewLogger()
+
+	// Server configured with schedule-skip-immediately=true.
+	reconciler := NewScheduleReconciler("ns", logger, client, metrics.NewServerMetrics(), true)
+	reconciler.clock = testclocks.NewFakeClock(time.Now())
+
+	makeSchedule := func(name string) *velerov1.Schedule {
+		return builder.ForSchedule("ns", name).
+			Phase(velerov1.SchedulePhaseEnabled).
+			CronSchedule("@every 5m").
+			LastBackupTime("2000-01-01 00:00:00"). // long past due, but should be skipped
+			Result()                               // SkipImmediately left nil
+	}
+
+	sched1 := makeSchedule("sched-1")
+	require.NoError(t, client.Create(ctx, sched1))
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "ns", Name: "sched-1"}})
+	require.NoError(t, err)
+
+	// The reconciler's own default must be unchanged after processing a schedule with a nil
+	// SkipImmediately -- every later schedule relies on this field still being true.
+	assert.True(t, reconciler.skipImmediately, "reconciler's shared skipImmediately default was mutated by reconciling sched-1")
+
+	sched2 := makeSchedule("sched-2")
+	require.NoError(t, client.Create(ctx, sched2))
+	_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "ns", Name: "sched-2"}})
+	require.NoError(t, err)
+
+	assert.True(t, reconciler.skipImmediately, "reconciler's shared skipImmediately default was mutated by reconciling sched-2")
+
+	// Functional check: sched-2 should ALSO have been skipped (server default still true),
+	// proving the bug's user-visible symptom (second+ schedule silently loses the skip
+	// behavior) is fixed, not just the internal field.
+	got := &velerov1.Schedule{}
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "sched-2"}, got))
+	require.NotNil(t, got.Status.LastSkipped, "sched-2 should have been skipped due to server-wide skipImmediately default")
+	require.NotNil(t, got.Status.LastBackup)
+	assert.Equal(t, parseTime("2000-01-01 00:00:00").Unix(), got.Status.LastBackup.Unix(), "sched-2 should not have triggered a new backup")
 }
 
 func TestGetNextRunTime(t *testing.T) {

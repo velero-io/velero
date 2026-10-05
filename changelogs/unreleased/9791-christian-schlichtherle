@@ -1,0 +1,1 @@
+Fix DataUploadDeleteAction creating snapshot-info ConfigMaps labeled with the wrong backup name when a DataUpload CR from another backup is incidentally captured in the backup tarball, which caused Kopia snapshots to be leaked in object storage on expiry of the real owning backup.

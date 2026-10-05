@@ -36,12 +36,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"golang.org/x/mod/semver"
 	schedulingv1api "k8s.io/api/scheduling/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	ver "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -240,7 +240,7 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	}
 
 	io := cliinstall.NewInstallOptions()
-	// always wait for velero and restic pods to be running.
+	// always wait for velero and node-agent pods to be running.
 	io.Wait = true
 	io.ProviderName = veleroCfg.ObjectStoreProvider
 
@@ -471,11 +471,7 @@ func VeleroBackupNamespace(ctx context.Context, veleroCLI, veleroNamespace strin
 		}
 	}
 	if backupCfg.DefaultVolumesToFsBackup {
-		if backupCfg.UseResticIfFSBackup {
-			args = append(args, "--default-volumes-to-restic")
-		} else {
-			args = append(args, "--default-volumes-to-fs-backup")
-		}
+		args = append(args, "--default-volumes-to-fs-backup")
 
 		// To workaround https://github.com/vmware-tanzu/velero-plugin-for-vsphere/issues/347 for vsphere plugin v1.1.1
 		// if the "--snapshot-volumes=false" isn't specified explicitly, the vSphere plugin will always take snapshots
@@ -484,20 +480,11 @@ func VeleroBackupNamespace(ctx context.Context, veleroCLI, veleroNamespace strin
 		if backupCfg.ProvideSnapshotsVolumeParam && !backupCfg.UseVolumeSnapshots {
 			args = append(args, "--snapshot-volumes=false")
 		} // if "--snapshot-volumes" is not provide, snapshot should be taken as default behavior.
-	} else { // DefaultVolumesToFsBackup is false
+	} else if backupCfg.UseVolumeSnapshots {
 		// Although DefaultVolumesToFsBackup is false, but probably DefaultVolumesToFsBackup
 		// was set to true in installation CLI in snapshot volume test, so set DefaultVolumesToFsBackup
 		// to false specifically to make sure volume snapshot was taken
-		if backupCfg.UseVolumeSnapshots {
-			if backupCfg.UseResticIfFSBackup {
-				args = append(args, "--default-volumes-to-restic=false")
-			} else {
-				args = append(args, "--default-volumes-to-fs-backup=false")
-			}
-		}
-		// Although DefaultVolumesToFsBackup is false, but probably DefaultVolumesToFsBackup
-		// was set to true in installation CLI in FS volume backup test, so do nothing here, no DefaultVolumesToFsBackup
-		// appear in backup CLI
+		args = append(args, "--default-volumes-to-fs-backup=false")
 	}
 	if backupCfg.BackupLocation != "" {
 		args = append(args, "--storage-location", backupCfg.BackupLocation)
@@ -1282,14 +1269,14 @@ func SnapshotCRsCountShouldBe(ctx context.Context, namespace, backupName string,
 }
 
 func BackupRepositoriesCountShouldBe(ctx context.Context, veleroNamespace, targetNamespace string, expectedCount int) error {
-	resticArr, err := GetRepositories(ctx, veleroNamespace, targetNamespace)
+	repos, err := GetRepositories(ctx, veleroNamespace, targetNamespace)
 	if err != nil {
 		return errors.Wrapf(err, "Fail to get BackupRepositories")
 	}
-	if len(resticArr) == expectedCount {
+	if len(repos) == expectedCount {
 		return nil
 	} else {
-		return errors.New(fmt.Sprintf("BackupRepositories count %d in namespace %s is not as expected %d", len(resticArr), targetNamespace, expectedCount))
+		return errors.New(fmt.Sprintf("BackupRepositories count %d in namespace %s is not as expected %d", len(repos), targetNamespace, expectedCount))
 	}
 }
 
@@ -1429,36 +1416,6 @@ func GetSchedule(ctx context.Context, veleroNamespace, scheduleName string) (str
 	return stdout, err
 }
 
-func VeleroUpgrade(ctx context.Context, veleroCfg VeleroConfig) error {
-	crd, err := ApplyCRDs(ctx, veleroCfg.VeleroCLI)
-	if err != nil {
-		return errors.Wrap(err, "Fail to Apply CRDs")
-	}
-	fmt.Println(crd)
-	deploy, err := UpdateVeleroDeployment(ctx, veleroCfg)
-	if err != nil {
-		return errors.Wrap(err, "Fail to update Velero deployment")
-	}
-	fmt.Println(deploy)
-	if veleroCfg.UseNodeAgent {
-		dsjson, err := KubectlGetDsJson(veleroCfg.VeleroNamespace)
-		if err != nil {
-			return errors.Wrap(err, "Fail to update Velero deployment")
-		}
-
-		err = DeleteVeleroDs(ctx)
-		if err != nil {
-			return errors.Wrap(err, "Fail to delete Velero ds")
-		}
-		update, err := UpdateNodeAgent(ctx, veleroCfg, dsjson)
-		fmt.Println(update)
-		if err != nil {
-			return errors.Wrap(err, "Fail to update node agent")
-		}
-	}
-	return waitVeleroReady(ctx, veleroCfg.VeleroNamespace, veleroCfg.UseNodeAgent, veleroCfg.UseNodeAgentWindows)
-}
-
 func ApplyCRDs(ctx context.Context, veleroCLI string) ([]string, error) {
 	cmds := []*common.OsCommandLine{}
 
@@ -1473,78 +1430,6 @@ func ApplyCRDs(ctx context.Context, veleroCLI string) ([]string, error) {
 		Args: []string{"apply", "-f", "-"},
 	}
 	cmds = append(cmds, cmd)
-	return common.GetListByCmdPipes(ctx, cmds)
-}
-
-func UpdateVeleroDeployment(ctx context.Context, veleroCfg VeleroConfig) ([]string, error) {
-	cmds := []*common.OsCommandLine{}
-
-	cmd := &common.OsCommandLine{
-		Cmd:  "kubectl",
-		Args: []string{"get", "deploy", "-n", veleroCfg.VeleroNamespace, "-ojson"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{fmt.Sprintf("s#\\\"server\\\",#\\\"server\\\",\\\"--uploader-type=%s\\\",#g", veleroCfg.UploaderType)},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{"s#default-volumes-to-restic#default-volumes-to-fs-backup#g"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{"s#default-restic-prune-frequency#default-repo-maintain-frequency#g"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{"s#restic-timeout#fs-backup-timeout#g"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "kubectl",
-		Args: []string{"apply", "-f", "-"},
-	}
-	cmds = append(cmds, cmd)
-
-	return common.GetListByCmdPipes(ctx, cmds)
-}
-
-func UpdateNodeAgent(ctx context.Context, veleroCfg VeleroConfig, dsjson string) ([]string, error) {
-	cmds := []*common.OsCommandLine{}
-
-	cmd := &common.OsCommandLine{
-		Cmd:  "echo",
-		Args: []string{dsjson},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{"s#\\\"name\\\"\\: \\\"restic\\\"#\\\"name\\\"\\: \\\"node-agent\\\"#g"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "sed",
-		Args: []string{"s#\\\"restic\\\",#\\\"node-agent\\\",#g"},
-	}
-	cmds = append(cmds, cmd)
-
-	cmd = &common.OsCommandLine{
-		Cmd:  "kubectl",
-		Args: []string{"create", "-f", "-"},
-	}
-	cmds = append(cmds, cmd)
-
 	return common.GetListByCmdPipes(ctx, cmds)
 }
 
@@ -1591,22 +1476,6 @@ func RestorePVRNum(ctx context.Context, veleroNamespace, restoreName string) (in
 	return len(outputList), err
 }
 
-func IsSupportUploaderType(version string) (bool, error) {
-	verSupportUploaderType, err := ver.ParseSemantic("v1.10.0")
-	if err != nil {
-		return false, err
-	}
-	v, err := ver.ParseSemantic(version)
-	if err != nil {
-		return false, err
-	}
-	if v.AtLeast(verSupportUploaderType) {
-		return true, nil
-	} else {
-		return false, nil
-	}
-}
-
 func GetVeleroPodName(ctx context.Context) ([]string, error) {
 	// Example:
 	//    NAME                                  STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS             AGE
@@ -1639,37 +1508,28 @@ func GetVeleroPodName(ctx context.Context) ([]string, error) {
 // e2e-storage-class is the default StorageClass for E2E.
 // e2e-storage-class-2 is used for the StorageClass mapping test case.
 // Kibishii StorageClass is not covered here.
-func InstallStorageClasses(provider string) error {
+func InstallStorageClasses(provider string, clients ...TestClient) error {
+	var client TestClient
+	if len(clients) > 0 {
+		client = clients[0]
+	} else if VeleroCfg.ClientToInstallVelero != nil {
+		client = *VeleroCfg.ClientToInstallVelero
+	} else {
+		return errors.New("no client available to install storage classes")
+	}
+
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Minute*5)
 	defer ctxCancel()
 
 	storageClassFilePath := fmt.Sprintf("../testdata/storage-class/%s.yaml", provider)
 
-	if err := InstallStorageClass(ctx, storageClassFilePath); err != nil {
+	fmt.Printf("Install storage class with %s.\n", storageClassFilePath)
+	if err := CreateStorageClassFromYaml(ctx, client, storageClassFilePath, StorageClassName); err != nil {
 		return err
 	}
-	content, err := os.ReadFile(storageClassFilePath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get %s when install storage class", storageClassFilePath)
-	}
 
-	// Replace the name to e2e-storage-class-2
-	newContent := strings.ReplaceAll(
-		string(content),
-		fmt.Sprintf("name: %s", StorageClassName),
-		fmt.Sprintf("name: %s", StorageClassName2),
-	)
-
-	tmpFile, err := os.CreateTemp("", "sc-file")
-	if err != nil {
-		return errors.Wrapf(err, "failed to create temp file  when install storage class")
-	}
-
-	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.WriteString(newContent); err != nil {
-		return errors.Wrapf(err, "failed to write content into temp file %s when install storage class", tmpFile.Name())
-	}
-	return InstallStorageClass(ctx, tmpFile.Name())
+	fmt.Printf("Install storage class %s with %s.\n", StorageClassName2, storageClassFilePath)
+	return CreateStorageClassFromYaml(ctx, client, storageClassFilePath, StorageClassName2)
 }
 
 func GetPvName(ctx context.Context, client TestClient, pvcName, namespace string) (string, error) {
@@ -1694,11 +1554,9 @@ func GetPvName(ctx context.Context, client TestClient, pvcName, namespace string
 }
 func DeletePVs(ctx context.Context, client TestClient, pvList []string) error {
 	for _, pv := range pvList {
-		args := []string{"delete", "pv", pv, "--timeout=0s"}
-		fmt.Println(args)
-		err := exec.CommandContext(ctx, "kubectl", args...).Run()
-		if err != nil {
-			return errors.New(fmt.Sprintf("Deleted PV  %s ", pv))
+		err := client.ClientGo.CoreV1().PersistentVolumes().Delete(ctx, pv, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return errors.Wrapf(err, "Failed to delete PV %s", pv)
 		}
 	}
 	return nil

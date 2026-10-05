@@ -106,7 +106,7 @@ By this way, schedule is the owner of it created backups. This is useful for som
 
 Please do notice there is also side effect that may not be expected. Because schedule is the owner, when the schedule is deleted, the related backups CR (Just backup CR is deleted. Backup data still exists in object store and snapshots) will be deleted by k8s GC controller, too, but Velero controller will sync these backups from object store's metadata into k8s. Then k8s GC controller and Velero controller will fight over whether these backups should exist all through.
 
-If there is possibility the schedule will be disable to not create backup anymore, and the created backups are still useful. Please do not enable this option. For detail, please reference to [Backups created by a schedule with useOwnerReferenceInBackup set do not get synced properly](https://github.com/vmware-tanzu/velero/issues/4093).
+If there is possibility the schedule will be disable to not create backup anymore, and the created backups are still useful. Please do not enable this option. For detail, please reference to [Backups created by a schedule with useOwnerReferenceInBackup set do not get synced properly](https://github.com/velero-io/velero/issues/4093).
 
 Some GitOps tools have configurations to avoid pruning the day 2 backups generated from the schedule.
 For example, the ArgoCD has two ways to do that:
@@ -161,7 +161,12 @@ Pagination can be entirely disabled by setting `--client-page-size` to `0`. This
 
 ## Deleting Backups
 
-Use the following commands to delete Velero backups and data:
+Use the following commands to delete Velero backups:  
+`velero backup delete <backupName>`: successful run of this command will:
+- Immediately delete the resource backup data from the backup storage
+- Immediately delete the volume snapshots associates to the backup if any (e.g., volumes are backed up with CSI snapshot backup or native snapshot method)
+- Trigger the deletion of volume backup data if any data is persisted to the backup repository (e.g., volumes are backed up with CSI snapshot data movement or fs-backup method). You will not see the backup storage space is released immediately, the backup repository maintenance jobs will GC the data and finally release the storage space
 
-* `kubectl delete backup <backupName> -n <veleroNamespace>` will delete the backup custom resource only and will not delete any associated data from object/block storage
-* `velero backup delete <backupName>` will delete the backup resource including all data in object/block storage
+Velero backup deletion needs extra spaces in the backup storage, so make sure the backup storage is not full during the backup deletion, otherwise, the backup deletion or the following backup repository maintenance jobs may fail.  
+
+`kubectl delete backup <backupName> -n <veleroNamespace>`: this command will delete the backup custom resource only and will not delete any associated data from the backup storage. So it is used for limited purposes only, e.g., all the backup data has been deleted in the backup storage, you just need to clear the orphaned CRs in the cluster.  

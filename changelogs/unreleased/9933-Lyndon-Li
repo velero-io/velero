@@ -1,0 +1,1 @@
+Recall the old rebind volume way for the case that volumeMode is not changed; and use the new way for volumeMode changed case

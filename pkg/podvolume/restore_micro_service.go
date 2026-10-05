@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -161,7 +161,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		OnProgress:  r.OnPvrProgress,
 	}
 
-	fsRestore, err := r.dataPathMgr.CreateFileSystemBR(pvr.Name, podVolumeRequestor, ctx, r.client, pvr.Namespace, callbacks, log)
+	fsRestore, err := r.dataPathMgr.CreateGenericDataPath(pvr.Name, podVolumeRequestor, ctx, r.client, pvr.Namespace, callbacks, log)
 	if err != nil {
 		return "", errors.Wrap(err, "error to create data path")
 	}
@@ -169,7 +169,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	log.Debug("Async fs br created")
 
 	if err := fsRestore.Init(ctx,
-		&datapath.FSBRInitParam{
+		&datapath.InitParam{
 			BSLName:           pvr.Spec.BackupStorageLocation,
 			SourceNamespace:   pvr.Spec.SourceNamespace,
 			UploaderType:      pvr.Spec.UploaderType,
@@ -184,7 +184,9 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 
 	log.Info("Async fs br init")
 
-	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings); err != nil {
+	if err := fsRestore.StartRestore(pvr.Spec.SnapshotID, r.sourceTargetPath, pvr.Spec.UploaderSettings, &datapath.RestoreStartParam{
+		Incremental: pvr.Spec.RestoreType == string(velerov1api.VolumeDataPolicyTypeIncremental),
+	}); err != nil {
 		return "", errors.Wrap(err, "error starting data path restore")
 	}
 

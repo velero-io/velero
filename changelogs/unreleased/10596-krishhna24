@@ -1,0 +1,1 @@
+Add hack/install-csi-hostpath.sh to install CSI snapshot support on a kind cluster

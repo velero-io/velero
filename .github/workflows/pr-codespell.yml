@@ -1,20 +1,24 @@
 name: Pull Request Codespell Check
 on: [pull_request]
+
+permissions:
+  contents: read
+
 jobs:
 
   codespell:
+    if: github.repository == 'velero-io/velero'
     name: Run Codespell
     runs-on: ubuntu-latest
     steps:
 
     - name: Check out the code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Codespell
       uses: codespell-project/actions-codespell@master
       with:
-        # ignore the config/.../crd.go file as it's generated binary data that is edited elsewhere.
-        skip: .git,*.png,*.jpg,*.woff,*.ttf,*.gif,*.ico,./config/crd/v1beta1/crds/crds.go,./config/crd/v1/crds/crds.go,./config/crd/v2alpha1/crds/crds.go,./go.sum,./LICENSE
+        skip: .git,*.png,*.jpg,*.woff,*.ttf,*.gif,*.ico,./go.sum,./LICENSE
         ignore_words_list: iam,aks,ist,bridget,ue,shouldnot,atleast,notin,sme,optin,sie
         check_filenames: true
         check_hidden: true

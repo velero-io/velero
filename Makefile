@@ -20,6 +20,10 @@ BIN ?= velero
 # This repo's root import path (under GOPATH).
 PKG := github.com/vmware-tanzu/velero
 
+# Container tool for local development targets (shell, lint, build-image, etc.)
+# Override with CONTAINER_TOOL=podman to use podman instead of docker.
+CONTAINER_TOOL ?= docker
+
 # Where to push the docker image.
 REGISTRY ?= velero
 # In order to push images to an insecure registry, follow the two steps:
@@ -63,7 +67,7 @@ else
 endif
 
 BUILDER_IMAGE := $(REGISTRY)/build-image:$(BUILDER_IMAGE_TAG)
-BUILDER_IMAGE_CACHED := $(shell docker images -q ${BUILDER_IMAGE} 2>/dev/null )
+BUILDER_IMAGE_CACHED := $(shell $(CONTAINER_TOOL) images -q ${BUILDER_IMAGE} 2>/dev/null )
 
 HUGO_IMAGE := ghcr.io/gohugoio/hugo
 
@@ -102,6 +106,11 @@ endif
 define BUILDX_ERROR
 buildx not enabled, refusing to run this recipe
 see: https://velero.io/docs/main/build-from-source/#making-images-and-updating-velero for more info
+endef
+
+define DOCKER_ONLY_ERROR
+this target requires docker buildx/manifest and is not supported with CONTAINER_TOOL=$(CONTAINER_TOOL).
+use docker for multi-arch image targets, or build single-arch images with podman directly.
 endef
 # comma cannot be escaped and can only be used in Make function arguments by putting into variable
 comma=,
@@ -146,20 +155,40 @@ GOARCH = $(word 2, $(platform_temp))
 GOPROXY ?= https://proxy.golang.org
 GOBIN=$$(pwd)/.go/bin
 
+# Keep these build-image tool versions in sync with go.mod so the CLI/library
+# pair doesn't drift (see https://github.com/velero-io/velero/issues/10023).
+PROTOC_GEN_GO_VERSION := $(shell go list -m -f '{{.Version}}' google.golang.org/protobuf)
+GOIMPORTS_VERSION := $(shell go list -m -f '{{.Version}}' golang.org/x/tools)
+
+# ==============================================================================
+# ================================ COMMANDS ====================================
+# ==============================================================================
+
+# ==================================
+# Help
+# ==================================
+# To document a new target, add "## <description>" at the end of the target line.
+# Example: new-target: ## Description of the new target
+
+.PHONY: help
+help: ## Display this help message
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_%-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+
 # If you want to build all binaries, see the 'all-build' rule.
 # If you want to build all containers, see the 'all-containers' rule.
-all:
+all: ## Build the default velero binary
 	@$(MAKE) build
 
-build-%:
+build-%: ## Build specific binary
 	@$(MAKE) --no-print-directory ARCH=$* build
 
-all-build: $(addprefix build-, $(CLI_PLATFORMS))
+all-build: $(addprefix build-, $(CLI_PLATFORMS)) ## Build for all CLI platforms
 
-all-containers:
+all-containers: ## Build all containers
 	@$(MAKE) --no-print-directory container
 
-local: build-dirs
+local: build-dirs ## Build locally
 # Add DEBUG=1 to enable debug locally
 	GOOS=$(GOOS) \
 	GOARCH=$(GOARCH) \
@@ -173,7 +202,7 @@ local: build-dirs
 	OUTPUT_DIR=$$(pwd)/_output/bin/$(GOOS)/$(GOARCH) \
 	./hack/build.sh
 
-build: _output/bin/$(GOOS)/$(GOARCH)/$(BIN)
+build: _output/bin/$(GOOS)/$(GOARCH)/$(BIN) ## Build the velero binary (use build-<os>-<arch> for specific targets)
 
 _output/bin/$(GOOS)/$(GOARCH)/$(BIN): build-dirs
 	@echo "building: $@"
@@ -193,12 +222,12 @@ _output/bin/$(GOOS)/$(GOARCH)/$(BIN): build-dirs
 TTY := $(shell tty -s && echo "-t")
 
 # Example: make shell CMD="date > datefile"
-shell: build-dirs build-env
+shell: build-dirs build-env ## Run a shell in the build container
 	@# bind-mount the Velero root dir in at /github.com/vmware-tanzu/velero
 	@# because the Kubernetes code-generator tools require the project to
 	@# exist in a directory hierarchy ending like this (but *NOT* necessarily
 	@# under $GOPATH).
-	@docker run \
+	@$(CONTAINER_TOOL) run \
 		-e GOFLAGS \
 		-e GOPROXY \
 		-i $(TTY) \
@@ -216,7 +245,10 @@ shell: build-dirs build-env
 		$(BUILDER_IMAGE) \
 		/bin/sh $(CMD)
 
-container:
+container: ## Build the docker container (use container-<os>-<arch> for specific targets)
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 ifneq ($(BUILDX_ENABLED), true)
 	$(error $(BUILDX_ERROR))
 endif
@@ -246,6 +278,9 @@ container-linux-%:
 	@BUILDX_ARCH=$* $(MAKE) container-linux
 
 container-linux:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building container: $(IMAGE):$(VERSION)-linux-$(BUILDX_ARCH)"
 
 	@docker buildx build --pull \
@@ -269,6 +304,9 @@ container-windows-%:
 	@BUILDX_OSVERSION=$(firstword $(subst -, ,$*)) BUILDX_ARCH=$(lastword $(subst -, ,$*)) $(MAKE) container-windows
 
 container-windows:
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building container: $(IMAGE):$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)"
 
 	@docker buildx build --pull \
@@ -289,7 +327,10 @@ container-windows:
 
 	@echo "built container: $(IMAGE):$(VERSION)-windows-$(BUILDX_OSVERSION)-$(BUILDX_ARCH)"
 
-push-manifest:
+push-manifest: ## Push multi-arch manifest
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@echo "building manifest: $(IMAGE_TAG) for $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})"
 	@docker manifest create --amend --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
 
@@ -309,36 +350,36 @@ push-manifest:
 	@docker manifest inspect --insecure=$(INSECURE_REGISTRY) $(IMAGE_TAG)
 
 SKIP_TESTS ?=
-test: build-dirs
+test: build-dirs ## Run unit tests
 ifneq ($(SKIP_TESTS), 1)
 	@$(MAKE) shell CMD="-c 'hack/test.sh $(WHAT)'"
 endif
 
-test-local: build-dirs
+test-local: build-dirs ## Run unit tests locally
 ifneq ($(SKIP_TESTS), 1)
 	hack/test.sh $(WHAT)
 endif
 
-verify:
+verify: ## Run all verify scripts
 ifneq ($(SKIP_TESTS), 1)
 	@$(MAKE) shell CMD="-c 'hack/verify-all.sh'"
 endif
 
-lint:
+lint: ## Run linter
 ifneq ($(SKIP_TESTS), 1)
 	@$(MAKE) shell CMD="-c 'hack/lint.sh'"
 endif
 
-local-lint:
+local-lint: ## Run linter locally
 ifneq ($(SKIP_TESTS), 1)
 	@hack/lint.sh
 endif
 
-update:
+update: ## Run all update scripts
 	@$(MAKE) shell CMD="-c 'hack/update-all.sh'"
 
 # update-crd is for development purpose only, it is faster than update, so is a shortcut when you want to generate CRD changes only
-update-crd:
+update-crd: ## Update generated CRD code
 	@$(MAKE) shell CMD="-c 'hack/update-3generated-crd-code.sh'"	
 
 build-dirs:
@@ -363,24 +404,30 @@ else ifneq ($(BUILDER_IMAGE_CACHED),)
 	@echo "Using Cached Image: $(BUILDER_IMAGE)"
 else
 	@echo "Trying to pull build-image: $(BUILDER_IMAGE)"
-	docker pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
+	$(CONTAINER_TOOL) pull -q $(BUILDER_IMAGE) || $(MAKE) build-image
 endif
 
-build-image:
+build-image: ## Build the builder image
 	@# When we build a new image we just untag the old one.
 	@# This makes sure we don't leave the orphaned image behind.
-	$(eval old_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	$(eval old_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 ifeq ($(BUILDX_ENABLED), true)
-	@cd hack/build-image && docker buildx build --build-arg=GOPROXY=$(GOPROXY) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
-else
-	@cd hack/build-image && docker build --build-arg=GOPROXY=$(GOPROXY) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
 endif
-	$(eval new_id=$(shell docker image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
+	@cd hack/build-image && $(CONTAINER_TOOL) buildx build --build-arg=GOPROXY=$(GOPROXY) --build-arg=PROTOC_GEN_GO_VERSION=$(PROTOC_GEN_GO_VERSION) --build-arg=GOIMPORTS_VERSION=$(GOIMPORTS_VERSION) --output=type=docker --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+else
+	@cd hack/build-image && $(CONTAINER_TOOL) build --build-arg=GOPROXY=$(GOPROXY) --build-arg=PROTOC_GEN_GO_VERSION=$(PROTOC_GEN_GO_VERSION) --build-arg=GOIMPORTS_VERSION=$(GOIMPORTS_VERSION) --pull -t $(BUILDER_IMAGE) -f $(BUILDER_IMAGE_DOCKERFILE_REALPATH) .
+endif
+	$(eval new_id=$(shell $(CONTAINER_TOOL) image inspect  --format '{{ .ID }}' ${BUILDER_IMAGE} 2>/dev/null))
 	@if [ "$(old_id)" != "" ] && [ "$(old_id)" != "$(new_id)" ]; then \
-		docker rmi -f $$id || true; \
+		$(CONTAINER_TOOL) rmi -f $$id || true; \
 	fi
 
-push-build-image:
+push-build-image: ## Push the builder image
+ifneq ($(CONTAINER_TOOL),docker)
+	$(error $(DOCKER_ONLY_ERROR))
+endif
 	@# this target will push the build-image it assumes you already have docker
 	@# credentials needed to accomplish this.
 	@# Pushing will be skipped if a custom Dockerfile was used to build the image.
@@ -391,36 +438,36 @@ else
 	docker push $(BUILDER_IMAGE)
 endif
 
-build-image-hugo:
-	cd site && docker build --pull -t $(HUGO_IMAGE) .
+build-image-hugo: ## Build the hugo image for docs
+	cd site && $(CONTAINER_TOOL) build --pull -t $(HUGO_IMAGE) .
 
-clean:
+clean: ## Clean up build artifacts and modcache
 # if we have a cached image then use it to run go clean --modcache
 # this test checks if we there is an image id in the BUILDER_IMAGE_CACHED variable.
 ifneq ($(strip $(BUILDER_IMAGE_CACHED)),)
 	$(MAKE) shell CMD="-c 'go clean --modcache'"
-	docker rmi -f $(BUILDER_IMAGE) || true
+	$(CONTAINER_TOOL) rmi -f $(BUILDER_IMAGE) || true
 endif
 	rm -rf .go _output
-	docker rmi $(HUGO_IMAGE)
+	$(CONTAINER_TOOL) rmi $(HUGO_IMAGE)
 
 
 .PHONY: modules
-modules:
+modules: ## Tidy go modules
 	go mod tidy
 
 
 .PHONY: verify-modules
-verify-modules: modules
+verify-modules: modules ## Verify go modules are up to date
 	@if !(git diff --quiet HEAD -- go.sum go.mod); then \
 		echo "go module files are out of date, please commit the changes to go.mod and go.sum"; exit 1; \
 	fi
 
 
-ci: verify-modules verify all test
+ci: verify-modules verify all test ## Run CI checks
 
 
-changelog:
+changelog: ## Generate changelog
 	hack/release-tools/changelog.sh
 
 # release builds a GitHub release using goreleaser within the build container.
@@ -438,7 +485,7 @@ changelog:
 #		RELEASE_NOTES_FILE=changelogs/CHANGELOG-1.2.md \
 #		PUBLISH=true \
 #		make release
-release:
+release: ## Build a GitHub release using goreleaser
 	$(MAKE) shell CMD="-c '\
 		GITHUB_TOKEN=$(GITHUB_TOKEN) \
 		RELEASE_NOTES_FILE=$(RELEASE_NOTES_FILE) \
@@ -446,8 +493,8 @@ release:
 		REGISTRY=$(REGISTRY) \
 		./hack/release-tools/goreleaser.sh'"
 
-serve-docs: build-image-hugo
-	docker run \
+serve-docs: build-image-hugo ## Serve the documentation site locally
+	$(CONTAINER_TOOL) run \
 	--rm \
 	-v "$$(pwd)/site:/project" \
 	-it -p 1313:1313 \
@@ -455,18 +502,18 @@ serve-docs: build-image-hugo
 	server --bind=0.0.0.0 --enableGitInfo=false
 # gen-docs generates a new versioned docs directory under site/content/docs.
 # Please read the documentation in the script for instructions on how to use it.
-gen-docs:
+gen-docs: ## Generate a new versioned docs directory
 	@hack/release-tools/gen-docs.sh
 
 .PHONY: test-e2e
-test-e2e: local
+test-e2e: local ## Run end-to-end tests
 	$(MAKE) -e VERSION=$(VERSION) -C test/ run-e2e
 
 .PHONY: test-perf
-test-perf: local
+test-perf: local ## Run performance tests
 	$(MAKE) -e VERSION=$(VERSION) -C test/ run-perf
 
-go-generate:
+go-generate: ## Run go generate
 	go generate ./pkg/...
 
 # requires an authenticated gh cli
@@ -478,7 +525,7 @@ go-generate:
 new-changelog: GH_LOGIN ?= $(shell gh pr view --json author --jq .author.login 2> /dev/null)
 new-changelog: GH_PR_NUMBER ?= $(shell gh pr view --json number --jq .number 2> /dev/null)
 new-changelog: CHANGELOG_BODY ?= '$(shell gh pr view --json title --jq .title)'
-new-changelog:
+new-changelog: ## Create a new changelog file for a PR
 	@if [ "$(GH_LOGIN)" = "" ]; then \
 		echo "branch does not have PR or cli not logged in, try 'gh auth login' or 'gh pr create'"; \
 		exit 1; \

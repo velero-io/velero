@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: '0 2 * * *' # run at 2 AM UTC
 
+permissions:
+  contents: read
+
 jobs:
   nightly-scan:
     name: Trivy nightly scan
@@ -15,14 +18,15 @@ jobs:
         # list of images that need scan
         images: [velero, velero-plugin-for-aws, velero-plugin-for-gcp, velero-plugin-for-microsoft-azure]
     permissions:
+      contents: read  # for actions/checkout to fetch code
       security-events: write  # for github/codeql-action/upload-sarif to upload SARIF results
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: 'docker.io/velero/${{ matrix.images }}:${{ matrix.versions }}'
           severity: 'CRITICAL,HIGH,MEDIUM'
@@ -31,6 +35,6 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4.38.2
         with:
           sarif_file: 'trivy-results.sarif'

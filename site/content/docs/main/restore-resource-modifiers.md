@@ -185,3 +185,46 @@ resourceModifierRules:
 ### Wildcard Support for GroupResource
 The user can specify a wildcard for groupResource in the conditions' struct. This will allow the user to apply the patches for all the resources of a particular group or all resources in all groups. For example, `*.apps` will apply to all the resources in the `apps` group, `*` will apply to all the resources in core group, `*.*` will apply to all the resources in all groups.
 - If both `*.groupName` and `namespaces` are specified, the patches will be applied to all the namespaced resources in this group in the specified namespaces and all the cluster resources in this group.
+
+## Default Resource Modifiers
+
+Velero supports a server-level default resource modifier that applies automatically to all restores without requiring per-restore configuration.
+This is useful for common transformations like stripping stale CNI annotations that can break workloads after restore.
+
+### Configuration
+
+1. Create a ConfigMap in the Velero namespace with your default resource modifier rules:
+
+```bash
+kubectl apply -f examples/default-resource-modifier-cni.yaml
+```
+
+2. Configure the Velero server to use it, either during install:
+
+```bash
+velero install --default-resource-modifier-configmap=default-restore-resource-modifiers ...
+```
+
+Or by editing an existing deployment:
+
+```bash
+kubectl -n velero edit deploy velero
+# Add to the server args: --default-resource-modifier-configmap=default-restore-resource-modifiers
+```
+
+### Precedence
+
+When a per-restore modifier is specified via `--resource-modifier-configmap`, it takes exclusive precedence and the default is not applied.
+
+### Opt-out
+
+To skip the default modifier for a specific restore without specifying a per-restore modifier:
+
+```bash
+velero restore create --from-backup my-backup --skip-default-resource-modifier
+```
+
+### Error Handling
+
+If the default ConfigMap is missing or contains invalid data, Velero logs a warning and proceeds with the restore.
+Per-restore modifier errors remain fatal and cause the restore to fail validation.

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 
@@ -56,7 +56,7 @@ func NewShimRepo(repo udmrepo.BackupRepo) repo.RepositoryWriter {
 
 // OpenObject open specific object
 func (sr *shimRepository) OpenObject(ctx context.Context, id object.ID) (object.Reader, error) {
-	reader, err := sr.udmRepo.OpenObject(ctx, udmrepo.ID(id.String()))
+	reader, err := sr.udmRepo.OpenObject(ctx, udmrepo.ID(id.String()), udmrepo.ObjectReadOptions{})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open object with id %v", id)
 	}

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 

@@ -26,16 +26,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+	"github.com/gobwas/glob"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
@@ -43,6 +46,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	"github.com/vmware-tanzu/velero/internal/volumehelper"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -352,6 +356,52 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		backupRequest.ResourceIncludesExcludes = srie
 	}
 
+	if backupRequest.ResPolicies != nil {
+		clusterScopedFilterPolicy := backupRequest.ResPolicies.GetClusterScopedFilterPolicy()
+		if clusterScopedFilterPolicy != nil {
+			backupRequest.ClusterScopedFilterMap, err = resolveClusterScopedFilterPolicy(
+				clusterScopedFilterPolicy,
+				kb.discoveryHelper,
+				log,
+			)
+			if err != nil {
+				return err
+			}
+			log.Infof("Resolved clusterScopedFilterPolicy: %d kind group(s) in cluster-scoped filter map",
+				len(backupRequest.ClusterScopedFilterMap))
+		}
+
+		nfPolicies := backupRequest.ResPolicies.GetNamespacedFilterPolicies()
+		if len(nfPolicies) > 0 {
+			backupRequest.NamespacedFilterMap, backupRequest.NamespacedFilterPatterns, err = resolveNamespacedFilterPolicies(
+				nfPolicies,
+				kb.discoveryHelper,
+				log,
+			)
+			if err != nil {
+				return err
+			}
+			log.Infof("Resolved namespacedFilterPolicies: %d namespace pattern(s) registered",
+				len(backupRequest.NamespacedFilterPatterns))
+			for _, p := range backupRequest.NamespacedFilterPatterns {
+				nsf := backupRequest.NamespacedFilterMap[p.Pattern]
+				log.WithFields(logrus.Fields{
+					"namespacePattern": p.Pattern,
+					"kindCount":        len(nsf.ResourceFilterMap),
+					"hasCatchAll":      nsf.CatchAllFilter != nil,
+				}).Debug("namespacedFilterPolicies: namespace pattern registered")
+				for kind := range nsf.ResourceFilterMap {
+					if backupRequest.ResourceIncludesExcludes.ShouldExclude(kind) {
+						log.WithFields(logrus.Fields{
+							"namespacePattern": p.Pattern,
+							"kind":             kind,
+						}).Warn("namespacedFilterPolicies entry lists a kind that is globally excluded by includeExcludePolicy; the per-namespace filter entry has no effect")
+					}
+				}
+			}
+		}
+	}
+
 	log.Infof("Backing up all volumes using pod volume backup: %t", boolptr.IsSetToTrue(backupRequest.Backup.Spec.DefaultVolumesToFsBackup))
 
 	backupRequest.ResourceHooks, err = getResourceHooks(backupRequest.Spec.Hooks.Resources, kb.discoveryHelper)
@@ -435,6 +485,8 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		return err
 	}
 
+	pvcMustInclusionTracker := NewPVCMustInclusionTracker(backupRequest.MustIncludeAdditionalItemPVCs)
+
 	volumeHelperImpl, err := volumehelper.NewVolumeHelperImplWithNamespaces(
 		backupRequest.ResPolicies,
 		backupRequest.Spec.SnapshotVolumes,
@@ -443,6 +495,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		boolptr.IsSetToTrue(backupRequest.Spec.DefaultVolumesToFsBackup),
 		!backupRequest.ResourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()),
 		namespaces,
+		pvcMustInclusionTracker,
 	)
 	if err != nil {
 		log.WithError(err).Error("Failed to build PVC-to-Pod cache for volume policy lookups")
@@ -693,10 +746,10 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		log.WithError(errors.WithStack((err))).Warn("Got error trying to update backup's status.progress and hook status")
 	}
 
-	if skippedPVSummary, err := json.Marshal(backupRequest.SkippedPVTracker.Summary()); err != nil {
-		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped PV summary.")
+	if skippedVolumeSummary, err := json.Marshal(backupRequest.SkippedVolumeTracker.Summary()); err != nil {
+		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped volume summary.")
 	} else {
-		log.Infof("Summary for skipped PVs: %s", skippedPVSummary)
+		log.Infof("Summary for skipped volumes: %s", skippedVolumeSummary)
 	}
 
 	backupRequest.Status.Progress = &velerov1api.BackupProgress{TotalItems: backedUpItems, ItemsBackedUp: backedUpItems}
@@ -1213,21 +1266,12 @@ func buildFinalTarball(tr *tar.Reader, tw tarWriter, updateFiles map[string]File
 				return errors.WithStack(err)
 			}
 			delete(updateFiles, header.Name)
-			// skip over file contents from old tarball
-			_, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 		} else {
 			// Add original content to new tarball, as item wasn't updated
-			oldContents, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 			if err := tw.WriteHeader(header); err != nil {
 				return errors.WithStack(err)
 			}
-			if _, err := tw.Write(oldContents); err != nil {
+			if _, err := io.Copy(tw, tr); err != nil {
 				return errors.WithStack(err)
 			}
 		}
@@ -1284,7 +1328,9 @@ func updateVolumeInfos(
 				volumeInfos[index].SnapshotDataMovementInfo.RetainedSnapshot = dataUpload.Spec.CSISnapshot.VolumeSnapshot
 				volumeInfos[index].SnapshotDataMovementInfo.Size = dataUpload.Status.Progress.TotalBytes
 				volumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
+				volumeInfos[index].SnapshotDataMovementInfo.SourceSize = dataUpload.Status.SourceSize
 				volumeInfos[index].SnapshotDataMovementInfo.Phase = dataUpload.Status.Phase
+				volumeInfos[index].FallbackFull = dataUpload.Status.FallbackFull
 
 				if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
 					volumeInfos[index].Result = volume.VolumeResultSucceeded
@@ -1340,4 +1386,139 @@ func putVolumeInfos(
 	}
 
 	return backupStore.PutBackupVolumeInfos(backupName, backupVolumeInfoBuf)
+}
+
+func resolveClusterScopedFilterPolicy(
+	policy *resourcepolicies.ClusterScopedFilterPolicy,
+	helper discovery.Helper,
+	log logrus.FieldLogger,
+) (map[string]*ResolvedResourceFilter, error) {
+	rfMap := make(map[string]*ResolvedResourceFilter)
+
+	for _, rf := range policy.ResourceFilters {
+		resolved, err := resolveResourceFilter(rf)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, kind := range rf.Kinds {
+			gr, apiResource, err := helper.ResourceFor(
+				schema.GroupVersionResource{Resource: kind},
+			)
+			if err != nil {
+				log.WithField("kind", kind).Warnf(
+					"Cannot resolve kind via discovery, using as-is: %v", err)
+				rfMap[kind] = resolved
+				continue
+			}
+			if apiResource.Namespaced {
+				log.WithField("kind", kind).Warnf(
+					"kind %q in clusterScopedFilterPolicy is namespace-scoped; "+
+						"it will never match in a cluster-scoped filter — did you mean namespacedFilterPolicies?", kind)
+			}
+			rfMap[gr.GroupResource().String()] = resolved
+		}
+	}
+
+	return rfMap, nil
+}
+
+func resolveResourceFilter(rf resourcepolicies.ResourceFilter) (*ResolvedResourceFilter, error) {
+	selector, err := resourcepolicies.SelectorFromPolicyLabelSelector(rf.LabelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid label selector in resource filter: %w", err)
+	}
+
+	var orSelectors []labels.Selector
+	for _, ols := range rf.OrLabelSelectors {
+		s, err := resourcepolicies.SelectorFromPolicyLabelSelector(ols)
+		if err != nil {
+			return nil, fmt.Errorf("invalid OR label selector in resource filter: %w", err)
+		}
+		if s != nil {
+			orSelectors = append(orSelectors, s)
+		}
+	}
+
+	var nameIE *collections.IncludesExcludes
+	if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {
+		nameIE = collections.NewIncludesExcludes()
+		nameIE.Includes(rf.Names...)
+		nameIE.Excludes(rf.ExcludedNames...)
+	}
+
+	return &ResolvedResourceFilter{
+		LabelSelector:    selector,
+		OrLabelSelectors: orSelectors,
+		NameIE:           nameIE,
+	}, nil
+}
+
+func resolveNamespacedFilterPolicies(
+	policies []resourcepolicies.NamespacedFilterPolicy,
+	helper discovery.Helper,
+	log logrus.FieldLogger,
+) (map[string]*ResolvedNamespaceFilter, []NamespacedFilterPattern, error) {
+	result := make(map[string]*ResolvedNamespaceFilter)
+	var patternOrder []NamespacedFilterPattern
+
+	for _, policy := range policies {
+		rfMap := make(map[string]*ResolvedResourceFilter)
+		var nsFilter *ResolvedNamespaceFilter
+
+		for _, rf := range policy.ResourceFilters {
+			resolved, err := resolveResourceFilter(rf)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if rf.IsCatchAll() {
+				if nsFilter == nil {
+					nsFilter = &ResolvedNamespaceFilter{ResourceFilterMap: rfMap}
+				}
+				nsFilter.CatchAllFilter = resolved
+			} else {
+				// Resolve each kind to a fully-qualified group-resource string with improved error handling
+				for _, kind := range rf.Kinds {
+					gr, apiResource, err := helper.ResourceFor(
+						schema.GroupVersionResource{Resource: kind},
+					)
+					if err != nil {
+						// Log warning but continue - allows for forward compatibility
+						log.WithField("kind", kind).Warnf(
+							"Cannot resolve kind via discovery, using as-is: %v", err)
+						rfMap[kind] = resolved
+						continue
+					}
+					if !apiResource.Namespaced {
+						log.WithField("kind", kind).Warnf(
+							"kind %q in namespacedFilterPolicies is cluster-scoped; "+
+								"it will never match in a namespace-scoped filter — did you mean clusterScopedFilterPolicy?", kind)
+					}
+					rfMap[gr.GroupResource().String()] = resolved
+				}
+			}
+		}
+
+		if nsFilter == nil {
+			nsFilter = &ResolvedNamespaceFilter{}
+		}
+		nsFilter.ResourceFilterMap = rfMap
+		for _, nsPattern := range policy.Namespaces {
+			result[nsPattern] = nsFilter
+			// Pre-compile glob patterns once here; exact names are matched via map
+			// and never reach the pattern loop, so only wildcard patterns need Compiled set.
+			entry := NamespacedFilterPattern{Pattern: nsPattern}
+			if strings.ContainsAny(nsPattern, "*?[") {
+				if compiled, cerr := glob.Compile(nsPattern); cerr == nil {
+					entry.Compiled = compiled
+				} else {
+					// Pattern already validated; this branch should not be reached
+					log.WithField("pattern", nsPattern).Warnf("Failed to pre-compile glob pattern: %v", cerr)
+				}
+			}
+			patternOrder = append(patternOrder, entry)
+		}
+	}
+	return result, patternOrder, nil
 }

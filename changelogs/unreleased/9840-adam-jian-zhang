@@ -1,0 +1,1 @@
+Fix issue #9812, validate ClusterScopedFilterPolicy and NamespacedFilterPolicy incompatible with legacy filters 

@@ -1,0 +1,1 @@
+Fix issue #10321, when data mover pod is evicted get the message from the data mover pod instead of the terminal message

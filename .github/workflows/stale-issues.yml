@@ -3,11 +3,17 @@ on:
   schedule:
     - cron: "30 1 * * *" # Every day at 1:30 UTC
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   stale:
+    if: github.repository == 'velero-io/velero'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10.1.1
+      - uses: actions/stale@v11.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           stale-issue-message: "This issue is stale because it has been open 60 days with no activity. Remove stale label or comment or this will be closed in 14 days. If a Velero team member has requested log or more information, please provide the output of the shared commands."
@@ -20,4 +26,4 @@ jobs:
           days-before-pr-close: -1
           # Only issues made after Feb 09 2021.
           start-date: "2021-09-02T00:00:00"
-          exempt-issue-labels: "Epic,Area/CLI,Area/Cloud/AWS,Area/Cloud/Azure,Area/Cloud/GCP,Area/Cloud/vSphere,Area/CSI,Area/Design,Area/Documentation,Area/Plugins,Bug,Enhancement/User,kind/requirement,kind/refactor,kind/tech-debt,limitation,Needs investigation,Needs triage,Needs Product,P0 - Hair on fire,P1 - Important,P2 - Long-term important,P3 - Wouldn't it be nice if...,Product Requirements,Restic - GA,Restic,release-blocker,Security,backlog"
+          exempt-issue-labels: "Epic,Area/CLI,Area/Cloud/AWS,Area/Cloud/Azure,Area/Cloud/GCP,Area/Cloud/vSphere,Area/CSI,Area/Design,Area/Documentation,Area/Plugins,Bug,Enhancement/User,kind/requirement,kind/refactor,kind/tech-debt,limitation,Needs investigation,Needs triage,Needs Product,P0 - Hair on fire,P1 - Important,P2 - Long-term important,P3 - Wouldn't it be nice if...,Product Requirements,release-blocker,Security,backlog"

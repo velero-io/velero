@@ -23,7 +23,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
@@ -196,6 +196,25 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 	// if securityContext configmap is unavailable but first container in pod has a SecurityContext set, then copy this security context
 	if !securityContextSet && len(pod.Spec.Containers) != 0 && pod.Spec.Containers[0].SecurityContext != nil {
 		securityContext = *pod.Spec.Containers[0].SecurityContext.DeepCopy()
+		securityContextSet = true
+	}
+	// if no configmap or container-level securityContext is set, fall back to the pod-level
+	// spec.securityContext runAsUser/runAsGroup: the workload's own identity is the one that
+	// wrote the restored files, so it's the one that can read them back
+	if !securityContextSet && pod.Spec.SecurityContext != nil &&
+		(pod.Spec.SecurityContext.RunAsUser != nil || pod.Spec.SecurityContext.RunAsGroup != nil) {
+		securityContext = defaultSecurityCtx()
+		if pod.Spec.SecurityContext.RunAsUser != nil {
+			securityContext.RunAsUser = pod.Spec.SecurityContext.RunAsUser
+			// defaultSecurityCtx() hardcodes RunAsNonRoot: true, which contradicts a pod-level
+			// RunAsUser of 0 (root); defer to the pod's own RunAsNonRoot setting in that case
+			if *pod.Spec.SecurityContext.RunAsUser == 0 {
+				securityContext.RunAsNonRoot = pod.Spec.SecurityContext.RunAsNonRoot
+			}
+		}
+		if pod.Spec.SecurityContext.RunAsGroup != nil {
+			securityContext.RunAsGroup = pod.Spec.SecurityContext.RunAsGroup
+		}
 		securityContextSet = true
 	}
 	if !securityContextSet {

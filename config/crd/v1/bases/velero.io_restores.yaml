@@ -11,10 +11,32 @@ spec:
     kind: Restore
     listKind: RestoreList
     plural: restores
+    shortNames:
+    - rst
     singular: restore
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: The name of the backup this restore is from
+      jsonPath: .spec.backupName
+      name: Backup
+      type: string
+    - description: Restore status such as New/InProgress
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - description: Total number of errors logged during the restore
+      jsonPath: .status.errors
+      name: Errors
+      type: integer
+    - description: Total number of warnings logged during the restore
+      jsonPath: .status.warnings
+      name: Warnings
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
@@ -46,6 +68,11 @@ spec:
                   BackupName is the unique name of the Velero backup to restore
                   from.
                 type: string
+              csiSnapshotTimeout:
+                description: |-
+                  CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot ready to use during creation, before returning error as timeout.
+                  The default value is 30 minute.
+                type: string
               excludedNamespaces:
                 description: |-
                   ExcludedNamespaces contains a list of namespaces that are not
@@ -65,6 +92,11 @@ spec:
               existingResourcePolicy:
                 description: ExistingResourcePolicy specifies the restore behavior
                   for the Kubernetes resource to be restored
+                nullable: true
+                type: string
+              existingVolumeDataPolicy:
+                description: ExistingVolumeDataPolicy specifies the restore behavior
+                  for the volume data to be restored
                 nullable: true
                 type: string
               hooks:
@@ -404,6 +436,33 @@ spec:
                 - name
                 type: object
                 x-kubernetes-map-type: atomic
+              resourcePolicy:
+                description: |-
+                  ResourcePolicy specifies the reference to a ConfigMap containing resource
+                  filter policies for this restore. The ConfigMap can contain a
+                  namespacedFilterPolicies section that specifies per-namespace resource type
+                  filters, label selectors, and resource name patterns, and a
+                  clusterScopedFilterPolicy section for per-kind filtering of cluster-scoped
+                  resources. The ConfigMap format is the same as for BackupSpec.ResourcePolicy.
+                nullable: true
+                properties:
+                  apiGroup:
+                    description: |-
+                      APIGroup is the group for the resource being referenced.
+                      If APIGroup is not specified, the specified Kind must be in the core API group.
+                      For any other third-party types, APIGroup is required.
+                    type: string
+                  kind:
+                    description: Kind is the type of resource being referenced
+                    type: string
+                  name:
+                    description: Name is the name of resource being referenced
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+                x-kubernetes-map-type: atomic
               restorePVs:
                 description: |-
                   RestorePVs specifies whether to restore all included
@@ -438,10 +497,24 @@ spec:
                   from. If specified, and BackupName is empty, Velero will restore
                   from the most recent successful backup created from this schedule.
                 type: string
+              skipDefaultResourceModifier:
+                description: |-
+                  SkipDefaultResourceModifier controls whether the server-configured default
+                  resource modifier is applied to this restore.
+                  When true, the default modifier is skipped even if configured on the server.
+                  Has no effect when a per-restore ResourceModifier is specified.
+                nullable: true
+                type: boolean
               uploaderConfig:
                 description: UploaderConfig specifies the configuration for the restore.
                 nullable: true
                 properties:
+                  deleteExtraFiles:
+                    description: |-
+                      DeleteExtraFiles specifies whether to delete the extra files in the target volume that do not exist in the backup.
+                      This setting is only applicable to File System restores (PodVolumeBackup or CSI File System Data Move) and has no effect on Block Data Move restores.
+                    nullable: true
+                    type: boolean
                   parallelFilesDownload:
                     description: ParallelFilesDownload is the concurrency number setting
                       for restore.
@@ -560,3 +633,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

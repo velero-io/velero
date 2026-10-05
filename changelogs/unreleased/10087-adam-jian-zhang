@@ -1,0 +1,1 @@
+Stop force-including VolumeSnapshotContents via resourceMustHave on every restore; CSI VolumeSnapshot/PVC RestoreItemActions now set restore.velero.io/must-include-additional-items so bound snapshot dependencies are restored only when their parent is restored (fixes #9957)

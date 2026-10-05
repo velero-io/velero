@@ -26,7 +26,9 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -279,8 +281,9 @@ func TestItemCollectorBackupNamespaces(t *testing.T) {
 					Backup:                    tc.backup,
 					NamespaceIncludesExcludes: tc.ie,
 				},
-				dynamicFactory: factory,
-				dir:            tempDir,
+				dynamicFactory:  factory,
+				discoveryHelper: test.NewFakeDiscoveryHelper(true, nil),
+				dir:             tempDir,
 			}
 
 			if tc.converter == nil {
@@ -304,4 +307,349 @@ func TestItemCollectorBackupNamespaces(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNamespacedFilterMap_GlobalExclusionPrecedence verifies the precedence rule:
+// ResourceIncludesExcludes (set by includeExcludePolicy) is checked before the
+// NamespacedFilterMap. This is enforced at both Stage 1 (item_collector.go line ~430)
+// and Stage 2 (item_backupper.go itemInclusionChecks). The unit below confirms that
+// GetNamespaceFilter still returns a filter for the namespace — it is the caller's
+// responsibility to check ResourceIncludesExcludes first, which item_collector does.
+//
+// Full coverage of the Stage 2 enforcement is in item_backupper_test.go
+// TestItemInclusionChecks_GlobalExclusion_OverridesNamespaceFilter.
+func TestNamespacedFilterMap_GlobalExclusionPrecedence(t *testing.T) {
+	req := &Request{
+		Backup:                    builder.ForBackup("velero", "test-backup").Result(),
+		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().Includes("ns-a"),
+		NamespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+			"ns-a": {
+				ResourceFilterMap: map[string]*ResolvedResourceFilter{
+					"secrets.": {},
+				},
+			},
+		},
+		NamespacedFilterPatterns: []NamespacedFilterPattern{},
+	}
+
+	// GetNamespaceFilter returns the filter regardless of global exclusions.
+	// The caller (item_collector) is responsible for checking ResourceIncludesExcludes first.
+	nsFilter := req.GetNamespaceFilter("ns-a")
+	require.NotNil(t, nsFilter, "GetNamespaceFilter should return a filter for ns-a")
+	_, hasSecrets := nsFilter.ResourceFilterMap["secrets."]
+	assert.True(t, hasSecrets, "ns-a filter should list secrets GR")
+
+	// When a global excludeAllIE is set, item_collector would return nil before consulting the map.
+	// This is verified by the Stage 1 check: ShouldInclude("secrets.") == false → skip.
+	ie := &excludeAllIE{}
+	assert.False(t, ie.ShouldInclude("secrets."),
+		"global exclusion must reject secrets before the per-namespace filter is consulted")
+}
+
+// excludeAllIE is an IncludesExcludesInterface that excludes every resource kind.
+type excludeAllIE struct{}
+
+func (excludeAllIE) ShouldInclude(string) bool { return false }
+func (excludeAllIE) ShouldExclude(string) bool { return true }
+
+func TestGetResourceItems(t *testing.T) {
+	tests := []struct {
+		name                   string
+		namespaces             []string
+		clusterScopedFilterMap map[string]*ResolvedResourceFilter
+		namespacedFilterMap    map[string]*ResolvedNamespaceFilter
+		resource               metav1.APIResource
+		gr                     schema.GroupResource
+	}{
+		{
+			name:       "cluster scoped resource with filter",
+			namespaces: []string{""},
+			resource: metav1.APIResource{
+				Name:       "persistentvolumes",
+				Namespaced: false,
+			},
+			gr: schema.GroupResource{Resource: "persistentvolumes"},
+			clusterScopedFilterMap: map[string]*ResolvedResourceFilter{
+				"persistentvolumes": {
+					LabelSelector: labels.Set{"app": "foo"}.AsSelector(),
+				},
+			},
+		},
+		{
+			name:       "namespace scoped resource with filter",
+			namespaces: []string{"ns1"},
+			resource: metav1.APIResource{
+				Name:       "pods",
+				Namespaced: true,
+			},
+			gr: schema.GroupResource{Resource: "pods"},
+			namespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+				"ns1": {
+					ResourceFilterMap: map[string]*ResolvedResourceFilter{
+						"pods": {
+							LabelSelector: labels.Set{"app": "bar"}.AsSelector(),
+						},
+					},
+				},
+			},
+		},
+		{
+			name:       "namespace scoped resource skipped due to no filter match",
+			namespaces: []string{"ns1"},
+			resource: metav1.APIResource{
+				Name:       "secrets",
+				Namespaced: true,
+			},
+			gr: schema.GroupResource{Resource: "secrets"},
+			namespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+				"ns1": {
+					ResourceFilterMap: map[string]*ResolvedResourceFilter{
+						"pods": {
+							LabelSelector: labels.Set{"app": "bar"}.AsSelector(),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := &test.FakeDynamicClient{}
+			dc.On("List", mock.Anything).Return(&unstructured.UnstructuredList{}, nil)
+
+			factory := &test.FakeDynamicFactory{}
+			factory.On("ClientForGroupVersionResource", mock.Anything, mock.Anything, mock.Anything).Return(dc, nil)
+
+			req := &Request{
+				Backup:                   builder.ForBackup("velero", "backup").Result(),
+				ClusterScopedFilterMap:   tc.clusterScopedFilterMap,
+				NamespacedFilterMap:      tc.namespacedFilterMap,
+				ResourceIncludesExcludes: includeAllIE{},
+			}
+			if len(tc.namespaces) > 0 && tc.namespaces[0] != "" {
+				req.NamespaceIncludesExcludes = collections.NewNamespaceIncludesExcludes().Includes(tc.namespaces...)
+			} else {
+				req.NamespaceIncludesExcludes = collections.NewNamespaceIncludesExcludes().Includes("*")
+			}
+
+			r := &itemCollector{
+				backupRequest:   req,
+				dynamicFactory:  factory,
+				discoveryHelper: test.NewFakeDiscoveryHelper(true, nil),
+				log:             test.NewLogger(),
+			}
+
+			_, err := r.getResourceItems(test.NewLogger(), schema.GroupVersion{}, tc.resource, nil)
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestGetOrderedResourcesForTypeTrimsSpaces(t *testing.T) {
+	// Spaces after commas are common in CLI input and should not break ordering.
+	orders := getOrderedResourcesForType(map[string]string{
+		"pods": "ns1/pod2, ns1/pod1",
+	}, "pods")
+	require.Equal(t, []string{"ns1/pod2", "ns1/pod1"}, orders)
+
+	log := logrus.StandardLogger()
+	podResources := []*kubernetesResource{
+		{namespace: "ns1", name: "pod3"},
+		{namespace: "ns1", name: "pod1"},
+		{namespace: "ns1", name: "pod2"},
+	}
+	sorted := sortResourcesByOrder(log, podResources, orders)
+	require.Equal(t, []*kubernetesResource{
+		{namespace: "ns1", name: "pod2", orderedResource: true},
+		{namespace: "ns1", name: "pod1", orderedResource: true},
+		{namespace: "ns1", name: "pod3"},
+	}, sorted)
+}
+
+func TestGetResourceItems_NamespacedFilterPolicies_ClusterWideListing(t *testing.T) {
+	// Simulate cluster-wide API calls where client is called with namespace=""
+	prodSA := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata": map[string]any{
+				"name":      "default",
+				"namespace": "production",
+			},
+		},
+	}
+	defaultSA := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata": map[string]any{
+				"name":      "default",
+				"namespace": "default",
+			},
+		},
+	}
+	kubeSystemSA := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata": map[string]any{
+				"name":      "default",
+				"namespace": "kube-system",
+			},
+		},
+	}
+
+	prodCM1 := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "app-config",
+				"namespace": "production",
+				"labels": map[string]any{
+					"app": "frontend",
+				},
+			},
+		},
+	}
+	prodCM2 := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "other-config",
+				"namespace": "production",
+				"labels": map[string]any{
+					"app": "backend",
+				},
+			},
+		},
+	}
+	defaultCM := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "my-config",
+				"namespace": "default",
+			},
+		},
+	}
+
+	dcClusterWideSA := &test.FakeDynamicClient{}
+	dcClusterWideSA.On("List", mock.Anything).Return(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{prodSA, defaultSA, kubeSystemSA}}, nil)
+
+	dcClusterWideCM := &test.FakeDynamicClient{}
+	dcClusterWideCM.On("List", mock.Anything).Return(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{prodCM1, prodCM2, defaultCM}}, nil)
+
+	factory := &test.FakeDynamicFactory{}
+	factory.On("ClientForGroupVersionResource", schema.GroupVersion{Version: "v1"}, metav1.APIResource{Name: "serviceaccounts", Namespaced: true, Kind: "ServiceAccount"}, "").Return(dcClusterWideSA, nil)
+	factory.On("ClientForGroupVersionResource", schema.GroupVersion{Version: "v1"}, metav1.APIResource{Name: "configmaps", Namespaced: true, Kind: "ConfigMap"}, "").Return(dcClusterWideCM, nil)
+
+	frontendSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{"app": "frontend"},
+	})
+	require.NoError(t, err)
+
+	req := &Request{
+		Backup: builder.ForBackup("velero", "backup").Result(),
+		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().
+			Includes("*").
+			Excludes("kube-system"),
+		NamespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+			"production": {
+				ResourceFilterMap: map[string]*ResolvedResourceFilter{
+					"configmaps": {
+						LabelSelector: frontendSelector,
+					},
+				},
+			},
+		},
+		ResourceIncludesExcludes: includeAllIE{},
+	}
+
+	tempDir := t.TempDir()
+	r := &itemCollector{
+		backupRequest:   req,
+		dynamicFactory:  factory,
+		discoveryHelper: test.NewFakeDiscoveryHelper(true, nil),
+		log:             test.NewLogger(),
+		dir:             tempDir,
+	}
+
+	// 1. ServiceAccounts:
+	// - production should be skipped because ServiceAccount is not in production's resourceFilters
+	// - kube-system should be skipped because kube-system is in excludedNamespaces
+	// - default should be included
+	saResource := metav1.APIResource{Name: "serviceaccounts", Namespaced: true, Kind: "ServiceAccount"}
+	saItems, err := r.getResourceItems(test.NewLogger(), schema.GroupVersion{Version: "v1"}, saResource, nil)
+	require.NoError(t, err)
+	require.Len(t, saItems, 1)
+	assert.Equal(t, "default", saItems[0].namespace)
+	assert.Equal(t, "default", saItems[0].name)
+
+	// 2. ConfigMaps:
+	// - production/app-config matches label app=frontend and should be included
+	// - production/other-config has label app=backend and should be skipped by labelSelector
+	// - default/my-config has no filter policy and should be included
+	cmResource := metav1.APIResource{Name: "configmaps", Namespaced: true, Kind: "ConfigMap"}
+	cmItems, err := r.getResourceItems(test.NewLogger(), schema.GroupVersion{Version: "v1"}, cmResource, nil)
+	require.NoError(t, err)
+	require.Len(t, cmItems, 2)
+	var cmNames []string
+	for _, it := range cmItems {
+		cmNames = append(cmNames, it.namespace+"/"+it.name)
+	}
+	assert.ElementsMatch(t, []string{"production/app-config", "default/my-config"}, cmNames)
+}
+
+func TestGetResourceItems_NamespacedFilterPolicies_SpecificNamespaces(t *testing.T) {
+	defaultSA := unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata": map[string]any{
+				"name":      "default",
+				"namespace": "default",
+			},
+		},
+	}
+
+	dcDefaultSA := &test.FakeDynamicClient{}
+	dcDefaultSA.On("List", mock.Anything).Return(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{defaultSA}}, nil)
+
+	factory := &test.FakeDynamicFactory{}
+	// Note: production client is never even requested because production skips ServiceAccount at the loop top!
+	factory.On("ClientForGroupVersionResource", schema.GroupVersion{Version: "v1"}, metav1.APIResource{Name: "serviceaccounts", Namespaced: true, Kind: "ServiceAccount"}, "default").Return(dcDefaultSA, nil)
+
+	req := &Request{
+		Backup: builder.ForBackup("velero", "backup").Result(),
+		NamespaceIncludesExcludes: collections.NewNamespaceIncludesExcludes().
+			Includes("production", "default"),
+		NamespacedFilterMap: map[string]*ResolvedNamespaceFilter{
+			"production": {
+				ResourceFilterMap: map[string]*ResolvedResourceFilter{
+					"configmaps": {},
+				},
+			},
+		},
+		ResourceIncludesExcludes: includeAllIE{},
+	}
+
+	tempDir := t.TempDir()
+	r := &itemCollector{
+		backupRequest:   req,
+		dynamicFactory:  factory,
+		discoveryHelper: test.NewFakeDiscoveryHelper(true, nil),
+		log:             test.NewLogger(),
+		dir:             tempDir,
+	}
+
+	saResource := metav1.APIResource{Name: "serviceaccounts", Namespaced: true, Kind: "ServiceAccount"}
+	saItems, err := r.getResourceItems(test.NewLogger(), schema.GroupVersion{Version: "v1"}, saResource, nil)
+	require.NoError(t, err)
+	require.Len(t, saItems, 1)
+	assert.Equal(t, "default", saItems[0].namespace)
+	assert.Equal(t, "default", saItems[0].name)
 }

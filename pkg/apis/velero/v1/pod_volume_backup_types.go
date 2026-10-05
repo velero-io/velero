@@ -61,6 +61,12 @@ type PodVolumeBackupSpec struct {
 	// Cancel indicates request to cancel the ongoing PodVolumeBackup. It can be set
 	// when the PodVolumeBackup is in InProgress phase
 	Cancel bool `json:"cancel,omitempty"`
+
+	// ParentSnapshot specifies the parent snapshot that current backup is based on.
+	// If its value is "" or "auto", the data mover finds the recent backup of the same volume as parent.
+	// If its value is "none", the data mover will do a full backup
+	// If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
+	ParentSnapshot string `json:"parentSnapshot,omitempty"`
 }
 
 // PodVolumeBackupPhase represents the lifecycle phase of a PodVolumeBackup.
@@ -92,7 +98,7 @@ type PodVolumeBackupStatus struct {
 	// +optional
 	SnapshotID string `json:"snapshotID,omitempty"`
 
-	// Message is a message about the pod volume backup's status.
+	// Message is a message describing the pod volume backup when it reaches to a terminal status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -118,15 +124,31 @@ type PodVolumeBackupStatus struct {
 	// +optional
 	Progress shared.DataMoveOperationProgress `json:"progress,omitempty"`
 
-	// IncrementalBytes holds the number of bytes new or changed since the last backup
+	// IncrementalBytes holds the number of bytes new or changed since the last backup.
+	// A nil value means the uploader did not report a figure; a pointer to 0 means it
+	// reported zero, i.e. nothing changed and nothing was transferred. The two are
+	// distinct: erasing a measured zero makes a perfect incremental indistinguishable
+	// from a full transfer in every downstream report.
 	// +optional
-	IncrementalBytes int64 `json:"incrementalBytes,omitempty"`
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+
+	// SourceSize holds the total size of the source volume.
+	// +optional
+	SourceSize int64 `json:"sourceSize,omitempty"`
 
 	// AcceptedTimestamp records the time the pod volume backup is to be prepared.
 	// The server's time is used for AcceptedTimestamp
 	// +optional
 	// +nullable
 	AcceptedTimestamp *metav1.Time `json:"acceptedTimestamp,omitempty"`
+
+	// FallbackFull indicates whether the incremental backup has fallen back to full backup
+	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains one or more messages about what have been done for this pod volume backup.
+	// +optional
+	// +nullable
+	Activities []string `json:"activities,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,
@@ -141,10 +163,11 @@ type PodVolumeBackupStatus struct {
 // +kubebuilder:printcolumn:name="Incremental Bytes",type="integer",format="int64",JSONPath=".status.incrementalBytes",description="Incremental bytes",priority=10
 // +kubebuilder:printcolumn:name="Storage Location",type="string",JSONPath=".spec.backupStorageLocation",description="Name of the Backup Storage Location where this backup should be stored"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since this PodVolumeBackup was created"
-// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.node",description="Name of the node where the PodVolumeBackup is processed"
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".spec.node",description="Name of the node where the PodVolumeBackup is processed"
 // +kubebuilder:printcolumn:name="Uploader",type="string",JSONPath=".spec.uploaderType",description="The type of the uploader to handle data transfer"
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
+// +kubebuilder:resource:shortName=pvb
 
 type PodVolumeBackup struct {
 	metav1.TypeMeta `json:",inline"`

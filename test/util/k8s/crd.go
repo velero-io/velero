@@ -24,7 +24,7 @@ import (
 
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
 )

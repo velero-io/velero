@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -53,6 +53,7 @@ const (
 	KubeAnnDynamicallyProvisioned = "pv.kubernetes.io/provisioned-by"
 	KubeAnnMigratedTo             = "pv.kubernetes.io/migrated-to"
 	KubeAnnSelectedNode           = "volume.kubernetes.io/selected-node"
+	KubeAnnAllowVolumeModeChange  = "snapshot.storage.kubernetes.io/allow-volume-mode-change"
 )
 
 // VolumeSnapshotContentManagedByLabel is applied by the snapshot controller
@@ -102,7 +103,10 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 			return true, err
 		}
 		if clusterNS != nil && (clusterNS.GetDeletionTimestamp() != nil || clusterNS.Status.Phase == corev1api.NamespaceTerminating) {
-			if resourceDeletionStatusTracker.Contains(clusterNS.Kind, clusterNS.Name, clusterNS.Name) {
+			// Use namespace.Kind (not clusterNS.Kind) so this key matches the one Add()
+			// writes below: client.Get() strips TypeMeta (Kind=""), but getNamespace()
+			// sets Kind="Namespace". Mismatched keys made Contains never match.
+			if resourceDeletionStatusTracker.Contains(namespace.Kind, namespace.Name, namespace.Name) {
 				namespaceAlreadyInDeletionTracker = true
 				return true, errors.Errorf("namespace %s is already present in the polling set, skipping execution", namespace.Name)
 			}

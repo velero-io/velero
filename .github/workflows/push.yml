@@ -8,6 +8,9 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: read
+
 jobs:
   get-go-version:
     uses: ./.github/workflows/get-go-version.yaml
@@ -20,21 +23,21 @@ jobs:
     needs: get-go-version
     steps:
       - name: Check out the code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ needs.get-go-version.outputs.version }}
 
       - name: Set up QEMU
         id: qemu
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
         with:
           platforms: all
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
           version: latest
       - name: Build
@@ -45,7 +48,7 @@ jobs:
       - name: Test
         run: make test
       - name: Upload test coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out

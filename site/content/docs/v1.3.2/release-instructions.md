@@ -67,7 +67,7 @@ This process is the same for both pre-release and GA, except for the fact that t
     make release
     ```
 
-1.  Navigate to the draft GitHub release, at https://github.com/vmware-tanzu/velero/releases.
+1.  Navigate to the draft GitHub release, at https://github.com/velero-io/velero/releases.
 1.  If this is a patch release (e.g. `v1.2.1`), note that the full `CHANGELOG-1.2.md` contents will be included in the body of the GitHub release. You need to delete the previous releases' content (e.g. `v1.2.0`'s changelog) so that only the latest patch release's changelog shows.
 1.  Do a quick review for formatting. **Note:** the `goreleaser` process should detect if it's a pre-release version, and check that box in the GitHub release appropriately, but it's always worth double-checking.
 1.  Publish the release.

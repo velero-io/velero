@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -62,7 +62,7 @@ var LoadAffinities func() = TestFunc(&NodeAgentConfigTestCase{
 			{
 				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"kubernetes.io/arch": "amd64",
+						corev1api.LabelArchStable: "amd64",
 					},
 				},
 				StorageClass: test.StorageClassName2,

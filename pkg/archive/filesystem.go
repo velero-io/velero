@@ -19,7 +19,9 @@ package archive
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 
+	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -27,13 +29,37 @@ import (
 )
 
 // GetItemFilePath returns an item's file path once extracted from a Velero backup archive.
-func GetItemFilePath(rootDir, groupResource, namespace, name string) string {
+func GetItemFilePath(rootDir, groupResource, namespace, name string) (string, error) {
 	return GetVersionedItemFilePath(rootDir, groupResource, namespace, name, "")
 }
 
 // GetVersionedItemFilePath returns an item's file path once extracted from a Velero backup archive, with version included.
-func GetVersionedItemFilePath(rootDir, groupResource, namespace, name, versionPath string) string {
-	return filepath.Join(rootDir, velerov1api.ResourcesDir, groupResource, versionPath, GetScopeDir(namespace), namespace, name+".json")
+//
+// The namespace and name components can originate from backup contents - for example the
+// additional items a RestoreItemAction returns are built from annotations on a backed up
+// object - so the joined path is verified to stay within rootDir. Without that check a
+// component containing ".." escapes the extracted backup directory and addresses an
+// arbitrary file on the Velero pod's filesystem.
+func GetVersionedItemFilePath(rootDir, groupResource, namespace, name, versionPath string) (string, error) {
+	path := filepath.Join(rootDir, velerov1api.ResourcesDir, groupResource, versionPath, GetScopeDir(namespace), namespace, name+".json")
+
+	// rootDir is empty when building the path of an entry inside the backup tarball rather
+	// than of an extracted file on disk; "." is the containment base for that relative form.
+	base := rootDir
+	if base == "" {
+		base = "."
+	}
+
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return "", errors.Wrapf(err, "error resolving item path for %q/%q", namespace, name)
+	}
+
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.Errorf("invalid item path for %q/%q: escapes the backup directory", namespace, name)
+	}
+
+	return path, nil
 }
 
 // GetScopeDir returns NamespaceScopedDir if namespace is present, or ClusterScopedDir if empty

@@ -33,6 +33,10 @@ toc:
         url: /enable-api-group-versions-feature
       - page: Resource filtering
         url: /resource-filtering
+      - page: Fine-Grained Backup Filters
+        url: /fine-grained-backup-filters
+      - page: Fine-grained restore filters
+        url: /fine-grained-restore-filters
       - page: Namespace glob patterns
         url: /namespace-glob-patterns
       - page: Backup reference
@@ -81,6 +85,8 @@ toc:
         url: /data-movement-cache-volume
       - page: Node-agent Concurrency
         url: /node-agent-concurrency
+      - page: Node-agent Prepare Queue Length
+        url: /node-agent-prepare-queue-length        
   - title: Plugins
     subfolderitems:
       - page: Overview

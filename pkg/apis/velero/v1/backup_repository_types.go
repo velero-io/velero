@@ -118,7 +118,7 @@ type BackupRepositoryMaintenanceStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Repository Type",type="string",JSONPath=".spec.repositoryType"
-//
+// +kubebuilder:resource:shortName=repo
 
 type BackupRepository struct {
 	metav1.TypeMeta `json:",inline"`

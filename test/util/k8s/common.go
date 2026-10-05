@@ -25,7 +25,7 @@ import (
 
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -37,7 +37,8 @@ import (
 
 // ensureClusterExists returns whether or not a Kubernetes cluster exists for tests to be run on.
 func EnsureClusterExists(ctx context.Context) error {
-	return exec.CommandContext(ctx, "kubectl", "cluster-info").Run()
+	_, _, err := KubectlExec(ctx, "cluster-info")
+	return err
 }
 
 func CreateSecretFromFiles(ctx context.Context, client TestClient, namespace string, name string, files map[string]string) error {
@@ -200,47 +201,57 @@ func KubectlGetNS(ctx context.Context, name string) ([]string, error) {
 	return common.GetListByCmdPipes(ctx, cmds)
 }
 
-func AddLabelToPv(ctx context.Context, pv, label string) error {
-	return exec.CommandContext(ctx, "kubectl", "label", "pv", pv, label).Run()
+// KubectlExec executes a kubectl command, prints its stdout and stderr,
+// and returns stdout, stderr, and an error wrapped with stderr and stdout if execution failed.
+func KubectlExec(ctx context.Context, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	fmt.Printf("Kubectl cmd =%v\n", cmd)
+	stdout, stderr, err := veleroexec.RunCommand(cmd)
+	if stdout != "" {
+		fmt.Print(stdout)
+		if !strings.HasSuffix(stdout, "\n") {
+			fmt.Println()
+		}
+	}
+	if stderr != "" {
+		fmt.Print(stderr)
+		if !strings.HasSuffix(stderr, "\n") {
+			fmt.Println()
+		}
+	}
+	if err != nil {
+		return stdout, stderr, errors.Wrapf(err, "kubectl %s failed - stderr: %s, stdout: %s", strings.Join(args, " "), stderr, stdout)
+	}
+	return stdout, stderr, nil
 }
 
 func AddLabelToPvc(ctx context.Context, pvc, namespace, label string) error {
-	args := []string{"label", "pvc", pvc, "-n", namespace, label}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "label", "pvc", pvc, "-n", namespace, label)
+	return err
 }
 
 func AddLabelToPod(ctx context.Context, podName, namespace, label string) error {
-	args := []string{"label", "pod", podName, "-n", namespace, label}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "label", "pod", podName, "-n", namespace, label)
+	return err
 }
 
 func AddLabelToCRD(ctx context.Context, crd, label string) error {
-	args := []string{"label", "crd", crd, label}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "label", "crd", crd, label)
+	return err
 }
 
 func KubectlApplyByFile(ctx context.Context, file string) error {
-	args := []string{"apply", "-f", file, "--force=true"}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "apply", "-f", file, "--force=true")
+	return err
 }
 
 func KubectlDeleteByFile(ctx context.Context, file string) error {
-	args := []string{"delete", "-f", file, "--force=true"}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "delete", "-f", file, "--force=true")
+	return err
 }
 
 func KubectlConfigUseContext(ctx context.Context, kubectlContext string) error {
-	cmd := exec.CommandContext(ctx, "kubectl",
-		"config", "use-context", kubectlContext)
-	fmt.Printf("Kubectl config use-context cmd =%v\n", cmd)
-	stdout, stderr, err := veleroexec.RunCommand(cmd)
-	fmt.Print(stdout)
-	fmt.Print(stderr)
+	_, _, err := KubectlExec(ctx, "config", "use-context", kubectlContext)
 	return err
 }
 
@@ -318,9 +329,8 @@ func CalFileHashInPod(ctx context.Context, namespace, podName, containerName, fi
 func WriteRandomDataToFileInPod(ctx context.Context, namespace, podName, containerName, volume, filename string, fileSize int64) error {
 	arg := []string{"exec", "-n", namespace, "-c", containerName, podName,
 		"--", "/bin/sh", "-c", fmt.Sprintf("dd if=/dev/urandom of=/%s/%s bs=%d count=1", volume, filename, fileSize)}
-	cmd := exec.CommandContext(ctx, "kubectl", arg...)
-	fmt.Printf("Kubectl exec cmd =%v\n", cmd)
-	return cmd.Run()
+	_, _, err := KubectlExec(ctx, arg...)
+	return err
 }
 
 func CreateFileToPod(
@@ -345,10 +355,8 @@ func CreateFileToPod(
 	arg := []string{"exec", "-n", namespace, "-c", containerName, podName,
 		"--", shell, shellParameter, fmt.Sprintf("echo ns-%s pod-%s volume-%s  > %s", namespace, podName, volume, filePath)}
 
-	cmd := exec.CommandContext(context.Background(), "kubectl", arg...)
-	fmt.Printf("Kubectl exec cmd =%v\n", cmd)
-
-	return cmd.Run()
+	_, _, err := KubectlExec(context.Background(), arg...)
+	return err
 }
 
 func FileExistInPV(
@@ -435,9 +443,8 @@ func KubectlGetDsJson(veleroNamespace string) (string, error) {
 }
 
 func DeleteVeleroDs(ctx context.Context) error {
-	args := []string{"delete", "ds", "-n", "velero", "--all", "--force", "--grace-period", "0"}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
+	_, _, err := KubectlExec(ctx, "delete", "ds", "-n", "velero", "--all", "--force", "--grace-period", "0")
+	return err
 }
 
 func WaitForCRDEstablished(crdName string) error {

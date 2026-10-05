@@ -16,7 +16,19 @@ spec:
     singular: volumesnapshotlocation
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - description: Provider is the provider of the volume storage
+      jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - description: Volume Snapshot Location status such as Available/Unavailable
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: VolumeSnapshotLocation is a location where Velero stores volume
@@ -93,3 +105,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

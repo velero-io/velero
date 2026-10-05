@@ -1,0 +1,1 @@
+Bound WaitRestoreExecHook polling with resourceTimeout to avoid an infinite wait when restore exec hooks never complete.

@@ -22,10 +22,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	clocks "k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,8 +42,21 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/vmware-tanzu/velero/pkg/util/csi"
 	"github.com/vmware-tanzu/velero/pkg/util/encode"
 )
+
+// objectStorageBackoff retries object storage writes (PutBackupMetadata,
+// PutBackupContents). Bounded (Steps) so a persistent failure surfaces as an
+// error within a bounded time rather than retrying forever; see the retry
+// call sites below for rationale. Var (not const) so tests can shrink it for
+// speed, matching pkg/repository/maintenance's waitCompletionBackOff pattern.
+var objectStorageBackoff = wait.Backoff{
+	Duration: time.Second,
+	Factor:   2.0,
+	Steps:    5,
+	Jitter:   0.1,
+}
 
 // backupFinalizerReconciler reconciles a Backup object
 type backupFinalizerReconciler struct {
@@ -104,8 +119,25 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.WithError(err).Error("Error getting Backup")
 		return ctrl.Result{}, errors.WithStack(err)
 	}
-
 	switch backup.Status.Phase {
+	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed:
+		// Terminal status is persisted only after the finalized archive has been
+		// uploaded. Run group cleanup on this subsequent reconciliation so a
+		// cleanup failure/restart retries deletion, not archive generation using
+		// snapshots that may already have been deleted.
+		if backup.Annotations[velerov1api.VolumeGroupSnapshotBackupAnnotation] == "true" &&
+			backup.Annotations[velerov1api.VolumeGroupSnapshotCleanupCompletedAnnotation] != "true" {
+			if err := csi.CleanupBackupVolumeGroupSnapshots(ctx, backup, r.globalCRClient, log); err != nil {
+				return ctrl.Result{}, err
+			}
+			base := backup.DeepCopy()
+			if backup.Annotations == nil {
+				backup.Annotations = map[string]string{}
+			}
+			backup.Annotations[velerov1api.VolumeGroupSnapshotCleanupCompletedAnnotation] = "true"
+			return ctrl.Result{}, r.client.Patch(ctx, backup, kbclient.MergeFrom(base))
+		}
+		return ctrl.Result{}, nil
 	case velerov1api.BackupPhaseFinalizing, velerov1api.BackupPhaseFinalizingPartiallyFailed:
 		// only process backups finalizing after  plugin operations are complete
 	default:
@@ -158,10 +190,11 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	backupRequest := &pkgbackup.Request{
-		Backup:           backup,
-		StorageLocation:  location,
-		SkippedPVTracker: pkgbackup.NewSkipPVTracker(),
-		BackedUpItems:    pkgbackup.NewBackedUpItemsMap(),
+		Backup:                        backup,
+		StorageLocation:               location,
+		SkippedVolumeTracker:          pkgbackup.NewSkipVolumeTracker(),
+		BackedUpItems:                 pkgbackup.NewBackedUpItemsMap(),
+		MustIncludeAdditionalItemPVCs: pkgbackup.NewBackedUpItemsMap(),
 	}
 	var outBackupFile *os.File
 	if len(operations) > 0 {
@@ -202,37 +235,74 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 	backupScheduleName := backupRequest.GetLabels()[velerov1api.ScheduleNameLabel]
+
+	// Determine the final phase and completion timestamp, but do NOT set them
+	// on the in-memory backup object yet. We first need to upload metadata and
+	// contents to object storage. If the upload fails, the deferred patch must
+	// NOT write a terminal phase to the API server so the controller can retry.
+	var finalPhase velerov1api.BackupPhase
 	switch backup.Status.Phase {
 	case velerov1api.BackupPhaseFinalizing:
-		backup.Status.Phase = velerov1api.BackupPhaseCompleted
+		finalPhase = velerov1api.BackupPhaseCompleted
+	case velerov1api.BackupPhaseFinalizingPartiallyFailed:
+		finalPhase = velerov1api.BackupPhasePartiallyFailed
+	default:
+		return ctrl.Result{}, nil
+	}
+
+	completionTimestamp := &metav1.Time{Time: r.clock.Now()}
+	csiVolumeSnapshotsCompleted := updateCSIVolumeSnapshotsCompleted(operations)
+
+	// Encode backup JSON with the final phase for object storage, so that the
+	// metadata in storage reflects the completed state.
+	backupForUpload := backup.DeepCopy()
+	backupForUpload.Status.Phase = finalPhase
+	backupForUpload.Status.CompletionTimestamp = completionTimestamp
+	backupForUpload.Status.CSIVolumeSnapshotsCompleted = csiVolumeSnapshotsCompleted
+
+	backupJSON := new(bytes.Buffer)
+	if err := encode.To(backupForUpload, "json", backupJSON); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "error encoding backup json")
+	}
+	// retry.DefaultBackoff is tuned for API server optimistic-concurrency
+	// conflicts (4 steps, ~1.25s total) and gives up far too quickly for
+	// object storage calls, which can see longer transient outages or
+	// throttling. objectStorageBackoff (above) grows more slowly and gives
+	// up after a bounded time instead of retrying forever, so a persistent
+	// failure (e.g. an object-lock/immutability policy) surfaces as an error
+	// promptly; controller-runtime requeues the Reconcile on error, so
+	// retries continue across reconciles rather than blocking a worker
+	// goroutine indefinitely on a call that will never succeed.
+	if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
+		func() error { return backupStore.PutBackupMetadata(backup.Name, bytes.NewReader(backupJSON.Bytes())) },
+	); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
+	}
+	if len(operations) > 0 {
+		if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
+			func() error { return backupStore.PutBackupContents(backup.Name, outBackupFile) },
+		); err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
+		}
+	}
+
+	// Uploads succeeded — now safe to set the final phase on the in-memory
+	// backup object so the deferred patch writes it to the API server.
+	backup.Status.Phase = finalPhase
+	backup.Status.CompletionTimestamp = completionTimestamp
+	backup.Status.CSIVolumeSnapshotsCompleted = csiVolumeSnapshotsCompleted
+
+	switch finalPhase {
+	case velerov1api.BackupPhaseCompleted:
 		r.metrics.RegisterBackupSuccess(backupScheduleName)
 		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusSucc)
-	case velerov1api.BackupPhaseFinalizingPartiallyFailed:
-		backup.Status.Phase = velerov1api.BackupPhasePartiallyFailed
+	case velerov1api.BackupPhasePartiallyFailed:
 		r.metrics.RegisterBackupPartialFailure(backupScheduleName)
 		r.metrics.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusFailure)
 	}
 
-	backup.Status.CompletionTimestamp = &metav1.Time{Time: r.clock.Now()}
-	backup.Status.CSIVolumeSnapshotsCompleted = updateCSIVolumeSnapshotsCompleted(operations)
-
 	recordBackupMetrics(log, backup, outBackupFile, r.metrics, true)
 
-	// update backup metadata in object store
-	backupJSON := new(bytes.Buffer)
-	if err := encode.To(backup, "json", backupJSON); err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "error encoding backup json")
-	}
-	err = backupStore.PutBackupMetadata(backup.Name, backupJSON)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "error uploading backup json")
-	}
-	if len(operations) > 0 {
-		err = backupStore.PutBackupContents(backup.Name, outBackupFile)
-		if err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "error uploading backup final contents")
-		}
-	}
 	return ctrl.Result{}, nil
 }
 

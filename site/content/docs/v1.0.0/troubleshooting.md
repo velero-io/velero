@@ -73,6 +73,6 @@ Backups in the `InProgress` phase have not uploaded any files to object storage.
 
 [1]: debugging-restores.md
 [2]: debugging-install.md
-[4]: https://github.com/vmware-tanzu/velero/issues
+[4]: https://github.com/velero-io/velero/issues
 [5]: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 [25]: https://kubernetes.slack.com/messages/velero

@@ -1,0 +1,1 @@
+Fix nil pointer dereference in EnsureDeleteVS and EnsureDeleteVSC when the API call times out before the object is retrieved

@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	corev1api "k8s.io/api/core/v1"
@@ -30,6 +30,7 @@ import (
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/backup"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
 )
@@ -76,6 +77,9 @@ example: "@every 2h30m".`,
 	o.BindFlags(c.Flags())
 	output.BindFlags(c.Flags())
 	output.ClearOutputFlagDefault(c)
+
+	_ = c.RegisterFlagCompletionFunc("storage-location", cli.CompleteBackupStorageLocationNames(f))
+	_ = c.RegisterFlagCompletionFunc("volume-snapshot-locations", cli.CompleteVolumeSnapshotLocationNames(f))
 
 	return c
 }
@@ -132,9 +136,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 
 	schedule := &api.Schedule{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: f.Namespace(),
-			Name:      o.BackupOptions.Name,
-			Labels:    o.BackupOptions.Labels.Data(),
+			Namespace:   f.Namespace(),
+			Name:        o.BackupOptions.Name,
+			Labels:      o.BackupOptions.Labels.Data(),
+			Annotations: o.BackupOptions.Annotations.Data(),
 		},
 		Spec: api.ScheduleSpec{
 			Template: api.BackupSpec{
@@ -159,6 +164,7 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 				ItemOperationTimeout:             metav1.Duration{Duration: o.BackupOptions.ItemOperationTimeout},
 				DataMover:                        o.BackupOptions.DataMover,
 				SnapshotMoveData:                 o.BackupOptions.SnapshotMoveData.Value,
+				BackupType:                       api.BackupType(o.BackupOptions.BackupType),
 			},
 			Schedule:                   o.Schedule,
 			UseOwnerReferencesInBackup: &o.UseOwnerReferencesInBackup,

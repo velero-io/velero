@@ -118,35 +118,17 @@ func DescribeRestore(
 		d.Println()
 		d.Printf("Namespaces:\n")
 		var s string
-		if len(restore.Spec.IncludedNamespaces) == 0 {
+		s = JoinStringWithFallback(restore.Spec.IncludedNamespaces, "all namespaces found in the backup")
+		if s == "*" {
 			s = "all namespaces found in the backup"
-		} else if len(restore.Spec.IncludedNamespaces) == 1 && restore.Spec.IncludedNamespaces[0] == "*" {
-			s = "all namespaces found in the backup"
-		} else {
-			s = strings.Join(restore.Spec.IncludedNamespaces, ", ")
 		}
 		d.Printf("\tIncluded:\t%s\n", s)
-		if len(restore.Spec.ExcludedNamespaces) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(restore.Spec.ExcludedNamespaces, ", ")
-		}
-		d.Printf("\tExcluded:\t%s\n", s)
+		d.Printf("\tExcluded:\t%s\n", JoinStringWithFallback(restore.Spec.ExcludedNamespaces, emptyDisplay))
 
 		d.Println()
 		d.Printf("Resources:\n")
-		if len(restore.Spec.IncludedResources) == 0 {
-			s = "*"
-		} else {
-			s = strings.Join(restore.Spec.IncludedResources, ", ")
-		}
-		d.Printf("\tIncluded:\t%s\n", s)
-		if len(restore.Spec.ExcludedResources) == 0 {
-			s = emptyDisplay
-		} else {
-			s = strings.Join(restore.Spec.ExcludedResources, ", ")
-		}
-		d.Printf("\tExcluded:\t%s\n", s)
+		d.Printf("\tIncluded:\t%s\n", JoinStringWithFallback(restore.Spec.IncludedResources, "*"))
+		d.Printf("\tExcluded:\t%s\n", JoinStringWithFallback(restore.Spec.ExcludedResources, emptyDisplay))
 
 		d.Printf("\tCluster-scoped:\t%s\n", BoolPointerString(restore.Spec.IncludeClusterResources, "excluded", "included", "auto"))
 
@@ -209,6 +191,11 @@ func DescribeRestore(
 			s = string(restore.Spec.ExistingResourcePolicy)
 		}
 		d.Printf("Existing Resource Policy: \t%s\n", s)
+		s = emptyDisplay
+		if restore.Spec.ExistingVolumeDataPolicy != "" {
+			s = string(restore.Spec.ExistingVolumeDataPolicy)
+		}
+		d.Printf("Existing Volume Data Policy: \t%s\n", s)
 		d.Printf("ItemOperationTimeout:\t%s\n", restore.Spec.ItemOperationTimeout.Duration)
 
 		d.Println()
@@ -217,6 +204,15 @@ func DescribeRestore(
 		if restore.Spec.ResourceModifier != nil {
 			d.Println()
 			DescribeResourceModifier(d, restore.Spec.ResourceModifier)
+		}
+
+		if boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
+			d.Printf("Skip Default Resource Modifier:\ttrue\n")
+		}
+
+		if restore.Spec.ResourcePolicy != nil {
+			d.Println()
+			DescribeResourcePolicies(d, restore.Spec.ResourcePolicy)
 		}
 
 		describeUploaderConfigForRestore(d, restore.Spec)
@@ -408,7 +404,7 @@ func describePodVolumeRestores(d *Describer, restores []velerov1api.PodVolumeRes
 		restoresByPod := new(volumesByPod)
 
 		for _, restore := range restoresByPhase[phase] {
-			restoresByPod.Add(restore.Spec.Pod.Namespace, restore.Spec.Pod.Name, restore.Spec.Volume, phase, restore.Status.Progress, 0)
+			restoresByPod.Add(restore.Spec.Pod.Namespace, restore.Spec.Pod.Name, restore.Spec.Volume, phase, restore.Status.Progress, nil)
 		}
 
 		d.Printf("\t%s:\n", phase)
@@ -459,6 +455,20 @@ func describeCSISnapshotsRestores(d *Describer, restoreVolInfo []volume.RestoreV
 			d.Printf("\t\t\tOperation ID: %s\n", info.SnapshotDataMovementInfo.OperationID)
 			d.Printf("\t\t\tData Mover: %s\n", info.SnapshotDataMovementInfo.DataMover)
 			d.Printf("\t\t\tUploader Type: %s\n", info.SnapshotDataMovementInfo.UploaderType)
+			if info.RestoreType != "" {
+				restoreType := info.RestoreType
+				if info.FallbackFull {
+					restoreType += " (fallen back to Full)"
+				}
+
+				d.Printf("\t\t\tRestore Type: %s\n", restoreType)
+			}
+			if info.SnapshotDataMovementInfo.Size > 0 {
+				d.Printf("\t\t\tRestored data Size (bytes): %d\n", info.SnapshotDataMovementInfo.Size)
+			}
+			if info.SnapshotDataMovementInfo.IncrementalSize != nil {
+				d.Printf("\t\t\tIncremental data Size (bytes): %d\n", *info.SnapshotDataMovementInfo.IncrementalSize)
+			}
 		} else {
 			d.Printf("\t\tData Movement: specify --details for more information\n")
 		}

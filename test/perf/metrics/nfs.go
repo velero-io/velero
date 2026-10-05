@@ -19,7 +19,7 @@ package metrics
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/vmware-tanzu/velero/test/util/metrics"
 )

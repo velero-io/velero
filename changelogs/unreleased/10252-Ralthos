@@ -1,0 +1,1 @@
+Skip signing a download URL when no artifacts can exist yet, and set a Failed phase with the reason so callers stop waiting

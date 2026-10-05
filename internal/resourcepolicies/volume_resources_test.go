@@ -430,6 +430,38 @@ func TestUnmarshalVolumeConditions(t *testing.T) {
 			},
 			expectedError: "!!str `production` into map[string]string",
 		},
+		{
+			name: "Valid pvcVolumeMode input",
+			input: map[string]any{
+				"capacity":      "1Gi,10Gi",
+				"pvcVolumeMode": "Block",
+			},
+			expectedError: "",
+		},
+		{
+			name: "Invalid pvcVolumeMode input: not a string",
+			input: map[string]any{
+				"capacity":      "1Gi,10Gi",
+				"pvcVolumeMode": []string{"Filesystem", "Block"},
+			},
+			expectedError: "cannot unmarshal !!seq",
+		},
+		{
+			name: "Valid pvcAccessModes input",
+			input: map[string]any{
+				"capacity":       "1Gi,10Gi",
+				"pvcAccessModes": []string{"ReadWriteOnce", "ReadWriteMany"},
+			},
+			expectedError: "",
+		},
+		{
+			name: "Invalid pvcAccessModes input: not a list",
+			input: map[string]any{
+				"capacity":       "1Gi,10Gi",
+				"pvcAccessModes": "ReadWriteOnce",
+			},
+			expectedError: "cannot unmarshal !!str",
+		},
 	}
 
 	for _, tc := range testCases {

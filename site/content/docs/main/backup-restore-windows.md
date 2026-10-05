@@ -17,38 +17,38 @@ For volume backups, CSI and CSI snapshot should be supported by the storage.
 As mentioned in [Image building][2], a hybrid image is provided for all platforms, so you don't need to set different images for linux and Windows clusters, you can always use the all-in-one image, e.g., `velero/velero:v1.16.0` or `velero/velero:main`.  
 
 In order to backup/restore volumes for stateful workloads, Velero node-agent needs to run in the Windows nodes. Velero provides a dedicated daemonset for Windows nodes, called `node-agent-windows`.  
-Therefore, in a typical cluster with linux and Windows nodes, there are two daemonsets for Velero node-agent, the existing `node-agent` deamonset for linux nodes, and the `node-agent-windows` daemonset for Windows nodes.  
-If you want to install `node-agent` deamonset, specify `--use-node-agent` parameter in `velero install` command; and if you want to install `node-agent-windows` daemonset, specify `--use-node-agent-windows` parameter.  
+Therefore, in a typical cluster with linux and Windows nodes, there are two daemonsets for Velero node-agent, the existing `node-agent` daemonset for linux nodes, and the `node-agent-windows` daemonset for Windows nodes.  
+If you want to install `node-agent` daemonset, specify `--use-node-agent` parameter in `velero install` command; and if you want to install `node-agent-windows` daemonset, specify `--use-node-agent-windows` parameter.  
 
 ## Resource backup restore
 
-Resource backup/restore for Windows workloads are done by Velero server as same as linux workloads.  
+Resource backup/restore for Windows workloads is done by the Velero server the same as for linux workloads.  
 
-Since Velero server is running in linux nodes only, all the existing plugins, i.e., BIA, RIA, BackupStore plugins, could be started by Velero in a cluster with Windows nodes. However, whether or how the plugins are functional to Windows workloads are decided by the plugins themselves.  
-It is recommended that plugin providers do a well round test with Velero in Windows cluster environments, and:
+Since Velero server is running in linux nodes only, all the existing plugins, i.e., BIA, RIA, BackupStore plugins, could be started by Velero in a cluster with Windows nodes. However, whether or how the plugins are functional for Windows workloads is decided by the plugins themselves.  
+It is recommended that plugin providers do a thorough test with Velero in Windows cluster environments, and:
 - If they need to support Windows workloads, make the necessary modification to ensure their plugins work well with Windows workloads
 - If they don't want to support Windows workloads, or part of the Windows workloads, they need to ensure the plugins won't cause any failure or crash when they process the undesired Windows workload items
 
 ## Volume backup restore
 
-Below are the status of supportive of Windows workload volumes for different backup methods:
-- CSI snapshot data movement: block volumes (i.e., vSphere CNS Block Volume, Azure Disk, AWS EBS, GCP Persistent Disk, etc.) are full supported; file volumes (i.e., vSphere CNS File Volume, Azure File, AWS EFS, GCP Filestore, etc.) are not tested or officially supported. This is the same with linux workloads
-- CSI snapshot backup: block volumes (i.e., vSphere CNS Block Volume, Azure Disk, AWS EBS, GCP Persistent Disk, etc.) are full supported; file volumes (i.e., vSphere CNS File Volume, Azure File, AWS EFS, GCP Filestore, etc.) are not tested or officially supported. This is the same with linux workloads
-- native snapshot backup: supported as same as linux workloads
+Below is the support status for Windows workload volumes for different backup methods:
+- CSI snapshot data movement: block volumes (i.e., vSphere CNS Block Volume, Azure Disk, AWS EBS, GCP Persistent Disk, etc.) are fully supported; file volumes (i.e., vSphere CNS File Volume, Azure File, AWS EFS, GCP Filestore, etc.) are not tested or officially supported. This is the same for linux workloads
+- CSI snapshot backup: block volumes (i.e., vSphere CNS Block Volume, Azure Disk, AWS EBS, GCP Persistent Disk, etc.) are fully supported; file volumes (i.e., vSphere CNS File Volume, Azure File, AWS EFS, GCP Filestore, etc.) are not tested or officially supported. This is the same for linux workloads
+- native snapshot backup: supported the same as for linux workloads
 - file system backup: at present, NOT supported
 
-For volume backups/restores conducted through Velero plugins, the supportive status is decided by the plugin themselves.  
+For volume backups/restores conducted through Velero plugins, the support status is decided by the plugins themselves.  
 
 ### CSI snapshot data movement
 
 During backup, Velero automatically identifies the OS type of the workload and schedules data mover pods to the right nodes. Specifically, for a linux workload, linux nodes in the cluster will be used; for a Windows workload, Windows nodes in the cluster will be used.  
 You could view the OS type that a data mover pod is running with from the DataUpload status's `nodeOS` field.   
 
-Velero takes several measures to deduce the OS type for volumes of workloads, from PVCs, VolumeAttach CRs, nodes and storage classes. If Velero fails to deduce the OS type, it fallbacks to linux, then the data mover pods will be scheduled to linux nodes. As a result, the data mover pods may not be able to start and the corresponding DataUploads will be cancelled because of timeout, so the backup will be partially failed.  
+Velero takes several measures to deduce the OS type for volumes of workloads, from PVCs, VolumeAttach CRs, nodes and storage classes. If Velero fails to deduce the OS type, it falls back to linux, then the data mover pods will be scheduled to linux nodes. As a result, the data mover pods may not be able to start and the corresponding DataUploads will be cancelled because of timeout, so the backup will be partially failed.  
 
 Therefore, it is highly recommended you provide a dedicated storage class for Windows workloads volumes, and set `csi.storage.k8s.io/fstype` correctly. E.g., for linux workload volumes, set `csi.storage.k8s.io/fstype=ext4`; for Windows workload volumes set `csi.storage.k8s.io/fstype=ntfs`.  
 Specifically, if you have X number of storage classes for linux workloads, you need to create another X number of storage classes for Windows workloads.  
-This is helpful for Velero to deduce the right OS type successfully all the time, especially when you are backing up below kind of volumes belonging to a Windows workload:
+This is helpful for Velero to deduce the right OS type successfully all the time, especially when you are backing up the following kinds of volumes belonging to a Windows workload:
 - The PVC is with Immediate mode
 - There is no pod mounting the PVC at the time of backup
 

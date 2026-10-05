@@ -1,0 +1,1 @@
+Add a troubleshooting entry for artifact downloads failing when the BackupStorageLocation s3Url is only resolvable inside the cluster

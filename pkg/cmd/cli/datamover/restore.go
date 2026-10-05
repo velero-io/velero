@@ -15,13 +15,14 @@ package datamover
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/bombsimon/logrusr/v3"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	corev1api "k8s.io/api/core/v1"
@@ -35,6 +36,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
+	"github.com/vmware-tanzu/velero/pkg/cbtservice"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
 	"github.com/vmware-tanzu/velero/pkg/datamover"
@@ -55,6 +57,9 @@ type dataMoverRestoreConfig struct {
 	ddName          string
 	cacheDir        string
 	resourceTimeout time.Duration
+	cbtSAName       string
+	vsNamespace     string
+	volumeID        string
 }
 
 func NewRestoreCommand(f client.Factory) *cobra.Command {
@@ -81,7 +86,10 @@ func NewRestoreCommand(f client.Factory) *cobra.Command {
 				kube.ExitPodWithMessage(logger, false, "Failed to create data mover restore, %v", err)
 			}
 
-			s.run()
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				s.run()
+			})
 		},
 	}
 
@@ -92,6 +100,9 @@ func NewRestoreCommand(f client.Factory) *cobra.Command {
 	command.Flags().StringVar(&config.ddName, "data-download", config.ddName, "The data download name")
 	command.Flags().StringVar(&config.cacheDir, "cache-volume-path", config.cacheDir, "The full path of the cache volume")
 	command.Flags().DurationVar(&config.resourceTimeout, "resource-timeout", config.resourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters.")
+	command.Flags().StringVar(&config.cbtSAName, "cbt-sa-name", config.cbtSAName, "The name of the service account used by CSI's CBT service")
+	command.Flags().StringVar(&config.vsNamespace, "vs-namespace", config.vsNamespace, "The namespace of the VolumeSnapshot")
+	command.Flags().StringVar(&config.volumeID, "volume-id", config.volumeID, "The volume ID of the snapshot")
 
 	_ = command.MarkFlagRequired("volume-path")
 	_ = command.MarkFlagRequired("volume-mode")
@@ -112,6 +123,7 @@ type dataMoverRestore struct {
 	config      dataMoverRestoreConfig
 	kubeClient  kubernetes.Interface
 	dataPathMgr *datapath.Manager
+	cbtService  cbtservice.Service
 }
 
 func newdataMoverRestore(logger logrus.FieldLogger, factory client.Factory, config dataMoverRestoreConfig) (*dataMoverRestore, error) {
@@ -197,6 +209,12 @@ func newdataMoverRestore(logger logrus.FieldLogger, factory client.Factory, conf
 		config:     config,
 		namespace:  factory.Namespace(),
 		nodeName:   nodeName,
+		cbtService: cbtservice.NewService(
+			logger,
+			config.vsNamespace,
+			config.cbtSAName,
+			clientConfig,
+		),
 	}
 
 	s.kubeClient, err = factory.KubeClient()
@@ -290,5 +308,5 @@ func (s *dataMoverRestore) createDataPathService() (dataPathService, error) {
 	return datamover.NewRestoreMicroService(s.ctx, s.client, s.kubeClient, s.config.ddName, s.namespace, s.nodeName, datapath.AccessPoint{
 		ByPath:  s.config.volumePath,
 		VolMode: uploader.PersistentVolumeMode(s.config.volumeMode),
-	}, s.dataPathMgr, repoEnsurer, credGetter, duInformer, s.config.cacheDir, s.logger), nil
+	}, s.dataPathMgr, repoEnsurer, credGetter, duInformer, s.config.cacheDir, s.config.volumeID, s.cbtService, s.logger), nil
 }

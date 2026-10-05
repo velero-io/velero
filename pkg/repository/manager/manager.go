@@ -18,10 +18,11 @@ package repository
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -173,7 +174,13 @@ func (m *manager) PrepareRepo(repo *velerov1api.BackupRepository) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	return prd.PrepareRepo(context.Background(), param)
+
+	// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+	var prepareErr error
+	fips140.WithoutEnforcement(func() {
+		prepareErr = prd.PrepareRepo(context.Background(), param)
+	})
+	return prepareErr
 }
 
 func (m *manager) PruneRepo(repo *velerov1api.BackupRepository) error {
@@ -224,11 +231,11 @@ func (m *manager) Forget(ctx context.Context, repo *velerov1api.BackupRepository
 		return errors.WithStack(err)
 	}
 
-	if err := prd.BoostRepoConnect(context.Background(), param); err != nil {
+	if err := prd.BoostRepoConnect(ctx, param); err != nil {
 		return errors.WithStack(err)
 	}
 
-	return prd.Forget(context.Background(), snapshot, param)
+	return prd.Forget(ctx, snapshot, param)
 }
 
 func (m *manager) BatchForget(ctx context.Context, repo *velerov1api.BackupRepository, snapshots []string) []error {
@@ -244,11 +251,20 @@ func (m *manager) BatchForget(ctx context.Context, repo *velerov1api.BackupRepos
 		return []error{errors.WithStack(err)}
 	}
 
-	if err := prd.BoostRepoConnect(context.Background(), param); err != nil {
-		return []error{errors.WithStack(err)}
+	// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+	var connectErr error
+	fips140.WithoutEnforcement(func() {
+		connectErr = prd.BoostRepoConnect(ctx, param)
+	})
+	if connectErr != nil {
+		return []error{errors.WithStack(connectErr)}
 	}
 
-	return prd.BatchForget(context.Background(), snapshots, param)
+	forgetErr := make([]error, 0)
+	fips140.WithoutEnforcement(func() {
+		forgetErr = prd.BatchForget(ctx, snapshots, param)
+	})
+	return forgetErr
 }
 
 func (m *manager) DefaultMaintenanceFrequency(repo *velerov1api.BackupRepository) (time.Duration, error) {

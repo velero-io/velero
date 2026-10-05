@@ -26,11 +26,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/format"
 	"github.com/kopia/kopia/repo/maintenance"
-	"github.com/pkg/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/kopia"
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
@@ -43,12 +43,18 @@ type kopiaBackendStore struct {
 	store       backend.Store
 }
 
+type kopiaBackendStoreFactory struct {
+	name        string
+	description string
+	newStore    func() backend.Store
+}
+
 // backendStores lists the supported backend storages at present
-var backendStores = []kopiaBackendStore{
-	{udmrepo.StorageTypeAzure, "an Azure blob storage", &backend.AzureBackend{}},
-	{udmrepo.StorageTypeFs, "a filesystem", &backend.FsBackend{}},
-	{udmrepo.StorageTypeGcs, "a Google Cloud Storage bucket", &backend.GCSBackend{}},
-	{udmrepo.StorageTypeS3, "an S3 bucket", &backend.S3Backend{}},
+var backendStores = []kopiaBackendStoreFactory{
+	{udmrepo.StorageTypeAzure, "an Azure blob storage", func() backend.Store { return &backend.AzureBackend{} }},
+	{udmrepo.StorageTypeFs, "a filesystem", func() backend.Store { return &backend.FsBackend{} }},
+	{udmrepo.StorageTypeGcs, "a Google Cloud Storage bucket", func() backend.Store { return &backend.GCSBackend{} }},
+	{udmrepo.StorageTypeS3, "an S3 bucket", func() backend.Store { return &backend.S3Backend{} }},
 }
 
 const udmRepoBlobID = "udmrepo.Repository"
@@ -226,7 +232,11 @@ func connectStore(ctx context.Context, repoOption udmrepo.RepoOptions, logger lo
 func findBackendStore(storage string) *kopiaBackendStore {
 	for _, options := range backendStores {
 		if strings.EqualFold(options.name, storage) {
-			return &options
+			return &kopiaBackendStore{
+				name:        options.name,
+				description: options.description,
+				store:       options.newStore(),
+			}
 		}
 	}
 

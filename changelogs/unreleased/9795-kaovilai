@@ -1,0 +1,1 @@
+Skip DeleteSnapshot when ProviderSnapshotID is empty

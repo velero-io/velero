@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +44,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/constant"
@@ -54,6 +55,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
+	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
@@ -105,13 +107,15 @@ type restoreReconciler struct {
 	metrics                     *metrics.ServerMetrics
 	logFormat                   logging.Format
 	clock                       clock.WithTickerAndDelayedExecution
+	defaultCSISnapshotTimeout   time.Duration
 	defaultItemOperationTimeout time.Duration
 	disableInformerCache        bool
 
-	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager
-	backupStoreGetter persistence.ObjectBackupStoreGetter
-	globalCrClient    client.Client
-	resourceTimeout   time.Duration
+	newPluginManager                 func(logger logrus.FieldLogger) clientmgmt.Manager
+	backupStoreGetter                persistence.ObjectBackupStoreGetter
+	globalCrClient                   client.Client
+	resourceTimeout                  time.Duration
+	defaultResourceModifierConfigMap string
 }
 
 type backupInfo struct {
@@ -130,10 +134,12 @@ func NewRestoreReconciler(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	logFormat logging.Format,
+	defaultCSISnapshotTimeout time.Duration,
 	defaultItemOperationTimeout time.Duration,
 	disableInformerCache bool,
 	globalCrClient client.Client,
 	resourceTimeout time.Duration,
+	defaultResourceModifierConfigMap string,
 ) *restoreReconciler {
 	r := &restoreReconciler{
 		ctx:                         ctx,
@@ -145,6 +151,7 @@ func NewRestoreReconciler(
 		metrics:                     metrics,
 		logFormat:                   logFormat,
 		clock:                       &clock.RealClock{},
+		defaultCSISnapshotTimeout:   defaultCSISnapshotTimeout,
 		defaultItemOperationTimeout: defaultItemOperationTimeout,
 		disableInformerCache:        disableInformerCache,
 
@@ -153,8 +160,9 @@ func NewRestoreReconciler(
 		newPluginManager:  newPluginManager,
 		backupStoreGetter: backupStoreGetter,
 
-		globalCrClient:  globalCrClient,
-		resourceTimeout: resourceTimeout,
+		globalCrClient:                   globalCrClient,
+		resourceTimeout:                  resourceTimeout,
+		defaultResourceModifierConfigMap: defaultResourceModifierConfigMap,
 	}
 
 	// Move the periodical backup and restore metrics computing logic from controllers to here.
@@ -232,7 +240,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	original := restore.DeepCopy()
 
 	// Validate the restore and fetch the backup
-	info, resourceModifiers := r.validateAndComplete(restore)
+	info, resourceModifiers, restoreResPolicies := r.validateAndComplete(ctx, restore)
 
 	// Register attempts after validation so we don't have to fetch the backup multiple times
 	backupScheduleName := restore.Spec.ScheduleName
@@ -244,6 +252,10 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		restore.Status.StartTimestamp = &metav1.Time{Time: r.clock.Now()}
 		restore.Status.Phase = api.RestorePhaseInProgress
+	}
+	if restore.Spec.CSISnapshotTimeout.Duration == 0 {
+		// set default CSI snapshot timeout
+		restore.Spec.CSISnapshotTimeout.Duration = r.defaultCSISnapshotTimeout
 	}
 	if restore.Spec.ItemOperationTimeout.Duration == 0 {
 		// set default item operation timeout
@@ -267,10 +279,10 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.runValidatedRestore(restore, info, resourceModifiers); err != nil {
+	if err := r.runValidatedRestore(restore, info, resourceModifiers, restoreResPolicies); err != nil {
 		log.WithError(err).Debug("Restore failed")
 		restore.Status.Phase = api.RestorePhaseFailed
-		restore.Status.FailureReason = err.Error()
+		restore.Status.FailureReason = fmt.Sprintf("restore execution failed: %v", err)
 		r.metrics.RegisterRestoreFailed(backupScheduleName)
 	}
 
@@ -303,7 +315,7 @@ func (r *restoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInfo, *resourcemodifiers.ResourceModifiers) {
+func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *api.Restore) (backupInfo, *resourcemodifiers.ResourceModifiers, *resourcepolicies.Policies) {
 	// add non-restorable resources to restore's excluded resources
 	excludedResources := sets.NewString(restore.Spec.ExcludedResources...)
 	for _, nonrestorable := range nonRestorableResources {
@@ -338,13 +350,13 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 	// validate that exactly one of BackupName and ScheduleName have been specified
 	if !backupXorScheduleProvided(restore) {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "Either a backup or schedule must be specified as a source for the restore, but not both")
-		return backupInfo{}, nil
+		return backupInfo{}, nil, nil
 	}
 
 	// validate Restore Init Hook's InitContainers
 	restoreHooks, err := hook.GetRestoreHooksFromSpec(&restore.Spec.Hooks)
 	if err != nil {
-		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, err.Error())
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("invalid restore hooks: %v", err))
 	}
 	for _, resource := range restoreHooks {
 		for _, h := range resource.RestoreHooks {
@@ -352,7 +364,7 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 				for _, container := range h.Init.InitContainers {
 					err = hook.ValidateContainer(container.Raw)
 					if err != nil {
-						restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, err.Error())
+						restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("invalid init container in restore hook %q: %v", resource.Name, err))
 					}
 				}
 			}
@@ -360,8 +372,13 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 	}
 
 	// validate ExistingResourcePolicy
-	if restore.Spec.ExistingResourcePolicy != "" && !pkgrestoreUtil.IsResourcePolicyValid(string(restore.Spec.ExistingResourcePolicy)) {
+	if !pkgrestoreUtil.IsResourcePolicyValid(string(restore.Spec.ExistingResourcePolicy)) {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingResourcePolicy: %s", restore.Spec.ExistingResourcePolicy))
+	}
+
+	// validate ExistingVolumeDataPolicy
+	if !pkgrestoreUtil.IsVolumeDataPolicyValid(string(restore.Spec.ExistingVolumeDataPolicy)) {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingVolumeDataPolicy: %s", restore.Spec.ExistingVolumeDataPolicy))
 	}
 
 	// if ScheduleName is specified, fill in BackupName with the most recent successful backup from
@@ -372,9 +389,9 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		}))
 
 		backupList := &api.BackupList{}
-		if err := r.kbClient.List(context.Background(), backupList, &client.ListOptions{LabelSelector: selector}); err != nil {
+		if err := r.kbClient.List(ctx, backupList, &client.ListOptions{LabelSelector: selector}); err != nil {
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "Unable to list backups for schedule")
-			return backupInfo{}, nil
+			return backupInfo{}, nil, nil
 		}
 		if len(backupList.Items) == 0 {
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "No backups found for schedule")
@@ -384,19 +401,30 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 			restore.Spec.BackupName = backup.Name
 		} else {
 			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, "No completed backups found for schedule")
-			return backupInfo{}, nil
+			return backupInfo{}, nil, nil
 		}
 	}
 
 	info, err := r.fetchBackupInfo(restore.Spec.BackupName)
 	if err != nil {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Error retrieving backup: %v", err))
-		return backupInfo{}, nil
+		return backupInfo{}, nil, nil
 	}
 
 	if !veleroutil.BSLIsAvailable(*info.location) {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("The BSL %s is unavailable, cannot retrieve the backup", info.location.Name))
-		return backupInfo{}, nil
+		return backupInfo{}, nil, nil
+	}
+
+	// reject restores from backups that are not in a usable phase
+	switch info.backup.Status.Phase {
+	case api.BackupPhaseCompleted, api.BackupPhasePartiallyFailed:
+		// ok
+	default:
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
+			fmt.Sprintf("backup %q is in phase %q and cannot be used as a restore source",
+				info.backup.Name, info.backup.Status.Phase))
+		return backupInfo{}, nil, nil
 	}
 
 	// Fill in the ScheduleName so it's easier to consume for metrics.
@@ -404,26 +432,85 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
 		restore.Spec.ScheduleName = info.backup.GetLabels()[api.ScheduleNameLabel]
 	}
 
-	var resourceModifiers *resourcemodifiers.ResourceModifiers
-	if restore.Spec.ResourceModifier != nil && strings.EqualFold(restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType) {
-		ResourceModifierConfigMap := &corev1api.ConfigMap{}
-		err := r.kbClient.Get(context.Background(), client.ObjectKey{Namespace: restore.Namespace, Name: restore.Spec.ResourceModifier.Name}, ResourceModifierConfigMap)
+	var restoreResPolicies *resourcepolicies.Policies
+	if restore.Spec.ResourcePolicy != nil {
+		var err error
+		restoreResPolicies, err = resourcepolicies.GetResourcePoliciesFromRestore(
+			ctx, restore, r.kbClient, r.logger,
+		)
 		if err != nil {
-			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("failed to get resource modifiers configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name))
-			return backupInfo{}, nil
+			restore.Status.ValidationErrors = append(
+				restore.Status.ValidationErrors, fmt.Sprintf("invalid restore resource policies: %v", err),
+			)
+			return backupInfo{}, nil, nil
 		}
-		resourceModifiers, err = resourcemodifiers.GetResourceModifiersFromConfig(ResourceModifierConfigMap)
-		if err != nil {
-			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, "Error in parsing resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name).Error())
-			return backupInfo{}, nil
-		} else if err = resourceModifiers.Validate(); err != nil {
-			restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, errors.Wrapf(err, "Validation error in resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name).Error())
-			return backupInfo{}, nil
-		}
-		r.logger.Infof("Retrieved Resource modifiers provided in configmap %s/%s", restore.Namespace, restore.Spec.ResourceModifier.Name)
 	}
 
-	return info, resourceModifiers
+	var resourceModifiers *resourcemodifiers.ResourceModifiers
+	if restore.Spec.ResourceModifier != nil {
+		if strings.EqualFold(restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType) {
+			resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, restore.Spec.ResourceModifier.Name, false)
+			if resourceModifiers == nil && len(restore.Status.ValidationErrors) > 0 {
+				return backupInfo{}, nil, nil
+			}
+		} else {
+			r.logger.Warnf("Unsupported resource modifier kind %q, only %q is supported", restore.Spec.ResourceModifier.Kind, resourcemodifiers.ConfigmapRefType)
+		}
+	} else if r.defaultResourceModifierConfigMap != "" {
+		if boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
+			r.logger.Infof("Skipping default resource modifier configmap %s/%s as SkipDefaultResourceModifier is set", restore.Namespace, r.defaultResourceModifierConfigMap)
+		} else {
+			resourceModifiers = r.loadResourceModifierConfigMap(ctx, restore, r.defaultResourceModifierConfigMap, true)
+		}
+	}
+
+	return info, resourceModifiers, restoreResPolicies
+}
+
+// loadResourceModifierConfigMap loads and validates a resource modifier ConfigMap.
+// When isDefault is true, errors are non-fatal (logged as warnings, returns nil).
+// When isDefault is false, errors are added to restore.Status.ValidationErrors.
+func (r *restoreReconciler) loadResourceModifierConfigMap(
+	ctx context.Context, restore *api.Restore, cmName string, isDefault bool,
+) *resourcemodifiers.ResourceModifiers {
+	cm := &corev1api.ConfigMap{}
+	if err := r.kbClient.Get(ctx, client.ObjectKey{Namespace: restore.Namespace, Name: cmName}, cm); err != nil {
+		if isDefault {
+			r.logger.WithError(err).Warnf("Failed to retrieve default resource modifier configmap %s/%s, skipping", restore.Namespace, cmName)
+			return nil
+		}
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
+			fmt.Sprintf("failed to get resource modifiers configmap %s/%s: %v", restore.Namespace, cmName, err))
+		return nil
+	}
+
+	modifiers, err := resourcemodifiers.GetResourceModifiersFromConfig(cm)
+	if err != nil {
+		if isDefault {
+			r.logger.WithError(err).Warnf("Error parsing default resource modifier configmap %s/%s, skipping", restore.Namespace, cmName)
+			return nil
+		}
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
+			errors.Wrapf(err, "Error in parsing resource modifiers provided in configmap %s/%s", restore.Namespace, cmName).Error())
+		return nil
+	}
+
+	if err = modifiers.Validate(); err != nil {
+		if isDefault {
+			r.logger.WithError(err).Warnf("Validation error in default resource modifier configmap %s/%s, skipping", restore.Namespace, cmName)
+			return nil
+		}
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
+			errors.Wrapf(err, "Validation error in resource modifiers provided in configmap %s/%s", restore.Namespace, cmName).Error())
+		return nil
+	}
+
+	source := "per-restore"
+	if isDefault {
+		source = "default"
+	}
+	r.logger.Infof("Retrieved %s resource modifiers from configmap %s/%s", source, restore.Namespace, cmName)
+	return modifiers
 }
 
 // backupXorScheduleProvided returns true if exactly one of BackupName and
@@ -496,7 +583,7 @@ func fetchBackupInfoInternal(kbClient client.Client, namespace, backupName strin
 // The log and results files are uploaded to backup storage. Any error returned from this function
 // means that the restore failed. This function updates the restore API object with warning and error
 // counts, but *does not* update its phase or patch it via the API.
-func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backupInfo, resourceModifiers *resourcemodifiers.ResourceModifiers) error {
+func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backupInfo, resourceModifiers *resourcemodifiers.ResourceModifiers, restoreResPolicies *resourcepolicies.Policies) error {
 	// instantiate the per-restore logger that will output both to a temp file
 	// (for upload to object storage) and to stdout.
 	restoreLog, err := logging.NewTempFileLogger(r.restoreLogLevel, r.logFormat, nil, logrus.Fields{"restore": kubeutil.NamespaceAndName(restore)})
@@ -575,6 +662,7 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 		VolumeSnapshots:               volumeSnapshots,
 		BackupReader:                  backupFile,
 		ResourceModifiers:             resourceModifiers,
+		ResPolicies:                   restoreResPolicies,
 		DisableInformerCache:          r.disableInformerCache,
 		CSIVolumeSnapshots:            csiVolumeSnapshots,
 		BackupVolumeInfoMap:           backupVolumeInfoMap,

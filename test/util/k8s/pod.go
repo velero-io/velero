@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -84,7 +84,7 @@ func CreatePod(
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{common.WorkerOSWindows},
 									Operator: corev1api.NodeSelectorOpIn,
 								},

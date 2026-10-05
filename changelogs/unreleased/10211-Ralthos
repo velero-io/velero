@@ -1,0 +1,1 @@
+Add printer columns for VolumeSnapshotLocation so kubectl shows provider and phase

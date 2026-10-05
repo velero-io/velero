@@ -297,6 +297,9 @@ For detailed information, see [BackupPVC Configuration for Data Movement Backup]
 - **`storageClass`**: Alternative storage class for backup PVCs (defaults to source PVC's storage class)
 - **`readOnly`**: This is a boolean value. If set to `true` then `ReadOnlyMany` will be the only value set to the backupPVC's access modes. Otherwise `ReadWriteOnce` value will be used.
 - **`spcNoRelabeling`**: This is a boolean value. If set to true, then `pod.Spec.SecurityContext.SELinuxOptions.Type` will be set to `spc_t`. From the SELinux point of view, this will be considered a `Super Privileged Container` which means that selinux enforcement will be disabled and volume relabeling will not occur. This field is ignored if `readOnly` is `false`.
+- **`secretNames`**: List of secret names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped secrets to provision the volume, e.g. ODF/ceph-csi encrypted volumes (`ceph-csi-kms-token`).
+- **`configMapNames`**: List of configmap names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped configmaps to provision the volume, e.g. a tenant ceph-csi KMS config (`ceph-csi-kms-config`).
+- **`readWriteOncePod`**: This is a boolean value. If set to `true`, then `ReadWriteOncePod` will be the only value set to the backupPVC's access modes, so the kubelet labels the volume at mount time instead of relabeling every file. Requires a CSI driver with `seLinuxMount: true` and a storage class that supports `ReadWriteOncePod` PVCs from a snapshot. This field is ignored if `readOnly` is `true`.
 
 **Use Cases:**
 - Use read-only volumes for faster snapshot-to-volume conversion
@@ -307,6 +310,7 @@ For detailed information, see [BackupPVC Configuration for Data Movement Backup]
 **Important Notes:**
 - Ensure specified storage classes exist and support required access modes
 - In SELinux environments, always set `spcNoRelabeling: true` when using `readOnly: true`
+- In SELinux environments where the storage does not support `ReadOnlyMany`, use `readWriteOncePod: true` instead; it is ignored when `readOnly: true` is also set
 - Failures result in DataUpload CR staying in `Accepted` phase until timeout (30m default)
 
 #### Storage Class Mapping
@@ -360,6 +364,8 @@ For detailed information, see [RestorePVC Configuration for Data Movement Restor
 
 #### Configuration Options
 - **`ignoreDelayBinding`**: Ignore `WaitForFirstConsumer` binding mode constraints
+- **`secretNames`**: List of secret names to copy from the target (restore) namespace to the Velero namespace before creating the restorePVC (deleted after the DataDownload completes). Needed for CSI drivers that require namespace-scoped secrets to provision the volume, e.g. ODF/ceph-csi encrypted volumes (`ceph-csi-kms-token`).
+- **`configMapNames`**: List of configmap names to copy from the target (restore) namespace to the Velero namespace before creating the restorePVC (deleted after the DataDownload completes). Needed for CSI drivers that require namespace-scoped configmaps to provision the volume, e.g. a tenant ceph-csi KMS config (`ceph-csi-kms-config`).
 
 **Use Cases:**
 - Improve restore parallelism by not waiting for pod scheduling
@@ -432,7 +438,7 @@ For detailed information, see [Cache PVC Configuration for Data Movement Restore
 
 Add customized labels for data mover pods to support third-party integrations and environment-specific requirements.
 
-If `podLabels` is configured, it supersedes Velero's [in-tree third-party labels](https://github.com/vmware-tanzu/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L19-L21).
+If `podLabels` is configured, it supersedes Velero's [in-tree third-party labels](https://github.com/velero-io/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L19-L21).
 If `podLabels` is not configured, Velero uses the in-tree third-party labels for compatibility with common cloud providers and networking solutions.
 
 The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods.
@@ -465,7 +471,7 @@ The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVo
 
 Add customized annotations for data mover pods to support third-party integrations and pod-level configuration.
 
-If `podAnnotations` is configured, it supersedes Velero's [in-tree third-party annotations](https://github.com/vmware-tanzu/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L23-L25).
+If `podAnnotations` is configured, it supersedes Velero's [in-tree third-party annotations](https://github.com/velero-io/velero/blob/94f64639cee09c5caaa65b65ab5f42175f41c101/pkg/util/third_party.go#L23-L25).
 If `podAnnotations` is not configured, Velero uses the in-tree third-party annotations for compatibility with common cloud providers and networking solutions.
 
 The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods.
@@ -491,6 +497,37 @@ The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVo
 - **Third-party Annotation Replacement**: When `podAnnotations` is configured, Velero's built-in in-tree annotations are NOT automatically added
 - **Explicit Configuration Required**: If you need both custom annotations and in-tree third-party annotations, explicitly include the in-tree annotations in the `podAnnotations` configuration
 - **In-tree Annotations**: The default in-tree annotations include support for AWS IAM roles
+
+### Tolerations Configuration (`tolerations`)
+
+Add customized tolerations for data mover pods to allow scheduling on nodes with custom taints.
+
+Unlike `podLabels`/`podAnnotations`, `tolerations` does **not** replace Velero's [in-tree third-party toleration allowlist](https://github.com/vmware-tanzu/velero/blob/main/pkg/util/third_party.go). Any toleration on the node-agent DaemonSet whose key is in that allowlist (currently `kubernetes.azure.com/scalesetpriority` and `CriticalAddonsOnly`) is always merged in alongside the tolerations configured here, with duplicates removed.
+
+The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVolumeRestore pods. This does not affect repository maintenance jobs; tolerations for maintenance jobs are configured separately via the repository maintenance job ConfigMap (see [Repository Maintenance](../repository-maintenance.md#tolerations-configuration)).
+
+#### Configuration Example
+```json
+{
+  "tolerations": [
+    {
+      "key": "dedicated",
+      "operator": "Equal",
+      "value": "backup",
+      "effect": "NoSchedule"
+    }
+  ]
+}
+```
+
+#### Use Cases
+- **Dedicated Backup Node Pools**: Nodes tainted to only run backup/restore workloads
+- **Spot/Preemptible Node Pools**: Additional spot-instance taints beyond the built-in Azure allowlist
+- **Custom Maintenance Taints**: Nodes with `NoExecute` taints applied during maintenance windows
+
+#### Important Notes
+- **Merge, Not Replace**: `tolerations` is merged with (not a replacement for) the in-tree third-party allowlisted tolerations inherited from the node-agent DaemonSet
+- **Deduplication**: Identical tolerations (same key, operator, value, and effect) from either source are only applied once
 
 ## Complete Configuration Example
 Here's a comprehensive example showing how all configuration sections work together:
@@ -573,7 +610,15 @@ Here's a comprehensive example showing how all configuration sections work toget
     "vault.hashicorp.com/agent-inject": "true",
     "prometheus.io/scrape": "true",
     "custom.company.com/environment": "production"
-  }
+  },
+  "tolerations": [
+    {
+      "key": "dedicated",
+      "operator": "Equal",
+      "value": "backup",
+      "effect": "NoSchedule"
+    }
+  ]
 }
 ```
 
@@ -590,6 +635,7 @@ This configuration:
 - Enable cache PVC for file system restore
 - The cache threshold is 1GB and use dedicated StorageClass
 - Use customized labels and annotations data mover pods
+- Tolerate the `dedicated=backup:NoSchedule` taint, merged with any allowlisted DaemonSet tolerations
 
 ## Troubleshooting
 

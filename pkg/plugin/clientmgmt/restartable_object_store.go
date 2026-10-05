@@ -20,7 +20,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"

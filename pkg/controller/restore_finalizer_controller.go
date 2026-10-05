@@ -17,14 +17,16 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	storagev1api "k8s.io/api/storage/v1"
@@ -39,6 +41,8 @@ import (
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	serverconfig "github.com/vmware-tanzu/velero/pkg/cmd/server/config"
 	"github.com/vmware-tanzu/velero/pkg/constant"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
@@ -46,6 +50,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -147,10 +152,16 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, errors.Wrap(err, "error getting backup store")
 	}
 
-	volumeInfo, err := backupStore.GetBackupVolumeInfos(restore.Spec.BackupName)
+	backupVolumeInfos, err := backupStore.GetBackupVolumeInfos(restore.Spec.BackupName)
 	if err != nil {
 		log.WithError(err).Errorf("error getting volumeInfo for backup %s", restore.Spec.BackupName)
-		return ctrl.Result{}, errors.Wrap(err, "error getting volumeInfo")
+		return ctrl.Result{}, errors.Wrap(err, "error getting backup volumeInfos")
+	}
+
+	restoreVolumeInfos, err := backupStore.GetRestoreVolumeInfos(restore.Name)
+	if err != nil {
+		log.WithError(err).Errorf("error getting volumeInfos for restore %s", restore.Name)
+		return ctrl.Result{}, errors.Wrap(err, "error getting restore volumeInfos")
 	}
 
 	restoredResourceList, err := backupStore.GetRestoredResourceList(restore.Name)
@@ -168,13 +179,15 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	finalizerCtx := &finalizerContext{
-		logger:           log,
-		restore:          restore,
-		crClient:         r.crClient,
-		volumeInfo:       volumeInfo,
-		restoredPVCList:  restoredPVCList,
-		multiHookTracker: r.multiHookTracker,
-		resourceTimeout:  r.resourceTimeout,
+		logger:             log,
+		backupStore:        backupStore,
+		restore:            restore,
+		crClient:           r.crClient,
+		backupVolumeInfos:  backupVolumeInfos,
+		restoreVolumeInfos: restoreVolumeInfos,
+		restoredPVCList:    restoredPVCList,
+		multiHookTracker:   r.multiHookTracker,
+		resourceTimeout:    r.resourceTimeout,
 		restoreItemOperationList: restoreItemOperationList{
 			items: restoreItemOperations,
 		},
@@ -287,7 +300,9 @@ type finalizerContext struct {
 	logger                   logrus.FieldLogger
 	restore                  *velerov1api.Restore
 	crClient                 client.Client
-	volumeInfo               []*volume.BackupVolumeInfo
+	backupStore              persistence.BackupStore
+	backupVolumeInfos        []*volume.BackupVolumeInfo
+	restoreVolumeInfos       []*volume.RestoreVolumeInfo
 	restoredPVCList          map[string]struct{}
 	restoreItemOperationList restoreItemOperationList
 	multiHookTracker         *hook.MultiHookTracker
@@ -301,8 +316,13 @@ func (ctx *finalizerContext) execute() (results.Result, results.Result) {
 	pdpErrs := ctx.patchDynamicPVWithVolumeInfo()
 	errs.Merge(&pdpErrs)
 
-	vgscWarnings := ctx.cleanupStubVGSC()
-	warnings.Merge(&vgscWarnings)
+	if ctx.hasVolumeGroupSnapshotHandles() {
+		vgscWarnings := ctx.cleanupStubVGSC()
+		warnings.Merge(&vgscWarnings)
+	}
+
+	viErrs := ctx.updateVolumeInfos()
+	errs.Merge(&viErrs)
 
 	rehErrs := ctx.WaitRestoreExecHook()
 	errs.Merge(&rehErrs)
@@ -321,7 +341,7 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 	maxConcurrency := 3
 	semaphore := make(chan struct{}, maxConcurrency)
 
-	for _, volumeItem := range ctx.volumeInfo {
+	for _, volumeItem := range ctx.backupVolumeInfos {
 		if (volumeItem.BackupMethod == volume.PodVolumeBackup || volumeItem.BackupMethod == volume.CSISnapshot) && volumeItem.PVInfo != nil {
 			// Determine restored PVC namespace
 			restoredNamespace := volumeItem.PVCNamespace
@@ -372,19 +392,20 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// failures due to the PVC not being bound, which could cause a timeout and result in a failed restore.
 					if pvc.Status.Phase == corev1api.ClaimPending {
 						// check if storage class used has VolumeBindingMode as WaitForFirstConsumer
-						scName := *pvc.Spec.StorageClassName
-						sc := &storagev1api.StorageClass{}
-						err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
+						if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+							scName := *pvc.Spec.StorageClassName
+							sc := &storagev1api.StorageClass{}
+							err = ctx.crClient.Get(context.Background(), client.ObjectKey{Name: scName}, sc)
 
-						if err != nil {
-							errs.Add(restoredNamespace, err)
-							return false, err
-						}
-						// skip PV patch step for this scenario
-						// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
-						if *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
-							log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
-							return true, nil
+							if err != nil {
+								return false, err
+							}
+							// skip PV patch step for this scenario
+							// because pvc would not be bound and the PV patch step would fail due to timeout thus failing the restore
+							if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode == storagev1api.VolumeBindingWaitForFirstConsumer {
+								log.Warnf("skipping PV patch to restore custom reclaim policy, if any: StorageClass %s used by PVC %s has VolumeBindingMode set to WaitForFirstConsumer, and the PVC is also in a pending state", scName, pvc.Name)
+								return true, nil
+							}
 						}
 					}
 
@@ -419,7 +440,16 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 					// patch PV's reclaim policy and label using the corresponding data stored in volume info
 					if needPatch(pv, volInfo.PVInfo) {
 						updatedPV := pv.DeepCopy()
-						updatedPV.Labels = volInfo.PVInfo.Labels
+
+						if updatedPV.Labels == nil {
+							updatedPV.Labels = make(map[string]string)
+						}
+						for k, v := range volInfo.PVInfo.Labels {
+							if _, exists := updatedPV.Labels[k]; !exists {
+								updatedPV.Labels[k] = v
+							}
+						}
+
 						updatedPV.Spec.PersistentVolumeReclaimPolicy = corev1api.PersistentVolumeReclaimPolicy(volInfo.PVInfo.ReclaimPolicy)
 						if err := kubeutil.PatchResource(pv, updatedPV, ctx.crClient); err != nil {
 							return false, err
@@ -449,6 +479,15 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 	return errs
 }
 
+func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
+	for _, vi := range ctx.backupVolumeInfos {
+		if vi.CSISnapshotInfo != nil && vi.CSISnapshotInfo.VolumeGroupSnapshotHandle != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // cleanupStubVGSC deletes stub VolumeGroupSnapshotContent objects that were
 // created during restore to satisfy CSI controller validation. These stubs are
 // labeled with velero.io/restore-name for identification.
@@ -457,15 +496,19 @@ func (ctx *finalizerContext) patchDynamicPVWithVolumeInfo() (errs results.Result
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
-	err := ctx.crClient.List(
+	vgscList, err := csiutil.ListVGSC(
 		context.Background(),
-		vgscList,
-		client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name},
+		ctx.crClient,
+		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
 	)
 	if err != nil {
-		// If the CRD is not installed, listing will fail. This is expected
-		// on clusters without VolumeGroupSnapshot support, so treat as warning.
+		if errors.Is(err, csiutil.ErrVGSAPINotAvailable) {
+			// Cluster does not serve the VolumeGroupSnapshot API, so there is
+			// nothing to clean up.
+			ctx.logger.Info("VolumeGroupSnapshot API not available, skipping stub VGSC cleanup")
+			return warnings
+		}
+		// Any other listing failure is unexpected; treat as warning.
 		ctx.logger.WithError(err).Warn("failed to list stub VolumeGroupSnapshotContents, skipping cleanup")
 		warnings.Add("cluster", errors.Wrap(err, "failed to list stub VolumeGroupSnapshotContents"))
 		return warnings
@@ -521,7 +564,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
-		if err := ctx.crClient.Delete(context.Background(), vgsc); err != nil {
+		if err := csiutil.DeleteVGSC(context.Background(), ctx.crClient, vgsc.Name); err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("stub VolumeGroupSnapshotContent already deleted")
 				continue
@@ -542,11 +585,8 @@ func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
 	}
 
 	newPVLabels, pvLabels := newPV.Labels, pvInfo.Labels
-	for k, v := range pvLabels {
+	for k := range pvLabels {
 		if _, ok := newPVLabels[k]; !ok {
-			return true
-		}
-		if newPVLabels[k] != v {
 			return true
 		}
 	}
@@ -554,13 +594,61 @@ func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
 	return false
 }
 
+func (ctx *finalizerContext) updateVolumeInfos() (errs results.Result) {
+	dataDownloads := &velerov2alpha1.DataDownloadList{}
+	if err := ctx.crClient.List(context.Background(), dataDownloads, client.InNamespace(ctx.restore.Namespace), client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name}); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "failed to list data downloads of restore %s", ctx.restore.Name))
+		return errs
+	}
+	for _, dataDownload := range dataDownloads.Items {
+		for index := range ctx.restoreVolumeInfos {
+			if ctx.restoreVolumeInfos[index].PVCName == dataDownload.Spec.TargetVolume.PVC &&
+				ctx.restoreVolumeInfos[index].PVCNamespace == dataDownload.Spec.TargetVolume.Namespace &&
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo != nil {
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Size = dataDownload.Status.Progress.TotalBytes
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataDownload.Status.IncrementalBytes
+				ctx.restoreVolumeInfos[index].FallbackFull = dataDownload.Status.FallbackFull
+				ctx.restoreVolumeInfos[index].SnapshotDataMovementInfo.Phase = dataDownload.Status.Phase
+			}
+		}
+	}
+
+	buffer := new(bytes.Buffer)
+	gzw := gzip.NewWriter(buffer)
+	defer gzw.Close()
+	if err := json.NewEncoder(gzw).Encode(ctx.restoreVolumeInfos); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "error encoding restore volume infos to JSON for restore %s", ctx.restore.Name))
+		return errs
+	}
+	if err := gzw.Close(); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "error closing gzip writer for restore %s", ctx.restore.Name))
+		return errs
+	}
+	if err := ctx.backupStore.PutRestoreVolumeInfo(ctx.restore.Name, buffer); err != nil {
+		errs.Add("cluster", errors.Wrapf(err, "failed to put restore volume info for restore %s", ctx.restore.Name))
+		return errs
+	}
+
+	return errs
+}
+
 // WaitRestoreExecHook waits for restore exec hooks to finish then update the hook execution results
 func (ctx *finalizerContext) WaitRestoreExecHook() (errs results.Result) {
 	log := ctx.logger.WithField("restore", ctx.restore.Name)
 	log.Info("Waiting for restore exec hooks starts")
 
-	// wait for restore exec hooks to finish
-	err := wait.PollUntilContextCancel(context.Background(), 1*time.Second, true, func(context.Context) (bool, error) {
+	// Bound the wait by resourceTimeout (the same budget Velero already
+	// applies to other finalizer phases). Previously this poll had no
+	// deadline, so a hook that was registered via Add() but never
+	// recorded as executed left the restore stuck in Finalizing forever
+	// and blocked every other restore on the cluster.
+	timeout := ctx.resourceTimeout
+	if timeout <= 0 {
+		timeout = serverconfig.DefaultResourceTimeout
+	}
+	pollCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := wait.PollUntilContextCancel(pollCtx, 1*time.Second, true, func(context.Context) (bool, error) {
 		log.Debug("Checking the progress of hooks execution")
 		if ctx.multiHookTracker.IsComplete(ctx.restore.Name) {
 			return true, nil

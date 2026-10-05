@@ -34,9 +34,9 @@ brew install velero
 
 ### Option 2: GitHub release
 
-1. Download the [latest official release's](https://github.com/vmware-tanzu/velero/releases) tarball for your client platform.
+1. Download the [latest official release's](https://github.com/velero-io/velero/releases) tarball for your client platform.
 
-    _We strongly recommend that you use an [official release](https://github.com/vmware-tanzu/velero/releases) of
+    _We strongly recommend that you use an [official release](https://github.com/velero-io/velero/releases) of
 Velero. The tarballs for each release contain the `velero` command-line client. The code in the main branch
 of the Velero repository is under active development and is not guaranteed to be stable!_
 
@@ -81,13 +81,13 @@ These instructions start the Velero server and a Minio instance that is accessib
         --backup-location-config region=minio,s3ForcePathStyle="true",s3Url=http://minio.velero.svc:9000
     ```
 
-    * This example assumes that it is running within a local cluster without a volume provider capable of snapshots, so no `VolumeSnapshotLocation` is created (`--use-volume-snapshots=false`). You may need to update AWS plugin version to one that is [compatible](https://github.com/vmware-tanzu/velero-plugin-for-aws#compatibility) with the version of Velero you are installing.
+    * This example assumes that it is running within a local cluster without a volume provider capable of snapshots, so no `VolumeSnapshotLocation` is created (`--use-volume-snapshots=false`). You may need to update AWS plugin version to one that is [compatible](https://github.com/velero-io/velero-plugin-for-aws#compatibility) with the version of Velero you are installing.
 
     * Additionally, you can specify `--use-node-agent` to enable File System Backup support, and `--wait` to wait for the deployment to be ready.
 
     * This example also assumes you have named your Minio bucket "velero".
 
-    * Please make sure to set parameter `s3ForcePathStyle=true`. The parameter is used to set the Velero integrated AWS SDK data query address style. There are two types of the address: [virtual-host and path-style](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html). If the `s3ForcePathStyle=true` is not set, the default value is false, then the AWS SDK will query in virtual-host style, but the MinIO server only support path-style address by default. The miss match will mean Velero can upload data to MinIO, but **cannot download from MinIO**. This [link](https://github.com/vmware-tanzu/velero/issues/7268) is an example of this issue.
+    * Please make sure to set parameter `s3ForcePathStyle=true`. The parameter is used to set the Velero integrated AWS SDK data query address style. There are two types of the address: [virtual-host and path-style](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html). If the `s3ForcePathStyle=true` is not set, the default value is false, then the AWS SDK will query in virtual-host style, but the MinIO server only support path-style address by default. The miss match will mean Velero can upload data to MinIO, but **cannot download from MinIO**. This [link](https://github.com/velero-io/velero/issues/7268) is an example of this issue.
     It can be resolved by two ways:
       * Set `s3ForcePathStyle=true` for parameter `--backup-location-config` when installing Velero. This is the preferred way.
       * Make MinIO server support virtual-host style address. Add the [MINIO_DOMAIN environment variable](https://min.io/docs/minio/linux/reference/minio-server/settings/core.html#id5) for MinIO server will do the magic.
@@ -296,6 +296,6 @@ In this case:
 [3]: ../customize-installation.md
 [17]: ../file-system-backup.md
 [18]: ../debugging-restores.md
-[26]: https://github.com/vmware-tanzu/velero/releases
+[26]: https://github.com/velero-io/velero/releases
 [30]: https://godoc.org/github.com/robfig/cron
 [32]: ../self-signed-certificates.md

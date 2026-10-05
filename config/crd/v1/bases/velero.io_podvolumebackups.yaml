@@ -11,6 +11,8 @@ spec:
     kind: PodVolumeBackup
     listKind: PodVolumeBackupList
     plural: podvolumebackups
+    shortNames:
+    - pvb
     singular: podvolumebackup
   scope: Namespaced
   versions:
@@ -49,7 +51,7 @@ spec:
       name: Age
       type: date
     - description: Name of the node where the PodVolumeBackup is processed
-      jsonPath: .status.node
+      jsonPath: .spec.node
       name: Node
       type: string
     - description: The type of the uploader to handle data transfer
@@ -93,6 +95,13 @@ spec:
               node:
                 description: Node is the name of the node that the Pod is running
                   on.
+                type: string
+              parentSnapshot:
+                description: |-
+                  ParentSnapshot specifies the parent snapshot that current backup is based on.
+                  If its value is "" or "auto", the data mover finds the recent backup of the same volume as parent.
+                  If its value is "none", the data mover will do a full backup
+                  If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
                 type: string
               pod:
                 description: Pod is a reference to the pod containing the volume to
@@ -186,6 +195,13 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              activities:
+                description: Activities contains one or more messages about what have
+                  been done for this pod volume backup.
+                items:
+                  type: string
+                nullable: true
+                type: array
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a backup was completed.
@@ -195,13 +211,22 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental backup
+                  has fallen back to full backup
+                type: boolean
               incrementalBytes:
-                description: IncrementalBytes holds the number of bytes new or changed
-                  since the last backup
+                description: |-
+                  IncrementalBytes holds the number of bytes new or changed since the last backup.
+                  A nil value means the uploader did not report a figure; a pointer to 0 means it
+                  reported zero, i.e. nothing changed and nothing was transferred. The two are
+                  distinct: erasing a measured zero makes a perfect incremental indistinguishable
+                  from a full transfer in every downstream report.
                 format: int64
                 type: integer
               message:
-                description: Message is a message about the pod volume backup's status.
+                description: Message is a message describing the pod volume backup
+                  when it reaches to a terminal status.
                 type: string
               path:
                 description: Path is the full path within the controller pod being
@@ -236,6 +261,10 @@ spec:
                 description: SnapshotID is the identifier for the snapshot of the
                   pod volume.
                 type: string
+              sourceSize:
+                description: SourceSize holds the total size of the source volume.
+                format: int64
+                type: integer
               startTimestamp:
                 description: |-
                   StartTimestamp records the time a backup was started.

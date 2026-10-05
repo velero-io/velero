@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	clocktesting "k8s.io/utils/clock/testing"
+
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -61,7 +64,6 @@ func dataDownloadBuilder() *builder.DataDownloadBuilder {
 		BackupStorageLocation("bsl-loc").
 		DataMover("velero").
 		SnapshotID("test-snapshot-id").TargetVolume(velerov2alpha1api.TargetVolumeSpec{
-		PV:        "test-pv",
 		PVC:       "test-pvc",
 		Namespace: "test-ns",
 	})
@@ -148,6 +150,8 @@ func initDataDownloadReconcilerWithError(t *testing.T, objects []any, needError 
 		nil,
 		nil, // podLabels
 		nil, // podAnnotations
+		nil, // snapshotMetadataServiceConfigs
+		nil, // tolerations
 	), nil
 }
 
@@ -183,6 +187,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 		dd                       *velerov2alpha1api.DataDownload
 		notCreateDD              bool
 		targetPVC                *corev1api.PersistentVolumeClaim
+		targetPV                 *corev1api.PersistentVolume
 		dataMgr                  *datapath.Manager
 		needErrs                 []bool
 		needCreateFSBR           bool
@@ -194,6 +199,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 		isPeekExposeErr          bool
 		isNilExposer             bool
 		notNilExpose             bool
+		mockExpose               bool
 		notMockCleanUp           bool
 		mockInit                 bool
 		mockInitErr              error
@@ -352,6 +358,16 @@ func TestDataDownloadReconcile(t *testing.T) {
 			expected:  dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Result(),
 		},
 		{
+			name:           "dd succeeds for accepted with target PV set",
+			dd:             dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).TargetVolume(velerov2alpha1api.TargetVolumeSpec{PVC: "test-pvc", Namespace: "test-ns", PV: "test-pv"}).Result(),
+			targetPVC:      builder.ForPersistentVolumeClaim("test-ns", "test-pvc").StorageClass("sc").Result(),
+			targetPV:       builder.ForPersistentVolume("test-pv").Result(),
+			expected:       dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).TargetVolume(velerov2alpha1api.TargetVolumeSpec{PVC: "test-pvc", Namespace: "test-ns", PV: "test-pv"}).Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Result(),
+			mockExpose:     true,
+			notMockCleanUp: true,
+			notNilExpose:   true,
+		},
+		{
 			name:     "prepare timeout on accepted",
 			dd:       dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseAccepted).Finalizers([]string{DataUploadDownloadFinalizer}).AcceptedTimestamp(&metav1.Time{Time: time.Now().Add(-time.Minute * 30)}).Result(),
 			expected: dataDownloadBuilder().Phase(velerov2alpha1api.DataDownloadPhaseFailed).Finalizers([]string{DataUploadDownloadFinalizer}).Phase(velerov2alpha1api.DataDownloadPhaseFailed).Message("timeout on preparing data download").Result(),
@@ -487,6 +503,10 @@ func TestDataDownloadReconcile(t *testing.T) {
 				objects = append(objects, test.targetPVC)
 			}
 
+			if test.targetPV != nil {
+				objects = append(objects, test.targetPV)
+			}
+
 			r, err := initDataDownloadReconciler(t, objects, test.needErrs...)
 			require.NoError(t, err)
 
@@ -507,7 +527,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledDataDownload[test.dd.Name] = test.sportTime.Time
+				r.cancelledDataDownload.Store(test.dd.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -529,7 +549,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 				}
 
 				if test.mockStart {
-					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
+					asyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.mockStartErr)
 				}
 
 				if test.mockCancel {
@@ -543,14 +563,16 @@ func TestDataDownloadReconcile(t *testing.T) {
 				return asyncBR
 			}
 
-			if test.isExposeErr || test.isGetExposeErr || test.isGetExposeNil || test.isPeekExposeErr || test.isNilExposer || test.notNilExpose {
+			if test.isExposeErr || test.isGetExposeErr || test.isGetExposeNil || test.isPeekExposeErr || test.isNilExposer || test.notNilExpose || test.mockExpose {
 				if test.isNilExposer {
 					r.restoreExposer = nil
 				} else {
 					r.restoreExposer = func() exposer.GenericRestoreExposer {
-						ep := exposermockes.NewMockGenericRestoreExposer(t)
+						ep := exposermockes.NewGenericRestoreExposer(t)
 						if test.isExposeErr {
 							ep.On("Expose", mock.Anything, mock.Anything, mock.Anything).Return(errors.New("Error to expose restore exposer"))
+						} else if test.mockExpose {
+							ep.On("Expose", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 						} else if test.notNilExpose {
 							hostingPod := builder.ForPod("test-ns", "test-name").Volumes(&corev1api.Volume{Name: "test-pvc"}).Result()
 							hostingPod.ObjectMeta.SetUID("test-uid")
@@ -565,7 +587,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 						}
 
 						if !test.notMockCleanUp {
-							ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+							ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 						}
 						return ep
 					}()
@@ -624,9 +646,15 @@ func TestDataDownloadReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledDataDownload, test.dd.Name)
+				_, ok := r.cancelledDataDownload.Load(test.dd.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledDataDownload)
+				empty := true
+				r.cancelledDataDownload.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isDataDownloadInFinalState(&dd) || dd.Status.Phase == velerov2alpha1api.DataDownloadPhaseInProgress {
@@ -712,13 +740,13 @@ func TestOnDataDownloadCompleted(t *testing.T) {
 			needErrs := []bool{test.isGetErr, false, false, false}
 			r, err := initDataDownloadReconciler(t, nil, needErrs...)
 			r.restoreExposer = func() exposer.GenericRestoreExposer {
-				ep := exposermockes.NewMockGenericRestoreExposer(t)
+				ep := exposermockes.NewGenericRestoreExposer(t)
 				if test.rebindVolumeErr {
 					ep.On("RebindVolume", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("Error to rebind volume"))
 				} else {
 					ep.On("RebindVolume", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				}
-				ep.On("CleanUp", mock.Anything, mock.Anything).Return()
+				ep.On("CleanUp", mock.Anything, mock.Anything, mock.Anything).Return()
 				return ep
 			}()
 
@@ -761,6 +789,15 @@ func TestOnDataDownloadProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			dd:   dataDownloadBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get datadownload",
 			dd:       dataDownloadBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -788,20 +825,33 @@ func TestOnDataDownloadProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), dd))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			// Call the OnDataDownloadProgress function
 			r.OnDataDownloadProgress(ctx, namespace, duName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				// Get the updated DataDownload object from the fake client
-				updatedDu := &velerov2alpha1api.DataDownload{}
-				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
+				updatedDd := &velerov2alpha1api.DataDownload{}
+				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDd))
 				// Assert that the DataDownload object has been updated with the progress
-				assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedDd.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedDd.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedDd.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedDd.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedDd.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataDownloadProgress(ctx, namespace, duName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDd))
+					assert.Equal(t, []string{progress.Message}, updatedDd.Status.Activities)
+				}
 			}
 		})
 	}
@@ -1092,11 +1142,12 @@ func (dt *ddResumeTestHelper) DiagnoseExpose(context.Context, corev1api.ObjectRe
 	return ""
 }
 
-func (dt *ddResumeTestHelper) RebindVolume(context.Context, corev1api.ObjectReference, string, string, time.Duration) error {
+func (dt *ddResumeTestHelper) RebindVolume(context.Context, corev1api.ObjectReference, exposer.GenericRestoreRebindVolumeParam) error {
 	return nil
 }
 
-func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference) {}
+func (dt *ddResumeTestHelper) CleanUp(context.Context, corev1api.ObjectReference, *exposer.GenericRestoreCleanUpParam) {
+}
 
 func (dt *ddResumeTestHelper) newMicroServiceBRWatcher(kbclient.Client, kubernetes.Interface, manager.Manager, string, string, string, string, string, string,
 	datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
@@ -1288,7 +1339,7 @@ func TestResumeCancellableRestore(t *testing.T) {
 			}
 
 			if test.mockStart {
-				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
+				mockAsyncBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.startWatcherErr)
 			}
 
 			if test.mockClose {
@@ -1319,6 +1370,7 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 	baseDataDownload := dataDownloadBuilder().Result()
 	baseDataDownload.Namespace = velerov1api.DefaultNamespace
+	baseDataDownload.Spec.TargetVolume.PV = "pv-1"
 	baseDataDownload.Spec.OperationTimeout = metav1.Duration{Duration: time.Minute * 10}
 	baseDataDownload.Spec.SnapshotSize = 5368709120 // 5Gi
 
@@ -1418,6 +1470,8 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 				nil, // repoConfigMgr (unused when cacheVolumeConfigs is nil)
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil, // snapshotMetadataServiceConfigs
+				nil, // tolerations
 			)
 
 			// Act
@@ -1428,11 +1482,60 @@ func TestDataDownloadSetupExposeParam(t *testing.T) {
 
 			// Core fields
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PVC, got.TargetPVCName)
+			assert.Equal(t, baseDataDownload.Spec.TargetVolume.PV, got.TargetPVName)
 			assert.Equal(t, baseDataDownload.Spec.TargetVolume.Namespace, got.TargetNamespace)
+			assert.Equal(t, baseDataDownload.Spec.DataMover, got.DataMover)
 
 			// Labels and Annotations
 			assert.Equal(t, tt.want.labels, got.HostingPodLabels)
 			assert.Equal(t, tt.want.annotations, got.HostingPodAnnotations)
 		})
 	}
+}
+
+type sequenceClock struct {
+	*clocktesting.FakeClock
+	mu sync.Mutex
+}
+
+func (c *sequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestDataDownloadCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	dd := dataDownloadBuilder().Cancel(true).Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
+
+	r, err := initDataDownloadReconciler(t, nil)
+	require.NoError(t, err)
+
+	err = r.client.Create(ctx, dd)
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledDataDownload.Store(dd.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.Clock = &sequenceClock{FakeClock: clocktesting.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: dd.Name, Namespace: dd.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledDataDownload.Load(dd.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

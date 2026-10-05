@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientTesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -201,7 +203,7 @@ func TestWaitVolumeSnapshotReady(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
 			vs, err := WaitVolumeSnapshotReady(t.Context(), fakeClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond, velerotest.NewLogger())
-			if err != nil {
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -286,8 +288,8 @@ func TestGetVolumeSnapshotContentForVolumeSnapshot(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
-			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(test.snapshotObj, fakeClient.SnapshotV1())
-			if err != nil {
+			vs, err := GetVolumeSnapshotContentForVolumeSnapshot(context.TODO(), test.snapshotObj, fakeClient.SnapshotV1())
+			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {
 				require.NoError(t, err)
@@ -312,6 +314,11 @@ func TestEnsureDeleteVS(t *testing.T) {
 			Namespace:  "fake-ns",
 			Finalizers: []string{"fake-finalizer-1", "fake-finalizer-2"},
 		},
+	}
+	groupMemberName := "group"
+	vsGroupMember := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "fake-vs", Namespace: "fake-ns"},
+		Status:     &snapshotv1api.VolumeSnapshotStatus{VolumeGroupSnapshotName: &groupMemberName},
 	}
 
 	tests := []struct {
@@ -342,7 +349,7 @@ func TestEnsureDeleteVS(t *testing.T) {
 					},
 				},
 			},
-			err: "error to assure VolumeSnapshot is deleted, fake-vs: error to get VolumeSnapshot fake-vs: fake-get-error",
+			err: "checking VGS membership before deleting VolumeSnapshot: fake-get-error",
 		},
 		{
 			name:      "wait timeout",
@@ -377,10 +384,39 @@ func TestEnsureDeleteVS(t *testing.T) {
 			err: "timeout to assure VolumeSnapshot fake-vs is deleted, finalizers in VS []",
 		},
 		{
+			name:      "wait timeout before the VS is ever retrieved",
+			vsName:    "fake-vs",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{vsObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "checking VGS membership before deleting VolumeSnapshot: context deadline exceeded",
+		},
+		{
 			name:      "success",
 			vsName:    "fake-vs",
 			namespace: "fake-ns",
 			clientObj: []runtime.Object{vsObj},
+		},
+		{
+			name:      "defer VGS member",
+			vsName:    "fake-vs",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{vsGroupMember},
 		},
 	}
 
@@ -393,7 +429,7 @@ func TestEnsureDeleteVS(t *testing.T) {
 			}
 
 			err := EnsureDeleteVS(t.Context(), fakeSnapshotClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond)
-			if err != nil {
+			if test.err != "" {
 				assert.EqualError(t, err, test.err)
 			} else {
 				assert.NoError(t, err)
@@ -414,6 +450,10 @@ func TestEnsureDeleteVSC(t *testing.T) {
 			Name:       "fake-vsc",
 			Finalizers: []string{"fake-finalizer-1", "fake-finalizer-2"},
 		},
+	}
+	vscGroupMember := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: "fake-vsc"},
+		Status:     &snapshotv1api.VolumeSnapshotContentStatus{VolumeGroupSnapshotHandle: ptr.To("group-handle")},
 	}
 
 	tests := []struct {
@@ -455,7 +495,7 @@ func TestEnsureDeleteVSC(t *testing.T) {
 					},
 				},
 			},
-			err: "error to assure VolumeSnapshotContent is deleted, fake-vsc: error to get VolumeSnapshotContent fake-vsc: fake-get-error",
+			err: "checking VGS membership before deleting VolumeSnapshotContent: fake-get-error",
 		},
 		{
 			name:      "wait timeout",
@@ -488,9 +528,36 @@ func TestEnsureDeleteVSC(t *testing.T) {
 			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted, finalizers in VSC []",
 		},
 		{
+			name:      "wait timeout before the VSC is ever retrieved",
+			vscName:   "fake-vsc",
+			clientObj: []runtime.Object{vscObjWithFinalizer},
+			reactors: []reactor{
+				{
+					verb:     "delete",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, nil
+					},
+				},
+				{
+					verb:     "get",
+					resource: "volumesnapshotcontents",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, context.DeadlineExceeded
+					},
+				},
+			},
+			err: "checking VGS membership before deleting VolumeSnapshotContent: context deadline exceeded",
+		},
+		{
 			name:      "success",
 			vscName:   "fake-vsc",
 			clientObj: []runtime.Object{vscObj},
+		},
+		{
+			name:      "defer group member",
+			vscName:   "fake-vsc",
+			clientObj: []runtime.Object{vscGroupMember},
 		},
 	}
 
@@ -590,6 +657,23 @@ func TestDeleteVolumeSnapshotIfAny(t *testing.T) {
 			vsNamespace: "fake-ns",
 			logMessage:  "Abort deleting volume snapshot, it doesn't exist fake-ns/fake-vs",
 			logLevel:    "level=debug",
+		},
+		{
+			name:        "membership lookup fails",
+			vsName:      "fake-vs",
+			vsNamespace: "fake-ns",
+			reactors: []reactor{
+				{
+					verb:     "get",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("fake-get-error")
+					},
+				},
+			},
+			logMessage: "Unable to check VGS membership for VolumeSnapshot fake-ns/fake-vs",
+			logLevel:   "level=warning",
+			logError:   "error=fake-get-error",
 		},
 		{
 			name:        "delete fail",
@@ -1032,13 +1116,101 @@ func TestGetVolumeSnapshotClass(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actualSnapshotClass, actualError := GetVolumeSnapshotClass(
-				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient)
+				context.TODO(),
+				tc.driverName, tc.backup, tc.pvc, logrus.New(), fakeClient, "")
 			if tc.expectError {
 				require.Error(t, actualError)
 				assert.Nil(t, actualSnapshotClass)
 				return
 			}
 			assert.Equal(t, tc.expectedVSC, actualSnapshotClass)
+		})
+	}
+}
+
+func TestGetVolumeSnapshotClassFromVolumePolicy(t *testing.T) {
+	vscArray1 := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-array-1"},
+		Driver:     "infinibox-csi-driver",
+	}
+	vscArray2 := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-array-2"},
+		Driver:     "infinibox-csi-driver",
+	}
+	vscOther := &snapshotv1api.VolumeSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vsc-other"},
+		Driver:     "other-csi-driver",
+	}
+
+	snapshotClasses := &snapshotv1api.VolumeSnapshotClassList{
+		Items: []snapshotv1api.VolumeSnapshotClass{*vscArray1, *vscArray2, *vscOther},
+	}
+
+	testCases := []struct {
+		name                string
+		policySnapshotClass string
+		provisioner         string
+		expectedVSC         *snapshotv1api.VolumeSnapshotClass
+		expectError         bool
+	}{
+		{
+			name:                "empty policy returns nil",
+			policySnapshotClass: "",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         nil,
+			expectError:         false,
+		},
+		{
+			name:                "matching VSC with correct driver",
+			policySnapshotClass: "vsc-array-1",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray1,
+			expectError:         false,
+		},
+		{
+			name:                "matching VSC with correct driver second array",
+			policySnapshotClass: "vsc-array-2",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray2,
+			expectError:         false,
+		},
+		{
+			name:                "VSC exists but wrong driver",
+			policySnapshotClass: "vsc-other",
+			provisioner:         "infinibox-csi-driver",
+			expectError:         true,
+		},
+		{
+			name:                "VSC does not exist",
+			policySnapshotClass: "non-existent",
+			provisioner:         "infinibox-csi-driver",
+			expectError:         true,
+		},
+		{
+			name:                "case-insensitive name matching",
+			policySnapshotClass: "VSC-ARRAY-1",
+			provisioner:         "infinibox-csi-driver",
+			expectedVSC:         vscArray1,
+			expectError:         false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actualVSC, actualError := GetVolumeSnapshotClassFromVolumePolicy(
+				tc.policySnapshotClass, tc.provisioner, snapshotClasses)
+			if tc.expectError {
+				require.Error(t, actualError)
+				assert.Nil(t, actualVSC)
+				return
+			}
+			if tc.expectedVSC == nil {
+				assert.Nil(t, actualVSC)
+			} else {
+				require.NotNil(t, actualVSC)
+				assert.Equal(t, tc.expectedVSC.Name, actualVSC.Name)
+				assert.Equal(t, tc.expectedVSC.Driver, actualVSC.Driver)
+			}
 		})
 	}
 }
@@ -1371,7 +1543,7 @@ func TestIsVolumeSnapshotExists(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := IsVolumeSnapshotExists(tc.vs.Namespace, tc.vs.Name, fakeClient)
+			actual := IsVolumeSnapshotExists(context.TODO(), tc.vs.Namespace, tc.vs.Name, fakeClient)
 			assert.Equal(t, tc.expected, actual)
 		})
 	}
@@ -1442,9 +1614,9 @@ func TestSetVolumeSnapshotContentDeletionPolicy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
-			_, err := SetVolumeSnapshotContentDeletionPolicy(tc.inputVSCName, fakeClient, tc.policy)
+			_, err := SetVolumeSnapshotContentDeletionPolicy(context.TODO(), tc.inputVSCName, fakeClient, tc.policy)
 			if tc.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				actual := new(snapshotv1api.VolumeSnapshotContent)
@@ -1489,7 +1661,18 @@ func TestDeleteVolumeSnapshots(t *testing.T) {
 				Status(&snapshotv1api.VolumeSnapshotContentStatus{}).Result(),
 			keepVSAndVSC: true,
 		},
+		{
+			name: "VGS member is deferred until group cleanup",
+			vs: *builder.ForVolumeSnapshot("velero", "vs1").
+				Status().BoundVolumeSnapshotContentName("vsc1").
+				Result(),
+			vsc: *builder.ForVolumeSnapshotContent("vsc1").
+				DeletionPolicy(snapshotv1api.VolumeSnapshotContentDelete).
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{}).Result(),
+			keepVSAndVSC: true,
+		},
 	}
+	tests[2].vs.Status.VolumeGroupSnapshotName = ptr.To("group")
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1499,7 +1682,7 @@ func TestDeleteVolumeSnapshots(t *testing.T) {
 			)
 			logger := logging.DefaultLogger(logrus.DebugLevel, logging.FormatText)
 
-			DeleteReadyVolumeSnapshot(tc.vs, client, logger)
+			DeleteReadyVolumeSnapshot(context.TODO(), tc.vs, client, logger)
 
 			vsList := new(snapshotv1api.VolumeSnapshotList)
 			err := client.List(
@@ -1632,6 +1815,34 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		},
 	}
 
+	errNoMessageVsc := "err-no-message-vsc"
+	vscWithErrorNoMessage := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: errNoMessageVsc,
+		},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			VolumeSnapshotRef: corev1api.ObjectReference{
+				Name:       "vol-snap-1",
+				APIVersion: snapshotv1api.SchemeGroupVersion.String(),
+			},
+		},
+		Status: &snapshotv1api.VolumeSnapshotContentStatus{
+			SnapshotHandle: nil,
+			// Error is set while Message is left nil. Both are optional in the
+			// CSI API, so the error-reporting paths must not dereference Message.
+			Error: &snapshotv1api.VolumeSnapshotError{Message: nil},
+		},
+	}
+	vsForErrorNoMessageVsc := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vs-for-err-no-message",
+			Namespace: "default",
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			BoundVolumeSnapshotContentName: &errNoMessageVsc,
+		},
+	}
+
 	objs := []runtime.Object{
 		vscObj,
 		validVS,
@@ -1642,6 +1853,8 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 		vsForNilStatusVsc,
 		vscWithNilStatusField,
 		vsForNilStatusFieldVsc,
+		vscWithErrorNoMessage,
+		vsForErrorNoMessageVsc,
 	}
 	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 	testCases := []struct {
@@ -1675,6 +1888,12 @@ func TestWaitUntilVSCHandleIsReady(t *testing.T) {
 					BoundVolumeSnapshotContentName: &nilStatusVsc,
 				},
 			},
+		},
+		{
+			name:        "waitEnabled should return an error rather than panic when the volumesnapshotcontent has an error without a message",
+			volSnap:     vsForErrorNoMessageVsc,
+			exepctedVSC: nil,
+			expectError: true,
 		},
 	}
 
@@ -2005,6 +2224,125 @@ func TestGetVSCForVS(t *testing.T) {
 
 			if tc.expectedVSC != nil {
 				require.Empty(t, cmp.Diff(tc.expectedVSC, vsc, cmpopts.IgnoreFields(snapshotv1api.VolumeSnapshotContent{}, "TypeMeta", "ResourceVersion")))
+			}
+		})
+	}
+}
+
+func TestCleanupVolumeSnapshot(t *testing.T) {
+	retainVSCName := "retain-vsc"
+
+	testCases := []struct {
+		name          string
+		volSnap       *snapshotv1api.VolumeSnapshot
+		objs          []runtime.Object
+		expectDeleted bool
+		// name of the VolumeSnapshotContent expected to have been patched to
+		// DeletionPolicy=Delete; empty when no VSC should be touched.
+		expectedVSC string
+	}{
+		{
+			name: "should be a no-op if the VolumeSnapshot no longer exists",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "does-not-exist",
+					Namespace: "velero",
+				},
+			},
+			objs:          []runtime.Object{},
+			expectDeleted: false,
+		},
+		{
+			name: "should delete a VolumeSnapshot with no bound VolumeSnapshotContent",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-no-vsc",
+					Namespace: "velero",
+				},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vs-no-vsc",
+						Namespace: "velero",
+					},
+				},
+			},
+			expectDeleted: true,
+		},
+		{
+			name: "should patch bound VSC DeletionPolicy to Delete and delete the VolumeSnapshot",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-with-vsc",
+					Namespace: "velero",
+				},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "vs-with-vsc",
+						Namespace: "velero",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &retainVSCName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "retain-vsc",
+					},
+					Spec: snapshotv1api.VolumeSnapshotContentSpec{
+						DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+					},
+				},
+			},
+			expectDeleted: true,
+			expectedVSC:   "retain-vsc",
+		},
+		{
+			name: "should defer deletion for a VGS member",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "vgs-member", Namespace: "velero"},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{Name: "vgs-member", Namespace: "velero"},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						VolumeGroupSnapshotName: ptr.To("group"),
+					},
+				},
+			},
+			expectDeleted: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
+
+			CleanupVolumeSnapshot(t.Context(), tc.volSnap, fakeClient, velerotest.NewLogger())
+
+			actual := new(snapshotv1api.VolumeSnapshot)
+			err := fakeClient.Get(
+				t.Context(),
+				crclient.ObjectKey{Name: tc.volSnap.Name, Namespace: tc.volSnap.Namespace},
+				actual,
+			)
+
+			if tc.expectDeleted {
+				assert.True(t, apierrors.IsNotFound(err), "expected VolumeSnapshot to be deleted")
+			}
+
+			if tc.expectedVSC != "" {
+				actualVSC := new(snapshotv1api.VolumeSnapshotContent)
+				err := fakeClient.Get(
+					t.Context(),
+					crclient.ObjectKey{Name: tc.expectedVSC},
+					actualVSC,
+				)
+				require.NoError(t, err)
+				assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, actualVSC.Spec.DeletionPolicy)
 			}
 		})
 	}

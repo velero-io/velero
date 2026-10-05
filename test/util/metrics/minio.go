@@ -17,7 +17,7 @@ limitations under the License.
 package metrics
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/vmware-tanzu/velero/test/util/providers"
 )

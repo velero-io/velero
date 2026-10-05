@@ -137,7 +137,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		td.fakeClient.Get(ctx, td.req.NamespacedName, res)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.True(t, strings.HasPrefix(res.Status.Errors[0], "error getting the backup store"))
+		assert.True(t, strings.HasPrefix(res.Status.Errors[0], "backup deletion failed: error getting the backup store"))
 	})
 
 	t.Run("missing spec.backupName", func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "spec.backupName is required", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: spec.backupName is required", res.Status.Errors[0])
 	})
 
 	t.Run("existing deletion requests for the backup are deleted", func(t *testing.T) {
@@ -221,7 +221,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "backup is still in progress", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: backup is still in progress", res.Status.Errors[0])
 	})
 
 	t.Run("unable to find backup", func(t *testing.T) {
@@ -235,7 +235,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "backup not found", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: backup not found", res.Status.Errors[0])
 	})
 	t.Run("unable to find backup storage location", func(t *testing.T) {
 		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").StorageLocation("default").Result()
@@ -250,7 +250,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "backup storage location default not found", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: backup storage location default not found", res.Status.Errors[0])
 	})
 
 	t.Run("backup storage location is in read-only mode", func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "cannot delete backup because backup storage location default is currently in read-only mode", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: cannot delete backup because backup storage location default is currently in read-only mode", res.Status.Errors[0])
 	})
 
 	t.Run("backup storage location is in unavailable state", func(t *testing.T) {
@@ -284,7 +284,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "cannot delete backup because backup storage location default is currently in Unavailable state", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: cannot delete backup because backup storage location default is currently in Unavailable state", res.Status.Errors[0])
 	})
 
 	t.Run("full delete, no errors", func(t *testing.T) {
@@ -396,6 +396,74 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 
 		// Make sure snapshot was deleted
 		assert.Equal(t, 0, td.volumeSnapshotter.SnapshotsTaken.Len())
+	})
+	t.Run("empty ProviderSnapshotID skips DeleteSnapshot call", func(t *testing.T) {
+		input := defaultTestDbr()
+
+		backup := builder.ForBackup(velerov1api.DefaultNamespace, input.Spec.BackupName).Result()
+		backup.UID = "uid"
+		backup.Spec.StorageLocation = "primary"
+
+		restore1 := builder.ForRestore(backup.Namespace, "restore-1").
+			Phase(velerov1api.RestorePhaseCompleted).
+			Backup(backup.Name).
+			Result()
+
+		location := &velerov1api.BackupStorageLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      "primary",
+			},
+			Spec: velerov1api.BackupStorageLocationSpec{
+				Provider: "objStoreProvider",
+				StorageType: velerov1api.StorageType{
+					ObjectStorage: &velerov1api.ObjectStorageLocation{
+						Bucket: "bucket",
+					},
+				},
+			},
+			Status: velerov1api.BackupStorageLocationStatus{
+				Phase: velerov1api.BackupStorageLocationPhaseAvailable,
+			},
+		}
+
+		snapshotLocation := &velerov1api.VolumeSnapshotLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      "vsl-1",
+			},
+			Spec: velerov1api.VolumeSnapshotLocationSpec{
+				Provider: "provider-1",
+			},
+		}
+		td := setupBackupDeletionControllerTest(t, input, backup, restore1, location, snapshotLocation)
+
+		snapshots := []*volume.Snapshot{
+			{
+				Spec: volume.SnapshotSpec{
+					Location:             "vsl-1",
+					PersistentVolumeName: "pv-1",
+				},
+				Status: volume.SnapshotStatus{
+					ProviderSnapshotID: "",
+				},
+			},
+		}
+
+		pluginManager := &pluginmocks.Manager{}
+		pluginManager.On("GetVolumeSnapshotter", "provider-1").Return(td.volumeSnapshotter, nil)
+		pluginManager.On("GetDeleteItemActions").Return(nil, nil)
+		pluginManager.On("CleanupClients")
+		td.controller.newPluginManager = func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager }
+
+		td.backupStore.On("GetBackupVolumeSnapshots", input.Spec.BackupName).Return(snapshots, nil)
+		td.backupStore.On("GetBackupContents", input.Spec.BackupName).Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+		td.backupStore.On("DeleteBackup", input.Spec.BackupName).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		td.backupStore.AssertCalled(t, "DeleteBackup", input.Spec.BackupName)
 	})
 	t.Run("full delete, no errors, with backup name greater than 63 chars", func(t *testing.T) {
 		backup := defaultBackup().
@@ -809,7 +877,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Processed", string(res.Status.Phase))
 		assert.Len(t, res.Status.Errors, 1)
-		assert.Equal(t, "backup not found", res.Status.Errors[0])
+		assert.Equal(t, "backup deletion failed: backup not found", res.Status.Errors[0])
 	})
 }
 

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"

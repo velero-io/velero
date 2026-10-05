@@ -60,6 +60,15 @@ func TestDeployment(t *testing.T) {
 	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 2)
 	assert.Equal(t, "--features=EnableCSI,foo,bar,baz", deploy.Spec.Template.Spec.Containers[0].Args[1])
 
+	deploy = Deployment("velero", WithPlugins([]string{
+		"harbor-repo.vmware.com/harbor-ci/velero/velero-plugin-for-aws:v1.2.0",
+		" \n vsphereveleroplugin/velero-plugin-for-vsphere:v1.1.1 ",
+	}))
+	assert.Len(t, deploy.Spec.Template.Spec.InitContainers, 2)
+	assert.Equal(t, "harbor-repo.vmware.com/harbor-ci/velero/velero-plugin-for-aws:v1.2.0", deploy.Spec.Template.Spec.InitContainers[0].Image)
+	assert.Equal(t, "vsphereveleroplugin/velero-plugin-for-vsphere:v1.1.1", deploy.Spec.Template.Spec.InitContainers[1].Image)
+	assert.Equal(t, "vsphereveleroplugin-velero-plugin-for-vsphere", deploy.Spec.Template.Spec.InitContainers[1].Name)
+
 	deploy = Deployment("velero", WithUploaderType("kopia"))
 	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 2)
 	assert.Equal(t, "--uploader-type=kopia", deploy.Spec.Template.Spec.Containers[0].Args[1])
@@ -100,6 +109,10 @@ func TestDeployment(t *testing.T) {
 	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 2)
 	assert.Equal(t, "--repo-maintenance-job-configmap=test-repo-maintenance-config", deploy.Spec.Template.Spec.Containers[0].Args[1])
 
+	deploy = Deployment("velero", WithDefaultResourceModifierConfigMap("default-restore-modifiers"))
+	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Args, 2)
+	assert.Equal(t, "--default-resource-modifier-configmap=default-restore-modifiers", deploy.Spec.Template.Spec.Containers[0].Args[1])
+
 	assert.Equal(t, &corev1api.Affinity{
 		NodeAffinity: &corev1api.NodeAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
@@ -107,7 +120,7 @@ func TestDeployment(t *testing.T) {
 					{
 						MatchExpressions: []corev1api.NodeSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Values:   []string{"windows"},
 								Operator: corev1api.NodeSelectorOpNotIn,
 							},

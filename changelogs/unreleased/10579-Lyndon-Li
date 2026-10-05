@@ -1,0 +1,1 @@
+Fix issue #10576, change hashing algorithm to HMAC-SHA256-128 for kopia repo

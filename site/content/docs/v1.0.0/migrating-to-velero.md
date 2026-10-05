@@ -39,7 +39,7 @@ kubectl scale --namespace heptio-ark deployment/ark --replicas 0
  ARCH="amd64"
 
 # Download the velero client/example tarball to and unpack
-curl -L https://github.com/vmware-tanzu/velero/releases/download/v0.11.0/velero-v0.11.0-${OS}-${ARCH}.tar.gz --output velero-v0.11.0-${OS}-${ARCH}.tar.gz
+curl -L https://github.com/velero-io/velero/releases/download/v0.11.0/velero-v0.11.0-${OS}-${ARCH}.tar.gz --output velero-v0.11.0-${OS}-${ARCH}.tar.gz
 tar xvf velero-v0.11.0-${OS}-${ARCH}.tar.gz
 
 # Create the prerequisite CRDs and namespace

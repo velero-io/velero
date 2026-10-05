@@ -77,6 +77,19 @@ Here are some things to verify if you receive `SignatureDoesNotMatch` errors:
   * Make sure your S3-compatible layer is using [signature version 4][5] (such as Ceph RADOS v12.2.7)
   * For Ceph, try using a native Ceph account for credentials instead of external providers such as OpenStack Keystone
 
+### `velero backup logs` or `velero describe` fails with `no such host`
+
+Downloading artifacts uses a pre-signed URL built from the `s3Url` in your `BackupStorageLocation`. If that address is only resolvable inside the cluster, such as a Kubernetes Service name, the Velero client cannot fetch the artifact even though the backup or restore itself succeeded:
+
+```
+Warnings:  <error getting warnings: Get "http://minio.velero.svc:9000/velero/restores/...":
+dial tcp: lookup minio.velero.svc: no such host>
+```
+
+The backup or restore is unaffected. Only the download of its log or results file fails.
+
+To fix this, give the location a `publicUrl` that your client can reach. See [Expose Minio outside your cluster][26] for the Minio case; the same applies to any object store addressed by an in-cluster name.
+
 ## Velero (or a pod it was backing up) restarted during a backup and the backup is stuck InProgress
 
 Velero cannot resume backups that were interrupted. Backups stuck in the `InProgress` phase can be deleted with `kubectl delete backup <name> -n <velero-namespace>`.
@@ -235,12 +248,30 @@ If the ownership conflict error(`maintenance must be run by designated user`) al
 Velero doesn't handle the conflict by design.
 To resolve it, please use Kopia maintenance CLI to set the ownership correctly, e.g. `kopia maintenance set --owner=default@default`.
 
-Please refer to [Issue 9007](https://github.com/vmware-tanzu/velero/issues/9007) for more information.
+Please refer to [Issue 9007](https://github.com/velero-io/velero/issues/9007) for more information.
+
+## Disk space issues during restore
+
+If you encounter "no space left on device" errors during restore, the `--write-sparse-files` flag may help in certain scenarios.
+
+Example error message:
+```
+Velero: pod volume restore failed: error restoring volume: error creating .velero directory for done file: mkdir /host_pods/60880bf2-9d1c-47cf-ba8f-5f8db43b385b/volumes/kubernetes.io~csi/pvc-ee79e0f0-ed62-44f7-987e-16efca1d1cd5/mount/.velero: no space left on device
+```
+
+**Important Limitation**: The `--write-sparse-files` flag only works if the persistent volume had sparse files during backup that would free up enough space for the done file. If the volume doesn't contain sparse files, this option will not resolve the disk space issue.
+
+To try using sparse files during restore:
+```bash
+velero restore create <RESTORE_NAME> --from-backup <BACKUP_NAME> --write-sparse-files
+```
+
+See [Write Sparse files](restore-reference.md#write-sparse-files) for more details on using this option.
 
 [1]: debugging-restores.md
 [2]: debugging-install.md
 [3]: file-system-backup.md
-[4]: https://github.com/vmware-tanzu/velero/issues
+[4]: https://github.com/velero-io/velero/issues
 [5]: https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 [6]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero
 [7]: https://github.com/vmware-tanzu/helm-charts/blob/main/charts/velero/values.yaml#L44
@@ -250,3 +281,4 @@ Please refer to [Issue 9007](https://github.com/vmware-tanzu/velero/issues/9007)
 [11]: /plugins
 [12]: https://kubernetes.io/docs/concepts/configuration/secret/#editing-a-secret
 [25]: https://kubernetes.slack.com/messages/velero
+[26]: contributions/minio.md

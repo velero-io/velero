@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"

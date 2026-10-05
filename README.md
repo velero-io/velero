@@ -1,7 +1,10 @@
 ![100]
 
 [![Build Status][1]][2] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3811/badge)](https://bestpractices.coreinfrastructure.org/projects/3811)
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/vmware-tanzu/velero)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/velero-io/velero/badge)](https://scorecard.dev/viewer/?uri=github.com/velero-io/velero)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/velero-io/velero)](https://github.com/velero-io/velero/releases)
+[![GitHub stars](https://img.shields.io/github/stars/velero-io/velero)](https://github.com/velero-io/velero/stargazers)
+[![Docker Pulls](https://img.shields.io/docker/pulls/velero/velero.svg)](https://hub.docker.com/r/velero/velero)
 
 ## Overview
 
@@ -22,15 +25,31 @@ Velero consists of:
 
 [The documentation][29] provides a getting started guide and information about building from source, architecture, extending Velero and more.
 
+For a high-level overview of Velero's components, goals, and design process, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Please use the version selector at the top of the site to ensure you are using the appropriate documentation for your version of Velero.
 
 ## Troubleshooting
 
-If you encounter issues, review the [troubleshooting docs][30], [file an issue][4], or talk to us on the [#velero channel][25] on the Kubernetes Slack server.
+If you encounter issues, review the [troubleshooting docs][30], [file an issue][4], or talk to us on the [#velero-users][25] and [#velero-dev][26] channel on the Kubernetes Slack server.
+
+## Community
+
+Velero is an open community and we welcome your participation. The best way to get involved is to join our bi-weekly community meetings:
+
+* Join the [Velero community meetings](https://velero.io/community/), held bi-weekly, alternating between Beijing-friendly and US/Europe-friendly time zones.
+* Subscribe to the [project meeting calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/velero?view=week).
+* Chat with us on the [Kubernetes Slack][25] `#velero-users` channel and join the [mailing list][24].
+
+See the [community page](https://velero.io/community/) for the full schedule and details.
 
 ## Contributing
 
 If you are ready to jump in and test, add code, or help with documentation, follow the instructions on our [Start contributing][31] documentation for guidance on how to setup Velero for development.
+
+## Governance
+
+Velero's [governance][32] describes how the project is run, including the decision-making process, the roles and responsibilities of maintainers, and how to become a maintainer. Governance applies across the Velero org and is maintained at [velero-io/.github][32].
 
 ## Changelog
 
@@ -52,22 +71,39 @@ Velero supports IPv4, IPv6, and dual stack environments. Support for this was te
 
 The Velero maintainers are continuously working to expand testing coverage, but are not able to test every combination of Velero and supported Kubernetes versions for each Velero release. The table above is meant to track the current testing coverage and the expected supported Kubernetes versions for each Velero version.
 
-If you are interested in using a different version of Kubernetes with a given Velero version, we'd recommend that you perform testing before installing or upgrading your environment. For full information around capabilities within a release, also see the Velero [release notes](https://github.com/vmware-tanzu/velero/releases) or Kubernetes [release notes](https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG). See the Velero [support page](https://velero.io/docs/latest/support-process/) for information about supported versions of Velero.
+If you are interested in using a different version of Kubernetes with a given Velero version, we'd recommend that you perform testing before installing or upgrading your environment. For full information around capabilities within a release, also see the Velero [release notes](https://github.com/velero-io/velero/releases) or Kubernetes [release notes](https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG). See the Velero [support page](https://velero.io/docs/latest/support-process/) for information about supported versions of Velero.
 
 For each release, Velero maintainers run the test to ensure the upgrade path from n-2 minor release.  For example, before the release of v1.10.x, the test will verify that the backup created by v1.9.x and v1.8.x can be restored using the build to be tagged as v1.10.x.
 
-[1]: https://github.com/vmware-tanzu/velero/workflows/Main%20CI/badge.svg
-[2]: https://github.com/vmware-tanzu/velero/actions?query=workflow%3A"Main+CI"
-[4]: https://github.com/vmware-tanzu/velero/issues
-[6]: https://github.com/vmware-tanzu/velero/releases
+## Cloud Native Computing Foundation
+<!-- remove sandbox once promoted -->
+Velero is a [Cloud Native Computing Foundation](https://www.cncf.io/) sandbox project.
+
+<p align="center">
+  <a href="https://www.cncf.io/">
+    <img src="https://raw.githubusercontent.com/cncf/artwork/main/other/cncf/horizontal/color/cncf-color.svg"
+         alt="Cloud Native Computing Foundation logo" width="300"/>
+  </a>
+</p>
+
+Copyright Contributors to Velero, established as Velero a Series of LF Projects, LLC.
+For website terms of use, trademark policy and other project policies please see
+<https://lfprojects.org/policies/>.
+
+[1]: https://github.com/velero-io/velero/workflows/Main%20CI/badge.svg
+[2]: https://github.com/velero-io/velero/actions?query=workflow%3A"Main+CI"
+[4]: https://github.com/velero-io/velero/issues
+[6]: https://github.com/velero-io/velero/releases
 [9]: https://kubernetes.io/docs/setup/
 [10]: https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-with-homebrew-on-macos
 [11]: https://kubernetes.io/docs/tasks/tools/install-kubectl/#tabset-1
 [12]: https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/dns/README.md
 [14]: https://github.com/kubernetes/kubernetes
 [24]: https://groups.google.com/forum/#!forum/projectvelero
-[25]: https://kubernetes.slack.com/messages/velero
+[25]: https://kubernetes.slack.com/messages/velero-users
+[26]: https://kubernetes.slack.com/messages/velero-dev
 [29]: https://velero.io/docs/
 [30]: https://velero.io/docs/troubleshooting
 [31]: https://velero.io/docs/start-contributing
+[32]: https://github.com/velero-io/.github/blob/main/GOVERNANCE.md
 [100]: https://velero.io/docs/main/img/velero.png

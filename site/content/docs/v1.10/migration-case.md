@@ -19,7 +19,7 @@ Before migrating you should consider the following,
 
 ## Migration Scenario
 
-This scenario steps through the migration of resources from Cluster 1 to Cluster 2. In this scenario, both clusters are using the same cloud provider, AWS, and Velero's [AWS plugin](https://github.com/vmware-tanzu/velero-plugin-for-aws).
+This scenario steps through the migration of resources from Cluster 1 to Cluster 2. In this scenario, both clusters are using the same cloud provider, AWS, and Velero's [AWS plugin](https://github.com/velero-io/velero-plugin-for-aws).
 
 1. On Cluster 1, make sure Velero is installed and points to an object storage location using the `--bucket` flag.
 

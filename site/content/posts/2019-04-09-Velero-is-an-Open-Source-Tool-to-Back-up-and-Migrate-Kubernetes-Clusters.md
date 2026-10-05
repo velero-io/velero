@@ -29,6 +29,6 @@ Since Velero was initially released in August 2017, we’ve had nearly 70 contri
 * Google Group ([projectvelero](groups.google.com/forum/#!forum/projectvelero))
 
 
-We are continuing to work towards Velero 1.0 and would love your help working on the items in our roadmap. If you’re interested in contributing, we have a number of GitHub issues labeled as [Good First Issue](https://github.com/vmware-tanzu/velero/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+first+issue%22) and [Help Wanted](https://github.com/vmware-tanzu/velero/issues?q=is%3Aopen+is%3Aissue+label%3A%22Help+wanted%22), including items related to Prometheus metrics, the CLI UX, improved documentation, and more. We are more than happy to work with new and existing contributors alike.
+We are continuing to work towards Velero 1.0 and would love your help working on the items in our roadmap. If you’re interested in contributing, we have a number of GitHub issues labeled as [Good First Issue](https://github.com/velero-io/velero/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+first+issue%22) and [Help Wanted](https://github.com/velero-io/velero/issues?q=is%3Aopen+is%3Aissue+label%3A%22Help+wanted%22), including items related to Prometheus metrics, the CLI UX, improved documentation, and more. We are more than happy to work with new and existing contributors alike.
 
 _Previously posted at: <https://blogs.vmware.com/cloudnative/2019/02/28/velero-v0-11-delivers-an-open-source-tool-to-back-up-and-migrate-kubernetes-clusters/>_ <!-- Velero.io word list : ignore -->

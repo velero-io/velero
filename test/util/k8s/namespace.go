@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -257,10 +257,4 @@ func GetMappingNamespaces(ctx context.Context, client TestClient, excludeNS []st
 		joinedNsMapping = joinedNsMapping[:len(joinedNsMapping)-1]
 	}
 	return joinedNsMapping, nil
-}
-
-func KubectlCreateNamespace(ctx context.Context, name string) error {
-	args := []string{"create", "namespace", name}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
 }

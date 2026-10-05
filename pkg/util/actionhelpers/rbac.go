@@ -19,7 +19,7 @@ package actionhelpers
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	rbacv1 "k8s.io/api/rbac/v1"
 	rbacbeta "k8s.io/api/rbac/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

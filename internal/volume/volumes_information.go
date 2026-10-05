@@ -22,20 +22,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/pkg/label"
-
+	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/datamover"
 	"github.com/vmware-tanzu/velero/pkg/features"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/vmware-tanzu/velero/pkg/label"
+	"github.com/vmware-tanzu/velero/pkg/util/stringptr"
 )
 
 type Method string
@@ -88,11 +90,17 @@ type BackupVolumeInfo struct {
 	// Whether the volume data is backed up successfully.
 	Result VolumeResult `json:"result,omitempty"`
 
-	CSISnapshotInfo          *CSISnapshotInfo          `json:"csiSnapshotInfo,omitempty"`
-	SnapshotDataMovementInfo *SnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
-	NativeSnapshotInfo       *NativeSnapshotInfo       `json:"nativeSnapshotInfo,omitempty"`
-	PVBInfo                  *PodVolumeInfo            `json:"pvbInfo,omitempty"`
-	PVInfo                   *PVInfo                   `json:"pvInfo,omitempty"`
+	// How volume data is backed up, with possible values including Full and Incremental.
+	BackupType velerov1api.BackupType `json:"backupType,omitempty"`
+
+	// FallbackFull indicates whether the incremental backup has fallen back to full backup
+	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	CSISnapshotInfo          *CSISnapshotInfo                `json:"csiSnapshotInfo,omitempty"`
+	SnapshotDataMovementInfo *BackupSnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
+	NativeSnapshotInfo       *NativeSnapshotInfo             `json:"nativeSnapshotInfo,omitempty"`
+	PVBInfo                  *PodVolumeBackupInfo            `json:"pvbInfo,omitempty"`
+	PVInfo                   *PVInfo                         `json:"pvInfo,omitempty"`
 }
 
 type VolumeResult string
@@ -121,10 +129,16 @@ type RestoreVolumeInfo struct {
 	// Whether the volume's data are restored via data movement
 	SnapshotDataMoved bool `json:"snapshotDataMoved"`
 
-	CSISnapshotInfo          *CSISnapshotInfo          `json:"csiSnapshotInfo,omitempty"`
-	SnapshotDataMovementInfo *SnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
-	NativeSnapshotInfo       *NativeSnapshotInfo       `json:"nativeSnapshotInfo,omitempty"`
-	PVRInfo                  *PodVolumeInfo            `json:"pvrInfo,omitempty"`
+	// Indicates the type of the restore, incremental or full.
+	RestoreType string `json:"restoreType,omitempty"`
+
+	// FallbackFull indicates whether the incremental restore has fallen back to full restore
+	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	CSISnapshotInfo          *CSISnapshotInfo                 `json:"csiSnapshotInfo,omitempty"`
+	SnapshotDataMovementInfo *RestoreSnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
+	NativeSnapshotInfo       *NativeSnapshotInfo              `json:"nativeSnapshotInfo,omitempty"`
+	PVRInfo                  *PodVolumeRestoreInfo            `json:"pvrInfo,omitempty"`
 }
 
 // CSISnapshotInfo is used for displaying the CSI snapshot status
@@ -145,15 +159,15 @@ type CSISnapshotInfo struct {
 	OperationID string `json:"operationID,omitempty"`
 
 	// The VolumeSnapshot's Status.ReadyToUse value
-	ReadyToUse *bool
+	ReadyToUse *bool `json:"readyToUse,omitempty"`
 
 	// The VolumeGroupSnapshotHandle from VSC status, used to create stub VGSC during restore
 	// for CSI drivers that populate this field (e.g., Ceph RBD).
 	VolumeGroupSnapshotHandle string `json:"volumeGroupSnapshotHandle,omitempty"`
 }
 
-// SnapshotDataMovementInfo is used for displaying the snapshot data mover status.
-type SnapshotDataMovementInfo struct {
+// BackupSnapshotDataMovementInfo is used for displaying the backup snapshot data mover status.
+type BackupSnapshotDataMovementInfo struct {
 	// The data mover used by the backup. The valid values are `velero` and ``(equals to `velero`).
 	DataMover string `json:"dataMover"`
 
@@ -174,11 +188,49 @@ type SnapshotDataMovementInfo struct {
 	// Moved snapshot data size.
 	Size int64 `json:"size"`
 
-	// Moved snapshot incremental size.
-	IncrementalSize int64 `json:"incrementalSize,omitempty"`
+	// Moved snapshot incremental size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure (including backups taken before this was
+	// recorded); a pointer to 0 means it transferred nothing, which is the ideal
+	// incremental and must stay distinguishable from "unknown".
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
+
+	// The size of source volume, for backup only
+	SourceSize int64 `json:"sourceSize,omitempty"`
 
 	// The DataUpload's Status.Phase value
-	Phase velerov2alpha1.DataUploadPhase
+	Phase velerov2alpha1.DataUploadPhase `json:"phase"`
+}
+
+// RestoreSnapshotDataMovementInfo is used for displaying the restore snapshot data mover status.
+type RestoreSnapshotDataMovementInfo struct {
+	// The data mover used by the backup. The valid values are `velero` and ``(equals to `velero`).
+	DataMover string `json:"dataMover"`
+
+	// The type of the uploader that uploads the snapshot data. The valid values are `kopia` and `restic`.
+	UploaderType string `json:"uploaderType"`
+
+	// The name or ID of the snapshot associated object(SAO).
+	// SAO is used to support local snapshots for the snapshot data mover,
+	// e.g. it could be a VolumeSnapshot for CSI snapshot data movement.
+	RetainedSnapshot string `json:"retainedSnapshot,omitempty"`
+
+	// It's the filesystem repository's snapshot ID.
+	SnapshotHandle string `json:"snapshotHandle"`
+
+	// The Async Operation's ID.
+	OperationID string `json:"operationID"`
+
+	// Moved snapshot data size.
+	Size int64 `json:"size"`
+
+	// Moved snapshot incremental size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure (including backups taken before this was
+	// recorded); a pointer to 0 means it transferred nothing, which is the ideal
+	// incremental and must stay distinguishable from "unknown".
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
+
+	// The DataDownload's Status.Phase value
+	Phase velerov2alpha1.DataDownloadPhase `json:"phase"`
 }
 
 // NativeSnapshotInfo is used for displaying the Velero native snapshot status.
@@ -199,7 +251,7 @@ type NativeSnapshotInfo struct {
 	IOPS string `json:"iops"`
 
 	// The NativeSnapshot's Status.Phase value
-	Phase SnapshotPhase
+	Phase SnapshotPhase `json:"phase,omitempty"`
 }
 
 func newNativeSnapshotInfo(s *Snapshot) *NativeSnapshotInfo {
@@ -216,16 +268,20 @@ func newNativeSnapshotInfo(s *Snapshot) *NativeSnapshotInfo {
 	}
 }
 
-// PodVolumeInfo is used for displaying the PodVolumeBackup/PodVolumeRestore snapshot status.
-type PodVolumeInfo struct {
-	// It's the file-system uploader's snapshot ID for PodVolumeBackup/PodVolumeRestore.
+// PodVolumeBackupInfo is used for displaying the PodVolumeBackup snapshot status.
+type PodVolumeBackupInfo struct {
+	// It's the file-system uploader's snapshot ID for PodVolumeBackup.
 	SnapshotHandle string `json:"snapshotHandle,omitempty"`
 
 	// The snapshot corresponding volume size.
 	Size int64 `json:"size,omitempty"`
 
-	// The incremental snapshot size.
-	IncrementalSize int64 `json:"incrementalSize,omitempty"`
+	// The incremental snapshot size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure; a pointer to 0 means it transferred nothing.
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
+
+	// The size of source volume, for backup only
+	SourceSize int64 `json:"sourceSize,omitempty"`
 
 	// The type of the uploader that uploads the data. The valid values are `kopia` and `restic`.
 	UploaderType string `json:"uploaderType"`
@@ -245,14 +301,48 @@ type PodVolumeInfo struct {
 	NodeName string `json:"nodeName,omitempty"`
 
 	// The PVB's Status.Phase value
-	Phase velerov1api.PodVolumeBackupPhase
+	Phase velerov1api.PodVolumeBackupPhase `json:"phase,omitempty"`
 }
 
-func newPodVolumeInfoFromPVB(pvb *velerov1api.PodVolumeBackup) *PodVolumeInfo {
-	return &PodVolumeInfo{
+// PodVolumeRestoreInfo is used for displaying the PodVolumeRestore snapshot status.
+type PodVolumeRestoreInfo struct {
+	// It's the file-system uploader's snapshot ID for PodVolumeRestore.
+	SnapshotHandle string `json:"snapshotHandle,omitempty"`
+
+	// The snapshot corresponding volume size.
+	Size int64 `json:"size,omitempty"`
+
+	// The incremental snapshot size, i.e. the bytes actually transferred. Nil means
+	// the uploader reported no figure; a pointer to 0 means it transferred nothing.
+	IncrementalSize *int64 `json:"incrementalSize,omitempty"`
+
+	// The type of the uploader that uploads the data. The valid values are `kopia` and `restic`.
+	UploaderType string `json:"uploaderType"`
+
+	// The PVC's corresponding volume name used by Pod
+	// https://github.com/kubernetes/kubernetes/blob/e4b74dd12fa8cb63c174091d5536a10b8ec19d34/pkg/apis/core/types.go#L48
+	VolumeName string `json:"volumeName"`
+
+	// The Pod name mounting this PVC.
+	PodName string `json:"podName"`
+
+	// The Pod namespace
+	PodNamespace string `json:"podNamespace"`
+
+	// The PVB-taken k8s node's name.
+	// This field will be empty when the struct is used to represent a podvolumerestore.
+	NodeName string `json:"nodeName,omitempty"`
+
+	// The PVR's Status.Phase value
+	Phase velerov1api.PodVolumeRestorePhase `json:"phase,omitempty"`
+}
+
+func newPodVolumeInfoFromPVB(pvb *velerov1api.PodVolumeBackup) *PodVolumeBackupInfo {
+	return &PodVolumeBackupInfo{
 		SnapshotHandle:  pvb.Status.SnapshotID,
 		Size:            pvb.Status.Progress.TotalBytes,
 		IncrementalSize: pvb.Status.IncrementalBytes,
+		SourceSize:      pvb.Status.SourceSize,
 		UploaderType:    pvb.Spec.UploaderType,
 		VolumeName:      pvb.Spec.Volume,
 		PodName:         pvb.Spec.Pod.Name,
@@ -262,15 +352,28 @@ func newPodVolumeInfoFromPVB(pvb *velerov1api.PodVolumeBackup) *PodVolumeInfo {
 	}
 }
 
-func newPodVolumeInfoFromPVR(pvr *velerov1api.PodVolumeRestore) *PodVolumeInfo {
-	return &PodVolumeInfo{
-		SnapshotHandle: pvr.Spec.SnapshotID,
-		Size:           pvr.Status.Progress.TotalBytes,
-		UploaderType:   pvr.Spec.UploaderType,
-		VolumeName:     pvr.Spec.Volume,
-		PodName:        pvr.Spec.Pod.Name,
-		PodNamespace:   pvr.Spec.Pod.Namespace,
+func newPodVolumeInfoFromPVR(pvr *velerov1api.PodVolumeRestore) *PodVolumeRestoreInfo {
+	return &PodVolumeRestoreInfo{
+		SnapshotHandle:  pvr.Spec.SnapshotID,
+		Size:            pvr.Status.Progress.TotalBytes,
+		UploaderType:    pvr.Spec.UploaderType,
+		VolumeName:      pvr.Spec.Volume,
+		PodName:         pvr.Spec.Pod.Name,
+		PodNamespace:    pvr.Spec.Pod.Namespace,
+		Phase:           pvr.Status.Phase,
+		IncrementalSize: pvr.Status.IncrementalBytes,
 	}
+}
+
+// SourceSize returns the size of the source volume recorded at backup time, or 0 if unknown.
+func (v BackupVolumeInfo) SourceSize() int64 {
+	switch {
+	case v.SnapshotDataMovementInfo != nil:
+		return v.SnapshotDataMovementInfo.SourceSize
+	case v.PVBInfo != nil:
+		return v.PVBInfo.SourceSize
+	}
+	return 0
 }
 
 // PVInfo is used to store some PV information modified after creation.
@@ -281,6 +384,28 @@ type PVInfo struct {
 
 	// The PV's labels should be kept after recreation.
 	Labels map[string]string `json:"labels"`
+
+	// VolumeHandle is the CSI volume handle of the PV, identifying the underlying
+	// volume independently of the PV name. Empty for non-CSI volumes.
+	VolumeHandle string `json:"volumeHandle,omitempty"`
+}
+
+func newPVInfo(pv *corev1api.PersistentVolume) *PVInfo {
+	info := &PVInfo{
+		ReclaimPolicy: string(pv.Spec.PersistentVolumeReclaimPolicy),
+		Labels:        pv.Labels,
+	}
+	if pv.Spec.CSI != nil {
+		info.VolumeHandle = pv.Spec.CSI.VolumeHandle
+	}
+	return info
+}
+
+type SkippedVolume struct {
+	PVName       string
+	PVCName      string
+	PVCNamespace string
+	Reasons      string
 }
 
 // BackupVolumesInformation contains the information needs by generating
@@ -295,7 +420,7 @@ type BackupVolumesInformation struct {
 	volumeSnapshots        []snapshotv1api.VolumeSnapshot
 	volumeSnapshotContents []snapshotv1api.VolumeSnapshotContent
 	volumeSnapshotClasses  []snapshotv1api.VolumeSnapshotClass
-	SkippedPVs             map[string]string
+	SkippedVolumes         []SkippedVolume
 	NativeSnapshots        []*Snapshot
 	PodVolumeBackups       []*velerov1api.PodVolumeBackup
 	BackupOperations       []*itemoperation.BackupOperation
@@ -335,7 +460,7 @@ func (v *BackupVolumesInformation) Result(
 	v.volumeSnapshotContents = csiVolumeSnapshotContents
 	v.volumeSnapshotClasses = csiVolumesnapshotClasses
 
-	v.generateVolumeInfoForSkippedPV()
+	v.generateVolumeInfoForSkippedVolume()
 	v.generateVolumeInfoForVeleroNativeSnapshot()
 	v.generateVolumeInfoForCSIVolumeSnapshot()
 	v.generateVolumeInfoFromPVB()
@@ -344,29 +469,35 @@ func (v *BackupVolumesInformation) Result(
 	return v.volumeInfos
 }
 
-// generateVolumeInfoForSkippedPV generate VolumeInfos for SkippedPV.
-func (v *BackupVolumesInformation) generateVolumeInfoForSkippedPV() {
+// generateVolumeInfoForSkippedVolume generate VolumeInfos for SkippedVolume.
+func (v *BackupVolumesInformation) generateVolumeInfoForSkippedVolume() {
 	tmpVolumeInfos := make([]*BackupVolumeInfo, 0)
 
-	for pvName, skippedReason := range v.SkippedPVs {
-		if pvcPVInfo := v.pvMap.retrieve(pvName, "", ""); pvcPVInfo != nil {
-			volumeInfo := &BackupVolumeInfo{
+	for _, skippedVolume := range v.SkippedVolumes {
+		var volumeInfo *BackupVolumeInfo
+		if pvcPVInfo := v.pvMap.retrieve(skippedVolume.PVName, skippedVolume.PVCName, skippedVolume.PVCNamespace); pvcPVInfo != nil {
+			volumeInfo = &BackupVolumeInfo{
 				PVCName:           pvcPVInfo.PVCName,
 				PVCNamespace:      pvcPVInfo.PVCNamespace,
-				PVName:            pvName,
+				PVName:            pvcPVInfo.PV.Name,
 				SnapshotDataMoved: false,
 				Skipped:           true,
-				SkippedReason:     skippedReason,
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				SkippedReason:     skippedVolume.Reasons,
+				PVInfo:            newPVInfo(&pvcPVInfo.PV),
 			}
-			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("Cannot find info for PV %s", pvName)
-			continue
+			// If we cannot find it in pvMap, it might be a PVC without PV.
+			volumeInfo = &BackupVolumeInfo{
+				PVCName:           skippedVolume.PVCName,
+				PVCNamespace:      skippedVolume.PVCNamespace,
+				PVName:            skippedVolume.PVName,
+				SnapshotDataMoved: false,
+				Skipped:           true,
+				SkippedReason:     skippedVolume.Reasons,
+			}
 		}
+
+		tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 	}
 
 	v.volumeInfos = append(v.volumeInfos, tmpVolumeInfos...)
@@ -393,10 +524,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForVeleroNativeSnapshot() {
 				// although NativeSnapshot doesn't check whether the snapshot creation result.
 				Result:             volumeResult,
 				NativeSnapshotInfo: newNativeSnapshotInfo(nativeSnapshot),
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo:             newPVInfo(&pvcPVInfo.PV),
 			}
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
@@ -465,6 +593,11 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 			volumeGroupSnapshotHandle = *volumeSnapshotContent.Status.VolumeGroupSnapshotHandle
 		}
 		if pvcPVInfo := v.pvMap.retrieve("", *volumeSnapshot.Spec.Source.PersistentVolumeClaimName, volumeSnapshot.Namespace); pvcPVInfo != nil {
+			volumeResult := VolumeResultFailed
+			if volumeSnapshot.Status != nil && volumeSnapshot.Status.ReadyToUse != nil && *volumeSnapshot.Status.ReadyToUse {
+				volumeResult = VolumeResultSucceeded
+			}
+
 			volumeInfo := &BackupVolumeInfo{
 				BackupMethod:          CSISnapshot,
 				PVCName:               pvcPVInfo.PVCName,
@@ -473,6 +606,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 				Skipped:               false,
 				SnapshotDataMoved:     false,
 				PreserveLocalSnapshot: true,
+				Result:                volumeResult,
 				CSISnapshotInfo: &CSISnapshotInfo{
 					VSCName:                   *volumeSnapshot.Status.BoundVolumeSnapshotContentName,
 					Size:                      size,
@@ -482,10 +616,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 					ReadyToUse:                volumeSnapshot.Status.ReadyToUse,
 					VolumeGroupSnapshotHandle: volumeGroupSnapshotHandle,
 				},
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo: newPVInfo(&pvcPVInfo.PV),
 			}
 
 			if volumeSnapshot.Status.CreationTime != nil {
@@ -494,7 +625,8 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace, volumeSnapshot.Spec.Source.PersistentVolumeClaimName)
+			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace,
+				stringptr.GetString(volumeSnapshot.Spec.Source.PersistentVolumeClaimName))
 			continue
 		}
 	}
@@ -513,6 +645,12 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromPVB() {
 			StartTimestamp:      pvb.Status.StartTimestamp,
 			CompletionTimestamp: pvb.Status.CompletionTimestamp,
 			PVBInfo:             newPodVolumeInfoFromPVB(pvb),
+			BackupType:          velerov1api.BackupTypeIncremental,
+			FallbackFull:        pvb.Status.FallbackFull,
+		}
+
+		if pvb.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
+			volumeInfo.BackupType = velerov1api.BackupTypeFull
 		}
 
 		// Only set Succeeded to true when the PVB's phase is Completed.
@@ -532,10 +670,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromPVB() {
 				volumeInfo.PVCName = pvcPVInfo.PVCName
 				volumeInfo.PVCNamespace = pvcPVInfo.PVCNamespace
 				volumeInfo.PVName = pvcPVInfo.PV.Name
-				volumeInfo.PVInfo = &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				}
+				volumeInfo.PVInfo = newPVInfo(&pvcPVInfo.PV)
 			} else {
 				v.logger.Warnf("Cannot find info for PVC %s/%s", pvb.Spec.Pod.Namespace, pvcName)
 				continue
@@ -616,6 +751,11 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
 				dataMover = dataUpload.Spec.DataMover
 			}
 
+			volumeResult := VolumeResultFailed
+			if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
+				volumeResult = VolumeResultSucceeded
+			}
+
 			volumeInfo := &BackupVolumeInfo{
 				BackupMethod:      CSISnapshot,
 				PVCName:           pvcPVInfo.PVCName,
@@ -623,26 +763,39 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
 				PVName:            pvcPVInfo.PV.Name,
 				SnapshotDataMoved: true,
 				Skipped:           false,
+				Result:            volumeResult,
+				BackupType:        velerov1api.BackupTypeIncremental,
 				CSISnapshotInfo: &CSISnapshotInfo{
 					SnapshotHandle: FieldValueIsUnknown,
 					VSCName:        FieldValueIsUnknown,
 					OperationID:    FieldValueIsUnknown,
 					Driver:         dataUpload.Spec.CSISnapshot.Driver,
 				},
-				SnapshotDataMovementInfo: &SnapshotDataMovementInfo{
-					DataMover:    dataMover,
-					UploaderType: velerov1api.BackupRepositoryTypeKopia,
-					OperationID:  operation.Spec.OperationID,
-					Phase:        dataUpload.Status.Phase,
+				SnapshotDataMovementInfo: &BackupSnapshotDataMovementInfo{
+					DataMover:      dataMover,
+					UploaderType:   datamover.GetUploaderType(dataMover),
+					OperationID:    operation.Spec.OperationID,
+					Phase:          dataUpload.Status.Phase,
+					Size:           dataUpload.Status.Progress.TotalBytes,
+					SnapshotHandle: dataUpload.Status.SnapshotID,
 				},
-				PVInfo: &PVInfo{
-					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),
-					Labels:        pvcPVInfo.PV.Labels,
-				},
+				PVInfo: newPVInfo(&pvcPVInfo.PV),
+			}
+
+			if dataUpload.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
+				volumeInfo.BackupType = velerov1api.BackupTypeFull
 			}
 
 			if dataUpload.Status.StartTimestamp != nil {
 				volumeInfo.StartTimestamp = dataUpload.Status.StartTimestamp
+			}
+
+			if dataUpload.Status.CompletionTimestamp != nil {
+				volumeInfo.CompletionTimestamp = dataUpload.Status.CompletionTimestamp
+			}
+
+			if dataUpload.Status.IncrementalBytes != nil {
+				volumeInfo.SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
 			}
 
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
@@ -775,6 +928,8 @@ func (t *RestoreVolumeInfoTracker) Result() []*RestoreVolumeInfo {
 			SnapshotDataMoved: false,
 			PVRInfo:           newPodVolumeInfoFromPVR(pvr),
 			RestoreMethod:     PodVolumeRestore,
+			RestoreType:       pvr.Spec.RestoreType,
+			FallbackFull:      pvr.Status.FallbackFull,
 		}
 		pvcName, err := pvcByPodvolume(context.TODO(), t.client, pvr.Spec.Pod.Name, pvr.Spec.Pod.Namespace, pvr.Spec.Volume)
 		if err != nil {
@@ -872,12 +1027,20 @@ func (t *RestoreVolumeInfoTracker) Result() []*RestoreVolumeInfo {
 			// the datadownload was initiated in CSI plugin
 			// For the same reason, no CSI snapshot info will be populated into volumeInfo
 			RestoreMethod: CSISnapshot,
-			SnapshotDataMovementInfo: &SnapshotDataMovementInfo{
-				DataMover:      dataMover,
-				UploaderType:   velerov1api.BackupRepositoryTypeKopia,
-				SnapshotHandle: dd.Spec.SnapshotID,
-				OperationID:    operationID,
+			RestoreType:   dd.Spec.RestoreType,
+			SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
+				DataMover:       dataMover,
+				UploaderType:    datamover.GetUploaderType(dataMover),
+				SnapshotHandle:  dd.Spec.SnapshotID,
+				OperationID:     operationID,
+				Size:            dd.Status.Progress.TotalBytes,
+				IncrementalSize: dd.Status.IncrementalBytes,
+				Phase:           dd.Status.Phase,
 			},
+		}
+
+		if dd.Status.IncrementalBytes != nil {
+			volumeInfo.SnapshotDataMovementInfo.IncrementalSize = dd.Status.IncrementalBytes
 		}
 
 		volumeInfos = append(volumeInfos, volumeInfo)

@@ -72,29 +72,40 @@ type ObjectWriteOptions struct {
 	ParentObject ID     // The object in the previous snapshot, for incremental backup
 }
 
+type ObjectReadOptions struct {
+	Prefetch         bool
+	PrefetchBudgetMB int
+}
+
 type AdvancedFeatureInfo struct {
 	MultiPartBackup bool // if set to true, it means the repo supports multiple-part backup
 }
 
 type ObjectMetadata struct {
-	ID   ID
-	Type int // OBJECT_DATA_TYPE_*
-	Size int64
+	ID          ID
+	Name        string
+	Type        int // OBJECT_DATA_TYPE_*
+	Size        int64
+	ModTime     time.Time
+	Permissions int
+	UserID      uint32
+	GroupID     uint32
 }
 
 type Metadata struct {
-	SubObjects   []ObjectMetadata // For dir metadata only, the sub objects in this dir.
-	ExtraDataLen int              // Extra data associated to this metadata.
-	ExtraData    []byte
+	SubObjects []ObjectMetadata
+	Summary    string
 }
 
 type Snapshot struct {
+	ID          ID
 	Source      string
 	Description string
 	StartTime   time.Time
 	EndTime     time.Time
 	Tags        map[string]string
-	RootObject  ID
+	TotalSize   int64
+	RootObject  ObjectMetadata
 }
 
 // BackupRepoService is used to initialize, open or maintain a backup repository
@@ -131,7 +142,7 @@ type BackupRepoService interface {
 type BackupRepo interface {
 	// OpenObject opens an existing object for read.
 	// id: the object's unified identifier.
-	OpenObject(ctx context.Context, id ID) (ObjectReader, error)
+	OpenObject(ctx context.Context, id ID, opt ObjectReadOptions) (ObjectReader, error)
 
 	// GetManifest gets a manifest data from the backup repository.
 	GetManifest(ctx context.Context, id ID, mani *RepoManifest) error
@@ -177,10 +188,14 @@ type BackupRepo interface {
 	// DeleteSnapshot deletes a repo snapshot
 	DeleteSnapshot(ctx context.Context, id ID) error
 
+	// ListSnapshot lists all snapshots in repo for the given source
+	ListSnapshot(ctx context.Context, source string) ([]Snapshot, error)
+
 	// Close closes the backup repository
 	Close(ctx context.Context) error
 }
 
+// ObjectReader is used to read data from an object in the backup repository.
 type ObjectReader interface {
 	io.ReadCloser
 	io.Seeker
@@ -189,11 +204,16 @@ type ObjectReader interface {
 	Length() int64
 }
 
+// ObjectWriter is used to write data to an object in the backup repository.
+// The sequential and random write behavior is determined by the backup repository implementation,
+// it may not exactly follow io.Writer or io.WriterAt, in terms of writer point movement, io pattern, etc.
+// The uploaders should refer to the backup repository implementation to use the ObjectWriter correctly.
 type ObjectWriter interface {
-	io.WriteCloser
+	// Write writes data to the object in the sequential manner.
+	Write([]byte) (int, error)
 
-	// WriterAt is used in the cases that the object is not written sequentially
-	io.WriterAt
+	// WriterAt is used in the cases that the object is not written sequentially.
+	WriteAt([]byte, int64) (int, error)
 
 	// Checkpoint is periodically called to preserve the state of data written to the repo so far.
 	// Checkpoint returns a unified identifier that represent the current state.
@@ -203,4 +223,7 @@ type ObjectWriter interface {
 	// Result waits for the completion of the object write.
 	// Result returns the object's unified identifier after the write completes.
 	Result() (ID, error)
+
+	// Close closes the object writer and releases all resources.
+	Close() error
 }

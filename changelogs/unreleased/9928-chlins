@@ -1,0 +1,1 @@
+Add `--global-backup-volume-policies-configmap` server flag to configure cluster-wide global backup volume policies that are merged into every backup

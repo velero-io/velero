@@ -26,9 +26,9 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/snapshot/restore"
-	"github.com/pkg/errors"
 )
 
 type BlockOutput struct {

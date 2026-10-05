@@ -17,7 +17,7 @@ limitations under the License.
 package flag
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // Enum is a Cobra-compatible wrapper for defining

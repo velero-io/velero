@@ -17,10 +17,15 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"testing"
 
-	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -35,8 +40,8 @@ import (
 
 func TestIsLinuxNode(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
@@ -90,8 +95,8 @@ func TestIsLinuxNode(t *testing.T) {
 }
 
 func TestWithLinuxNode(t *testing.T) {
-	nodeWindows := builder.ForNode("fake-node-1").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node-2").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node-1").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node-2").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
@@ -135,8 +140,8 @@ func TestWithLinuxNode(t *testing.T) {
 
 func TestGetNodeOSType(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node").Result()
-	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
 	tests := []struct {
@@ -185,8 +190,8 @@ func TestGetNodeOSType(t *testing.T) {
 
 func TestHasNodeWithOS(t *testing.T) {
 	nodeNoOSLabel := builder.ForNode("fake-node-1").Result()
-	nodeWindows := builder.ForNode("fake-node-2").Labels(map[string]string{"kubernetes.io/os": "windows"}).Result()
-	nodeLinux := builder.ForNode("fake-node-3").Labels(map[string]string{"kubernetes.io/os": "linux"}).Result()
+	nodeWindows := builder.ForNode("fake-node-2").Labels(map[string]string{corev1api.LabelOSStable: "windows"}).Result()
+	nodeLinux := builder.ForNode("fake-node-3").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result()
 
 	scheme := runtime.NewScheme()
 	corev1api.AddToScheme(scheme)
@@ -257,4 +262,46 @@ func TestHasNodeWithOS(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeCoreV1 struct {
+	corev1client.CoreV1Interface
+	nodeClient corev1client.NodeInterface
+}
+
+func (f *fakeCoreV1) Nodes() corev1client.NodeInterface {
+	return f.nodeClient
+}
+
+type fakeNodeClient struct {
+	corev1client.NodeInterface
+	getFunc func(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error)
+}
+
+func (f *fakeNodeClient) Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error) {
+	if f.getFunc != nil {
+		return f.getFunc(ctx, name, opts)
+	}
+	return f.NodeInterface.Get(ctx, name, opts)
+}
+
+func TestGetNodeOSWithContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var passedCtx context.Context
+	nodeClient := &fakeNodeClient{
+		getFunc: func(ctx context.Context, name string, opts metav1.GetOptions) (*corev1api.Node, error) {
+			passedCtx = ctx
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return builder.ForNode("fake-node").Labels(map[string]string{corev1api.LabelOSStable: "linux"}).Result(), nil
+		},
+	}
+	fakeCore := &fakeCoreV1{nodeClient: nodeClient}
+
+	_, err := GetNodeOS(ctx, "fake-node", fakeCore)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, passedCtx)
 }

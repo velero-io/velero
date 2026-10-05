@@ -154,6 +154,39 @@ func TestEnsureNamespaceExistsAndIsReady(t *testing.T) {
 	}
 }
 
+// TestEnsureNamespaceExistsAndIsReadyTerminatingTrackerKindMismatch verifies the
+// tracker skip-path fires when Add and Contains see different Kind values, as they
+// do in production: getNamespace() sets Kind="Namespace" but client.Get() strips it.
+func TestEnsureNamespaceExistsAndIsReadyTerminatingTrackerKindMismatch(t *testing.T) {
+	// Passed-in namespace mirrors getNamespace(): Kind is set.
+	namespace := &corev1api.Namespace{
+		TypeMeta:   metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+	}
+
+	// clusterNS mirrors client.Get(): Kind stripped, phase Terminating.
+	clusterNS := &corev1api.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Status:     corev1api.NamespaceStatus{Phase: corev1api.NamespaceTerminating},
+	}
+
+	nsClient := &velerotest.FakeNamespaceClient{}
+	defer nsClient.AssertExpectations(t)
+	nsClient.On("Get", "test", metav1.GetOptions{}).Return(clusterNS, nil)
+
+	// Seed the tracker as production Add() does.
+	tracker := NewResourceDeletionStatusTracker()
+	tracker.Add(namespace.Kind, namespace.Name, namespace.Name)
+
+	result, nsCreated, err := EnsureNamespaceExistsAndIsReady(namespace, nsClient, time.Millisecond, tracker)
+
+	assert.False(t, result)
+	assert.False(t, nsCreated)
+	// Skip-path must fire, not the full terminating-resource-timeout wait.
+	require.ErrorContains(t, err, "skipping polling for terminating namespace")
+	assert.NotContains(t, err.Error(), "timed out waiting for terminating namespace")
+}
+
 // TestGetVolumeDirectorySuccess tests that the GetVolumeDirectory function
 // returns a volume's name or a volume's name plus '/mount' when a PVC is present.
 func TestGetVolumeDirectorySuccess(t *testing.T) {
@@ -727,6 +760,98 @@ func TestVerifyJsonConfigs(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestGetVolumeModeByPVC(t *testing.T) {
+	modeFilesystem := corev1api.PersistentVolumeFilesystem
+	modeBlock := corev1api.PersistentVolumeBlock
+
+	tests := []struct {
+		name     string
+		pvc      *corev1api.PersistentVolumeClaim
+		expected corev1api.PersistentVolumeMode
+	}{
+		{
+			name: "nil VolumeMode returns Filesystem",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: nil,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Filesystem VolumeMode returns Filesystem",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: &modeFilesystem,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Block VolumeMode returns Block",
+			pvc: &corev1api.PersistentVolumeClaim{
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeMode: &modeBlock,
+				},
+			},
+			expected: corev1api.PersistentVolumeBlock,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := GetVolumeModeByPVC(test.pvc)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
+func TestGetVolumeModeByPV(t *testing.T) {
+	modeFilesystem := corev1api.PersistentVolumeFilesystem
+	modeBlock := corev1api.PersistentVolumeBlock
+
+	tests := []struct {
+		name     string
+		pv       *corev1api.PersistentVolume
+		expected corev1api.PersistentVolumeMode
+	}{
+		{
+			name: "nil VolumeMode returns Filesystem",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: nil,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Filesystem VolumeMode returns Filesystem",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: &modeFilesystem,
+				},
+			},
+			expected: corev1api.PersistentVolumeFilesystem,
+		},
+		{
+			name: "Block VolumeMode returns Block",
+			pv: &corev1api.PersistentVolume{
+				Spec: corev1api.PersistentVolumeSpec{
+					VolumeMode: &modeBlock,
+				},
+			},
+			expected: corev1api.PersistentVolumeBlock,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := GetVolumeModeByPV(test.pv)
+			assert.Equal(t, test.expected, actual)
 		})
 	}
 }

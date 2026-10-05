@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	clocks "k8s.io/utils/clock"
@@ -156,6 +156,10 @@ func (c *gcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	if !veleroutil.BSLIsAvailable(*loc) {
 		log.Infof("BSL %s is unavailable, cannot gc backup", loc.Name)
+		backup.Labels[garbageCollectionFailure] = gcFailureBSLUnavailable
+		if err := c.Update(ctx, backup); err != nil {
+			log.WithError(err).Error("error updating backup labels")
+		}
 		return ctrl.Result{}, fmt.Errorf("bsl %s is unavailable, cannot gc backup", loc.Name)
 	}
 

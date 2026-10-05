@@ -19,6 +19,7 @@ package builder
 import (
 	"time"
 
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -97,7 +98,13 @@ func (b *RestoreBuilder) ExcludedResources(resources ...string) *RestoreBuilder 
 
 // ExistingResourcePolicy sets the Restore's resource policy.
 func (b *RestoreBuilder) ExistingResourcePolicy(policy string) *RestoreBuilder {
-	b.object.Spec.ExistingResourcePolicy = velerov1api.PolicyType(policy)
+	b.object.Spec.ExistingResourcePolicy = velerov1api.ResourcePolicyType(policy)
+	return b
+}
+
+// ExistingVolumeDataPolicy sets the Restore's volume data policy.
+func (b *RestoreBuilder) ExistingVolumeDataPolicy(policy string) *RestoreBuilder {
+	b.object.Spec.ExistingVolumeDataPolicy = velerov1api.VolumeDataPolicyType(policy)
 	return b
 }
 
@@ -169,5 +176,26 @@ func (b *RestoreBuilder) CompletionTimestamp(val time.Time) *RestoreBuilder {
 // ItemOperationTimeout sets the Restore's ItemOperationTimeout
 func (b *RestoreBuilder) ItemOperationTimeout(timeout time.Duration) *RestoreBuilder {
 	b.object.Spec.ItemOperationTimeout.Duration = timeout
+	return b
+}
+
+// CSISnapshotTimeout sets the Restore's CSISnapshotTimeout
+func (b *RestoreBuilder) CSISnapshotTimeout(timeout time.Duration) *RestoreBuilder {
+	b.object.Spec.CSISnapshotTimeout.Duration = timeout
+	return b
+}
+
+// ResourcePoliciesConfigmap sets the Restore's resource policies configmap.
+func (b *RestoreBuilder) ResourcePoliciesConfigmap(name string) *RestoreBuilder {
+	b.object.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{
+		Kind: "configmap",
+		Name: name,
+	}
+	return b
+}
+
+// SkipDefaultResourceModifier sets whether to skip the server default resource modifier.
+func (b *RestoreBuilder) SkipDefaultResourceModifier(val bool) *RestoreBuilder {
+	b.object.Spec.SkipDefaultResourceModifier = &val
 	return b
 }

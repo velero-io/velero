@@ -19,7 +19,7 @@ package client
 import (
 	"os"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -27,8 +27,8 @@ import (
 	k8scheme "k8s.io/client-go/kubernetes/scheme"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
@@ -77,20 +77,22 @@ type Factory interface {
 }
 
 type factory struct {
-	flags       *pflag.FlagSet
-	kubeconfig  string
-	kubecontext string
-	baseName    string
-	namespace   string
-	clientQPS   float32
-	clientBurst int
+	flags         *pflag.FlagSet
+	kubeconfig    string
+	kubecontext   string
+	baseName      string
+	namespace     string
+	namespaceMode string
+	clientQPS     float32
+	clientBurst   int
 }
 
 // NewFactory returns a Factory.
 func NewFactory(baseName string, config VeleroConfig) Factory {
 	f := &factory{
-		flags:    pflag.NewFlagSet("", pflag.ContinueOnError),
-		baseName: baseName,
+		flags:         pflag.NewFlagSet("", pflag.ContinueOnError),
+		baseName:      baseName,
+		namespaceMode: config.NamespaceMode(),
 	}
 
 	f.namespace = os.Getenv("VELERO_NAMESPACE")
@@ -168,7 +170,7 @@ func (f *factory) KubebuilderClient() (kbclient.Client, error) {
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	kubebuilderClient, err := kbclient.New(clientConfig, kbclient.Options{
@@ -207,7 +209,7 @@ func (f *factory) KubebuilderWatchClient() (kbclient.WithWatch, error) {
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	kubebuilderWatchClient, err := kbclient.NewWithWatch(clientConfig, kbclient.Options{
@@ -242,5 +244,15 @@ func (f *factory) SetClientBurst(burst int) {
 }
 
 func (f *factory) Namespace() string {
+	// In auto mode, the namespace is resolved from the current kubeconfig context on every
+	// call, unless the caller explicitly overrode it with --namespace or VELERO_NAMESPACE.
+	if f.namespaceMode == NamespaceModeAuto &&
+		!f.flags.Changed("namespace") &&
+		os.Getenv("VELERO_NAMESPACE") == "" {
+		if namespace, err := NamespaceFromKubeContext(f.kubeconfig, f.kubecontext); err == nil && namespace != "" {
+			return namespace
+		}
+	}
+
 	return f.namespace
 }

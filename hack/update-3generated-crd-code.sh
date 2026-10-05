@@ -55,6 +55,6 @@ controller-gen \
   paths=./pkg/controller/... \
   rbac:roleName=velero-perms
 
-go generate ./config/crd/v1/crds
-
-go generate ./config/crd/v2alpha1/crds
+# The CRD manifests above are embedded directly into the binary via
+# go:embed (see config/crd/v1/crds.go and config/crd/v2alpha1/crds.go),
+# so no further code generation step is required.

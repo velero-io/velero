@@ -19,6 +19,7 @@ package builder
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 )
 
@@ -59,6 +60,30 @@ func (b *PodVolumeRestoreBuilder) ObjectMeta(opts ...ObjectMetaOpt) *PodVolumeRe
 // Phase sets the PodVolumeRestore's phase.
 func (b *PodVolumeRestoreBuilder) Phase(phase velerov1api.PodVolumeRestorePhase) *PodVolumeRestoreBuilder {
 	b.object.Status.Phase = phase
+	return b
+}
+
+// RestoreType sets the PodVolumeRestore's RestoreType.
+func (b *PodVolumeRestoreBuilder) RestoreType(restoreType string) *PodVolumeRestoreBuilder {
+	b.object.Spec.RestoreType = restoreType
+	return b
+}
+
+// Progress sets the PodVolumeRestore's Progress.
+func (b *PodVolumeRestoreBuilder) Progress(progress shared.DataMoveOperationProgress) *PodVolumeRestoreBuilder {
+	b.object.Status.Progress = progress
+	return b
+}
+
+// TotalBytes sets the PodVolumeRestore's TotalBytes.
+func (b *PodVolumeRestoreBuilder) TotalBytes(totalBytes int64) *PodVolumeRestoreBuilder {
+	b.object.Status.Progress.TotalBytes = totalBytes
+	return b
+}
+
+// IncrementalBytes sets the PodVolumeRestore's IncrementalBytes.
+func (b *PodVolumeRestoreBuilder) IncrementalBytes(incrementalBytes int64) *PodVolumeRestoreBuilder {
+	b.object.Status.IncrementalBytes = &incrementalBytes
 	return b
 }
 

@@ -60,10 +60,10 @@ After you publish your plugin, open a PR that adds your plugin to the appropriat
 [5]: ibm-config.md
 [6]: https://docs.portworx.com/scheduler/kubernetes/ark.html
 [7]: https://github.com/StackPointCloud/ark-plugin-digitalocean
-[8]: https://github.com/vmware-tanzu/velero-plugin-example/
+[8]: https://github.com/velero-io/velero-plugin-example/
 [9]: get-started.md
 [10]: https://kubernetes.slack.com/messages/velero
-[11]: https://github.com/vmware-tanzu/velero/issues
+[11]: https://github.com/velero-io/velero/issues
 [12]: https://github.com/aws/aws-sdk-go
 [13]: https://portworx.slack.com/messages/px-k8s
 [14]: https://github.com/portworx/ark-plugin/issues

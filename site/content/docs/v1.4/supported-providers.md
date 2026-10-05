@@ -11,14 +11,14 @@ Velero supports a variety of storage providers for different backup and snapshot
 
 | Provider                          | Object Store        | Volume Snapshotter           | Plugin Provider Repo                    | Setup Instructions            |
 |-----------------------------------|---------------------|------------------------------|-----------------------------------------|-------------------------------|
-| [Amazon Web Services (AWS)](https://aws.amazon.com)    | AWS S3              | AWS EBS                      | [Velero plugin for AWS](https://github.com/vmware-tanzu/velero-plugin-for-aws)              | [AWS Plugin Setup](https://github.com/vmware-tanzu/velero-plugin-for-aws#setup)        |
-| [Google Cloud Platform (GCP)](https://cloud.google.com) | Google Cloud Storage| Google Compute Engine Disks  | [Velero plugin for GCP](https://github.com/vmware-tanzu/velero-plugin-for-gcp)             | [GCP Plugin Setup](https://github.com/vmware-tanzu/velero-plugin-for-gcp#setup)        |
-| [Microsoft Azure](https://azure.com)              | Azure Blob Storage  | Azure Managed Disks          | [Velero plugin for Microsoft Azure](https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure) | [Azure Plugin Setup](https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure#setup)      |
-| [VMware vSphere](https://github.com/vmware-tanzu/velero-plugin-for-vsphere)              | 🚫                  | vSphere Volumes              | [VMware vSphere](https://github.com/vmware-tanzu/velero-plugin-for-vsphere)                    | [vSphere Plugin Setup](https://github.com/vmware-tanzu/velero-plugin-for-vsphere#velero-plugin-for-vsphere-installation-and-configuration-details)    |
+| [Amazon Web Services (AWS)](https://aws.amazon.com)    | AWS S3              | AWS EBS                      | [Velero plugin for AWS](https://github.com/velero-io/velero-plugin-for-aws)              | [AWS Plugin Setup](https://github.com/velero-io/velero-plugin-for-aws#setup)        |
+| [Google Cloud Platform (GCP)](https://cloud.google.com) | Google Cloud Storage| Google Compute Engine Disks  | [Velero plugin for GCP](https://github.com/velero-io/velero-plugin-for-gcp)             | [GCP Plugin Setup](https://github.com/velero-io/velero-plugin-for-gcp#setup)        |
+| [Microsoft Azure](https://azure.com)              | Azure Blob Storage  | Azure Managed Disks          | [Velero plugin for Microsoft Azure](https://github.com/velero-io/velero-plugin-for-microsoft-azure) | [Azure Plugin Setup](https://github.com/velero-io/velero-plugin-for-microsoft-azure#setup)      |
+| [VMware vSphere](https://github.com/velero-io/velero-plugin-for-vsphere)              | 🚫                  | vSphere Volumes              | [VMware vSphere](https://github.com/velero-io/velero-plugin-for-vsphere)                    | [vSphere Plugin Setup](https://github.com/velero-io/velero-plugin-for-vsphere#velero-plugin-for-vsphere-installation-and-configuration-details)    |
 | [Container Storage Interface (CSI)](https://github.com/vmware-tanzu/velero-plugin-for-csi/)| 🚫                 | CSI Volumes                  | [Velero plugin for CSI](https://github.com/vmware-tanzu/velero-plugin-for-csi/)             | [CSI Plugin Setup](https://github.com/vmware-tanzu/velero-plugin-for-csi#kinds-of-plugins-included)        |
 {{< /table >}}
 
-Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero), [GitHub Issues](https://github.com/vmware-tanzu/velero/issues)
+Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero), [GitHub Issues](https://github.com/velero-io/velero/issues)
 
 ## Community supported providers
 {{< table caption="Community supported providers" >}}
@@ -61,8 +61,8 @@ In the case you want to take volume snapshots but didn't find a plugin for your 
 [3]: contributions/minio.md
 [4]: https://github.com/StackPointCloud/ark-plugin-digitalocean
 [5]: http://www.noobaa.com/
-[6]: https://github.com/vmware-tanzu/velero-plugin-for-aws/blob/main/backupstoragelocation.md
+[6]: https://github.com/velero-io/velero-plugin-for-aws/blob/main/backupstoragelocation.md
 [25]: https://github.com/hpe-storage/velero-plugin
 [30]: restic.md
-[36]: https://github.com/vmware-tanzu/velero-plugin-for-gcp#setup
+[36]: https://github.com/velero-io/velero-plugin-for-gcp#setup
 [38]: https://www.cloudian.com/

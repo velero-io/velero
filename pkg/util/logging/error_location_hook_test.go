@@ -20,7 +20,7 @@ import (
 	"errors"
 	"testing"
 
-	pkgerrs "github.com/pkg/errors"
+	pkgerrs "github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

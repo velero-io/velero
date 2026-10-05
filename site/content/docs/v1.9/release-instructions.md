@@ -7,9 +7,9 @@ This page covers the steps to perform when releasing a new version of Velero.
 
 ## General notes
 - Please read the documented variables in each script to understand what they are for and how to properly format their values.
-- You will need to have an upstream remote configured to use to the [vmware-tanzu/velero](https://github.com/vmware-tanzu/velero) repository.
+- You will need to have an upstream remote configured to use to the [velero-io/velero](https://github.com/velero-io/velero) repository.
   You can check this using `git remote -v`.
-  The release script ([`tag-release.sh`](https://github.com/vmware-tanzu/velero/blob/v1.9.0/hack/release-tools/tag-release.sh)) will use `upstream` as the default remote name if it is not specified using the environment variable `REMOTE`.
+  The release script ([`tag-release.sh`](https://github.com/velero-io/velero/blob/v1.9.0/hack/release-tools/tag-release.sh)) will use `upstream` as the default remote name if it is not specified using the environment variable `REMOTE`.
 - GA release: major and minor releases only. Example: 1.0 (major), 1.5 (minor).
 - Pre-releases: Any release leading up to a GA. Example: 1.4.0-beta.1, 1.5.0-rc.1
 - RC releases: Release Candidate, contains everything that is supposed to ship with the GA release. This is still a pre-release.
@@ -75,7 +75,7 @@ For each major or minor release, create and publish a blog post to let folks kno
     - Remove the pre-release docs table of contents mapping entry from `site/data/toc-mapping.yml`.
     - Remove all references to the pre-release docs from `site/config.yml`.
 1. Create the "Upgrade to $major.minor" page if it does not already exist ([example](https://velero.io/docs/v1.5/upgrade-to-1.5/)).
-   If it already exists, update any usage of the previous version string within this file to use the new version string instead ([example](https://github.com/vmware-tanzu/velero/pull/2941/files#diff-d594f8fd0901fed79c39aab4b348193d)).
+   If it already exists, update any usage of the previous version string within this file to use the new version string instead ([example](https://github.com/velero-io/velero/pull/2941/files#diff-d594f8fd0901fed79c39aab4b348193d)).
    This needs to be done in both the versioned and the `main` folders.
 1. Review and submit PR
 	- Follow the additional instructions at `site/README-HUGO.md` to complete the docs generation process.
@@ -86,7 +86,7 @@ For each major or minor release, create and publish a blog post to let folks kno
 The image of velero is built based on [Distroless docker image](https://github.com/GoogleContainerTools/distroless).  
 For the reproducibility of the release, before the release candidate is tagged, we need to make sure the in the Dockerfile 
 on the release branch, the base image is referenced by digest, such as
-https://github.com/vmware-tanzu/velero/blob/release-1.7/Dockerfile#L53-L54
+https://github.com/velero-io/velero/blob/release-1.7/Dockerfile#L53-L54
 
 ## Velero release
 ### Notes
@@ -106,11 +106,11 @@ https://github.com/vmware-tanzu/velero/blob/release-1.7/Dockerfile#L53-L54
 1. Create a tagged release and push it to GitHub
 	- Run `VELERO_VERSION=v1.9.0-rc.1 REMOTE=<upstream-remote> GITHUB_TOKEN=REDACTED ON_RELEASE_BRANCH=TRUE ./hack/release-tools/tag-release.sh publish`.
 1. Publish the release
-	- Navigate to the draft GitHub release at https://github.com/vmware-tanzu/velero/releases and edit the release.
+	- Navigate to the draft GitHub release at https://github.com/velero-io/velero/releases and edit the release.
 	- If this is a patch release (e.g. `v1.9.1`), note that the full `CHANGELOG-1.9.md` contents will be included in the body of the GitHub release. You need to delete the previous releases' content (e.g. `v1.9.0`'s changelog) so that only the latest patch release's changelog shows.
 	- Do a quick review for formatting. 
 	- **Note:** the `goreleaser` process should have detected if it's a pre-release version and, if so, checked the box at the bottom of the GitHub release page appropriately, but it's always worth double-checking.
-	- Verify that GitHub has built and pushed all the images (it takes a while): https://github.com/vmware-tanzu/velero/actions
+	- Verify that GitHub has built and pushed all the images (it takes a while): https://github.com/velero-io/velero/actions
 	- Verify that the images are on Docker Hub: https://hub.docker.com/r/velero/velero/tags
 	- Verify that the assets were published to the GitHub release
 	- Publish the release.
@@ -174,4 +174,4 @@ What to include:
 
 [1]: https://velero.io/blog
 [2]: website-guidelines.md
-[3]: https://github.com/vmware-tanzu/velero/tree/main/test/e2e
+[3]: https://github.com/velero-io/velero/tree/main/test/e2e

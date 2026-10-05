@@ -17,7 +17,7 @@ limitations under the License.
 package common
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors/errbase"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"
@@ -81,5 +81,5 @@ func ErrorStack(err error) *proto.Stack {
 }
 
 type StackTracer interface {
-	StackTrace() errors.StackTrace
+	StackTrace() errbase.StackTrace
 }

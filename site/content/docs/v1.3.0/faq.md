@@ -25,7 +25,7 @@ Examples of cases where Velero is useful:
 
 Yes, with some exceptions. For example, when Velero restores pods it deletes the `nodeName` from the
 pod so that it can be scheduled onto a new node. You can see some more examples of the differences
-in [pod_action.go](https://github.com/vmware-tanzu/velero/blob/v1.3.0/pkg/restore/pod_action.go)
+in [pod_action.go](https://github.com/velero-io/velero/blob/v1.3.0/pkg/restore/pod_action.go)
 
 ## I'm using Velero in multiple clusters. Should I use the same bucket to store all of my backups?
 

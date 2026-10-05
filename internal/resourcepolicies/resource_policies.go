@@ -21,14 +21,18 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+	"github.com/gobwas/glob"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/util/datamover"
+	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
 )
 
 type VolumeActionType string
@@ -46,12 +50,169 @@ const (
 	Custom VolumeActionType = "custom"
 )
 
+const (
+	// DataMoverParameter is the key of the action parameter that selects the data
+	// mover to be used for the matched volumes when the action type is snapshot.
+	DataMoverParameter = "dataMover"
+
+	// SnapshotClassParameter is the key of the action parameter that selects the
+	// VolumeSnapshotClass to use for CSI snapshots when the action type is snapshot.
+	SnapshotClassParameter = "snapshotClass"
+)
+
+// validDataMovers is the set of data mover values accepted in the snapshot
+// action's dataMover parameter.
+var validDataMovers = map[string]struct{}{
+	datamover.DataMoverTypeEmpty:       {},
+	datamover.DataMoverTypeVelero:      {},
+	datamover.DataMoverTypeVeleroFs:    {},
+	datamover.DataMoverTypeVeleroBlock: {},
+}
+
 // Action defined as one action for a specific way of backup
 type Action struct {
 	// Type defined specific type of action, currently only support 'skip'
 	Type VolumeActionType `yaml:"type"`
 	// Parameters defined map of parameters when executing a specific action
 	Parameters map[string]any `yaml:"parameters,omitempty"`
+}
+
+// GetDataMover returns the data mover configured in the snapshot action's
+// dataMover parameter. The dataMover parameter is only meaningful for the
+// snapshot action, so it returns an error when the action is nil or its type is
+// not snapshot. When the parameter is absent, it returns the default built-in
+// data mover. The empty string and "velero" both denote the default built-in
+// data mover and are returned unchanged; normalizing them to the concrete
+// default mover is the consuming workflow's responsibility (issue #9830).
+func (a *Action) GetDataMover() (string, error) {
+	if a == nil || a.Type != Snapshot {
+		return "", fmt.Errorf("the %q parameter is only supported for the %q action", DataMoverParameter, Snapshot)
+	}
+	if len(a.Parameters) == 0 {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+	raw, ok := a.Parameters[DataMoverParameter]
+	if !ok {
+		return datamover.GetDefaultBuiltInDataMover(), nil
+	}
+
+	dataMover, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string, got %T", DataMoverParameter, raw)
+	}
+	if _, ok := validDataMovers[dataMover]; !ok {
+		return "", fmt.Errorf("invalid %q value %q, valid values are %q, %q, %q, %q",
+			DataMoverParameter, dataMover, datamover.DataMoverTypeEmpty, datamover.DataMoverTypeVelero, datamover.DataMoverTypeVeleroFs, datamover.DataMoverTypeVeleroBlock)
+	}
+
+	// Return default data mover for backup's volume policy, when the data mover's original value is legacy value: "" or "velero".
+	if dataMover == datamover.DataMoverTypeEmpty || dataMover == datamover.DataMoverTypeVelero {
+		dataMover = datamover.GetDefaultBuiltInDataMover()
+	}
+
+	return dataMover, nil
+}
+
+// GetSnapshotClass returns the VolumeSnapshotClass name configured in the
+// snapshot action's snapshotClass parameter. The snapshotClass parameter is
+// only meaningful for the snapshot action, so it returns an error when the
+// action is nil or its type is not snapshot. When the parameter is absent,
+// it returns an empty string, meaning the caller should fall back to the
+// existing VolumeSnapshotClass selection logic.
+func (a *Action) GetSnapshotClass() (string, error) {
+	if a == nil || a.Type != Snapshot {
+		return "", fmt.Errorf("the %q parameter is only supported for the %q action", SnapshotClassParameter, Snapshot)
+	}
+	if len(a.Parameters) == 0 {
+		return "", nil
+	}
+	raw, ok := a.Parameters[SnapshotClassParameter]
+	if !ok {
+		return "", nil
+	}
+	snapshotClass, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string, got %T", SnapshotClassParameter, raw)
+	}
+	return snapshotClass, nil
+}
+
+// PolicyLabelSelector mirrors metav1.LabelSelector with yaml tags for ConfigMap decode.
+// metav1.LabelSelector only has json tags, which do not populate under go.yaml.in/yaml/v3.
+type PolicyLabelSelector struct {
+	MatchLabels      map[string]string                `yaml:"matchLabels,omitempty"`
+	MatchExpressions []PolicyLabelSelectorRequirement `yaml:"matchExpressions,omitempty"`
+}
+
+// PolicyLabelSelectorRequirement mirrors metav1.LabelSelectorRequirement with yaml tags.
+type PolicyLabelSelectorRequirement struct {
+	Key      string   `yaml:"key"`
+	Operator string   `yaml:"operator"`
+	Values   []string `yaml:"values,omitempty"`
+}
+
+// IsPresentLabelSelector reports whether s defines any label constraints.
+// Empty {} (nil MatchLabels and empty MatchExpressions) is treated as absent.
+func IsPresentLabelSelector(s *PolicyLabelSelector) bool {
+	return s != nil && (len(s.MatchLabels) > 0 || len(s.MatchExpressions) > 0)
+}
+
+// ToMetaV1LabelSelector converts the YAML mirror type to metav1.LabelSelector.
+// Conversion itself is infallible; call LabelSelectorAsSelector (or
+// SelectorFromPolicyLabelSelector) to validate operators and values.
+func ToMetaV1LabelSelector(s *PolicyLabelSelector) *metav1.LabelSelector {
+	if s == nil {
+		return nil
+	}
+	ls := &metav1.LabelSelector{MatchLabels: s.MatchLabels}
+	for _, expr := range s.MatchExpressions {
+		ls.MatchExpressions = append(ls.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      expr.Key,
+			Operator: metav1.LabelSelectorOperator(expr.Operator),
+			Values:   expr.Values,
+		})
+	}
+	return ls
+}
+
+// SelectorFromPolicyLabelSelector converts a present policy label selector to a
+// runtime labels.Selector. Returns (nil, nil) when s defines no constraints.
+func SelectorFromPolicyLabelSelector(s *PolicyLabelSelector) (labels.Selector, error) {
+	if !IsPresentLabelSelector(s) {
+		return nil, nil
+	}
+	return metav1.LabelSelectorAsSelector(ToMetaV1LabelSelector(s))
+}
+
+// validatePolicyLabelSelector converts and validates a policy label selector.
+func validatePolicyLabelSelector(s *PolicyLabelSelector) error {
+	_, err := SelectorFromPolicyLabelSelector(s)
+	return err
+}
+
+// ResourceFilter defines a filter for specific resource kinds.
+type ResourceFilter struct {
+	Kinds            []string               `yaml:"kinds"`
+	LabelSelector    *PolicyLabelSelector   `yaml:"labelSelector,omitempty"`
+	OrLabelSelectors []*PolicyLabelSelector `yaml:"orLabelSelectors,omitempty"`
+	Names            []string               `yaml:"names,omitempty"`
+	ExcludedNames    []string               `yaml:"excludedNames,omitempty"`
+}
+
+// IsCatchAll returns true if the filter is a catch-all entry (empty kinds or ["*"])
+func (rf *ResourceFilter) IsCatchAll() bool {
+	return len(rf.Kinds) == 0 || (len(rf.Kinds) == 1 && rf.Kinds[0] == "*")
+}
+
+// ClusterScopedFilterPolicy defines backup filters scoped globally to cluster-scoped resources.
+type ClusterScopedFilterPolicy struct {
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
+}
+
+// NamespacedFilterPolicy defines backup filters scoped to specific namespaces.
+type NamespacedFilterPolicy struct {
+	Namespaces      []string         `yaml:"namespaces"`
+	ResourceFilters []ResourceFilter `yaml:"resourceFilters"`
 }
 
 // IncludeExcludePolicy defined policy to include or exclude resources based on the names
@@ -62,13 +223,190 @@ type IncludeExcludePolicy struct {
 	ExcludedClusterScopedResources   []string `yaml:"excludedClusterScopedResources"`
 	IncludedNamespaceScopedResources []string `yaml:"includedNamespaceScopedResources"`
 	ExcludedNamespaceScopedResources []string `yaml:"excludedNamespaceScopedResources"`
+
+	// IncludedNamespacesByLabel and ExcludedNamespacesByLabel are lists of Kubernetes
+	// label selector strings (same syntax as `kubectl get ns -l <selector>`, parsed via
+	// labels.Parse). At backup time, each selector is evaluated against the live namespace
+	// list to dynamically resolve which namespaces to include/exclude, without requiring
+	// namespaces to be enumerated by name in BackupSpec.
+	IncludedNamespacesByLabel []string `yaml:"includedNamespacesByLabel,omitempty"`
+	ExcludedNamespacesByLabel []string `yaml:"excludedNamespacesByLabel,omitempty"`
+
+	// LabelSelectorLogic controls how multiple entries within IncludedNamespacesByLabel are
+	// combined with each other, and independently how multiple entries within
+	// ExcludedNamespacesByLabel are combined with each other: "OR" (default) matches a
+	// namespace against any entry in the list; "AND" requires a namespace to match every
+	// entry in the list. Empty string is treated as "OR". Matching is case-insensitive
+	// ("and"/"Or" are accepted the same as "AND"/"OR"). This is unrelated to the
+	// comma-separated AND semantics within a single selector string, which is standard
+	// labels.Parse syntax.
+	LabelSelectorLogic string `yaml:"labelSelectorLogic,omitempty"`
 }
 
 func (p *IncludeExcludePolicy) Validate() error {
 	if err := p.validateIncludeExclude(p.IncludedClusterScopedResources, p.ExcludedClusterScopedResources); err != nil {
 		return err
 	}
-	return p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources)
+	if err := p.validateIncludeExclude(p.IncludedNamespaceScopedResources, p.ExcludedNamespaceScopedResources); err != nil {
+		return err
+	}
+	if err := validateLabelSelectors(p.IncludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("includedNamespacesByLabel: %w", err)
+	}
+	if err := validateLabelSelectors(p.ExcludedNamespacesByLabel); err != nil {
+		return fmt.Errorf("excludedNamespacesByLabel: %w", err)
+	}
+	return validateLabelSelectorLogic(p.LabelSelectorLogic)
+}
+
+// validateLabelSelectors returns an error if any selector string is empty/whitespace-only
+// (which labels.Parse would otherwise silently accept as labels.Everything(), matching
+// every namespace) or fails to parse as a Kubernetes label selector.
+func validateLabelSelectors(selectors []string) error {
+	for _, s := range selectors {
+		if strings.TrimSpace(s) == "" {
+			return fmt.Errorf("label selector cannot be empty")
+		}
+		if _, err := labels.Parse(s); err != nil {
+			return fmt.Errorf("invalid label selector %q: %w", s, err)
+		}
+	}
+	return nil
+}
+
+func validateLabelSelectorLogic(logic string) error {
+	switch strings.ToUpper(logic) {
+	case "", "OR", "AND":
+		return nil
+	default:
+		return fmt.Errorf("labelSelectorLogic must be \"OR\" or \"AND\", got %q", logic)
+	}
+}
+
+// ResolveNamespacesByLabel lists all cluster namespaces and returns two independently
+// resolved name sets: those matching includedSelectors, and those matching
+// excludedSelectors, combined per logic ("OR": any selector in the list matches; "AND":
+// every selector in the list matches; "" defaults to "OR", case-insensitive). It performs no
+// cross-suppression between the two sets - the caller decides how to combine them with
+// BackupSpec.IncludedNamespaces/ExcludedNamespaces. Although the production path already
+// validates selectors and logic before reaching here (see validateLabelSelectors/
+// validateLabelSelectorLogic, called from Validate()), this function re-validates both on
+// entry since it is exported: an empty-string selector parses successfully as "match
+// everything" (k8s labels.Parse("") is not an error), so skipping this check would let a
+// malformed excludedSelectors entry silently exclude nothing instead of failing loudly -
+// fail-open, since a namespace meant to be excluded would be backed up instead.
+func ResolveNamespacesByLabel(
+	ctx context.Context,
+	client crclient.Client,
+	includedSelectors []string,
+	excludedSelectors []string,
+	logic string,
+) ([]string, []string, error) {
+	if err := validateLabelSelectorLogic(logic); err != nil {
+		return nil, nil, err
+	}
+	if err := validateLabelSelectors(includedSelectors); err != nil {
+		return nil, nil, errors.Wrap(err, "includedNamespacesByLabel")
+	}
+	if err := validateLabelSelectors(excludedSelectors); err != nil {
+		return nil, nil, errors.Wrap(err, "excludedNamespacesByLabel")
+	}
+
+	nsList := &corev1api.NamespaceList{}
+	if err := client.List(ctx, nsList); err != nil {
+		return nil, nil, errors.Wrap(err, "listing namespaces")
+	}
+
+	matchSet := func(selectors []string) ([]string, error) {
+		result := sets.NewString()
+		if len(selectors) == 0 {
+			return result.List(), nil
+		}
+		// Matches validateLabelSelectorLogic's case-insensitive acceptance - "and"/"Or" etc.
+		// are as valid as "AND"/"OR", so the actual matching must normalize the same way.
+		isAND := strings.EqualFold(logic, "AND")
+		parsedSelectors := make([]labels.Selector, 0, len(selectors))
+		for _, sel := range selectors {
+			parsed, err := labels.Parse(sel)
+			if err != nil {
+				return nil, fmt.Errorf("invalid label selector %q: %w", sel, err)
+			}
+			parsedSelectors = append(parsedSelectors, parsed)
+		}
+		for _, ns := range nsList.Items {
+			nsLabels := labels.Set(ns.Labels)
+			if isAND {
+				allMatch := true
+				for _, parsed := range parsedSelectors {
+					if !parsed.Matches(nsLabels) {
+						allMatch = false
+						break
+					}
+				}
+				if allMatch {
+					result.Insert(ns.Name)
+				}
+			} else { // "OR" (default, including "")
+				for _, parsed := range parsedSelectors {
+					if parsed.Matches(nsLabels) {
+						result.Insert(ns.Name)
+						break
+					}
+				}
+			}
+		}
+		return result.List(), nil
+	}
+
+	included, err := matchSet(includedSelectors)
+	if err != nil {
+		return nil, nil, err
+	}
+	excluded, err := matchSet(excludedSelectors)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return included, excluded, nil
+}
+
+// NoNamespaceMatchesPattern is a namespace glob pattern guaranteed to match zero real
+// namespaces - Kubernetes namespace names are RFC 1123 labels that must start and end with an
+// alphanumeric character, so no real namespace can ever start with '-' - while still being
+// recognized as a wildcard pattern by wildcard.ShouldExpandWildcards/ExpandWildcards.
+//
+// This matters because a plain empty []string in BackupSpec.IncludedNamespaces is Velero's
+// long-standing "include everything" default everywhere else: wildcard.ShouldExpandWildcards
+// explicitly treats len(includes)==0 as "equivalent to * (match all) - don't expand". Reusing
+// that same empty representation to mean the opposite - "a configured includedNamespacesByLabel
+// selector currently matches zero namespaces, so include nothing" - would silently expand to
+// "back up every namespace" instead, exactly the opposite of the intended fail-safe. Routing
+// through the wildcard-expansion path instead uses the mechanism
+// collections.NamespaceIncludesExcludes.ShouldInclude already relies on for "include nothing":
+// it returns false for everything once wildcard expansion ran and the expanded includes list
+// came back empty, which only happens when the includes list contained an actual wildcard
+// pattern (not a plain empty list).
+//
+// This must be a pattern collections.ValidateNamespaceIncludesExcludes actually accepts, not
+// just wildcard.ValidateNamespaceName in isolation: that function replaces glob metacharacters
+// (*, ?, [, ]) with a placeholder letter before checking the result against Kubernetes' own
+// RFC 1123 namespace-name rules, so a pattern like "[A-Z]*" becomes "xA-Zxx" - the literal
+// uppercase A and Z survive that substitution and fail RFC 1123 (lowercase only), even though
+// wildcard.ValidateNamespaceName alone would accept it as a syntactically valid glob. "[-]*"
+// substitutes to "x-xx", which is a valid RFC 1123 label, so it passes both checks - confirmed
+// empirically against collections.ValidateNamespaceIncludesExcludes directly, not just reasoned
+// through the substitution rule.
+const NoNamespaceMatchesPattern = "[-]*"
+
+// RepresentNamespaceSelection returns resolved as an effective IncludedNamespaces value,
+// substituting NoNamespaceMatchesPattern when resolved is empty so that "the selector matched
+// nothing" is represented unambiguously downstream - see NoNamespaceMatchesPattern's doc
+// comment for why a plain empty slice cannot be used for this.
+func RepresentNamespaceSelection(resolved []string) []string {
+	if len(resolved) == 0 {
+		return []string{NoNamespaceMatchesPattern}
+	}
+	return resolved
 }
 
 func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList []string) error {
@@ -95,17 +433,21 @@ type VolumePolicy struct {
 
 // ResourcePolicies currently defined slice of volume policies to handle backup
 type ResourcePolicies struct {
-	Version              string                `yaml:"version"`
-	VolumePolicies       []VolumePolicy        `yaml:"volumePolicies"`
-	IncludeExcludePolicy *IncludeExcludePolicy `yaml:"includeExcludePolicy"`
+	Version                   string                     `yaml:"version"`
+	VolumePolicies            []VolumePolicy             `yaml:"volumePolicies"`
+	IncludeExcludePolicy      *IncludeExcludePolicy      `yaml:"includeExcludePolicy"`
+	ClusterScopedFilterPolicy *ClusterScopedFilterPolicy `yaml:"clusterScopedFilterPolicy,omitempty"`
+	NamespacedFilterPolicies  []NamespacedFilterPolicy   `yaml:"namespacedFilterPolicies,omitempty"`
 	// we may support other resource policies in the future, and they could be added separately
 	// OtherResourcePolicies []OtherResourcePolicy
 }
 
 type Policies struct {
-	version              string
-	volumePolicies       []volPolicy
-	includeExcludePolicy *IncludeExcludePolicy
+	version                   string
+	volumePolicies            []volPolicy
+	includeExcludePolicy      *IncludeExcludePolicy
+	clusterScopedFilterPolicy *ClusterScopedFilterPolicy
+	namespacedFilterPolicies  []NamespacedFilterPolicy
 	// OtherPolicies
 }
 
@@ -124,8 +466,33 @@ func unmarshalResourcePolicies(yamlData *string) (*ResourcePolicies, error) {
 				return nil, fmt.Errorf("pvcLabels must be a map of string to string, got %T", raw)
 			}
 		}
+		if raw, ok := vp.Conditions["pvcVolumeMode"]; ok {
+			if _, ok := raw.(string); !ok {
+				return nil, fmt.Errorf("pvcVolumeMode must be a string, got %T", raw)
+			}
+		}
+		if raw, ok := vp.Conditions["pvcAccessModes"]; ok {
+			if err := validateStringSliceCondition("pvcAccessModes", raw); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return resPolicies, nil
+}
+
+func validateStringSliceCondition(name string, raw any) error {
+	switch values := raw.(type) {
+	case []any:
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("%s must be a list of strings, got element %T", name, value)
+			}
+		}
+	case []string:
+	default:
+		return fmt.Errorf("%s must be a list of strings, got %T", name, raw)
+	}
+	return nil
 }
 
 func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
@@ -151,6 +518,12 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 		if len(con.PVCPhase) > 0 {
 			volP.conditions = append(volP.conditions, &pvcPhaseCondition{phases: con.PVCPhase})
 		}
+		if con.PVCVolumeMode != "" {
+			volP.conditions = append(volP.conditions, &pvcVolumeModeCondition{volumeMode: con.PVCVolumeMode})
+		}
+		if len(con.PVCAccessModes) > 0 {
+			volP.conditions = append(volP.conditions, &pvcAccessModesCondition{accessModes: con.PVCAccessModes})
+		}
 		p.volumePolicies = append(p.volumePolicies, volP)
 	}
 
@@ -158,6 +531,8 @@ func (p *Policies) BuildPolicy(resPolicies *ResourcePolicies) error {
 
 	p.version = resPolicies.Version
 	p.includeExcludePolicy = resPolicies.IncludeExcludePolicy
+	p.clusterScopedFilterPolicy = resPolicies.ClusterScopedFilterPolicy
+	p.namespacedFilterPolicies = resPolicies.NamespacedFilterPolicies
 	return nil
 }
 
@@ -228,6 +603,38 @@ func (p *Policies) Validate() error {
 		}
 	}
 
+	if err := p.validateClusterScopedFilterPolicy(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if err := p.validateNamespacedFilterPolicies(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	return nil
+}
+
+func (p *Policies) ValidateForRestore() error {
+	if p.version != currentSupportDataVersion {
+		return fmt.Errorf("incompatible version number %s with supported version %s", p.version, currentSupportDataVersion)
+	}
+
+	if len(p.volumePolicies) > 0 {
+		return fmt.Errorf("volumePolicies are not supported for restore")
+	}
+
+	if p.GetIncludeExcludePolicy() != nil {
+		return fmt.Errorf("includeExcludePolicy is not supported for restore")
+	}
+
+	if err := p.validateClusterScopedFilterPolicy(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if err := p.validateNamespacedFilterPolicies(); err != nil {
+		return errors.WithStack(err)
+	}
+
 	return nil
 }
 
@@ -235,7 +642,15 @@ func (p *Policies) GetIncludeExcludePolicy() *IncludeExcludePolicy {
 	return p.includeExcludePolicy
 }
 
-func GetResourcePoliciesFromBackup(
+func (p *Policies) GetClusterScopedFilterPolicy() *ClusterScopedFilterPolicy {
+	return p.clusterScopedFilterPolicy
+}
+
+func (p *Policies) GetNamespacedFilterPolicies() []NamespacedFilterPolicy {
+	return p.namespacedFilterPolicies
+}
+
+func getResourcePoliciesFromBackup(
 	backup velerov1api.Backup,
 	client crclient.Client,
 	logger logrus.FieldLogger,
@@ -251,23 +666,147 @@ func GetResourcePoliciesFromBackup(
 		if err != nil {
 			logger.Errorf("Fail to get ResourcePolicies %s ConfigMap with error %s.",
 				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err.Error())
-			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap with error %s",
-				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap: %w",
+				backup.Namespace+"/"+backup.Spec.ResourcePolicy.Name, err)
 		}
 		resourcePolicies, err = getResourcePoliciesFromConfig(policiesConfigMap)
 		if err != nil {
 			logger.Errorf("Fail to read ResourcePolicies from ConfigMap %s with error %s.",
 				backup.Namespace+"/"+backup.Name, err.Error())
-			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s with error %s",
-				backup.Namespace+"/"+backup.Name, err.Error())
+			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s: %w",
+				backup.Namespace+"/"+backup.Name, err)
 		} else if err = resourcePolicies.Validate(); err != nil {
 			logger.Errorf("Fail to validate ResourcePolicies in ConfigMap %s with error %s.",
 				backup.Namespace+"/"+backup.Name, err.Error())
-			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s with error %s",
-				backup.Namespace+"/"+backup.Name, err.Error())
+			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s: %w",
+				backup.Namespace+"/"+backup.Name, err)
 		}
 	}
 
+	return resourcePolicies, nil
+}
+
+// GetGlobalResourcePolicies loads and validates the cluster-wide global backup volume
+// policies from a ConfigMap in the Velero install namespace. Only the volumePolicies
+// section is honored globally; any include/exclude or fine-grained filter policies are
+// ignored (a warning is logged), as those are tied to a specific backup use case.
+func GetGlobalResourcePolicies(
+	client crclient.Client,
+	namespace string,
+	configMapName string,
+	logger logrus.FieldLogger,
+) (*Policies, error) {
+	cm := &corev1api.ConfigMap{}
+	if err := client.Get(context.Background(), crclient.ObjectKey{Namespace: namespace, Name: configMapName}, cm); err != nil {
+		return nil, fmt.Errorf("fail to get global backup volume policies ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+
+	policies, err := getResourcePoliciesFromConfig(cm)
+	if err != nil {
+		return nil, fmt.Errorf("fail to read global backup volume policies from ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+	if err := policies.Validate(); err != nil {
+		return nil, fmt.Errorf("fail to validate global backup volume policies in ConfigMap %s/%s: %w", namespace, configMapName, err)
+	}
+
+	// Only volumePolicies apply globally; warn about any other filter policies that will be ignored.
+	if policies.includeExcludePolicy != nil ||
+		policies.clusterScopedFilterPolicy != nil ||
+		len(policies.namespacedFilterPolicies) > 0 {
+		logger.Warnf("Global backup volume policies ConfigMap %s/%s contains include/exclude or fine-grained "+
+			"filter policies; these are ignored, only volumePolicies apply globally.", namespace, configMapName)
+	}
+
+	// Return a fresh Policies carrying only the globally-applicable fields. Using an allowlist here
+	// (rather than nil-ing out the ignored fields) means any filter field added to Policies in the
+	// future is excluded from the global policies by default, without needing to update this code.
+	return &Policies{
+		version:        policies.version,
+		volumePolicies: policies.volumePolicies,
+	}, nil
+}
+
+// GetResourcePoliciesFromBackupWithGlobal builds the effective resource policies for a backup
+// by merging the backup-referenced resource policies with the global backup volume policies
+// (when globalConfigMapName is set or specified via backup annotations). The merged volumePolicies list is the backup-level
+// policies followed by the global ones, so the first match wins and a backup can override the
+// global baseline for a specific volume while still inheriting the rest of the global rules.
+func GetResourcePoliciesFromBackupWithGlobal(
+	backup velerov1api.Backup,
+	client crclient.Client,
+	globalConfigMapName string,
+	installNamespace string,
+	logger logrus.FieldLogger,
+) (*Policies, error) {
+	backupPolicies, err := getResourcePoliciesFromBackup(backup, client, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	if globalConfigMapName == "" && backup.Annotations != nil {
+		globalConfigMapName = backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+	if installNamespace == "" {
+		installNamespace = backup.Namespace
+	}
+
+	if globalConfigMapName == "" {
+		return backupPolicies, nil
+	}
+
+	globalPolicies, err := GetGlobalResourcePolicies(client, installNamespace, globalConfigMapName, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	if backupPolicies == nil {
+		return globalPolicies, nil
+	}
+	// Backup-level policies first, then global, so backups can override the global baseline.
+	backupPolicies.volumePolicies = append(backupPolicies.volumePolicies, globalPolicies.volumePolicies...)
+	return backupPolicies, nil
+}
+
+// GetResourcePoliciesFromRestore retrieves the resource policies from the ConfigMap referenced in the Restore spec.
+func GetResourcePoliciesFromRestore(
+	ctx context.Context,
+	restore *velerov1api.Restore,
+	client crclient.Client,
+	logger logrus.FieldLogger,
+) (resourcePolicies *Policies, err error) {
+	if restore.Spec.ResourcePolicy != nil {
+		if !strings.EqualFold(restore.Spec.ResourcePolicy.Kind, ConfigmapRefType) {
+			return nil, fmt.Errorf("invalid ResourcePolicy kind %q, only %q is supported",
+				restore.Spec.ResourcePolicy.Kind, ConfigmapRefType)
+		}
+		policiesConfigMap := &corev1api.ConfigMap{}
+		err = client.Get(
+			ctx,
+			crclient.ObjectKey{
+				Namespace: restore.Namespace,
+				Name:      restore.Spec.ResourcePolicy.Name,
+			},
+			policiesConfigMap,
+		)
+		if err != nil {
+			logger.Errorf("Fail to get ResourcePolicies %s ConfigMap with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to get ResourcePolicies %s ConfigMap: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		}
+		resourcePolicies, err = getResourcePoliciesFromConfig(policiesConfigMap)
+		if err != nil {
+			logger.Errorf("Fail to read ResourcePolicies from ConfigMap %s with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to read the ResourcePolicies from ConfigMap %s: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		} else if err = resourcePolicies.ValidateForRestore(); err != nil {
+			logger.Errorf("Fail to validate ResourcePolicies in ConfigMap %s with error %s.",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err.Error())
+			return nil, fmt.Errorf("fail to validate ResourcePolicies in ConfigMap %s: %w",
+				restore.Namespace+"/"+restore.Spec.ResourcePolicy.Name, err)
+		}
+	}
 	return resourcePolicies, nil
 }
 
@@ -295,4 +834,134 @@ func getResourcePoliciesFromConfig(cm *corev1api.ConfigMap) (*Policies, error) {
 	}
 
 	return policies, nil
+}
+
+func (p *Policies) validateNamespacedFilterPolicies() error {
+	seenPatterns := make(map[string][]int) // pattern -> list of policy indices
+
+	// Rule 1-7: Basic validation rules
+	for i, nfp := range p.namespacedFilterPolicies {
+		if len(nfp.Namespaces) == 0 {
+			return fmt.Errorf("namespacedFilterPolicies[%d]: at least one namespace must be specified", i)
+		}
+		if len(nfp.ResourceFilters) == 0 {
+			return fmt.Errorf("namespacedFilterPolicies[%d]: at least one resourceFilter must be specified", i)
+		}
+
+		// Rule 8 & 9: Validate glob patterns and collect namespace patterns for duplicate check
+		for j, pattern := range nfp.Namespaces {
+			if err := wildcard.ValidateNamespaceName(pattern); err != nil {
+				return fmt.Errorf("namespacedFilterPolicies[%d].namespaces[%d]: %w", i, j, err)
+			}
+			seenPatterns[pattern] = append(seenPatterns[pattern], i)
+		}
+
+		seenKinds := make(map[string]int)
+		hasCatchAll := false
+		for j, rf := range nfp.ResourceFilters {
+			if rf.IsCatchAll() {
+				if hasCatchAll {
+					return fmt.Errorf("namespacedFilterPolicies[%d]: only one catch-all resource filter is allowed", i)
+				}
+				hasCatchAll = true
+				if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d]: names or excludedNames cannot be specified for catch-all filters", i, j)
+				}
+			}
+
+			for _, kind := range rf.Kinds {
+				if kind == "*" {
+					continue // "*" is handled by IsCatchAll, no need to check duplicates against other kinds
+				}
+				if prevJ, ok := seenKinds[kind]; ok {
+					return fmt.Errorf("namespacedFilterPolicies[%d]: kind %q appears in both resourceFilters[%d] and resourceFilters[%d]", i, kind, prevJ, j)
+				}
+				seenKinds[kind] = j
+			}
+
+			if IsPresentLabelSelector(rf.LabelSelector) && len(rf.OrLabelSelectors) > 0 {
+				return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d]: labelSelector and orLabelSelectors cannot co-exist", i, j)
+			}
+			if err := validatePolicyLabelSelector(rf.LabelSelector); err != nil {
+				return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d]: invalid label selector: %w", i, j, err)
+			}
+			for k, ols := range rf.OrLabelSelectors {
+				if err := validatePolicyLabelSelector(ols); err != nil {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d].orLabelSelectors[%d]: invalid label selector: %w", i, j, k, err)
+				}
+			}
+
+			// Validate glob patterns for names and excludedNames using gobwas/glob
+			for k, pattern := range rf.Names {
+				if _, err := glob.Compile(pattern); err != nil {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d].names[%d]: invalid glob pattern %q: %v", i, j, k, pattern, err)
+				}
+			}
+			for k, pattern := range rf.ExcludedNames {
+				if _, err := glob.Compile(pattern); err != nil {
+					return fmt.Errorf("namespacedFilterPolicies[%d].resourceFilters[%d].excludedNames[%d]: invalid glob pattern %q: %v", i, j, k, pattern, err)
+				}
+			}
+		}
+	}
+
+	// Rule 8: Report exact duplicates only
+	for pattern, policyIndices := range seenPatterns {
+		if len(policyIndices) > 1 {
+			return fmt.Errorf(
+				"namespacedFilterPolicies: duplicate namespace pattern '%s' found in policies %v",
+				pattern, policyIndices)
+		}
+	}
+
+	return nil
+}
+
+func (p *Policies) validateClusterScopedFilterPolicy() error {
+	if p.clusterScopedFilterPolicy == nil {
+		return nil
+	}
+
+	if len(p.clusterScopedFilterPolicy.ResourceFilters) == 0 {
+		return fmt.Errorf("clusterScopedFilterPolicy: resourceFilters cannot be empty; remove the policy block entirely if it is not needed")
+	}
+
+	seenKinds := make(map[string]int)
+	for j, rf := range p.clusterScopedFilterPolicy.ResourceFilters {
+		if rf.IsCatchAll() {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: kinds must be specified (catch-all is not supported)", j)
+		}
+
+		for _, kind := range rf.Kinds {
+			if prevJ, ok := seenKinds[kind]; ok {
+				return fmt.Errorf("clusterScopedFilterPolicy: kind %q appears in both resourceFilters[%d] and resourceFilters[%d]", kind, prevJ, j)
+			}
+			seenKinds[kind] = j
+		}
+
+		if IsPresentLabelSelector(rf.LabelSelector) && len(rf.OrLabelSelectors) > 0 {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: labelSelector and orLabelSelectors cannot co-exist", j)
+		}
+		if err := validatePolicyLabelSelector(rf.LabelSelector); err != nil {
+			return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d]: invalid label selector: %w", j, err)
+		}
+		for k, ols := range rf.OrLabelSelectors {
+			if err := validatePolicyLabelSelector(ols); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].orLabelSelectors[%d]: invalid label selector: %w", j, k, err)
+			}
+		}
+
+		for k, pattern := range rf.Names {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].names[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
+		}
+		for k, pattern := range rf.ExcludedNames {
+			if _, err := glob.Compile(pattern); err != nil {
+				return fmt.Errorf("clusterScopedFilterPolicy.resourceFilters[%d].excludedNames[%d]: invalid glob pattern %q: %v", j, k, pattern, err)
+			}
+		}
+	}
+
+	return nil
 }

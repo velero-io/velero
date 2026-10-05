@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -165,7 +165,7 @@ func TestOnPvrCompleted(t *testing.T) {
 		{
 			name:        "marshal fail",
 			marshalErr:  errors.New("fake-marshal-error"),
-			expectedErr: "error marshaling restore result {{ } 0}: fake-marshal-error",
+			expectedErr: "error marshaling restore result {{ } 0 0 false}: fake-marshal-error",
 		},
 		{
 			name:                "succeed",
@@ -428,7 +428,7 @@ func TestRunCancelableDataPathRestore(t *testing.T) {
 				rs.dataPathMgr = test.dataPathMgr
 			}
 
-			datapath.FSBRCreator = func(string, string, kbclient.Client, string, datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
+			datapath.VGDPCreator = func(string, string, kbclient.Client, string, datapath.Callbacks, logrus.FieldLogger) datapath.AsyncBR {
 				fsBR := datapathmockes.NewAsyncBR(t)
 				if test.initErr != nil {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(test.initErr)
@@ -436,12 +436,12 @@ func TestRunCancelableDataPathRestore(t *testing.T) {
 
 				if test.startErr != nil {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(nil)
-					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(test.startErr)
+					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.startErr)
 				}
 
 				if test.dataPathStarted {
 					fsBR.On("Init", mock.Anything, mock.Anything).Return(nil)
-					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+					fsBR.On("StartRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 				}
 
 				return fsBR

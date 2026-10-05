@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	clocktesting "k8s.io/utils/clock/testing"
+
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -154,6 +157,7 @@ func initPVBReconcilerWithError(needError ...error) (*PodVolumeBackupReconciler,
 		false, // privileged
 		nil,   // podLabels
 		nil,   // podAnnotations
+		nil,   // tolerations
 	), nil
 }
 
@@ -489,7 +493,7 @@ func TestPVBReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledPVB[test.pvb.Name] = test.sportTime.Time
+				r.cancelledPVB.Store(test.pvb.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -567,9 +571,15 @@ func TestPVBReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledPVB, test.pvb.Name)
+				_, ok := r.cancelledPVB.Load(test.pvb.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledPVB)
+				empty := true
+				r.cancelledPVB.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isPVBInFinalState(&pvb) || pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseInProgress {
@@ -617,6 +627,15 @@ func TestOnPVBProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			pvb:  pvbBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get pvb",
 			pvb:      pvbBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -644,17 +663,30 @@ func TestOnPVBProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), pvb))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			r.OnDataPathProgress(ctx, namespace, pvbName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				updatedPvb := &velerov1api.PodVolumeBackup{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, updatedPvb))
-				assert.Equal(t, test.progress.TotalBytes, updatedPvb.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedPvb.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedPvb.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedPvb.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedPvb.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedPvb.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedPvb.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataPathProgress(ctx, namespace, pvbName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: pvbName, Namespace: namespace}, updatedPvb))
+					assert.Equal(t, []string{progress.Message}, updatedPvb.Status.Activities)
+				}
 			}
 		})
 	}
@@ -1291,6 +1323,7 @@ func TestPodVolumeBackupSetupExposeParam(t *testing.T) {
 				true,
 				tt.args.customLabels,
 				tt.args.customAnnotations,
+				nil,
 			)
 
 			// Act
@@ -1307,4 +1340,51 @@ func TestPodVolumeBackupSetupExposeParam(t *testing.T) {
 			assert.Equal(t, tt.want.annotations, got.HostingPodAnnotations)
 		})
 	}
+}
+
+type pvbSequenceClock struct {
+	*clocktesting.FakeClock
+	mu sync.Mutex
+}
+
+func (c *pvbSequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestPodVolumeBackupCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	pvb := builder.ForPodVolumeBackup(velerov1api.DefaultNamespace, "pvb-1").Cancel(true).Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+
+	r, err := initPVBReconciler()
+	require.NoError(t, err)
+
+	err = r.client.Create(ctx, pvb)
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledPVB.Store(pvb.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.clock = &pvbSequenceClock{FakeClock: clocktesting.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: pvb.Name, Namespace: pvb.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledPVB.Load(pvb.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

@@ -107,5 +107,5 @@ Note that the container must support the shell command you use.
 
 
 [1]: api-types/backup.md
-[2]: https://github.com/vmware-tanzu/velero/blob/v1.9.0/examples/nginx-app/with-pv.yaml
+[2]: https://github.com/velero-io/velero/blob/v1.9.0/examples/nginx-app/with-pv.yaml
 [3]: cloud-common.md

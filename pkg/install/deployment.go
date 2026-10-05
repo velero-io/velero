@@ -34,36 +34,38 @@ import (
 type podTemplateOption func(*podTemplateConfig)
 
 type podTemplateConfig struct {
-	image                           string
-	envVars                         []corev1api.EnvVar
-	restoreOnly                     bool
-	annotations                     map[string]string
-	labels                          map[string]string
-	resources                       corev1api.ResourceRequirements
-	withSecret                      bool
-	defaultRepoMaintenanceFrequency time.Duration
-	garbageCollectionFrequency      time.Duration
-	podVolumeOperationTimeout       time.Duration
-	plugins                         []string
-	features                        []string
-	defaultVolumesToFsBackup        bool
-	serviceAccountName              string
-	uploaderType                    string
-	defaultSnapshotMoveData         bool
-	privilegedNodeAgent             bool
-	disableInformerCache            bool
-	scheduleSkipImmediately         bool
-	podResources                    kube.PodResources
-	keepLatestMaintenanceJobs       int
-	backupRepoConfigMap             string
-	repoMaintenanceJobConfigMap     string
-	nodeAgentConfigMap              string
-	itemBlockWorkerCount            int
-	concurrentBackups               int
-	forWindows                      bool
-	kubeletRootDir                  string
-	nodeAgentDisableHostPath        bool
-	priorityClassName               string
+	image                            string
+	envVars                          []corev1api.EnvVar
+	restoreOnly                      bool
+	annotations                      map[string]string
+	labels                           map[string]string
+	resources                        corev1api.ResourceRequirements
+	withSecret                       bool
+	defaultRepoMaintenanceFrequency  time.Duration
+	garbageCollectionFrequency       time.Duration
+	podVolumeOperationTimeout        time.Duration
+	plugins                          []string
+	features                         []string
+	defaultVolumesToFsBackup         bool
+	serviceAccountName               string
+	uploaderType                     string
+	defaultSnapshotMoveData          bool
+	csiSnapshotEarlyFrequentPolling  bool
+	privilegedNodeAgent              bool
+	disableInformerCache             bool
+	scheduleSkipImmediately          bool
+	podResources                     kube.PodResources
+	keepLatestMaintenanceJobs        int
+	backupRepoConfigMap              string
+	repoMaintenanceJobConfigMap      string
+	defaultResourceModifierConfigMap string
+	nodeAgentConfigMap               string
+	itemBlockWorkerCount             int
+	concurrentBackups                int
+	forWindows                       bool
+	kubeletRootDir                   string
+	nodeAgentDisableHostPath         bool
+	priorityClassName                string
 }
 
 func WithImage(image string) podTemplateOption {
@@ -138,7 +140,10 @@ func WithPodVolumeOperationTimeout(val time.Duration) podTemplateOption {
 
 func WithPlugins(plugins []string) podTemplateOption {
 	return func(c *podTemplateConfig) {
-		c.plugins = plugins
+		c.plugins = make([]string, 0, len(plugins))
+		for _, plugin := range plugins {
+			c.plugins = append(c.plugins, strings.TrimSpace(plugin))
+		}
 	}
 }
 
@@ -163,6 +168,12 @@ func WithDefaultVolumesToFsBackup(b bool) podTemplateOption {
 func WithDefaultSnapshotMoveData(b bool) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.defaultSnapshotMoveData = b
+	}
+}
+
+func WithCSISnapshotEarlyFrequentPolling(b bool) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.csiSnapshotEarlyFrequentPolling = b
 	}
 }
 
@@ -216,6 +227,12 @@ func WithBackupRepoConfigMap(backupRepoConfigMap string) podTemplateOption {
 func WithRepoMaintenanceJobConfigMap(repoMaintenanceJobConfigMap string) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.repoMaintenanceJobConfigMap = repoMaintenanceJobConfigMap
+	}
+}
+
+func WithDefaultResourceModifierConfigMap(name string) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.defaultResourceModifierConfigMap = name
 	}
 }
 
@@ -340,6 +357,10 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 		args = append(args, fmt.Sprintf("--repo-maintenance-job-configmap=%s", c.repoMaintenanceJobConfigMap))
 	}
 
+	if len(c.defaultResourceModifierConfigMap) > 0 {
+		args = append(args, fmt.Sprintf("--default-resource-modifier-configmap=%s", c.defaultResourceModifierConfigMap))
+	}
+
 	if c.itemBlockWorkerCount > 0 {
 		args = append(args, fmt.Sprintf("--item-block-worker-count=%d", c.itemBlockWorkerCount))
 	}
@@ -374,7 +395,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 									{
 										MatchExpressions: []corev1api.NodeSelectorRequirement{
 											{
-												Key:      "kubernetes.io/os",
+												Key:      corev1api.LabelOSStable,
 												Values:   []string{"windows"},
 												Operator: corev1api.NodeSelectorOpNotIn,
 											},
@@ -423,6 +444,15 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 								},
 							},
 							Resources: c.resources,
+							SecurityContext: &corev1api.SecurityContext{
+								Capabilities: &corev1api.Capabilities{
+									Drop: []corev1api.Capability{"ALL"},
+								},
+								AllowPrivilegeEscalation: ptr.To(false),
+								SeccompProfile: &corev1api.SeccompProfile{
+									Type: corev1api.SeccompProfileTypeRuntimeDefault,
+								},
+							},
 						},
 					},
 					Volumes: []corev1api.Volume{
@@ -489,11 +519,20 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 		}...)
 	}
 
+	if c.csiSnapshotEarlyFrequentPolling {
+		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, []corev1api.EnvVar{
+			{
+				Name:  "CSI_SNAPSHOT_EARLY_FREQUENT_POLLING",
+				Value: "true",
+			},
+		}...)
+	}
+
 	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, c.envVars...)
 
 	if len(c.plugins) > 0 {
 		for _, image := range c.plugins {
-			container := *builder.ForPluginContainer(image, pullPolicy).Result()
+			container := *builder.ForPluginContainer(image, pullPolicy, deployment.Spec.Template.Spec.InitContainers).Result()
 			deployment.Spec.Template.Spec.InitContainers = append(deployment.Spec.Template.Spec.InitContainers, container)
 		}
 	}

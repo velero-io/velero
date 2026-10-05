@@ -8,7 +8,7 @@ Integrating Container Storage Interface (CSI) snapshot support into Velero enabl
 By supporting CSI snapshot APIs, Velero can support any volume provider that has a CSI driver, without requiring a Velero-specific plugin to be available. This page gives an overview of how to add support for CSI snapshots to Velero.
 
 ## Notice
-From release-1.14, the `github.com/vmware-tanzu/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/vmware-tanzu/velero` repository.
+From release-1.14, the `github.com/velero-io/velero-plugin-for-csi` repository, which is the Velero CSI plugin, is merged into the `github.com/velero-io/velero` repository.
 The reasons to merge the CSI plugin are:
 * The VolumeSnapshot data mover depends on the CSI plugin, it's reasonabe to integrate them.
 * This change reduces the Velero deploying complexity.
@@ -86,8 +86,23 @@ This section documents some of the choices made during implementing the CSI snap
         ```
         Note: Please ensure all your annotations are in lowercase. And follow the following format: `velero.io/csi-volumesnapshot-class_<driver name> = <VolumeSnapshotClass Name>`
 
-    3. **Choosing VolumeSnapshotClass for a particular PVC:**
-    If you want to use a particular VolumeSnapshotClass for a particular PVC, you can add a annotation to the PVC to indicate which VolumeSnapshotClass to use. This overrides any annotation added to backup or schedule. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular PVC, you can create a PVC like this:
+    3. **Choosing VolumeSnapshotClass via Volume Policy:**
+    If you want to use a particular VolumeSnapshotClass based on conditions like StorageClass, you can specify the `snapshotClass` parameter in a volume policy's `snapshot` action. This is useful when multiple storage arrays share the same CSI driver but require different VolumeSnapshotClasses. For example:
+        ```yaml
+        version: v1
+        volumePolicies:
+        - conditions:
+            storageClass:
+            - nutanix-files
+          action:
+            type: snapshot
+            parameters:
+              snapshotClass: nutanix-files-snapclass
+        ```
+        This overrides backup/schedule annotations and VolumeSnapshotClass labels, but is overridden by PVC-level annotations. See the [resource filtering documentation](resource-filtering.md) for more volume policy examples.
+
+    4. **Choosing VolumeSnapshotClass for a particular PVC:**
+    If you want to use a particular VolumeSnapshotClass for a particular PVC, you can add a annotation to the PVC to indicate which VolumeSnapshotClass to use. This overrides any other method of selecting a VolumeSnapshotClass. For example, if you want to use the VolumeSnapshotClass `test-snapclass` for a particular PVC, you can create a PVC like this:
         ```yaml
         apiVersion: v1
         kind: PersistentVolumeClaim
@@ -130,7 +145,7 @@ The `DeletionPolicy` on the VolumeSnapshotContent will be the same as the `Delet
 
 When the Velero backup expires, the VolumeSnapshot objects will be deleted and the VolumeSnapshotContent objects will be updated to have a `DeletionPolicy` of `Delete`, to free space on the storage system.
 
-**Note:** The AWS, Microsoft Azure, and Google Cloud Platform (GCP) Velero plugins version 1.4 and later are able to snapshot and restore persistent volumes provisioned by a CSI driver via the APIs of the cloud provider, without having to install Velero CSI plugins. See the [AWS](https://github.com/vmware-tanzu/velero-plugin-for-aws), [Microsoft Azure](https://github.com/vmware-tanzu/velero-plugin-for-microsoft-azure), and [Google Cloud Platform (GCP)](https://github.com/vmware-tanzu/velero-plugin-for-gcp) Velero plugin repo for more information on supported CSI drivers.
+**Note:** The AWS, Microsoft Azure, and Google Cloud Platform (GCP) Velero plugins version 1.4 and later are able to snapshot and restore persistent volumes provisioned by a CSI driver via the APIs of the cloud provider, without having to install Velero CSI plugins. See the [AWS](https://github.com/velero-io/velero-plugin-for-aws), [Microsoft Azure](https://github.com/velero-io/velero-plugin-for-microsoft-azure), and [Google Cloud Platform (GCP)](https://github.com/velero-io/velero-plugin-for-gcp) Velero plugin repo for more information on supported CSI drivers.
 From v1.14, no need to install the CSI plugin, because it is integrated into the Velero code base.
 
 [1]: customize-installation.md#enable-server-side-features

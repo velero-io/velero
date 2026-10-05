@@ -17,6 +17,7 @@ limitations under the License.
 package delete
 
 import (
+	"errors"
 	"io"
 	"sort"
 	"testing"
@@ -25,9 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -153,9 +151,9 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// test harness contains the fake API server/discovery client
-			h := newHarness(t)
+			h, dh := newHarness(t)
 			for _, r := range tc.apiResources {
-				h.addResource(t, r)
+				h.AddResource(t, dh, r)
 			}
 
 			// Get the plugins out of the map in order to use them.
@@ -168,7 +166,7 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 				Backup:          tc.backup,
 				BackupReader:    tc.tarball,
 				Filesystem:      fs,
-				DiscoveryHelper: h.discoveryHelper,
+				DiscoveryHelper: dh,
 				Actions:         actions,
 				Log:             log,
 			}
@@ -186,46 +184,15 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 	}
 }
 
-// TODO: unify this with the test harness in pkg/restore/restore_test.go
-type harness struct {
-	*test.APIServer
-	discoveryHelper discovery.Helper
-}
-
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) (*test.Harness, discovery.Helper) {
 	t.Helper()
 
 	apiServer := test.NewAPIServer(t)
 	log := logrus.StandardLogger()
-
-	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
+	dh, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
 	require.NoError(t, err)
 
-	return &harness{
-		APIServer:       apiServer,
-		discoveryHelper: discoveryHelper,
-	}
-}
-
-// addResource adds an APIResource and it's items to a faked API server for testing.
-func (h *harness) addResource(t *testing.T, resource *test.APIResource) {
-	t.Helper()
-
-	h.DiscoveryClient.WithAPIResource(resource)
-	require.NoError(t, h.discoveryHelper.Refresh())
-
-	for _, item := range resource.Items {
-		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
-		require.NoError(t, err)
-
-		unstructuredObj := &unstructured.Unstructured{Object: obj}
-		if resource.Namespaced {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Namespace(item.GetNamespace()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		} else {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		}
-		require.NoError(t, err)
-	}
+	return test.NewHarness(t, apiServer), dh
 }
 
 // recordResourcesAction is a delete item action that can be configured to run
@@ -275,4 +242,55 @@ func TestInvokeDeleteItemActionsWithNoPlugins(t *testing.T) {
 	}
 	err := InvokeDeleteActions(c)
 	require.NoError(t, err)
+}
+
+// failingAction is a DeleteItemAction that always returns an error from Execute.
+// It is used to verify that InvokeDeleteActions surfaces plugin errors instead
+// of swallowing them.
+type failingAction struct {
+	selector velero.ResourceSelector
+	err      error
+	executed int
+}
+
+func (a *failingAction) AppliesTo() (velero.ResourceSelector, error) {
+	return a.selector, nil
+}
+
+func (a *failingAction) Execute(input *velero.DeleteItemActionExecuteInput) error {
+	a.executed++
+	return a.err
+}
+
+func TestInvokeDeleteActionsReturnsPluginErrors(t *testing.T) {
+	fs := test.NewFakeFileSystem()
+	log := logrus.StandardLogger()
+
+	tarball := test.NewTarWriter(t).
+		AddItems("pods", builder.ForPod("ns-1", "pod-1").Result(), builder.ForPod("ns-2", "pod-2").Result()).
+		Done()
+
+	action := &failingAction{err: errors.New("could not delete artifact")}
+
+	h, dh := newHarness(t)
+	h.AddResource(t, dh, test.Pods())
+
+	c := &Context{
+		Backup:          builder.ForBackup("velero", "velero").Result(),
+		BackupReader:    tarball,
+		Filesystem:      fs,
+		DiscoveryHelper: dh,
+		Actions:         []velero.DeleteItemAction{action},
+		Log:             log,
+	}
+
+	err := InvokeDeleteActions(c)
+
+	// The plugin error must be surfaced so the caller can fail the deletion
+	// rather than orphaning the artifacts the plugin failed to delete.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not delete artifact")
+	// The loop must keep going: the action should run for every matching item,
+	// not stop at the first failure.
+	assert.Equal(t, 2, action.executed)
 }

@@ -23,7 +23,7 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +38,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/nodeagent"
 	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/restore/inplace"
 	uploaderutil "github.com/vmware-tanzu/velero/pkg/uploader/util"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -48,6 +49,9 @@ type RestoreData struct {
 	Pod                             *corev1api.Pod
 	PodVolumeBackups                []*velerov1api.PodVolumeBackup
 	SourceNamespace, BackupLocation string
+	// BackupVolumeInfos is the backup's volume info keyed by PV name, used by
+	// the in-place restore pre-flight checks.
+	BackupVolumeInfos map[string]volume.BackupVolumeInfo
 }
 
 // Restorer can execute pod volume restores of volumes in a pod.
@@ -63,10 +67,9 @@ type restorer struct {
 	kubeClient  kubernetes.Interface
 	crClient    ctrlclient.Client
 
-	resultsLock    sync.Mutex
-	results        map[string]chan *velerov1api.PodVolumeRestore
-	nodeAgentCheck chan error
-	log            logrus.FieldLogger
+	resultsLock sync.Mutex
+	results     map[string]chan *velerov1api.PodVolumeRestore
+	log         logrus.FieldLogger
 }
 
 func newRestorer(
@@ -106,9 +109,9 @@ func newRestorer(
 
 				if pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseCompleted || pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseFailed || pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseCanceled {
 					r.resultsLock.Lock()
-					defer r.resultsLock.Unlock()
-
 					resChan, ok := r.results[resultsKey(pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)]
+					r.resultsLock.Unlock()
+
 					if !ok {
 						log.Errorf("No results channel found for pod %s/%s to send pod volume restore %s/%s on", pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name, pvr.Namespace, pvr.Name)
 						return
@@ -147,13 +150,13 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 	r.repoLocker.Lock(repo.Name)
 	defer r.repoLocker.Unlock(repo.Name)
 
-	resultsChan := make(chan *velerov1api.PodVolumeRestore)
+	resultsChan := make(chan *velerov1api.PodVolumeRestore, len(volumesToRestore))
 
 	r.resultsLock.Lock()
 	r.results[resultsKey(data.Pod.Namespace, data.Pod.Name)] = resultsChan
 	r.resultsLock.Unlock()
 
-	r.nodeAgentCheck = make(chan error)
+	nodeAgentCheck := make(chan error)
 
 	var (
 		errs        []error
@@ -177,6 +180,31 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 					errs = append(errs, errors.Wrap(err, "error getting persistent volume claim for volume"))
 					continue
 				}
+			}
+		}
+
+		// Pre-flight checks for in-place restore. Pods gated by this
+		// restore's restore-wait init container are excluded: they must mount
+		// the PVC so the volume gets mounted on the node for the node-agent
+		// to write into, and they cannot write to it themselves until this
+		// restore's PodVolumeRestores complete.
+		if data.Restore.IsVolumeDataInplaceRestore() && pvc != nil {
+			pvName := backedUpPVName(data.BackupVolumeInfos, data.SourceNamespace, pvc.Name)
+			var volumeHandle string
+			if info := data.BackupVolumeInfos[pvName].PVInfo; info != nil {
+				volumeHandle = info.VolumeHandle
+			}
+			if err := inplace.CheckPVCBoundToBackedUpVolume(r.ctx, r.crClient, pvc, pvName, volumeHandle, data.SourceNamespace); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := inplace.CheckPVCCapacity(pvc, data.BackupVolumeInfos[pvName].SourceSize()); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := inplace.CheckPVCNotInUse(r.ctx, r.crClient, pvc, data.Restore.UID); err != nil {
+				errs = append(errs, err)
+				continue
 			}
 		}
 
@@ -217,7 +245,7 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 			err = nodeagent.IsRunningInNode(checkCtx, data.Restore.Namespace, nodeName, r.crClient)
 			if err != nil {
 				r.log.WithField("node", nodeName).WithError(err).Error("node-agent pod is not running in node, abort the restore")
-				r.nodeAgentCheck <- errors.Wrapf(err, "node-agent pod is not running in node %s", nodeName)
+				nodeAgentCheck <- errors.Wrapf(err, "node-agent pod is not running in node %s", nodeName)
 			}
 		}
 	}()
@@ -235,7 +263,7 @@ ForEachVolume:
 				errs = append(errs, errors.Errorf("pod volume restore canceled: %s", res.Status.Message))
 			}
 			tracker.TrackPodVolume(res)
-		case err := <-r.nodeAgentCheck:
+		case err := <-nodeAgentCheck:
 			errs = append(errs, err)
 			break ForEachVolume
 		}
@@ -298,7 +326,22 @@ func newPodVolumeRestore(restore *velerov1api.Restore, pod *corev1api.Pod, backu
 		pvr.Spec.UploaderSettings = uploaderutil.StoreRestoreConfig(restore.Spec.UploaderConfig)
 	}
 
+	if restore.IsVolumeDataInplaceRestore() {
+		pvr.Spec.RestoreType = string(restore.Spec.ExistingVolumeDataPolicy)
+	}
+
 	return pvr
+}
+
+// backedUpPVName returns the name of the PV the given source-namespace PVC was
+// bound to at backup time, or "" if unknown.
+func backedUpPVName(infos map[string]volume.BackupVolumeInfo, pvcNamespace, pvcName string) string {
+	for pvName, info := range infos {
+		if info.PVCNamespace == pvcNamespace && info.PVCName == pvcName {
+			return pvName
+		}
+	}
+	return ""
 }
 
 func getVolumesRepositoryType(volumes map[string]volumeBackupInfo) (string, error) {

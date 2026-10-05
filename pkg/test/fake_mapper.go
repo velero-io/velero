@@ -17,7 +17,7 @@ limitations under the License.
 package test
 
 import (
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"

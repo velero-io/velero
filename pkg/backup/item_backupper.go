@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -115,7 +115,7 @@ func (ib *itemBackupper) itemInclusionChecks(log logrus.FieldLogger, mustInclude
 	} else {
 		if metadata.GetLabels()[velerov1api.ExcludeFromBackupLabel] == "true" {
 			log.Infof("Excluding item because it has label %s=true", velerov1api.ExcludeFromBackupLabel)
-			ib.trackSkippedPV(obj, groupResource, "", fmt.Sprintf("item has label %s=true", velerov1api.ExcludeFromBackupLabel), log)
+			ib.trackSkippedVolume(obj, groupResource, "", fmt.Sprintf("item has label %s=true", velerov1api.ExcludeFromBackupLabel), log)
 			return false
 		}
 		// NOTE: we have to re-check namespace & resource includes/excludes because it's possible that
@@ -141,6 +141,42 @@ func (ib *itemBackupper) itemInclusionChecks(log logrus.FieldLogger, mustInclude
 		if namespace != "" && !ib.backupRequest.ResourceIncludesExcludes.ShouldInclude(groupResource.String()) {
 			log.Info("Excluding item because resource is excluded")
 			return false
+		}
+
+		// Per-kind name filter from ResourcePolicy namespace filter.
+		if namespace != "" {
+			if nsFilter := ib.backupRequest.GetNamespaceFilter(namespace); nsFilter != nil {
+				rf := nsFilter.ResourceFilterMap[groupResource.String()]
+				if rf == nil {
+					rf = nsFilter.CatchAllFilter
+				}
+				// When rf is still nil the item's kind is not listed in the namespace filter and
+				// there is no catch-all entry. This is an intentional permissive passthrough:
+				// plugin-injected additional items (returned by BackupItemAction) must be able
+				// to reach the archive even when their kind was not explicitly listed in
+				// namespacedFilterPolicies, because excluding them at Stage 2 would break backup
+				// completeness. For example, a CSI plugin may inject a VolumeSnapshotContent
+				// as an additional item that is required for a correct restore. Kind-level
+				// exclusion for the primary collection pass is enforced earlier in
+				// item_collector.go (Stage 1).
+				if rf != nil && rf.NameIE != nil {
+					if !rf.NameIE.ShouldInclude(metadata.GetName()) {
+						log.Infof("Excluding item: name does not match resource filter for kind %s",
+							groupResource)
+						return false
+					}
+				}
+			}
+		} else {
+			// Cluster-scoped resource name filter
+			if ib.backupRequest.ClusterScopedFilterMap != nil {
+				if rf, ok := ib.backupRequest.ClusterScopedFilterMap[groupResource.String()]; ok && rf.NameIE != nil {
+					if !rf.NameIE.ShouldInclude(metadata.GetName()) {
+						log.Infof("Excluding item: name does not match clusterScopedFilterPolicy for kind %s", groupResource)
+						return false
+					}
+				}
+			}
 		}
 	}
 
@@ -192,7 +228,7 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	)
 
 	if optedOut, podName := ib.podVolumeSnapshotTracker.OptedoutByPod(namespace, name); optedOut {
-		ib.trackSkippedPV(obj, groupResource, podVolumeApproach, fmt.Sprintf("opted out due to annotation in pod %s", podName), log)
+		ib.trackSkippedVolume(obj, groupResource, podVolumeApproach, fmt.Sprintf("opted out due to annotation in pod %s", podName), log)
 	}
 
 	if groupResource == kuberesource.Pods {
@@ -209,6 +245,7 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 			// where it's been backed up from another pod), since we don't need >1 backup per PVC.
 			for _, volume := range pod.Spec.Volumes {
 				shouldDoFSBackup, err := ib.volumeHelperImpl.ShouldPerformFSBackup(volume, *pod)
+
 				if err != nil {
 					backupErrs = append(backupErrs, errors.WithStack(err))
 				}
@@ -289,7 +326,7 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 				if obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(skippedPVC.PVC); err != nil {
 					backupErrs = append(backupErrs, errors.WithStack(err))
 				} else {
-					ib.trackSkippedPV(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumeClaims,
+					ib.trackSkippedVolume(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumeClaims,
 						podVolumeApproach, skippedPVC.Reason, log)
 				}
 			}
@@ -297,7 +334,7 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 				if obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvc); err != nil {
 					backupErrs = append(backupErrs, errors.WithStack(err))
 				} else {
-					ib.unTrackSkippedPV(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumeClaims, log)
+					ib.unTrackSkippedVolume(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumeClaims, log)
 				}
 			}
 		}
@@ -315,16 +352,28 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 	if versionPath == preferredGVR.Version {
 		// backing up preferred version backup without API Group version - for backward compatibility
 		log.Debugf("Resource %s/%s, version= %s, preferredVersion=%s", groupResource.String(), name, versionPath, preferredGVR.Version)
-		itemFiles = append(itemFiles, getFileForArchive(namespace, name, groupResource.String(), "", itemBytes))
+		fileForArchive, err := getFileForArchive(namespace, name, groupResource.String(), "", itemBytes)
+		if err != nil {
+			return false, itemFiles, err
+		}
+		itemFiles = append(itemFiles, fileForArchive)
 		versionPath = versionPath + velerov1api.PreferredVersionDir
 	}
 
-	itemFiles = append(itemFiles, getFileForArchive(namespace, name, groupResource.String(), versionPath, itemBytes))
+	fileForArchive, err := getFileForArchive(namespace, name, groupResource.String(), versionPath, itemBytes)
+	if err != nil {
+		return false, itemFiles, err
+	}
+	itemFiles = append(itemFiles, fileForArchive)
 	return true, itemFiles, nil
 }
 
-func getFileForArchive(namespace, name, groupResource, versionPath string, itemBytes []byte) FileForArchive {
-	filePath := archive.GetVersionedItemFilePath("", groupResource, namespace, name, versionPath)
+func getFileForArchive(namespace, name, groupResource, versionPath string, itemBytes []byte) (FileForArchive, error) {
+	filePath, err := archive.GetVersionedItemFilePath("", groupResource, namespace, name, versionPath)
+	if err != nil {
+		return FileForArchive{}, err
+	}
+
 	hdr := &tar.Header{
 		Name:     filePath,
 		Size:     int64(len(itemBytes)),
@@ -332,7 +381,7 @@ func getFileForArchive(namespace, name, groupResource, versionPath string, itemB
 		Mode:     0755,
 		ModTime:  time.Now(),
 	}
-	return FileForArchive{FilePath: filePath, Header: hdr, FileBytes: itemBytes}
+	return FileForArchive{FilePath: filePath, Header: hdr, FileBytes: itemBytes}, nil
 }
 
 // backupPodVolumes triggers pod volume backups of the specified pod volumes, and returns a list of PodVolumeBackups
@@ -370,7 +419,7 @@ func (ib *itemBackupper) executeActions(
 			return nil, itemFiles, errors.WithStack(err)
 		} else if act != nil && act.Type == resourcepolicies.Skip {
 			log.Infof("Skip executing Backup Item Action: %s of resource %s: %s/%s for the matched resource policies", actionName, groupResource, namespace, name)
-			ib.trackSkippedPV(obj, groupResource, "", "skipped due to resource policy ", log)
+			ib.trackSkippedVolume(obj, groupResource, "", "skipped due to resource policy ", log)
 			continue
 		}
 
@@ -389,7 +438,7 @@ func (ib *itemBackupper) executeActions(
 			}
 
 			if !snapshotVolume {
-				ib.trackSkippedPV(
+				ib.trackSkippedVolume(
 					obj,
 					kuberesource.PersistentVolumeClaims,
 					volumeSnapshotApproach,
@@ -417,12 +466,12 @@ func (ib *itemBackupper) executeActions(
 			if additionalItemIdentifiers == nil && u.GetAnnotations()[velerov1api.SkippedNoCSIPVAnnotation] == "true" {
 				// snapshot was skipped by CSI plugin
 				log.Infof("skip CSI snapshot for PVC %s as it's not a CSI compatible volume", namespace+"/"+name)
-				ib.trackSkippedPV(obj, groupResource, csiSnapshotApproach, "skipped b/c it's not a CSI volume", log)
+				ib.trackSkippedVolume(obj, groupResource, csiSnapshotApproach, "skipped b/c it's not a CSI volume", log)
 				delete(u.GetAnnotations(), velerov1api.SkippedNoCSIPVAnnotation)
 			} else {
 				// the snapshot has been taken by the BIA plugin
 				log.Infof("Untrack the PVC %s, because it's backed up by CSI BIA.", namespace+"/"+name)
-				ib.unTrackSkippedPV(obj, kuberesource.PersistentVolumeClaims, log)
+				ib.unTrackSkippedVolume(obj, kuberesource.PersistentVolumeClaims, log)
 			}
 		}
 
@@ -431,6 +480,26 @@ func (ib *itemBackupper) executeActions(
 		// we don't want the resource be restored with this annotation.
 		delete(u.GetAnnotations(), velerov1api.MustIncludeAdditionalItemAnnotation)
 		obj = u
+
+		// If the BIA specifies that additional items must be included, we track any PVCs returned as additional items.
+		// This tracking is necessary because the FSB (File System Backup) evaluation for a Pod
+		// happens before its PVCs are processed. By tracking these explicitly included PVCs here,
+		// the FSB logic can correctly determine that the PVC will be backed up and therefore
+		// a PodVolumeBackup should be created.
+		// We track this unconditionally when mustInclude is true, because fine-grained backup filters
+		// might exclude a PVC even if it's globally included, but mustInclude overrides those filters.
+		if mustInclude && ib.backupRequest.MustIncludeAdditionalItemPVCs != nil {
+			for _, additionalItem := range additionalItemIdentifiers {
+				if additionalItem.GroupResource == kuberesource.PersistentVolumeClaims {
+					key := itemKey{
+						resource:  additionalItem.GroupResource.String(),
+						namespace: additionalItem.Namespace,
+						name:      additionalItem.Name,
+					}
+					ib.backupRequest.MustIncludeAdditionalItemPVCs.AddItem(key)
+				}
+			}
+		}
 
 		// If async plugin started async operation, add it to the ItemOperations list
 		// ignore during finalize phase
@@ -521,9 +590,9 @@ func (ib *itemBackupper) executeActions(
 // zoneLabel is the label that stores availability-zone info
 // on PVs
 const (
-	zoneLabelDeprecated = "failure-domain.beta.kubernetes.io/zone"
+	zoneLabelDeprecated = corev1api.LabelFailureDomainBetaZone
 	// this is reused for nodeAffinity requirements
-	zoneLabel = "topology.kubernetes.io/zone"
+	zoneLabel = corev1api.LabelTopologyZone
 
 	awsEbsCsiZoneKey = "topology.ebs.csi.aws.com/zone"
 	azureCsiZoneKey  = "topology.disk.csi.azure.com/zone"
@@ -554,7 +623,7 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	}
 
 	if !snapshotVolume {
-		ib.trackSkippedPV(
+		ib.trackSkippedVolume(
 			obj,
 			kuberesource.PersistentVolumes,
 			volumeSnapshotApproach,
@@ -600,7 +669,13 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 		} else if action != nil && action.Type == resourcepolicies.Skip {
 			log.Infof("skip snapshot of pv %s for the matched resource policies", pv.Name)
 			// at this point we are sure this object is PV therefore we'll call the tracker directly
-			ib.backupRequest.SkippedPVTracker.Track(pv.Name, volumeSnapshotApproach, "matched action is 'skip' in chosen resource policies")
+			pvcName := ""
+			pvcNamespace := ""
+			if pv.Spec.ClaimRef != nil {
+				pvcName = pv.Spec.ClaimRef.Name
+				pvcNamespace = pv.Spec.ClaimRef.Namespace
+			}
+			ib.backupRequest.SkippedVolumeTracker.Track(pv.Name, pvcName, pvcNamespace, volumeSnapshotApproach, "matched action is 'skip' in chosen resource policies")
 			return nil
 		}
 	}
@@ -655,7 +730,13 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	if volumeSnapshotter == nil {
 		// the PV may still has change to be snapshotted by CSI plugin's `PVCBackupItemAction` in PVC backup logic
 		log.Info("Persistent volume is not a supported volume type for Velero-native volumeSnapshotter snapshot, skipping.")
-		ib.backupRequest.SkippedPVTracker.Track(pv.Name, volumeSnapshotApproach, "no applicable volumesnapshotter found")
+		pvcName := ""
+		pvcNamespace := ""
+		if pv.Spec.ClaimRef != nil {
+			pvcName = pv.Spec.ClaimRef.Name
+			pvcNamespace = pv.Spec.ClaimRef.Namespace
+		}
+		ib.backupRequest.SkippedVolumeTracker.Track(pv.Name, pvcName, pvcNamespace, volumeSnapshotApproach, "no applicable volumesnapshotter found")
 		return nil
 	}
 
@@ -679,8 +760,14 @@ func (ib *itemBackupper) takePVSnapshot(obj runtime.Unstructured, log logrus.Fie
 	snapshot := volumeSnapshot(ib.backupRequest.Backup, pv.Name, volumeID, volumeType, pvFailureDomainZone, location, iops)
 
 	var errs []error
-	log.Info("Untrack the PV %s from the skipped volumes, because it's backed by Velero native snapshot.", pv.Name)
-	ib.backupRequest.SkippedPVTracker.Untrack(pv.Name)
+	log.Infof("Untrack the PV %s from the skipped volumes, because it's backed by Velero native snapshot.", pv.Name)
+	pvcName := ""
+	pvcNamespace := ""
+	if pv.Spec.ClaimRef != nil {
+		pvcName = pv.Spec.ClaimRef.Name
+		pvcNamespace = pv.Spec.ClaimRef.Namespace
+	}
+	ib.backupRequest.SkippedVolumeTracker.Untrack(pv.Name, pvcName, pvcNamespace)
 	snapshotID, err := volumeSnapshotter.CreateSnapshot(snapshot.Spec.ProviderVolumeID, snapshot.Spec.VolumeAZ, tags)
 	if err != nil {
 		errs = append(errs, errors.Wrap(err, "error taking snapshot of volume"))
@@ -717,37 +804,35 @@ func (ib *itemBackupper) getMatchAction(obj runtime.Unstructured, groupResource 
 	return nil, nil
 }
 
-// trackSkippedPV tracks the skipped PV based on the object and the given approach and reason
+// trackSkippedVolume tracks the skipped volume based on the object and the given approach and reason
 // this function will be called throughout the process of backup, it needs to handle any object
-func (ib *itemBackupper) trackSkippedPV(obj runtime.Unstructured, groupResource schema.GroupResource, approach string, reason string, log logrus.FieldLogger) {
-	if name, err := getPVName(obj, groupResource); len(name) > 0 && err == nil {
-		ib.backupRequest.SkippedPVTracker.Track(name, approach, reason)
+func (ib *itemBackupper) trackSkippedVolume(obj runtime.Unstructured, groupResource schema.GroupResource, approach string, reason string, log logrus.FieldLogger) {
+	pvName, pvcName, pvcNamespace, err := getVolumeTrackingInfo(obj, groupResource)
+	if err == nil && (len(pvName) > 0 || len(pvcName) > 0) {
+		ib.backupRequest.SkippedVolumeTracker.Track(pvName, pvcName, pvcNamespace, approach, reason)
 	} else if err != nil {
-		// Log at info level for tracking purposes. This is not an error because
-		// it's expected for some resources (e.g., PVCs in Pending or Lost phase)
-		// to not have a PV name. This occurs when volume policy skips unbound PVCs.
-		log.WithError(err).Infof("unable to get PV name, skip tracking.")
+		log.WithError(err).Info("unable to get volume tracking info, skip tracking.")
 	}
 }
 
-// unTrackSkippedPV removes skipped PV based on the object from the tracker
+// unTrackSkippedVolume removes skipped volume based on the object from the tracker
 // this function will be called throughout the process of backup, it needs to handle any object
-func (ib *itemBackupper) unTrackSkippedPV(obj runtime.Unstructured, groupResource schema.GroupResource, log logrus.FieldLogger) {
-	if name, err := getPVName(obj, groupResource); len(name) > 0 && err == nil {
-		ib.backupRequest.SkippedPVTracker.Untrack(name)
+func (ib *itemBackupper) unTrackSkippedVolume(obj runtime.Unstructured, groupResource schema.GroupResource, log logrus.FieldLogger) {
+	pvName, pvcName, pvcNamespace, err := getVolumeTrackingInfo(obj, groupResource)
+	if err == nil && (len(pvName) > 0 || len(pvcName) > 0) {
+		ib.backupRequest.SkippedVolumeTracker.Untrack(pvName, pvcName, pvcNamespace)
 	} else if err != nil {
-		// For PVCs in Pending or Lost phase, it's expected that there's no PV name.
-		// Log at debug level instead of warning to reduce noise.
 		if groupResource == kuberesource.PersistentVolumeClaims {
 			pvc := new(corev1api.PersistentVolumeClaim)
 			if convErr := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pvc); convErr == nil {
 				if pvc.Status.Phase == corev1api.ClaimPending || pvc.Status.Phase == corev1api.ClaimLost {
-					log.WithError(err).Debugf("unable to get PV name for %s PVC, skip untracking.", pvc.Status.Phase)
+					log.WithError(err).Debugf("unable to get volume tracking info for %s PVC, skip untracking.", pvc.Status.Phase)
 					return
 				}
 			}
 		}
-		log.WithError(err).Warnf("unable to get PV name, skip untracking.")
+
+		log.WithError(err).Warn("unable to get volume tracking info, skip untracking.")
 	}
 }
 
@@ -771,26 +856,29 @@ func (ib *itemBackupper) addVolumeInfo(obj runtime.Unstructured, log logrus.Fiel
 	return nil
 }
 
-// convert the input object to PV/PVC and get the PV name
-func getPVName(obj runtime.Unstructured, groupResource schema.GroupResource) (string, error) {
+// convert the input object to PV/PVC and get the PV name, PVC name and PVC namespace
+func getVolumeTrackingInfo(obj runtime.Unstructured, groupResource schema.GroupResource) (string, string, string, error) {
 	if groupResource == kuberesource.PersistentVolumes {
 		pv := new(corev1api.PersistentVolume)
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pv); err != nil {
-			return "", fmt.Errorf("failed to convert object to PV: %w", err)
+			return "", "", "", fmt.Errorf("failed to convert object to PV: %w", err)
 		}
-		return pv.Name, nil
+		pvcName := ""
+		pvcNamespace := ""
+		if pv.Spec.ClaimRef != nil {
+			pvcName = pv.Spec.ClaimRef.Name
+			pvcNamespace = pv.Spec.ClaimRef.Namespace
+		}
+		return pv.Name, pvcName, pvcNamespace, nil
 	}
 	if groupResource == kuberesource.PersistentVolumeClaims {
 		pvc := new(corev1api.PersistentVolumeClaim)
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pvc); err != nil {
-			return "", fmt.Errorf("failed to convert object to PVC: %w", err)
+			return "", "", "", fmt.Errorf("failed to convert object to PVC: %w", err)
 		}
-		if pvc.Spec.VolumeName == "" {
-			return "", fmt.Errorf("PV name is not set in PVC")
-		}
-		return pvc.Spec.VolumeName, nil
+		return pvc.Spec.VolumeName, pvc.Name, pvc.Namespace, nil
 	}
-	return "", nil
+	return "", "", "", nil
 }
 
 func volumeSnapshot(backup *velerov1api.Backup, volumeName, volumeID, volumeType, az, location string, iops *int64) *volume.Snapshot {

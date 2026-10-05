@@ -19,8 +19,8 @@ package csi
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -107,8 +107,7 @@ func (p *volumeSnapshotContentBackupItemAction) Execute(
 	}
 
 	p.log.Infof(
-		"Returning from VolumeSnapshotContentBackupItemAction",
-		"with %d additionalItems to backup",
+		"Returning from VolumeSnapshotContentBackupItemAction with %d additionalItems to backup",
 		len(additionalItems),
 	)
 	return &unstructured.Unstructured{Object: snapContMap}, additionalItems, "", nil, nil

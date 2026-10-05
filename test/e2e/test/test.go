@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	. "github.com/vmware-tanzu/velero/test"
@@ -179,10 +179,6 @@ func (t *TestCase) Start() error {
 		Skip("Skip due to issue https://github.com/kubernetes/kubernetes/issues/114384 on AKS")
 	}
 
-	if veleroCfg.UploaderType == UploaderTypeRestic &&
-		strings.Contains(t.GetTestCase().CaseBaseName, "ParallelFiles") {
-		Skip("Skip Parallel Files upload and download test cases for environments using Restic as uploader.")
-	}
 	return nil
 }
 

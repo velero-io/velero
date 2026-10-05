@@ -40,6 +40,16 @@ The users can specify the ConfigMap name during velero installation by CLI:
 - `annotations`: permits to set annotations on the backupPVC itself. typically useful for some CSI provider which cannot mount
   a VolumeSnapshot without a custom annotation.
 
+- `secretNames`: a list of secret names to copy from the source PVC's namespace to the Velero namespace before the backupPVC is
+  created, and delete after the DataUpload completes. This is needed for CSI drivers that require namespace-scoped secrets to
+  provision the volume, for example ODF/ceph-csi encrypted volumes that fetch a KMS token secret (`ceph-csi-kms-token`) from the
+  PVC's namespace. Without this, the backupPVC created in the Velero namespace fails to provision because the secret only exists
+  in the source namespace.
+
+- `configMapNames`: a list of configmap names to copy from the source PVC's namespace to the Velero namespace before the backupPVC
+  is created, and delete after the DataUpload completes. This is needed for CSI drivers that require namespace-scoped configmaps to
+  provision the volume, for example a tenant-specific ceph-csi KMS connection override configmap (`ceph-csi-kms-config`).
+
 A sample of `backupPVC` config as part of the ConfigMap would look like:
 ```json
 {
@@ -60,10 +70,20 @@ A sample of `backupPVC` config as part of the ConfigMap would look like:
         "storage-class-4": {
             "readOnly": true,
             "spcNoRelabeling": true
+        },
+        "ocs-storagecluster-ceph-rbd-encrypted": {
+            "secretNames": ["ceph-csi-kms-token"],
+            "configMapNames": ["ceph-csi-kms-config"]
         }
     }
 }
 ```
+
+**Note on encrypted volumes:** the copied secrets/configmaps are labeled `velero.io/backup-pvc-secret=<DataUpload UID>` and
+deleted when the DataUpload completes (or on failure). If concurrent DataUploads from different namespaces need a secret with the same
+name but different content in the Velero namespace, they conflict. For ceph-csi,
+this can be avoided by configuring a unique
+[`tenantTokenName` per tenant](https://github.com/ceph/ceph-csi/blob/devel/docs/design/proposals/encryption-with-vault-tokens.md#example-of-the-kms-configuration-file-for-vault-tokens).
 
 **Note:** 
 - Users should make sure that the storage class specified in `backupPVC` config should exist in the cluster and can be used by the

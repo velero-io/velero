@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: default-restore-resource-modifiers
+  namespace: velero
+data:
+  resource-modifiers.yaml: |
+    version: v1
+    resourceModifierRules:
+    - conditions:
+        groupResource: pods
+      mergePatches:
+      - patchData: |
+          metadata:
+            annotations:
+              k8s.ovn.org/pod-networks: null
+              k8s.v1.cni.cncf.io/network-status: null
+              k8s.v1.cni.cncf.io/networks-status: null

@@ -38,17 +38,37 @@
                                                               alt="Homepage"/></a>
             </div>
         </div>
+        {{/* CNCF affiliation block — required by CNCF Website Guidelines.
+             Change `sandbox project` -> `project` when Velero is promoted to
+             incubating or graduated. See
+             https://github.com/cncf/foundation/blob/main/policies-guidance/website-guidelines.md */}}
+        <div class="row align-items-center cncf-affiliation mt-4">
+            <div class="col text-center">
+                <p class="mb-2">
+                    We are a
+                    <a href="{{ .Site.Params.footer.cncf_link }}">Cloud Native Computing Foundation</a>
+                    {{ with .Site.Params.footer.cncf_status }}{{ . }} {{ end }}project.
+                </p>
+                <a href="{{ .Site.Params.footer.cncf_link }}" aria-label="Cloud Native Computing Foundation">
+                    <img src="/img/{{ .Site.Params.cncf_logo }}"
+                         alt="Cloud Native Computing Foundation logo"
+                         class="cncf-logo"
+                         style="max-height: 64px;"/>
+                </a>
+            </div>
+        </div>
+
         <div class="row align-items-center">
-            <div class="col copyright text-center text-md-right mt-4">
-                &copy; {{ now.Format "2006" }} {{ .Site.Params.Author }}.
-                <a href="{{ .Site.Params.footer.vm_link }}" class="vm-logo">A VMware-backed project. <img
-                            src="/img/{{ .Site.Params.vm_logo }}" alt="VMware logo"/></a>
-                <br/>This Website Does Not Use Cookies or Other Tracking Technology.  This site is powered by <a href="https://www.netlify.com">Netlify</a>.<br/><br/>
-                <span>
-                    <a target="_blank" rel="noopener" href='https://www.vmware.com/help/legal.html'>Terms of Use</a> |
-                    <a target="_blank" rel="noopener" href='https://www.vmware.com/help/privacy.html'>Privacy Policy</a> |
-                    <a target="_blank" rel="noopener" href='https://www.vmware.com/help/privacy/california-privacy-rights.html'>Your California Privacy Rights</a>
-                </span>
+            <div class="col copyright text-center mt-4">
+                <p class="mb-1">Copyright {{ .Site.Params.footer.copyright_holder }}.</p>
+                <p class="mb-0">
+                    For website terms of use, trademark policy and other project policies please see
+                    <a href="{{ .Site.Params.footer.lf_policies_link }}">{{ .Site.Params.footer.lf_policies_link }}</a>.
+                </p>
+                <p class="mt-2 small">
+                    This website does not use cookies or other tracking technology.
+                    This site is powered by <a href="https://www.netlify.com">Netlify</a>.
+                </p>
             </div>
         </div>
     </div>

@@ -61,6 +61,12 @@ func (d *DataDownloadBuilder) Phase(phase velerov2alpha1api.DataDownloadPhase) *
 	return d
 }
 
+// RestoreType sets the DataDownload's RestoreType.
+func (d *DataDownloadBuilder) RestoreType(restoreType string) *DataDownloadBuilder {
+	d.object.Spec.RestoreType = restoreType
+	return d
+}
+
 // SnapshotID sets the DataDownload's SnapshotID.
 func (d *DataDownloadBuilder) SnapshotID(id string) *DataDownloadBuilder {
 	d.object.Spec.SnapshotID = id
@@ -139,6 +145,24 @@ func (d *DataDownloadBuilder) CompletionTimestamp(completionTimestamp *metav1.Ti
 // Progress sets the DataDownload's Progress.
 func (d *DataDownloadBuilder) Progress(progress shared.DataMoveOperationProgress) *DataDownloadBuilder {
 	d.object.Status.Progress = progress
+	return d
+}
+
+// TotalBytes sets the DataDownload's TotalBytes.
+func (d *DataDownloadBuilder) TotalBytes(totalBytes int64) *DataDownloadBuilder {
+	d.object.Status.Progress.TotalBytes = totalBytes
+	return d
+}
+
+// IncrementalBytes sets the DataDownload's IncrementalBytes.
+func (d *DataDownloadBuilder) IncrementalBytes(incrementalBytes int64) *DataDownloadBuilder {
+	d.object.Status.IncrementalBytes = &incrementalBytes
+	return d
+}
+
+// FallbackFull sets the DataDownload's FallbackFull status.
+func (d *DataDownloadBuilder) FallbackFull(fallbackFull bool) *DataDownloadBuilder {
+	d.object.Status.FallbackFull = fallbackFull
 	return d
 }
 

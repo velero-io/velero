@@ -31,7 +31,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // getS3CredentialsFunc is used to make testing more convenient

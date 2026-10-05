@@ -1,0 +1,1 @@
+Fix backup-finalizer: do not set backup phase to Completed before PutBackupMetadata succeeds

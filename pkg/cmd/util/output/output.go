@@ -21,7 +21,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -247,4 +247,18 @@ func NewPrinter(cmd *cobra.Command) (printers.ResourcePrinter, error) {
 	printer := printers.NewTablePrinter(options)
 
 	return printer, nil
+}
+
+// formatTimestamp renders an optional timestamp for a table cell.
+//
+// Appending a nil *metav1.Time to a row prints "<nil>", which reaches the user
+// for any object that has not reached the phase that sets the field: a backup
+// that failed validation never gets a start time, and a restore that failed
+// validation gets neither a start nor a completion time. An unset timestamp
+// shows as "n/a" instead, matching humanReadableTimeFromNow in the same row.
+func formatTimestamp(t *metav1.Time) string {
+	if t == nil || t.IsZero() {
+		return "n/a"
+	}
+	return t.String()
 }

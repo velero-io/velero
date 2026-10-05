@@ -15,13 +15,14 @@ package podvolume
 
 import (
 	"context"
+	"crypto/fips140"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/bombsimon/logrusr/v3"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	corev1api "k8s.io/api/core/v1"
@@ -79,7 +80,10 @@ func NewRestoreCommand(f client.Factory) *cobra.Command {
 				kube.ExitPodWithMessage(logger, false, "Failed to create pod volume restore, %v", err)
 			}
 
-			s.run()
+			// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
+			fips140.WithoutEnforcement(func() {
+				s.run()
+			})
 		},
 	}
 

@@ -23,9 +23,9 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/fs/virtualfs"
-	"github.com/pkg/errors"
 )
 
 const ErrNotPermitted = "operation not permitted"

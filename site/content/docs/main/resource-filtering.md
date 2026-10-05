@@ -5,8 +5,8 @@ layout: docs
 
 *Filter objects by namespace, type, labels or resource policies.*
 
-This page describes how to filter resource for backup and restore.
-User could use the include and exclude flags with the `velero backup` and `velero restore` commands. And user could also use resource policies to handle backup.
+This page describes how to filter resources for backup and restore.
+Users can use include and exclude flags with the `velero backup` and `velero restore` commands. Users can also use resource policies for fine-grained resource filtering during backup and restore, as well as volume handling during backup.
 By default, Velero includes all objects in a backup or restore when no filtering options are used.
 
 ## Includes
@@ -32,7 +32,7 @@ Note: `*` alone is reserved for empty fields, which means all namespaces.
 * Restore two namespaces and their objects.
 
   ```bash
-  velero restore create <backup-name> --include-namespaces <namespace1>,<namespace2>
+  velero restore create --from-backup <backup-name> --include-namespaces <namespace1>,<namespace2>
   ```
 
 ### --include-resources
@@ -48,7 +48,7 @@ Kubernetes resources to include in the backup, formatted as resource.group, such
 * Restore all deployments and configmaps in the cluster.
 
   ```bash
-  velero restore create <backup-name> --include-resources deployments,configmaps
+  velero restore create --from-backup <backup-name> --include-resources deployments,configmaps
   ```
 
 * Backup the deployments in a namespace.
@@ -82,7 +82,7 @@ Includes cluster-scoped resources. Cannot work with `--include-cluster-scoped-re
 * Restore only namespaced resources in the cluster.
 
   ```bash
-  velero restore create <backup-name> --include-cluster-resources=false
+  velero restore create --from-backup <backup-name> --include-cluster-resources=false
   ```
 
 * Backup a namespace and include cluster-scoped resources.
@@ -102,6 +102,30 @@ Includes cluster-scoped resources. Cannot work with `--include-cluster-scoped-re
   ```bash
   velero backup create <backup-name> --selector "<key> notin (<value>)"
   ```
+
+The same selector syntax works on restore. Set-based selectors are useful for phased restores: restore labeled resources first, then everything else.
+
+* Restore only resources matching the label selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector <key>=<value>
+  ```
+
+* Restore everything in the backup except resources matching the selector.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector "<key> notin (<value>)"
+  ```
+
+  `notin` also matches resources that don't have the `<key>` label at all: this restores resources whose `<key>` label has any other value, as well as resources without the `<key>` label.
+
+* Restore only resources that do not have a particular label key.
+
+  ```bash
+  velero restore create --from-backup <backup-name> --selector '!<key>'
+  ```
+
+Note: resources pulled in as dependencies of selected items by restore item actions (for example, a restored pod's service account or persistent volume claims) are restored even if the label selector would exclude them.
 
 For more information read the [Kubernetes label selector documentation](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors)
 
@@ -175,7 +199,7 @@ See [Namespace Glob Patterns](namespace-glob-patterns.md) for more details on su
 * Exclude two namespaces during a restore.
 
   ```bash
-  velero restore create <backup-name> --exclude-namespaces <namespace1>,<namespace2>
+  velero restore create --from-backup <backup-name> --exclude-namespaces <namespace1>,<namespace2>
   ```
 
 ### --exclude-resources
@@ -229,99 +253,140 @@ Kubernetes namespace resources to exclude from the backup, formatted as resource
   ```
 
 ## Resource policies
-Velero provides resource policies to filter resources to do backup, which may contain `includeExcludePolicy` and `volumePolicies`.
 
-### Creating resource policies
+Velero provides resource policies (defined in a ConfigMap and referenced via `--resource-policies-configmap` or `spec.resourcePolicy`) to define fine-grained resource filters and volume handling rules.
 
-Below is the two-step of using resource policies in backup:
-1. Creating resource policies configmap
+Resource policies support both **Backup** and **Restore** operations, though certain policy sections are specific to backup workflows.
 
-   Users need to create one configmap in Velero install namespace from a YAML file that defined resource policies. The creating command would be like the below:
+### Supported policy sections by operation
+
+| Policy Section | Description | Supported Operations | Learn More |
+| --- | --- | --- | --- |
+| `namespacedFilterPolicies` | Fine-grained per-namespace and per-kind filters with label selectors and resource name patterns. | **Backup** & **Restore** | [Fine-Grained Backup Filters](fine-grained-backup-filters.md) / [Fine-Grained Restore Filters](fine-grained-restore-filters.md) |
+| `clusterScopedFilterPolicy` | Fine-grained cluster-scoped filter overlays with per-kind label selectors and resource name patterns. | **Backup** & **Restore** | [Fine-Grained Backup Filters](fine-grained-backup-filters.md) / [Fine-Grained Restore Filters](fine-grained-restore-filters.md) |
+| `volumePolicies` | Rules to control volume data backup methods (`skip`, `snapshot`, `fs-backup`) based on conditions. | **Backup** only | See [VolumePolicy](#volumepolicy-backup-only) |
+| `includeExcludePolicy` | Reusable scoped resource include/exclude filters. | **Backup** only | See [IncludeExcludePolicy](#includeexcludepolicy-backup-only) |
+| `includeExcludePolicy.includedNamespacesByLabel` / `excludedNamespacesByLabel` / `labelSelectorLogic` | Dynamically include/exclude whole namespaces by label selector; `labelSelectorLogic` picks OR (default, any entry matches) or AND (every entry must match) across multiple entries in the same list. | **Backup** only | See [Namespace selection by label](#namespace-selection-by-label-backup-only) |
+
+### Creating and referencing resource policies
+
+Using resource policies is a two-step process:
+
+1. **Create the resource policies ConfigMap**
+
+   Create a ConfigMap in the Velero installation namespace (typically `velero`) containing your YAML policy definition:
    ```bash
    kubectl create cm <configmap-name> --from-file <yaml-file> -n velero
    ```
-2. Creating a backup reference to the defined resource policies
 
-   Users create a backup with the flag `--resource-policies-configmap`, which will reference the current backup to the defined resource policies. The creating command would be like the below:
-   ```bash
-   velero backup create --resource-policies-configmap <configmap-name>
-   ```
-   This flag could also be combined with the other include and exclude filters above
+2. **Reference the resource policies ConfigMap in a Backup or Restore**
+
+   * **For Backup:** Reference the ConfigMap via CLI flag or in the Backup CR spec:
+     ```bash
+     velero backup create <backup-name> --resource-policies-configmap <configmap-name>
+     ```
+     Or in `Backup.spec`:
+     ```yaml
+     spec:
+       resourcePolicy:
+         kind: ConfigMap
+         name: <configmap-name>
+     ```
+
+   * **For Restore:** Reference the ConfigMap via CLI flag or in the Restore CR spec:
+     ```bash
+     velero restore create <restore-name> --from-backup <backup-name> --resource-policies-configmap <configmap-name>
+     ```
+     Or in `Restore.spec`:
+     ```yaml
+     spec:
+       resourcePolicy:
+         kind: ConfigMap
+         name: <configmap-name>
+     ```
+
+   These flags and fields can also be combined with standard include and exclude options.
 
 ### YAML template
-The policies YAML config file would look like this:
-- Yaml template:
-    ```yaml
-    # currently only supports v1 version
-    version: v1
-    # The filters in includeExcludePolicy work the same as the scoped resources filters in the Spec of a Backup 
-    # NOTE: similar to scoped filters in Backup Spec, the includeExcludePolicy does not work with --include-resources, --exclude-resources and --include-cluster-resources filters in Backup.
-    includeExcludePolicy:
-      includedClusterScopedResources:
-        - "crd"
-        - "pv"
-      excludedClusterScopedResources: []
-      includedNamespaceScopedResources:
-        - "pod"
-        - "service"
-        - "deployment"
-        - "pvc"
-      excludedNamespaceScopedResources:
-        - "configmap"
-        - "secret"
-    volumePolicies:
-    # each policy consists of a list of conditions and an action
-    # we could have lots of policies, but if the resource matched the first policy, the latter will be ignored
-    # each key in the object is one condition, and one policy will apply to resources that meet ALL conditions
-    # NOTE: capacity or storageClass is suited for [Persistent Volumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes), and pod [Volume](https://kubernetes.io/docs/concepts/storage/volumes) not support it.
-    - conditions:
-        # capacity condition matches the volumes whose capacity falls into the range
-        capacity: "10,100Gi"
-        # pv matches specific csi driver
-        csi:
-          driver: ebs.csi.aws.com
-        # pv matches one of the storage class list
-        storageClass:
-          - gp2
-          - standard
-        # pvc matches specific phase(s)
-        pvcPhase:
-          - Pending
-      action:
-        type: skip
-    - conditions:
-        capacity: "0,100Gi"
-        # nfs volume source with specific server and path (nfs could be empty or only config server or path)
-        nfs:
-          server: 192.168.200.90
-          path: /mnt/data
-      action:
-        type: skip
-    - conditions:
-        nfs:
-          server: 192.168.200.90
-      action:
-        type: fs-backup
-    - conditions:
-        # nfs could be empty which matches any nfs volume source
-        nfs: {}
-      action:
-        type: skip
-    - conditions:
-        # csi could be empty which matches any csi volume source
-        csi: {}
-      action:
-        type: snapshot
-    - conditions:
-        volumeTypes:
-          - emptyDir
-          - downwardAPI
-          - configmap
-          - cinder
-      action:
-        type: skip
-    ```
-### IncludeExcludePolicy
+
+The policies YAML config file showing all supported sections:
+
+```yaml
+# Currently supports v1 version
+version: v1
+
+# Fine-grained namespace-scoped filters (Supported for both Backup and Restore)
+namespacedFilterPolicies:
+  - namespace: "app-ns-*"
+    resourceFilters:
+      - kind: "deployment"
+        labelSelector:
+          matchLabels:
+            app: frontend
+        includedResourceNames:
+          - "web-*"
+      - kind: "secret"
+        excludedResourceNames:
+          - "sensitive-secret"
+
+# Fine-grained cluster-scoped filter overlay (Supported for both Backup and Restore)
+clusterScopedFilterPolicy:
+  resourceFilters:
+    - kind: "storageclass"
+      labelSelector:
+        matchLabels:
+          tier: gold
+
+# Volume handling policies (Supported for Backup ONLY)
+volumePolicies:
+  - conditions:
+      capacity: "10,100Gi"
+      csi:
+        driver: ebs.csi.aws.com
+      storageClass:
+        - gp2
+        - standard
+      pvcPhase:
+        - Pending
+      pvcVolumeMode: Block
+      pvcAccessModes:
+        - ReadWriteOnce
+    action:
+      type: skip
+  - conditions:
+      nfs: {}
+    action:
+      type: fs-backup
+
+# Legacy scoped resource include/exclude filters (Supported for Backup ONLY)
+# NOTE: Cannot be combined with --include-resources, --exclude-resources, or --include-cluster-resources in Backup.
+includeExcludePolicy:
+  includedClusterScopedResources:
+    - "crd"
+    - "pv"
+  excludedClusterScopedResources: []
+  includedNamespaceScopedResources:
+    - "pod"
+    - "service"
+    - "deployment"
+    - "pvc"
+  excludedNamespaceScopedResources:
+    - "configmap"
+    - "secret"
+```
+
+### Fine-grained backup and restore filters
+
+`namespacedFilterPolicies` and `clusterScopedFilterPolicy` allow defining per-namespace and per-kind rules with independent label selectors and resource name patterns.
+
+* **During Backup:** Controls which resources are backed up from matching namespaces or kinds.
+* **During Restore:** Controls which resources are restored from a backup archive without modifying the backup itself.
+
+For comprehensive guides, syntax details, and detailed examples, see:
+* [Fine-Grained Backup Filters](fine-grained-backup-filters.md)
+* [Fine-Grained Restore Filters](fine-grained-restore-filters.md)
+
+### IncludeExcludePolicy (Backup only)
 The `includeExcludePolicy` is used to filter resources based on the namespace-scoped and cluster-scoped resources. User can use it 
 to define a group of filters and reuse them across different backups.
 
@@ -360,7 +425,102 @@ velero backup create <backup-name> --resource-policies-configmap my-policy --inc
 The backup will include all resources in namespace `my-workload-ns`, including `configmap` and `event`, and all CRDs and
 `apiservices` in the cluster.
 
-### VolumePolicy
+### Namespace selection by label (Backup only)
+`includedNamespacesByLabel` and `excludedNamespacesByLabel` let you dynamically include or exclude entire namespaces from
+a backup based on Kubernetes label selectors applied to the namespace objects themselves, without enumerating namespace
+names in `BackupSpec` or a schedule. This is useful when namespaces are created and labeled dynamically and you don't want
+to update `--include-namespaces`/`--exclude-namespaces` (or a schedule) every time.
+
+Both fields live in `includeExcludePolicy`, alongside the resource-scoped filters above, and are lists of Kubernetes label
+selector strings (same syntax as `kubectl get ns -l <selector>`). A realistic policy commonly sets both together — include
+any namespace opted into a schedule by team, but always exclude confidential ones regardless of team:
+
+```yaml
+version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+    - "velero-backup-schedule=weekly"
+    - "team=platform"
+  excludedNamespacesByLabel:
+    - "confidential=true"
+```
+
+With the policy above, a namespace labeled `velero-backup-schedule=weekly` AND `confidential=true` is still excluded —
+`excludedNamespacesByLabel` always wins (see [Precedence](#precedence) below).
+
+By default, multiple entries within `includedNamespacesByLabel` (and, independently, within `excludedNamespacesByLabel`)
+are OR'd together: a namespace matching *any* entry in the list is included/excluded. Set `labelSelectorLogic: "AND"` to
+require a namespace to match *every* entry in the list instead:
+
+```yaml
+version: v1
+includeExcludePolicy:
+  labelSelectorLogic: "AND"
+  includedNamespacesByLabel:
+    - "tier=critical"
+    - "compliance=pci"
+```
+
+(A single selector string can already express AND via comma-separated requirements, e.g. `"tier=critical,compliance=pci"`
+— that's standard `labels.Parse` syntax and unrelated to `labelSelectorLogic`, which only controls how *separate list
+entries* combine.)
+
+#### Precedence
+
+- If `includedNamespacesByLabel` is configured and `BackupSpec.IncludedNamespaces` was left empty (the common case — a
+  schedule with no explicit namespace list), the namespaces resolved by label become the entire inclusion baseline
+  instead of "all namespaces." If the selector currently matches nothing, the backup selects nothing — it does not fall
+  back to "everything."
+- If `BackupSpec.IncludedNamespaces` is also set explicitly, the label-resolved namespaces are added to that list. An
+  explicit `--include-namespaces '*'` is treated the same way as any other explicit value here — it is **preserved**,
+  not narrowed down to just the label matches, since `*` already means "every namespace" regardless of what else is in
+  the list.
+- `excludedNamespacesByLabel` always subtracts from the effective set, the same way `--exclude-namespaces` does, whether
+  or not `includedNamespacesByLabel` is configured.
+- `BackupSpec.LabelSelector`/`--selector` is unaffected by any of this — it continues to filter individual resources, not
+  namespaces. A namespace selected via `includedNamespacesByLabel` gets its own `Namespace` object backed up even if that
+  namespace doesn't separately match `--selector`; resources inside it are still filtered by `--selector` as usual. This
+  matches how an explicitly-named `--include-namespaces` entry already behaves today.
+
+This union-vs-replacement distinction is subtle but matters in practice — the same `includedNamespacesByLabel` policy
+produces a different effective namespace set depending on what else is configured on the backup:
+
+| `BackupSpec.IncludedNamespaces` | `includedNamespacesByLabel` matches | Effective included namespaces |
+| --- | --- | --- |
+| *(empty)* | `team-a`, `team-b` | `team-a`, `team-b` (**replaces** the "all namespaces" default) |
+| `ops` | `team-a`, `team-b` | `ops`, `team-a`, `team-b` (**unions** with the explicit list) |
+| `*` (explicit) | `team-a`, `team-b` | `*` (**preserved as-is** — already "every namespace", not narrowed) |
+| *(empty)* | *(no matches yet)* | *(none)* — not "all namespaces" |
+
+Selectors are evaluated once, when the backup starts — a namespace labeled to match *after* that point isn't picked up
+until the next backup runs. The resolved names are written into the created Backup's own `spec.includedNamespaces` (and
+`spec.excludedNamespaces`), so `velero backup describe` and `kubectl get backup <name> -o yaml` show exactly which
+namespaces were actually selected. When a selector matches nothing, that field shows the internal `[-]*` pattern
+(`resourcepolicies.NoNamespaceMatchesPattern`) rather than an actual namespace name — a placeholder namespace glob
+guaranteed to match nothing, not a sign anything went wrong.
+
+#### Limitations
+
+- Not usable in a `RestoreSpec.ResourcePolicy` ConfigMap — like the rest of `includeExcludePolicy`, a ConfigMap containing
+  these fields is rejected for Restore.
+- Not honored in the global `--global-backup-volume-policies-configmap`; set these on a per-backup (or per-schedule) ResourcePolicy
+  ConfigMap referenced via `--resource-policies-configmap` / `BackupSpec.ResourcePolicy`.
+- An empty (or whitespace-only) selector string is rejected at validation time rather than silently matching every
+  namespace.
+- `labelSelectorLogic` applies the same OR/AND choice to both `includedNamespacesByLabel` and
+  `excludedNamespacesByLabel` when both are set — there's no way to set AND for one and OR for the other. Setting
+  `"AND"` to narrow which namespaces are included also requires *every* `excludedNamespacesByLabel` entry to match
+  before a namespace is excluded, which excludes fewer namespaces than the OR default. If you rely on
+  `excludedNamespacesByLabel` as a safety net, keep it to a single selector entry (comma-separated requirements
+  within that one entry already express AND, independent of `labelSelectorLogic`) so its behavior doesn't change
+  based on how `includedNamespacesByLabel` is tuned.
+- Narrowing `BackupSpec.IncludedNamespaces` from "all namespaces" down to a resolved subset — whether via
+  `includedNamespacesByLabel` or a plain explicit namespace list — also stops cluster-scoped resources (CRDs,
+  ClusterRoles, StorageClasses, etc.) from being backed up by default, per Velero's existing
+  `IncludeClusterResources` auto-detection (unset means "only include cluster-scoped resources on a full,
+  all-namespaces backup"). Set `includeClusterResources: true` on the backup explicitly if you still want them.
+
+### VolumePolicy (Backup only)
 VolumePolicy is a data structure to control how velero handle the volumes matching certain conditions.
 
 #### Supported VolumePolicy actions
@@ -380,6 +540,8 @@ Currently, Velero supports the volume attributes listed below:
 - storageClass: matching volumes those with specified `storageClass`, such as `gp2`, `ebs-sc` in eks
 - volume sources: matching volumes that used specified volume sources. Currently we support nfs or csi backend volume source
 - pvcPhase: matching volumes based on the phase of their associated PVCs (Pending, Bound, Lost)
+- pvcVolumeMode: matching volumes based on the volume mode of their associated PVCs (Filesystem, Block)
+- pvcAccessModes: matching volumes based on the access modes of their associated PVCs (ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod). All configured access modes must be present on the PVC.
 
 Velero supported conditions and format listed below:
 - capacity
@@ -521,6 +683,72 @@ Velero supported conditions and format listed below:
           type: skip
       ```
 
+- pvc VolumeMode
+
+  This condition filters PVC-backed volumes based on the volume mode of their associated PVCs. The condition is specified as a single volume mode to match. The volume matches this condition if the PVC's volume mode exactly matches the configured value. Matching is case-sensitive, so `block` does not match `Block`. Supported volume modes are: `Filesystem` and `Block`. If `pvcVolumeMode` is omitted from a policy, volume mode is not restricted. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcVolumeMode: Block
+    ```
+
+    Some examples:
+  - Skip Block PVCs: Skip backup of volumes whose associated PVC uses `Block` volume mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+        action:
+          type: skip
+      ```
+  - Combine with other conditions: You can combine PVC volume mode conditions with other conditions like PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcVolumeMode: Block
+          pvcPhase:
+            - Bound
+        action:
+          type: snapshot
+      ```
+
+- pvc AccessModes
+
+  This condition filters PVC-backed volumes based on the access modes of their associated PVCs. The condition is specified as a list of access modes to match. The volume matches this condition only if the PVC has all of the access modes in the list. Matching is case-sensitive, so `readwriteonce` does not match `ReadWriteOnce`. Supported access modes are: `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, and `ReadWriteOncePod`. Non-PVC volumes, such as `emptyDir`, `configMap`, or inline volumes without an associated PVC, do not match policies that require this condition.
+    ```yaml
+    pvcAccessModes:
+      - ReadWriteOnce
+    ```
+
+    Some examples:
+  - Skip ReadWriteOnce PVCs: Skip backup of volumes whose associated PVC includes the `ReadWriteOnce` access mode.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+        action:
+          type: skip
+      ```
+  - Match multiple access modes: Apply an action to volumes whose associated PVC includes both `ReadOnlyMany` and `ReadWriteMany`.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadOnlyMany
+            - ReadWriteMany
+        action:
+          type: snapshot
+      ```
+  - Combine with other conditions: You can combine PVC access mode conditions with other conditions like PVC volume mode, PVC phase, storage class, or labels.
+      ```yaml
+      volumePolicies:
+      - conditions:
+          pvcAccessModes:
+            - ReadWriteOnce
+          pvcVolumeMode: Block
+        action:
+          type: snapshot
+      ```
+
 
 
 ### Resource policies rules
@@ -544,6 +772,7 @@ a volume policy but for a particular volume included in the backup there are no 
 in such a scenario the legacy approach will be used for backing up the particular volume. Considering everything, the recommendation would be to use only one
 of the approaches to backup volumes - volume policy approach or the opt-in/opt-out legacy approach, and not mix them for clarity.
 - Snapshot action can either be a native snapshot or a csi snapshot or csi snapshot datamover, as is the case with the current flow where velero itself makes the decision based on the backup CR's existing options.
+- The `snapshot` action supports an optional `snapshotClass` parameter that specifies which VolumeSnapshotClass to use for CSI snapshots. This is useful when multiple storage arrays share the same CSI driver but require different VolumeSnapshotClasses. When specified, this takes priority over backup annotations and VolumeSnapshotClass labels, but is overridden by PVC-level annotations. See the [CSI documentation](csi.md) for the full VolumeSnapshotClass selection priority order.
 - The `snapshot` action via Volume Policy has higher priority if there is a `snapshot` action matching for a particular volume, this volume would be backed up via snapshot irrespective of the value of `backup.Spec.SnapshotVolumes`.
 - If for a particular volume there is no `snapshot` matching action then the volume will be backed up via snapshot given that `backup.Spec.SnapshotVolumes` is not explicitly set to false.
 - Let's see some examples on how to use the volume policy feature for `fs-backup` and `snapshot` action purposes:
@@ -631,3 +860,108 @@ volumePolicies:
 3. The outcome would be that velero would perform `fs-backup` operation on both the volumes
    - `fs-backup` on `Volume 1` because `Volume 1` satisfies the criteria for `fs-backup` action. 
    - Also, for Volume 2 as no matching action was found so legacy approach will be used as a fallback option for this volume (`fs-backup` operation will be done as `defaultVolumesToFSBackup: true` is specified by the user).
+
+***Example 6: User has two storage arrays using the same CSI driver and needs different VolumeSnapshotClasses for each***
+1. User specifies the volume policy as follows:
+```yaml
+version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - array-1-sc
+  action:
+    type: snapshot
+    parameters:
+      snapshotClass: vsc-array-1
+- conditions:
+    storageClass:
+    - array-2-sc
+  action:
+    type: snapshot
+    parameters:
+      snapshotClass: vsc-array-2
+```
+2. User creates a backup using this volume policy
+3. The outcome would be that velero would use `vsc-array-1` VolumeSnapshotClass for volumes on storage class `array-1-sc` and `vsc-array-2` VolumeSnapshotClass for volumes on storage class `array-2-sc`, even though both storage classes use the same CSI driver.
+
+### Global backup volume policies
+
+Resource policies (volume policies) are normally opt-in per backup via `--resource-policies-configmap`. An administrator can instead configure a cluster-wide baseline that applies to **every** backup by starting the Velero server with the `--global-backup-volume-policies-configmap` flag, pointing at a ConfigMap in the Velero install namespace:
+
+```bash
+velero server --global-backup-volume-policies-configmap global-volume-policy
+```
+
+The ConfigMap uses the exact same format as a per-backup resource policies ConfigMap (a single data key holding a `ResourcePolicies` YAML document):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: global-volume-policy
+  namespace: velero
+data:
+  policies.yaml: |
+    version: v1
+    volumePolicies:
+      - conditions:
+          storageClass:
+            - gp2
+        action:
+          type: skip
+```
+
+#### Behavior
+
+- **Only `volumePolicies` apply globally.** If the global ConfigMap contains `includeExcludePolicy`, `clusterScopedFilterPolicy`, or `namespacedFilterPolicies`, those sections are ignored and a warning is logged. Those filters are tied to a specific backup use case, so they remain per-backup only.
+- **Merge semantics.** When a backup runs, the effective `volumePolicies` list is the backup-level policies followed by the global policies:
+
+  ```
+  merged.volumePolicies = backup.volumePolicies ++ global.volumePolicies
+  ```
+
+  Because the first matching policy wins, a backup can override the global baseline for a specific volume while still inheriting every global rule it does not override. If a backup references no resource policy, the global policy applies on its own.
+- **Validation.** The global ConfigMap is validated at server startup (the server fails to start if it is missing or invalid) and again on each backup (a backup whose global policy has become missing or invalid is moved to the `FailedValidation` phase).
+
+#### Example
+
+Global policy (`--global-backup-volume-policies-configmap=global-volume-policy`): skip `gp2` volumes.
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+```
+
+Backup-level policy (`--resource-policies-configmap backup01`): `fs-backup` NFS volumes.
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      nfs: {}
+    action:
+      type: fs-backup
+```
+
+Effective (merged) policy used for the backup — backup rules first, then global:
+
+```yaml
+version: v1
+volumePolicies:
+  - conditions:
+      nfs: {}
+    action:
+      type: fs-backup
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: skip
+```
+
+When a global policy contributes to a backup, `velero backup describe` surfaces the contributing ConfigMap under a `Global volume policies` section.

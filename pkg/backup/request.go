@@ -19,6 +19,9 @@ package backup
 import (
 	"sync"
 
+	"github.com/gobwas/glob"
+	"k8s.io/apimachinery/pkg/labels"
+
 	"github.com/vmware-tanzu/velero/internal/hook"
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -32,6 +35,21 @@ type itemKey struct {
 	resource  string
 	namespace string
 	name      string
+}
+
+// ResolvedResourceFilter holds the materialized filter state for one kind-group
+// within a namespace.
+type ResolvedResourceFilter struct {
+	LabelSelector    labels.Selector
+	OrLabelSelectors []labels.Selector
+	NameIE           *collections.IncludesExcludes
+}
+
+// ResolvedNamespaceFilter holds the materialized filter state for a namespace.
+// ResourceFilterMap is keyed by the resolved group-resource string.
+type ResolvedNamespaceFilter struct {
+	ResourceFilterMap map[string]*ResolvedResourceFilter
+	CatchAllFilter    *ResolvedResourceFilter
 }
 
 type SynchronizedVSList struct {
@@ -65,11 +83,41 @@ type Request struct {
 	VolumeSnapshots           SynchronizedVSList
 	PodVolumeBackups          []*velerov1api.PodVolumeBackup
 	BackedUpItems             *backedUpItemsMap
-	itemOperationsList        *[]*itemoperation.BackupOperation
-	ResPolicies               *resourcepolicies.Policies
-	SkippedPVTracker          *skipPVTracker
-	VolumesInformation        volume.BackupVolumesInformation
-	WorkerPool                *ItemBlockWorkerPool
+	// MustIncludeAdditionalItemPVCs keeps track of PVCs that are returned as additionalItems
+	// by a BackupItemAction plugin with the must-include annotation. This is specifically
+	// used to ensure PodVolumeBackups (FSB) are created for these PVCs even when PVCs are
+	// excluded by global or fine-grained backup resource filters.
+	MustIncludeAdditionalItemPVCs *backedUpItemsMap
+	itemOperationsList            *[]*itemoperation.BackupOperation
+	ResPolicies                   *resourcepolicies.Policies
+	SkippedVolumeTracker          *skipVolumeTracker
+	VolumesInformation            volume.BackupVolumesInformation
+	WorkerPool                    *ItemBlockWorkerPool
+
+	// ClusterScopedFilterMap holds resolved global filters for cluster-scoped resources.
+	// Key is the resolved group-resource string.
+	ClusterScopedFilterMap map[string]*ResolvedResourceFilter
+
+	// NamespacedFilterMap holds resolved per-namespace filters.
+	// Key is either an exact namespace name or a glob pattern.
+	NamespacedFilterMap map[string]*ResolvedNamespaceFilter
+
+	// NamespacedFilterPatterns preserves the order of patterns for first-match semantics
+	// and caches pre-compiled globs to avoid repeated compilation in the hot path.
+	NamespacedFilterPatterns []NamespacedFilterPattern
+
+	// NamespaceFilterCache memoizes the resolved filter for a given namespace.
+	// sync.Map is used because item backuppers access this concurrently.
+	NamespaceFilterCache sync.Map
+}
+
+// NamespacedFilterPattern pairs a namespace pattern string with its pre-compiled
+// glob so that GetNamespaceFilter does not recompile on every call.
+// Compiled is nil for exact-match (non-glob) patterns, which are looked up
+// directly in NamespacedFilterMap.
+type NamespacedFilterPattern struct {
+	Pattern  string
+	Compiled glob.Glob
 }
 
 // BackupVolumesInformation contains the information needs by generating
@@ -91,13 +139,18 @@ func (r *Request) BackupResourceList() map[string][]string {
 }
 
 func (r *Request) FillVolumesInformation() {
-	skippedPVMap := make(map[string]string)
+	var skippedVolumes []volume.SkippedVolume
 
-	for _, skippedPV := range r.SkippedPVTracker.Summary() {
-		skippedPVMap[skippedPV.Name] = skippedPV.SerializeSkipReasons()
+	for _, skippedVolume := range r.SkippedVolumeTracker.Summary() {
+		skippedVolumes = append(skippedVolumes, volume.SkippedVolume{
+			PVName:       skippedVolume.PVName,
+			PVCName:      skippedVolume.PVCName,
+			PVCNamespace: skippedVolume.PVCNamespace,
+			Reasons:      skippedVolume.SerializeSkipReasons(),
+		})
 	}
 
-	r.VolumesInformation.SkippedPVs = skippedPVMap
+	r.VolumesInformation.SkippedVolumes = skippedVolumes
 	r.VolumesInformation.NativeSnapshots = r.VolumeSnapshots.Get()
 	r.VolumesInformation.PodVolumeBackups = r.PodVolumeBackups
 	r.VolumesInformation.BackupOperations = *r.GetItemOperationsList()
@@ -106,4 +159,41 @@ func (r *Request) FillVolumesInformation() {
 
 func (r *Request) StopWorkerPool() {
 	r.WorkerPool.Stop()
+}
+
+// GetNamespaceFilter returns the resolved filter for a namespace, or nil
+// if the namespace should use global filters. Uses first-match semantics
+// when multiple patterns could match the same namespace, but exact matches
+// always take precedence over glob patterns regardless of definition order.
+func (r *Request) GetNamespaceFilter(namespace string) *ResolvedNamespaceFilter {
+	if r.NamespacedFilterMap == nil {
+		return nil
+	}
+
+	// 1. Check the concurrent cache first
+	if val, ok := r.NamespaceFilterCache.Load(namespace); ok {
+		if val == nil {
+			return nil
+		}
+		return val.(*ResolvedNamespaceFilter)
+	}
+
+	// 2. Check for exact match first
+	if f, ok := r.NamespacedFilterMap[namespace]; ok {
+		r.NamespaceFilterCache.Store(namespace, f)
+		return f
+	}
+
+	// 3. Walk patterns in definition order using pre-compiled globs
+	for _, p := range r.NamespacedFilterPatterns {
+		if p.Compiled != nil && p.Compiled.Match(namespace) {
+			filter := r.NamespacedFilterMap[p.Pattern]
+			r.NamespaceFilterCache.Store(namespace, filter)
+			return filter
+		}
+	}
+
+	// 4. Cache the miss
+	r.NamespaceFilterCache.Store(namespace, nil)
+	return nil
 }

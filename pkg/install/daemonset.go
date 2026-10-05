@@ -18,7 +18,7 @@ package install
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	appsv1api "k8s.io/api/apps/v1"
@@ -68,8 +68,8 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 	if c.forWindows {
 		dsName = "node-agent-windows"
 	}
-	hostPodsVolumePath := filepath.Join(c.kubeletRootDir, "pods")
-	hostPluginsVolumePath := filepath.Join(c.kubeletRootDir, "plugins")
+	hostPodsVolumePath := path.Join(strings.ReplaceAll(c.kubeletRootDir, "\\", "/"), "pods")
+	hostPluginsVolumePath := path.Join(strings.ReplaceAll(c.kubeletRootDir, "\\", "/"), "plugins")
 	volumes := []corev1api.Volume{}
 	volumeMounts := []corev1api.VolumeMount{}
 	if !c.nodeAgentDisableHostPath {
@@ -247,7 +247,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{"windows"},
 									Operator: corev1api.NodeSelectorOpIn,
 								},
@@ -280,7 +280,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 						{
 							MatchExpressions: []corev1api.NodeSelectorRequirement{
 								{
-									Key:      "kubernetes.io/os",
+									Key:      corev1api.LabelOSStable,
 									Values:   []string{"windows"},
 									Operator: corev1api.NodeSelectorOpNotIn,
 								},

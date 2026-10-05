@@ -21,7 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
+	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
+	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -54,7 +56,6 @@ var (
 	ErrDaemonSetNotFound           = errors.New("daemonset not found")
 	ErrNodeAgentLabelNotFound      = errors.New("node-agent label not found")
 	ErrNodeAgentAnnotationNotFound = errors.New("node-agent annotation not found")
-	ErrNodeAgentTolerationNotFound = errors.New("node-agent toleration not found")
 )
 
 func IsRunningOnLinux(ctx context.Context, kubeClient kubernetes.Interface, namespace string) error {
@@ -78,6 +79,44 @@ func isRunning(ctx context.Context, kubeClient kubernetes.Interface, namespace s
 // KbClientIsRunningInNode checks if the node agent pod is running properly in a specified node through kube client. If not, return the error found
 func KbClientIsRunningInNode(ctx context.Context, namespace string, nodeName string, kubeClient kubernetes.Interface) error {
 	return isRunningInNode(ctx, namespace, nodeName, nil, kubeClient)
+}
+
+// IsReady checks whether the node-agent daemonset has at least one ready pod
+// by inspecting the DaemonSet status. Both the linux and windows daemonsets
+// are checked before returning any non-NotFound lookup error, so that a
+// transient error fetching one daemonset does not mask the other daemonset
+// being ready.
+func IsReady(ctx context.Context, namespace string, crClient ctrlclient.Client) error {
+	dsLinux := new(appsv1api.DaemonSet)
+	var lookupErr error
+	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonSet}, dsLinux); err != nil {
+		dsLinux = nil
+		if !apierrors.IsNotFound(err) {
+			lookupErr = errors.Wrap(err, "failed to get linux node-agent daemonset")
+		}
+	}
+
+	dsWindows := new(appsv1api.DaemonSet)
+	if err := crClient.Get(ctx, ctrlclient.ObjectKey{Namespace: namespace, Name: daemonsetWindows}, dsWindows); err != nil {
+		dsWindows = nil
+		if !apierrors.IsNotFound(err) {
+			lookupErr = errors.CombineErrors(lookupErr, errors.Wrap(err, "failed to get windows node-agent daemonset"))
+		}
+	}
+
+	if dsLinux != nil && dsLinux.Status.NumberReady > 0 {
+		return nil
+	}
+
+	if dsWindows != nil && dsWindows.Status.NumberReady > 0 {
+		return nil
+	}
+
+	if lookupErr != nil {
+		return lookupErr
+	}
+
+	return errors.New("node-agent is not ready: no ready pods found")
 }
 
 // IsRunningInNode checks if the node agent pod is running properly in a specified node through controller client. If not, return the error found
@@ -210,7 +249,14 @@ func GetAnnotationValue(ctx context.Context, kubeClient kubernetes.Interface, na
 	return val, nil
 }
 
-func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespace string, key string, osType string) (*corev1api.Toleration, error) {
+// GetTolerations returns the tolerations that should be applied to a node-agent-driven
+// hosting pod: the explicitly configured tolerations (typically sourced from the
+// node-agent-configmap), plus any toleration on the node-agent daemonset (linux or
+// windows, based on osType) whose key is in util.ThirdPartyTolerations. The combined
+// list is deduplicated by kube.DeduplicateTolerations. On a daemonset lookup error,
+// configuredTolerations is still returned alongside the error so callers don't lose
+// explicitly configured tolerations to a transient lookup failure.
+func GetTolerations(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string, configuredTolerations []corev1api.Toleration) ([]corev1api.Toleration, error) {
 	dsName := daemonSet
 	if osType == kube.NodeOSWindows {
 		dsName = daemonsetWindows
@@ -218,16 +264,28 @@ func GetToleration(ctx context.Context, kubeClient kubernetes.Interface, namespa
 
 	ds, err := kubeClient.AppsV1().DaemonSets(namespace).Get(ctx, dsName, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting %s daemonset", dsName)
+		return configuredTolerations, errors.Wrapf(err, "error getting %s daemonset", dsName)
 	}
 
-	for i, t := range ds.Spec.Template.Spec.Tolerations {
-		if t.Key == key {
-			return &ds.Spec.Template.Spec.Tolerations[i], nil
+	// configuredTolerations is appended first so it wins: DeduplicateTolerations
+	// keeps only the first occurrence of each exact (Key, Operator, Value,
+	// Effect) combination, so an allowlisted daemonset toleration identical to
+	// one already set in the configmap is dropped as a duplicate rather than
+	// overriding it. A daemonset toleration that only shares a Key (but
+	// differs in Operator/Value/Effect) isn't a duplicate and is kept
+	// alongside the configured one, not replaced by it.
+	merged := make([]corev1api.Toleration, 0, len(configuredTolerations)+len(ds.Spec.Template.Spec.Tolerations))
+	merged = append(merged, configuredTolerations...)
+	for _, t := range ds.Spec.Template.Spec.Tolerations {
+		for _, allowed := range util.ThirdPartyTolerations {
+			if t.Key == allowed {
+				merged = append(merged, t)
+				break
+			}
 		}
 	}
 
-	return nil, ErrNodeAgentTolerationNotFound
+	return kube.DeduplicateTolerations(merged), nil
 }
 
 func GetHostPodPath(ctx context.Context, kubeClient kubernetes.Interface, namespace string, osType string) (string, error) {

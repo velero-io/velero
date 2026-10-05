@@ -21,7 +21,7 @@ files in this directory are gitignored so you may configure your setup according
 1. [Docker](https://docs.docker.com/install/) v19.03 or newer
 1. A Kubernetes cluster v1.12 or greater (does not have to be Kind)
 1. [Tilt](https://docs.tilt.dev/install.html) v0.12.0 or newer
-1. Clone the [Velero project](https://github.com/vmware-tanzu/velero) repository
+1. Clone the [Velero project](https://github.com/velero-io/velero) repository
    locally
 1. Access to an S3 object storage
 1. Clone any [provider plugin(s)](https://velero.io/plugins/) you want to make changes to and deploy (optional, must be configured to be deployed by the Velero Tilt's setup, [more info below](#provider-plugins))
@@ -115,7 +115,7 @@ Below are some ways to configure a backup storage location for Velero.
 Follow the provider documentation to provision the storage. We have a [list of all known object storage providers](supported-providers/) with corresponding plugins for Velero.
 
 #### Using MinIO as an object storage
-Note: to use MinIO as an object storage, you will need to use the [`AWS` plugin](https://github.com/vmware-tanzu/velero-plugin-for-aws), and configure the storage location with the `spec.provider` set to `aws` and the `spec.config.region` set to `minio`. Example:
+Note: to use MinIO as an object storage, you will need to use the [`AWS` plugin](https://github.com/velero-io/velero-plugin-for-aws), and configure the storage location with the `spec.provider` set to `aws` and the `spec.config.region` set to `minio`. Example:
 ```
 spec:
   config:
@@ -141,7 +141,7 @@ necessary to expose MinIO outside the cluster.
 
 1) As a standalone MinIO instance running locally in a Docker container
 
-    See [these instructions](https://github.com/vmware-tanzu/velero/discussions/3381) to run MinIO locally on your computer, as a standalone as opposed to running it on a Pod.
+    See [these instructions](https://github.com/velero-io/velero/discussions/3381) to run MinIO locally on your computer, as a standalone as opposed to running it on a Pod.
 
 Please see our [locations documentation](locations/) to learn more how backup locations work.
 

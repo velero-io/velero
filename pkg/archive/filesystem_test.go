@@ -27,29 +27,102 @@ import (
 )
 
 func TestGetItemFilePath(t *testing.T) {
-	res := GetItemFilePath("root", "resource", "", "item")
+	res, err := GetItemFilePath("root", "resource", "", "item")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/cluster/item.json", res)
 
-	res = GetItemFilePath("root", "resource", "namespace", "item")
+	res, err = GetItemFilePath("root", "resource", "namespace", "item")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/namespaces/namespace/item.json", res)
 
-	res = GetItemFilePath("", "resource", "", "item")
+	res, err = GetItemFilePath("", "resource", "", "item")
+	require.NoError(t, err)
 	assert.Equal(t, "resources/resource/cluster/item.json", res)
 
-	res = GetVersionedItemFilePath("root", "resource", "", "item", "")
+	res, err = GetVersionedItemFilePath("root", "resource", "", "item", "")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/cluster/item.json", res)
 
-	res = GetVersionedItemFilePath("root", "resource", "namespace", "item", "")
+	res, err = GetVersionedItemFilePath("root", "resource", "namespace", "item", "")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/namespaces/namespace/item.json", res)
 
-	res = GetVersionedItemFilePath("root", "resource", "namespace", "item", "v1")
+	res, err = GetVersionedItemFilePath("root", "resource", "namespace", "item", "v1")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/v1/namespaces/namespace/item.json", res)
 
-	res = GetVersionedItemFilePath("root", "resource", "", "item", "v1")
+	res, err = GetVersionedItemFilePath("root", "resource", "", "item", "v1")
+	require.NoError(t, err)
 	assert.Equal(t, "root/resources/resource/v1/cluster/item.json", res)
 
-	res = GetVersionedItemFilePath("", "resource", "", "item", "")
+	res, err = GetVersionedItemFilePath("", "resource", "", "item", "")
+	require.NoError(t, err)
 	assert.Equal(t, "resources/resource/cluster/item.json", res)
+}
+
+// TestGetItemFilePathRejectsPathTraversal verifies that a name or namespace containing
+// ".." cannot address a file outside the extracted backup directory. These components can
+// come from backup contents, for example the additional items a RestoreItemAction builds
+// from annotations on a backed up object.
+func TestGetItemFilePathRejectsPathTraversal(t *testing.T) {
+	tests := []struct {
+		name          string
+		rootDir       string
+		groupResource string
+		namespace     string
+		itemName      string
+	}{
+		{
+			name:          "traversal in name escapes root",
+			rootDir:       "/tmp/restore-dir",
+			groupResource: "secrets",
+			namespace:     "x",
+			itemName:      "../../../../../../root/.docker/config",
+		},
+		{
+			name:          "traversal in namespace escapes root",
+			rootDir:       "/tmp/restore-dir",
+			groupResource: "secrets",
+			namespace:     "../../../../../../etc",
+			itemName:      "passwd",
+		},
+		{
+			name:          "traversal in group resource escapes root",
+			rootDir:       "/tmp/restore-dir",
+			groupResource: "../../../../../../etc",
+			namespace:     "",
+			itemName:      "passwd",
+		},
+		{
+			name:          "traversal escapes archive-relative root",
+			rootDir:       "",
+			groupResource: "secrets",
+			namespace:     "x",
+			itemName:      "../../../../../../escape",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := GetItemFilePath(tc.rootDir, tc.groupResource, tc.namespace, tc.itemName)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "escapes the backup directory")
+			assert.Empty(t, res)
+
+			res, err = GetVersionedItemFilePath(tc.rootDir, tc.groupResource, tc.namespace, tc.itemName, "v1")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "escapes the backup directory")
+			assert.Empty(t, res)
+		})
+	}
+}
+
+// TestGetItemFilePathAllowsInnerDotDot verifies the containment check does not reject a
+// path whose ".." segments resolve back inside the root directory.
+func TestGetItemFilePathAllowsInnerDotDot(t *testing.T) {
+	res, err := GetItemFilePath("root", "resource", "namespaces/..", "item")
+	require.NoError(t, err)
+	assert.Equal(t, "root/resources/resource/namespaces/item.json", res)
 }
 
 func TestGetScopeDir(t *testing.T) {

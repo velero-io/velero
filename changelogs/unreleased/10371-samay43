@@ -1,0 +1,1 @@
+prevent panic when the restore hook init container command annotation is empty

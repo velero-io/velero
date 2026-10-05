@@ -1,0 +1,1 @@
+Replace generated `config/crd/{v1,v2alpha1}/crds/crds.go` with `go:embed` of the CRD YAML bases, removing the codegen step and its CI drift check

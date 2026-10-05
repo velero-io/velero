@@ -1,18 +1,32 @@
-on: 
+name: Automatic Rebase
+
+on:
   issue_comment:
     types: [created]
-name: Automatic Rebase
+
+permissions: {}
+
 jobs:
   rebase:
     name: Rebase
-    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/rebase')
+    if: >-
+      github.repository == 'velero-io/velero' &&
+      github.event.issue.pull_request != null &&
+      github.event.comment.body == '/rebase' &&
+      contains(
+        fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+        github.event.comment.author_association
+      )
     runs-on: ubuntu-latest
+    permissions:
+      # contents: write is required because updating the pull request branch
+      # pushes commits to the head branch.
+      contents: write
+      pull-requests: write
     steps:
-    - name: Checkout the latest code
-      uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-    - name: Automatic Rebase
-      uses: cirrus-actions/rebase@1.8
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rebase pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: gh pr update-branch "$PR_NUMBER" --repo "$GH_REPO" --rebase

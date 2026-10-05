@@ -1,0 +1,1 @@
+Fix a potential deadlock when resultsLock is held by the informer but blocked on resChan because the early quit of RestorePodVolumes

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -194,7 +194,7 @@ func deleteNodePorts(service *corev1api.Service) error {
 							// unnamed port
 							unnamedPortInts.Insert(nodePortInt)
 						} else {
-							explicitNodePorts.Insert(portName.(string))
+							explicitNodePorts.Insert(fmt.Sprint(portName))
 						}
 					}
 				}

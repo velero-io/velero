@@ -1,0 +1,1 @@
+Add totalSize to repo snapshot operation; and pin unified repo snapshots to Kopia repository and so pin them with Velero backup lifecycle

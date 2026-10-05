@@ -122,7 +122,29 @@ func TestVSCExecute(t *testing.T) {
 			backup:    builder.ForBackup("velero", "backup").Result(),
 			expectErr: false,
 			preExistingVSC: &snapshotv1api.VolumeSnapshotContent{
-				ObjectMeta: metav1.ObjectMeta{Name: "bar"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bar",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel: "backup",
+					},
+				},
+				Spec: snapshotv1api.VolumeSnapshotContentSpec{
+					DeletionPolicy:    snapshotv1api.VolumeSnapshotContentRetain,
+					Driver:            "disk.csi.azure.com",
+					Source:            snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: stringPtr("snap-123")},
+					VolumeSnapshotRef: corev1api.ObjectReference{Name: "vs-1", Namespace: "default"},
+				},
+			},
+		},
+		{
+			name:      "Original VSC exists in cluster without backup label, falls through to temp VSC flow",
+			vsc:       builder.ForVolumeSnapshotContent("bar").ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.BackupNameLabel: "backup"})).Status(&snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &snapshotHandleStr}).Result(),
+			backup:    builder.ForBackup("velero", "backup").Result(),
+			expectErr: false,
+			preExistingVSC: &snapshotv1api.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "bar",
+				},
 				Spec: snapshotv1api.VolumeSnapshotContentSpec{
 					DeletionPolicy:    snapshotv1api.VolumeSnapshotContentRetain,
 					Driver:            "disk.csi.azure.com",
@@ -200,22 +222,51 @@ func TestNewVolumeSnapshotContentDeleteItemAction(t *testing.T) {
 
 func TestTryDeleteOriginalVSC(t *testing.T) {
 	tests := []struct {
-		name      string
-		vscName   string
-		existing  *snapshotv1api.VolumeSnapshotContent
-		createIt  bool
-		expectRet bool
+		name       string
+		vscName    string
+		backupName string
+		existing   *snapshotv1api.VolumeSnapshotContent
+		createIt   bool
+		expectRet  bool
 	}{
 		{
-			name:      "VSC not found in cluster, returns false",
-			vscName:   "not-found",
+			name:       "VSC not found in cluster, returns false",
+			vscName:    "not-found",
+			backupName: "test-backup",
+			expectRet:  false,
+		},
+		{
+			name:       "VSC found in cluster without backup label, returns false",
+			vscName:    "unlabeled-vsc",
+			backupName: "test-backup",
+			existing: &snapshotv1api.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{Name: "unlabeled-vsc"},
+				Spec: snapshotv1api.VolumeSnapshotContentSpec{
+					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+					Driver:         "disk.csi.azure.com",
+					Source: snapshotv1api.VolumeSnapshotContentSource{
+						SnapshotHandle: stringPtr("snap-123"),
+					},
+					VolumeSnapshotRef: corev1api.ObjectReference{
+						Name:      "vs-1",
+						Namespace: "default",
+					},
+				},
+			},
+			createIt:  true,
 			expectRet: false,
 		},
 		{
-			name:    "VSC found with Retain policy, patches and deletes",
-			vscName: "legacy-vsc",
+			name:       "VSC found with Retain policy and matching backup label, patches and deletes",
+			vscName:    "legacy-vsc",
+			backupName: "test-backup",
 			existing: &snapshotv1api.VolumeSnapshotContent{
-				ObjectMeta: metav1.ObjectMeta{Name: "legacy-vsc"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "legacy-vsc",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel: "test-backup",
+					},
+				},
 				Spec: snapshotv1api.VolumeSnapshotContentSpec{
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
 					Driver:         "disk.csi.azure.com",
@@ -232,10 +283,16 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 			expectRet: true,
 		},
 		{
-			name:    "VSC found with Delete policy already, just deletes",
-			vscName: "already-delete-vsc",
+			name:       "VSC found with Delete policy and matching backup label, just deletes",
+			vscName:    "already-delete-vsc",
+			backupName: "test-backup",
 			existing: &snapshotv1api.VolumeSnapshotContent{
-				ObjectMeta: metav1.ObjectMeta{Name: "already-delete-vsc"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "already-delete-vsc",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel: "test-backup",
+					},
+				},
 				Spec: snapshotv1api.VolumeSnapshotContentSpec{
 					DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
 					Driver:         "disk.csi.azure.com",
@@ -266,7 +323,7 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 				require.NoError(t, crClient.Create(t.Context(), test.existing))
 			}
 
-			result := p.tryDeleteOriginalVSC(t.Context(), test.vscName)
+			result := p.tryDeleteOriginalVSC(t.Context(), test.vscName, test.backupName)
 			require.Equal(t, test.expectRet, result)
 
 			// If cleanup succeeded, verify the VSC is gone
@@ -289,13 +346,18 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 			log:      logrus.StandardLogger(),
 			crClient: errClient,
 		}
-		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "some-vsc"))
+		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "some-vsc", "test-backup"))
 	})
 
 	t.Run("Patch fails, returns false", func(t *testing.T) {
 		realClient := velerotest.NewFakeControllerRuntimeClient(t)
 		vsc := &snapshotv1api.VolumeSnapshotContent{
-			ObjectMeta: metav1.ObjectMeta{Name: "patch-fail-vsc"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "patch-fail-vsc",
+				Labels: map[string]string{
+					velerov1api.BackupNameLabel: "test-backup",
+				},
+			},
 			Spec: snapshotv1api.VolumeSnapshotContentSpec{
 				DeletionPolicy:    snapshotv1api.VolumeSnapshotContentRetain,
 				Driver:            "disk.csi.azure.com",
@@ -313,13 +375,18 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 			log:      logrus.StandardLogger(),
 			crClient: errClient,
 		}
-		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "patch-fail-vsc"))
+		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "patch-fail-vsc", "test-backup"))
 	})
 
 	t.Run("Delete fails, returns false", func(t *testing.T) {
 		realClient := velerotest.NewFakeControllerRuntimeClient(t)
 		vsc := &snapshotv1api.VolumeSnapshotContent{
-			ObjectMeta: metav1.ObjectMeta{Name: "delete-fail-vsc"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "delete-fail-vsc",
+				Labels: map[string]string{
+					velerov1api.BackupNameLabel: "test-backup",
+				},
+			},
 			Spec: snapshotv1api.VolumeSnapshotContentSpec{
 				DeletionPolicy:    snapshotv1api.VolumeSnapshotContentDelete,
 				Driver:            "disk.csi.azure.com",
@@ -337,7 +404,7 @@ func TestTryDeleteOriginalVSC(t *testing.T) {
 			log:      logrus.StandardLogger(),
 			crClient: errClient,
 		}
-		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "delete-fail-vsc"))
+		require.False(t, p.tryDeleteOriginalVSC(t.Context(), "delete-fail-vsc", "test-backup"))
 	})
 }
 

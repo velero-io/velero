@@ -1,0 +1,1 @@
+Restores from backups not in a completed or partially failed phase are now rejected.

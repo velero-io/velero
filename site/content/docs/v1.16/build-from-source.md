@@ -17,7 +17,7 @@ layout: docs
 ```bash
 mkdir $HOME/go
 export GOPATH=$HOME/go
-go get github.com/vmware-tanzu/velero
+go get github.com/velero-io/velero
 ```
 
 Where `go` is your [import path][4] for Go.
@@ -26,7 +26,7 @@ For Go development, it is recommended to add the Go import path (`$HOME/go` in t
 
 ### Option 2) Release archive
 
-Download the archive named `Source code` from the [release page][22] and extract it in your Go import path as `src/github.com/vmware-tanzu/velero`.
+Download the archive named `Source code` from the [release page][22] and extract it in your Go import path as `src/github.com/velero-io/velero`.
 
 Note that the Makefile targets assume building from a git repository. When building from an archive, you will be limited to the `go build` commands described below.
 
@@ -193,6 +193,6 @@ kubectl -n velero delete pods -l deploy=velero
 
 [4]: https://blog.golang.org/organizing-go-code
 [5]: https://golang.org/doc/install
-[22]: https://github.com/vmware-tanzu/velero/releases
+[22]: https://github.com/velero-io/velero/releases
 [23]: https://docs.docker.com/buildx/working-with-buildx/
 [24]: https://github.com/docker/buildx

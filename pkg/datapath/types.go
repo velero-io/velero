@@ -30,17 +30,25 @@ type Result struct {
 
 // BackupResult represents the result of a backup
 type BackupResult struct {
-	SnapshotID       string      `json:"snapshotID"`
-	EmptySnapshot    bool        `json:"emptySnapshot"`
-	Source           AccessPoint `json:"source,omitempty"`
-	TotalBytes       int64       `json:"totalBytes,omitempty"`
-	IncrementalBytes int64       `json:"incrementalBytes,omitempty"`
+	SnapshotID    string      `json:"snapshotID"`
+	EmptySnapshot bool        `json:"emptySnapshot"`
+	Source        AccessPoint `json:"source,omitempty"`
+	TotalBytes    int64       `json:"totalBytes,omitempty"`
+	// IncrementalBytes is a pointer so an old data mover (release-1.17 and earlier,
+	// which predates this field) that omits it unmarshals to nil -- "not measured" --
+	// while a current mover reporting a genuine zero still serializes the key and
+	// unmarshals to a non-nil zero, distinguishing "measured zero" from "not measured".
+	IncrementalBytes *int64 `json:"incrementalBytes,omitempty"`
+	SourceSize       int64  `json:"sourceSize,omitempty"`
+	FallbackFull     bool   `json:"fallbackFull,omitempty"`
 }
 
 // RestoreResult represents the result of a restore
 type RestoreResult struct {
-	Target     AccessPoint `json:"target,omitempty"`
-	TotalBytes int64       `json:"totalBytes,omitempty"`
+	Target           AccessPoint `json:"target,omitempty"`
+	TotalBytes       int64       `json:"totalBytes,omitempty"`
+	IncrementalBytes int64       `json:"incrementalBytes,omitempty"`
+	FallbackFull     bool        `json:"fallbackFull,omitempty"`
 }
 
 // Callbacks defines the collection of callbacks during backup/restore
@@ -66,7 +74,7 @@ type AsyncBR interface {
 	StartBackup(source AccessPoint, dataMoverConfig map[string]string, param any) error
 
 	// StartRestore starts an asynchronous data path instance for restore
-	StartRestore(snapshotID string, target AccessPoint, dataMoverConfig map[string]string) error
+	StartRestore(snapshotID string, target AccessPoint, dataMoverConfig map[string]string, param any) error
 
 	// Cancel cancels an asynchronous data path instance
 	Cancel()

@@ -236,9 +236,9 @@ If you get an error like `complete:13: command not found: compdef`, then add the
   ```
 
 [0]: supported-providers.md
-[1]: https://github.com/vmware-tanzu/velero/releases/latest
+[1]: https://github.com/velero-io/velero/releases/latest
 [2]: namespace.md
 [3]: restic.md
 [4]: on-premises.md
 [6]: velero-install.md#usage
-[7]: https://github.com/vmware-tanzu/velero/issues/2077
+[7]: https://github.com/velero-io/velero/issues/2077

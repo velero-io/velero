@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	v1crds "github.com/vmware-tanzu/velero/config/crd/v1/crds"
-	v2alpha1crds "github.com/vmware-tanzu/velero/config/crd/v2alpha1/crds"
+	v1crds "github.com/vmware-tanzu/velero/config/crd/v1"
+	v2alpha1crds "github.com/vmware-tanzu/velero/config/crd/v2alpha1"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
@@ -234,48 +234,50 @@ func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object)
 }
 
 type VeleroOptions struct {
-	Namespace                       string
-	Image                           string
-	ProviderName                    string
-	Bucket                          string
-	Prefix                          string
-	PodAnnotations                  map[string]string
-	PodLabels                       map[string]string
-	ServiceAccountAnnotations       map[string]string
-	ServiceAccountName              string
-	VeleroPodResources              corev1api.ResourceRequirements
-	NodeAgentPodResources           corev1api.ResourceRequirements
-	SecretData                      []byte
-	RestoreOnly                     bool
-	UseNodeAgent                    bool
-	UseNodeAgentWindows             bool
-	PrivilegedNodeAgent             bool
-	UseVolumeSnapshots              bool
-	BSLConfig                       map[string]string
-	VSLConfig                       map[string]string
-	DefaultRepoMaintenanceFrequency time.Duration
-	GarbageCollectionFrequency      time.Duration
-	PodVolumeOperationTimeout       time.Duration
-	Plugins                         []string
-	NoDefaultBackupLocation         bool
-	CACertData                      []byte
-	Features                        []string
-	DefaultVolumesToFsBackup        bool
-	UploaderType                    string
-	DefaultSnapshotMoveData         bool
-	DisableInformerCache            bool
-	ScheduleSkipImmediately         bool
-	PodResources                    kube.PodResources
-	KeepLatestMaintenanceJobs       int
-	BackupRepoConfigMap             string
-	RepoMaintenanceJobConfigMap     string
-	NodeAgentConfigMap              string
-	ItemBlockWorkerCount            int
-	ConcurrentBackups               int
-	KubeletRootDir                  string
-	NodeAgentDisableHostPath        bool
-	ServerPriorityClassName         string
-	NodeAgentPriorityClassName      string
+	Namespace                        string
+	Image                            string
+	ProviderName                     string
+	Bucket                           string
+	Prefix                           string
+	PodAnnotations                   map[string]string
+	PodLabels                        map[string]string
+	ServiceAccountAnnotations        map[string]string
+	ServiceAccountName               string
+	VeleroPodResources               corev1api.ResourceRequirements
+	NodeAgentPodResources            corev1api.ResourceRequirements
+	SecretData                       []byte
+	RestoreOnly                      bool
+	UseNodeAgent                     bool
+	UseNodeAgentWindows              bool
+	PrivilegedNodeAgent              bool
+	UseVolumeSnapshots               bool
+	BSLConfig                        map[string]string
+	VSLConfig                        map[string]string
+	DefaultRepoMaintenanceFrequency  time.Duration
+	GarbageCollectionFrequency       time.Duration
+	PodVolumeOperationTimeout        time.Duration
+	Plugins                          []string
+	NoDefaultBackupLocation          bool
+	CACertData                       []byte
+	Features                         []string
+	DefaultVolumesToFsBackup         bool
+	UploaderType                     string
+	DefaultSnapshotMoveData          bool
+	CSISnapshotEarlyFrequentPolling  bool
+	DisableInformerCache             bool
+	ScheduleSkipImmediately          bool
+	PodResources                     kube.PodResources
+	KeepLatestMaintenanceJobs        int
+	BackupRepoConfigMap              string
+	RepoMaintenanceJobConfigMap      string
+	DefaultResourceModifierConfigMap string
+	NodeAgentConfigMap               string
+	ItemBlockWorkerCount             int
+	ConcurrentBackups                int
+	KubeletRootDir                   string
+	NodeAgentDisableHostPath         bool
+	ServerPriorityClassName          string
+	NodeAgentPriorityClassName       string
 }
 
 func AllCRDs() *unstructured.UnstructuredList {
@@ -390,6 +392,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		deployOpts = append(deployOpts, WithDefaultSnapshotMoveData(true))
 	}
 
+	if o.CSISnapshotEarlyFrequentPolling {
+		deployOpts = append(deployOpts, WithCSISnapshotEarlyFrequentPolling(true))
+	}
+
 	if o.DisableInformerCache {
 		deployOpts = append(deployOpts, WithDisableInformerCache(true))
 	}
@@ -400,6 +406,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	if len(o.RepoMaintenanceJobConfigMap) > 0 {
 		deployOpts = append(deployOpts, WithRepoMaintenanceJobConfigMap(o.RepoMaintenanceJobConfigMap))
+	}
+
+	if len(o.DefaultResourceModifierConfigMap) > 0 {
+		deployOpts = append(deployOpts, WithDefaultResourceModifierConfigMap(o.DefaultResourceModifierConfigMap))
 	}
 
 	deploy := Deployment(o.Namespace, deployOpts...)

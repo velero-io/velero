@@ -11,6 +11,8 @@ spec:
     kind: PodVolumeRestore
     listKind: PodVolumeRestoreList
     plural: podvolumerestores
+    shortNames:
+    - pvr
     singular: podvolumerestore
   scope: Namespaced
   versions:
@@ -18,6 +20,11 @@ spec:
     - description: PodVolumeRestore status such as New/InProgress
       jsonPath: .status.phase
       name: Status
+      type: string
+    - description: Restore type such as Full/Incremental
+      jsonPath: .spec.restoreType
+      name: Restore Type
+      priority: 10
       type: string
     - description: Time duration since this PodVolumeRestore was started
       jsonPath: .status.startTimestamp
@@ -32,6 +39,12 @@ spec:
       format: int64
       jsonPath: .status.progress.totalBytes
       name: Total Bytes
+      type: integer
+    - description: Incremental bytes
+      format: int64
+      jsonPath: .status.incrementalBytes
+      name: Incremental Bytes
+      priority: 10
       type: integer
     - description: Name of the Backup Storage Location where the backup data is stored
       jsonPath: .spec.backupStorageLocation
@@ -130,6 +143,9 @@ spec:
               repoIdentifier:
                 description: RepoIdentifier is the backup repository identifier.
                 type: string
+              restoreType:
+                description: RestoreType indicates the type of the restore.
+                type: string
               snapshotID:
                 description: SnapshotID is the ID of the volume snapshot to be restored.
                 type: string
@@ -165,6 +181,7 @@ spec:
             - backupStorageLocation
             - pod
             - repoIdentifier
+            - restoreType
             - snapshotID
             - sourceNamespace
             - volume
@@ -179,6 +196,13 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              activities:
+                description: Activities contains one or more messages about what have
+                  been done for this pod volume restore.
+                items:
+                  type: string
+                nullable: true
+                type: array
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a restore was completed.
@@ -187,8 +211,17 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              fallbackFull:
+                description: FallbackFull indicates whether the incremental restore
+                  has fallen back to full restore
+                type: boolean
+              incrementalBytes:
+                description: IncrementalBytes holds the number of bytes restored incrementally
+                format: int64
+                type: integer
               message:
-                description: Message is a message about the pod volume restore's status.
+                description: Message is a message describing the pod volume restore
+                  when it reaches to a terminal status.
                 type: string
               node:
                 description: Node is name of the node where the pod volume restore

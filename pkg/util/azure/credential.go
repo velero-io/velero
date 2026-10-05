@@ -23,7 +23,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // NewCredential constructs a Credential that tries the config credential, workload identity credential
@@ -37,8 +37,7 @@ func NewCredential(creds map[string]string, options policy.ClientOptions) (azcor
 	// config credential
 	if len(creds[CredentialKeyClientSecret]) > 0 ||
 		len(creds[CredentialKeyClientCertificate]) > 0 ||
-		len(creds[CredentialKeyClientCertificatePath]) > 0 ||
-		len(creds[CredentialKeyUsername]) > 0 {
+		len(creds[CredentialKeyClientCertificatePath]) > 0 {
 		return newConfigCredential(creds, configCredentialOptions{
 			ClientOptions:              options,
 			AdditionallyAllowedTenants: additionalTenants,

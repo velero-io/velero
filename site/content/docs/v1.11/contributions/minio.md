@@ -34,9 +34,9 @@ brew install velero
 
 ### Option 2: GitHub release
 
-1. Download the [latest official release's](https://github.com/vmware-tanzu/velero/releases) tarball for your client platform.
+1. Download the [latest official release's](https://github.com/velero-io/velero/releases) tarball for your client platform.
 
-    _We strongly recommend that you use an [official release](https://github.com/vmware-tanzu/velero/releases) of
+    _We strongly recommend that you use an [official release](https://github.com/velero-io/velero/releases) of
 Velero. The tarballs for each release contain the `velero` command-line client. The code in the main branch
 of the Velero repository is under active development and is not guaranteed to be stable!_
 
@@ -81,7 +81,7 @@ These instructions start the Velero server and a Minio instance that is accessib
         --backup-location-config region=minio,s3ForcePathStyle="true",s3Url=http://minio.velero.svc:9000
     ```
 
-    This example assumes that it is running within a local cluster without a volume provider capable of snapshots, so no `VolumeSnapshotLocation` is created (`--use-volume-snapshots=false`). You may need to update AWS plugin version to one that is [compatible](https://github.com/vmware-tanzu/velero-plugin-for-aws#compatibility) with the version of Velero you are installing.
+    This example assumes that it is running within a local cluster without a volume provider capable of snapshots, so no `VolumeSnapshotLocation` is created (`--use-volume-snapshots=false`). You may need to update AWS plugin version to one that is [compatible](https://github.com/velero-io/velero-plugin-for-aws#compatibility) with the version of Velero you are installing.
 
     Additionally, you can specify `--use-node-agent` to enable File System Backup support, and `--wait` to wait for the deployment to be ready.
 
@@ -291,6 +291,6 @@ In this case:
 [3]: ../customize-installation.md
 [17]: ../file-system-backup.md
 [18]: ../debugging-restores.md
-[26]: https://github.com/vmware-tanzu/velero/releases
+[26]: https://github.com/velero-io/velero/releases
 [30]: https://godoc.org/github.com/robfig/cron
 [32]: ../self-signed-certificates.md

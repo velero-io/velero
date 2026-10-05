@@ -1,0 +1,1 @@
+Add printer columns for DownloadRequest and ServerStatusRequest so kubectl shows their target, status and server version

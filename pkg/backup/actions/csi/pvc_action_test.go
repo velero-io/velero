@@ -23,23 +23,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
-	"github.com/stretchr/testify/assert"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
-
-	"github.com/vmware-tanzu/velero/pkg/label"
-
+	"github.com/cockroachdb/errors"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	storagev1api "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,7 +39,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
@@ -55,8 +49,13 @@ import (
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
+	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
+	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csi "github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 const testDriver = "csi.example.com"
@@ -81,21 +80,24 @@ func (c *errorInjectingClient) Create(ctx context.Context, obj crclient.Object, 
 func TestExecute(t *testing.T) {
 	boolTrue := true
 	tests := []struct {
-		name               string
-		backup             *velerov1api.Backup
-		pvc                *corev1api.PersistentVolumeClaim
-		pv                 *corev1api.PersistentVolume
-		sc                 *storagev1api.StorageClass
-		vsClass            *snapshotv1api.VolumeSnapshotClass
-		operationID        string
-		expectedErr        error
-		expectErr          bool // Use bool for cases where we just need to check for any error
-		expectedBackup     *velerov1api.Backup
-		expectedDataUpload *velerov2alpha1.DataUpload
-		expectedPVC        *corev1api.PersistentVolumeClaim
-		resourcePolicy     *corev1api.ConfigMap
-		failVSCreate       bool
-		skipVSReadyUpdate  bool // New flag to control VS readiness
+		name                 string
+		backup               *velerov1api.Backup
+		pvc                  *corev1api.PersistentVolumeClaim
+		pv                   *corev1api.PersistentVolume
+		sc                   *storagev1api.StorageClass
+		vsClass              *snapshotv1api.VolumeSnapshotClass
+		operationID          string
+		expectedErr          error
+		expectErr            bool // Use bool for cases where we just need to check for any error
+		expectedBackup       *velerov1api.Backup
+		expectedDataUpload   *velerov2alpha1.DataUpload
+		expectedPVC          *corev1api.PersistentVolumeClaim
+		resourcePolicy       *corev1api.ConfigMap
+		globalResourcePolicy *corev1api.ConfigMap
+		extraObjects         []runtime.Object
+		failVSCreate         bool
+		skipVSReadyUpdate    bool // New flag to control VS readiness
+		expectedVSClassName  string
 	}{
 		{
 			name:   "Skip PVC BIA when backup is in finalizing phase",
@@ -122,12 +124,21 @@ func TestExecute(t *testing.T) {
 			expectErr:         true, // Expect an error, but the exact message can vary
 		},
 		{
-			name:        "Test SnapshotMoveData",
-			backup:      builder.ForBackup("velero", "test").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
-			pvc:         builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
-			pv:          builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
-			sc:          builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
-			vsClass:     builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			name:    "Test SnapshotMoveData",
+			backup:  builder.ForBackup("velero", "test").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
 			operationID: ".",
 			expectedDataUpload: &velerov2alpha1.DataUpload{
 				TypeMeta: metav1.TypeMeta{
@@ -163,21 +174,41 @@ func TestExecute(t *testing.T) {
 					SourcePVC:        "testPVC",
 					SourceNamespace:  "velero",
 					OperationTimeout: metav1.Duration{Duration: 1 * time.Minute},
+					ParentSnapshot:   "",
 				},
 			},
 		},
 		{
-			name:        "Verify PVC is modified as expected",
-			backup:      builder.ForBackup("velero", "test").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
-			pvc:         builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
-			pv:          builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
-			sc:          builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
-			vsClass:     builder.ForVolumeSnapshotClass("tescVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			name:    "Verify PVC is modified as expected",
+			backup:  builder.ForBackup("velero", "test").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("tescVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
 			operationID: ".",
 			expectedPVC: builder.ForPersistentVolumeClaim("velero", "testPVC").
 				ObjectMeta(builder.WithAnnotations(velerov1api.MustIncludeAdditionalItemAnnotation, "true", velerov1api.DataUploadNameAnnotation, "velero/"),
 					builder.WithLabels(velerov1api.BackupNameLabel, "test")).
 				VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+		},
+		{
+			name:              "Test SnapshotMoveData without node-agent",
+			backup:            builder.ForBackup("velero", "test").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
+			pvc:               builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:                builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:                builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:           builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			expectErr:         true,
+			skipVSReadyUpdate: true,
 		},
 		{
 			name:           "Test ResourcePolicy",
@@ -188,10 +219,85 @@ func TestExecute(t *testing.T) {
 			sc:             builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
 			vsClass:        builder.ForVolumeSnapshotClass("tescVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
 		},
+		{
+			name:                "Volume policy with snapshotClass selects correct VolumeSnapshotClass",
+			backup:              builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").CSISnapshotTimeout(time.Duration(3600) * time.Second).Result(),
+			resourcePolicy:      builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"snapshotClass":"policy-selected-vsclass"}}}]}`).Result(),
+			pvc:                 builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:                  builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:                  builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:             builder.ForVolumeSnapshotClass("policy-selected-vsclass").Driver("hostpath").Result(),
+			expectedVSClassName: "policy-selected-vsclass",
+		},
+		{
+			name: "Global backup volume policy dataMover overrides backup.Spec.DataMover",
+			backup: builder.ForBackup("velero", "test").
+				SnapshotMoveData(true).
+				DataMover("velero-fs").
+				CSISnapshotTimeout(1 * time.Minute).
+				ObjectMeta(builder.WithAnnotations(velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation, "global-volume-policy")).
+				Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			globalResourcePolicy: builder.ForConfigMap("velero", "global-volume-policy").
+				Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"dataMover":"velero-block"}}}]}`).
+				Result(),
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
+			operationID: ".",
+			expectedDataUpload: &velerov2alpha1.DataUpload{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "DataUpload",
+					APIVersion: velerov2alpha1.SchemeGroupVersion.String(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-",
+					Namespace:    "velero",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel:       "test",
+						velerov1api.BackupUIDLabel:        "",
+						velerov1api.PVCUIDLabel:           "",
+						velerov1api.AsyncOperationIDLabel: "du-.",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "velero.io/v1",
+							Kind:       "Backup",
+							Name:       "test",
+							UID:        "",
+							Controller: &boolTrue,
+						},
+					},
+				},
+				Spec: velerov2alpha1.DataUploadSpec{
+					SnapshotType: velerov2alpha1.SnapshotTypeCSI,
+					CSISnapshot: &velerov2alpha1.CSISnapshotSpec{
+						VolumeSnapshot: "",
+						StorageClass:   "testSC",
+						SnapshotClass:  "testVSClass",
+					},
+					SourcePVC:        "testPVC",
+					SourceNamespace:  "velero",
+					DataMover:        "velero-block",
+					OperationTimeout: metav1.Duration{Duration: 1 * time.Minute},
+					ParentSnapshot:   "",
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			logger := logrus.New()
 			logger.Level = logrus.DebugLevel
 			objects := make([]runtime.Object, 0)
@@ -210,6 +316,10 @@ func TestExecute(t *testing.T) {
 			if tc.resourcePolicy != nil {
 				objects = append(objects, tc.resourcePolicy)
 			}
+			if tc.globalResourcePolicy != nil {
+				objects = append(objects, tc.globalResourcePolicy)
+			}
+			objects = append(objects, tc.extraObjects...)
 
 			var crClient crclient.Client
 			if tc.failVSCreate {
@@ -227,33 +337,43 @@ func TestExecute(t *testing.T) {
 			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&tc.pvc)
 			require.NoError(t, err)
 
+			var reconcileErrCh chan error
 			if tc.pvc != nil && !tc.failVSCreate && !tc.skipVSReadyUpdate {
+				reconcileErrCh = make(chan error, 1)
 				go func() {
 					var vsList snapshotv1api.VolumeSnapshotList
 					err := wait.PollUntilContextTimeout(t.Context(), 1*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
-						err = pvcBIA.crClient.List(ctx, &vsList, &crclient.ListOptions{Namespace: tc.pvc.Namespace})
-
-						require.NoError(t, err)
-						if err != nil || len(vsList.Items) == 0 {
+						if err := pvcBIA.crClient.List(ctx, &vsList, &crclient.ListOptions{Namespace: tc.pvc.Namespace}); err != nil {
 							return false, err
 						}
+						if len(vsList.Items) == 0 {
+							return false, nil
+						}
+
 						return true, nil
 					})
 
-					require.NoError(t, err)
+					if err != nil {
+						reconcileErrCh <- err
+						return
+					}
+
 					vscName := "testVSC"
+					handleName := "testHandle"
+					vsc := builder.ForVolumeSnapshotContent("testVSC").Status(&snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &handleName}).Result()
+					err = pvcBIA.crClient.Create(t.Context(), vsc)
+					if err != nil {
+						reconcileErrCh <- err
+						return
+					}
+
 					readyToUse := true
 					vsList.Items[0].Status = &snapshotv1api.VolumeSnapshotStatus{
 						BoundVolumeSnapshotContentName: &vscName,
 						ReadyToUse:                     &readyToUse,
 					}
 					err = pvcBIA.crClient.Update(t.Context(), &vsList.Items[0])
-					require.NoError(t, err)
-
-					handleName := "testHandle"
-					vsc := builder.ForVolumeSnapshotContent("testVSC").Status(&snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &handleName}).Result()
-					err = pvcBIA.crClient.Create(t.Context(), vsc)
-					require.NoError(t, err)
+					reconcileErrCh <- err
 				}()
 			}
 
@@ -274,6 +394,10 @@ func TestExecute(t *testing.T) {
 				require.NoError(t, err)
 			}
 
+			if reconcileErrCh != nil {
+				require.NoError(t, <-reconcileErrCh)
+			}
+
 			if tc.expectedDataUpload != nil {
 				dataUploadList := new(velerov2alpha1.DataUploadList)
 				err := crClient.List(t.Context(), dataUploadList, &crclient.ListOptions{LabelSelector: labels.SelectorFromSet(map[string]string{velerov1api.BackupNameLabel: tc.backup.Name})})
@@ -286,6 +410,15 @@ func TestExecute(t *testing.T) {
 				resultPVC := new(corev1api.PersistentVolumeClaim)
 				runtime.DefaultUnstructuredConverter.FromUnstructured(resultUnstructed.UnstructuredContent(), resultPVC)
 				require.True(t, cmp.Equal(tc.expectedPVC, resultPVC, cmpopts.IgnoreFields(corev1api.PersistentVolumeClaim{}, "ResourceVersion", "Annotations", "Labels")))
+			}
+
+			if tc.expectedVSClassName != "" {
+				vsList := new(snapshotv1api.VolumeSnapshotList)
+				require.NoError(t, crClient.List(t.Context(), vsList, &crclient.ListOptions{Namespace: tc.pvc.Namespace}))
+				require.NotEmpty(t, vsList.Items, "expected VolumeSnapshot to be created")
+				require.NotNil(t, vsList.Items[0].Spec.VolumeSnapshotClassName)
+				assert.Equal(t, tc.expectedVSClassName, *vsList.Items[0].Spec.VolumeSnapshotClassName,
+					"VolumeSnapshot should use the VolumeSnapshotClass specified by volume policy")
 			}
 		})
 	}
@@ -641,12 +774,13 @@ func TestListGroupedPVCs(t *testing.T) {
 
 func TestFilterPVCsByVolumePolicy(t *testing.T) {
 	tests := []struct {
-		name            string
-		pvcs            []corev1api.PersistentVolumeClaim
-		pvs             []corev1api.PersistentVolume
-		volumePolicyStr string
-		expectCount     int
-		expectError     bool
+		name                  string
+		pvcs                  []corev1api.PersistentVolumeClaim
+		pvs                   []corev1api.PersistentVolume
+		volumePolicyStr       string
+		globalVolumePolicyStr string
+		expectCount           int
+		expectError           bool
 	}{
 		{
 			name: "All PVCs should be included when no volume policy",
@@ -655,7 +789,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-1",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -663,7 +797,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-2", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-2",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -695,7 +829,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-csi", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-csi",
-						StorageClassName: pointer.String("sc-1"),
+						StorageClassName: ptr.To("sc-1"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -703,7 +837,7 @@ func TestFilterPVCsByVolumePolicy(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -746,7 +880,7 @@ volumePolicies:
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs-1", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs-1",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -754,7 +888,7 @@ volumePolicies:
 					ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs-2", Namespace: "ns-1"},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs-2",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -804,7 +938,7 @@ volumePolicies:
 					},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-linstor",
-						StorageClassName: pointer.String("sc-linstor"),
+						StorageClassName: ptr.To("sc-linstor"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -816,7 +950,7 @@ volumePolicies:
 					},
 					Spec: corev1api.PersistentVolumeClaimSpec{
 						VolumeName:       "pv-nfs",
-						StorageClassName: pointer.String("sc-nfs"),
+						StorageClassName: ptr.To("sc-nfs"),
 					},
 					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 				},
@@ -852,6 +986,65 @@ volumePolicies:
 `,
 			expectCount: 1,
 		},
+		{
+			name: "Filter out NFS PVC using global volume policy annotation",
+			pvcs: []corev1api.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pvc-linstor",
+						Namespace: "ns-1",
+						Labels:    map[string]string{"app.kubernetes.io/instance": "myapp"},
+					},
+					Spec: corev1api.PersistentVolumeClaimSpec{
+						VolumeName:       "pv-linstor",
+						StorageClassName: ptr.To("sc-linstor"),
+					},
+					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pvc-nfs",
+						Namespace: "ns-1",
+						Labels:    map[string]string{"app.kubernetes.io/instance": "myapp"},
+					},
+					Spec: corev1api.PersistentVolumeClaimSpec{
+						VolumeName:       "pv-nfs",
+						StorageClassName: ptr.To("sc-nfs"),
+					},
+					Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
+				},
+			},
+			pvs: []corev1api.PersistentVolume{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pv-linstor"},
+					Spec: corev1api.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1api.PersistentVolumeSource{
+							CSI: &corev1api.CSIPersistentVolumeSource{Driver: "linstor.csi.linbit.com"},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pv-nfs"},
+					Spec: corev1api.PersistentVolumeSpec{
+						PersistentVolumeSource: corev1api.PersistentVolumeSource{
+							NFS: &corev1api.NFSVolumeSource{
+								Server: "nfs-server",
+								Path:   "/export",
+							},
+						},
+					},
+				},
+			},
+			globalVolumePolicyStr: `
+version: v1
+volumePolicies:
+- conditions:
+    nfs: {}
+  action:
+    type: skip
+`,
+			expectCount: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -869,6 +1062,25 @@ volumePolicies:
 					Namespace: "velero",
 				},
 				Spec: velerov1api.BackupSpec{},
+			}
+
+			// Add global volume policy ConfigMap if specified
+			if tt.globalVolumePolicyStr != "" {
+				cm := &corev1api.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "global-volume-policy",
+						Namespace: "velero",
+					},
+					Data: map[string]string{
+						"volume-policy": tt.globalVolumePolicyStr,
+					},
+				}
+				require.NoError(t, client.Create(t.Context(), cm))
+
+				if backup.Annotations == nil {
+					backup.Annotations = make(map[string]string)
+				}
+				backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation] = "global-volume-policy"
 			}
 
 			// Add volume policy ConfigMap if specified
@@ -929,7 +1141,7 @@ func TestFilterPVCsByVolumePolicyWithVolumeHelper(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-csi", Namespace: "ns-1"},
 			Spec: corev1api.PersistentVolumeClaimSpec{
 				VolumeName:       "pv-csi",
-				StorageClassName: pointer.String("sc-csi"),
+				StorageClassName: ptr.To("sc-csi"),
 			},
 			Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 		},
@@ -937,7 +1149,7 @@ func TestFilterPVCsByVolumePolicyWithVolumeHelper(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pvc-nfs", Namespace: "ns-1"},
 			Spec: corev1api.PersistentVolumeClaimSpec{
 				VolumeName:       "pv-nfs",
-				StorageClassName: pointer.String("sc-nfs"),
+				StorageClassName: ptr.To("sc-nfs"),
 			},
 			Status: corev1api.PersistentVolumeClaimStatus{Phase: corev1api.ClaimBound},
 		},
@@ -1174,7 +1386,7 @@ func TestDetermineVGSClass(t *testing.T) {
 		name             string
 		backup           *velerov1api.Backup
 		pvc              *corev1api.PersistentVolumeClaim
-		existingVGSClass []volumegroupsnapshotv1beta2.VolumeGroupSnapshotClass
+		existingVGSClass []volumegroupsnapshotv1.VolumeGroupSnapshotClass
 		expectError      bool
 		expectResult     string
 	}{
@@ -1206,7 +1418,7 @@ func TestDetermineVGSClass(t *testing.T) {
 			name:   "Default label-based match",
 			pvc:    &corev1api.PersistentVolumeClaim{},
 			backup: &velerov1api.Backup{},
-			existingVGSClass: []volumegroupsnapshotv1beta2.VolumeGroupSnapshotClass{
+			existingVGSClass: []volumegroupsnapshotv1.VolumeGroupSnapshotClass{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:   "default-class",
@@ -1227,7 +1439,7 @@ func TestDetermineVGSClass(t *testing.T) {
 			name:   "Multiple matching VGS classes",
 			pvc:    &corev1api.PersistentVolumeClaim{},
 			backup: &velerov1api.Backup{},
-			existingVGSClass: []volumegroupsnapshotv1beta2.VolumeGroupSnapshotClass{
+			existingVGSClass: []volumegroupsnapshotv1.VolumeGroupSnapshotClass{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:   "class1",
@@ -1255,11 +1467,10 @@ func TestDetermineVGSClass(t *testing.T) {
 				initObjs = append(initObjs, &vgsClassCopy)
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, initObjs...)
-			logger := logrus.New()
-			require.NoError(t, volumegroupsnapshotv1beta2.AddToScheme(client.Scheme()))
-
-			action := &pvcBackupItemAction{crClient: client, log: logger}
+			action := &pvcBackupItemAction{
+				log:      logrus.New(),
+				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, initObjs...),
+			}
 
 			result, err := action.determineVGSClass(t.Context(), testDriver, tt.backup, tt.pvc)
 
@@ -1280,8 +1491,9 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	testVGSClass := "test-class"
 	testBackup := &velerov1api.Backup{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-backup",
-			UID:  "test-uid",
+			Name:            "test-backup",
+			UID:             "test-uid",
+			ResourceVersion: "1",
 		},
 	}
 	testPVC := corev1api.PersistentVolumeClaim{
@@ -1294,8 +1506,8 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 		},
 	}
 
-	crClient := velerotest.NewFakeControllerRuntimeClient(t)
 	log := logrus.New()
+	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, testBackup)
 	action := &pvcBackupItemAction{
 		log:      log,
 		crClient: crClient,
@@ -1304,10 +1516,12 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	vgs, err := action.createVolumeGroupSnapshot(t.Context(), testBackup, testPVC, testLabelKey, testLabelValue, testVGSClass)
 	require.NoError(t, err)
 	require.NotNil(t, vgs)
+	updatedBackup := &velerov1api.Backup{}
+	require.NoError(t, crClient.Get(t.Context(), crclient.ObjectKeyFromObject(testBackup), updatedBackup))
+	require.Equal(t, "true", updatedBackup.Annotations[velerov1api.VolumeGroupSnapshotBackupAnnotation])
 
 	// Verify VGS fields
 	assert.Equal(t, testNamespace, vgs.Namespace)
-	assert.NotEmpty(t, vgs.GenerateName)
 	assert.Equal(t, testVGSClass, *vgs.Spec.VolumeGroupSnapshotClassName)
 	assert.NotNil(t, vgs.Spec.Source.Selector)
 	assert.Equal(t, testLabelValue, vgs.Spec.Source.Selector.MatchLabels[testLabelKey])
@@ -1315,14 +1529,14 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	assert.Equal(t, label.GetValidName(testBackup.Name), vgs.Labels[velerov1api.BackupNameLabel])
 	assert.Equal(t, string(testBackup.UID), vgs.Labels[velerov1api.BackupUIDLabel])
 
-	// Check that it exists in fake client
-	retrieved := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
-	err = crClient.Get(t.Context(), crclient.ObjectKey{Name: vgs.Name, Namespace: vgs.Namespace}, retrieved)
+	// Check that it exists in the fake client
+	retrieved, err := csi.GetVGS(t.Context(), crClient, vgs.Namespace, vgs.Name)
 	require.NoError(t, err)
+	require.NotNil(t, retrieved)
 }
 
 func TestWaitForVGSAssociatedVS(t *testing.T) {
-	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-vgs",
 			Namespace: "test-ns",
@@ -1335,7 +1549,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 		if owned {
 			refs = []metav1.OwnerReference{
 				{
-					APIVersion: "groupsnapshot.storage.k8s.io/v1beta2",
+					APIVersion: "groupsnapshot.storage.k8s.io/v1",
 					Kind:       "VolumeGroupSnapshot",
 					Name:       vgs.Name,
 					UID:        vgs.UID,
@@ -1351,7 +1565,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvcName),
+					PersistentVolumeClaimName: ptr.To(pvcName),
 				},
 			},
 		}
@@ -1359,7 +1573,7 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 		if hasStatus {
 			vs.Status = &snapshotv1api.VolumeSnapshotStatus{}
 			if hasVGSName {
-				vs.Status.VolumeGroupSnapshotName = pointer.String(vgs.Name)
+				vs.Status.VolumeGroupSnapshotName = ptr.To(vgs.Name)
 			}
 		}
 
@@ -1456,7 +1670,11 @@ func TestWaitForVGSAssociatedVS(t *testing.T) {
 				crClient: client,
 			}
 
-			vsMap, err := action.waitForVGSAssociatedVS(t.Context(), tt.groupedPVCs, vgs, 2*time.Second)
+			timeout := 2 * time.Second
+			if tt.expectErr {
+				timeout = 20 * time.Millisecond
+			}
+			vsMap, err := action.waitForVGSAssociatedVS(t.Context(), tt.groupedPVCs, vgs, timeout)
 
 			if tt.expectErr {
 				if err == nil {
@@ -1482,7 +1700,7 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 		},
 	}
 
-	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-vgs",
 			Namespace: "ns",
@@ -1495,7 +1713,7 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 		if withVGSOwner {
 			refs = []metav1.OwnerReference{
 				{
-					APIVersion: "groupsnapshot.storage.k8s.io/v1beta2",
+					APIVersion: "groupsnapshot.storage.k8s.io/v1",
 					Kind:       "VolumeGroupSnapshot",
 					Name:       vgs.Name,
 					UID:        vgs.UID,
@@ -1507,18 +1725,15 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 				Name:            name,
 				Namespace:       vgs.Namespace,
 				OwnerReferences: refs,
-				Finalizers: []string{
-					VolumeSnapshotFinalizerGroupProtection,
-					VolumeSnapshotFinalizerSourceProtection,
-				},
+				Finalizers:      []string{"group-protection", "source-protection"},
 			},
 			Status: &snapshotv1api.VolumeSnapshotStatus{
-				ReadyToUse:              pointer.Bool(true),
+				ReadyToUse:              ptr.To(true),
 				VolumeGroupSnapshotName: vgsNamePtr,
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvcName),
+					PersistentVolumeClaimName: ptr.To(pvcName),
 				},
 			},
 		}
@@ -1532,10 +1747,10 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 		expectLabelPatched      bool
 	}{
 		{
-			name:                    "should update owned VS",
-			vs:                      makeVS("vs-owned", true, pointer.String(vgs.Name), "pvc-1"),
-			expectOwnerCleared:      true,
-			expectFinalizersCleared: true,
+			name:                    "should label owned VS",
+			vs:                      makeVS("vs-owned", true, ptr.To(vgs.Name), "pvc-1"),
+			expectOwnerCleared:      false,
+			expectFinalizersCleared: false,
 			expectLabelPatched:      true,
 		},
 		{
@@ -1614,26 +1829,26 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
+			vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-vgsc"},
-				Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSpec{
+				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
 					DeletionPolicy: tt.initialPolicy,
 				},
 			}
-			vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+			vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-vgs",
 					Namespace: "ns",
 				},
-				Status: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotStatus{
-					BoundVolumeGroupSnapshotContentName: pointer.String("test-vgsc"),
+				Status: &volumegroupsnapshotv1.VolumeGroupSnapshotStatus{
+					BoundVolumeGroupSnapshotContentName: ptr.To("test-vgsc"),
 				},
 			}
 
-			client := velerotest.NewFakeControllerRuntimeClient(t, vgs, vgsc)
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, vgsc)
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
-				crClient: client,
+				crClient: crClient,
 			}
 
 			err := action.patchVGSCDeletionPolicy(t.Context(), vgs)
@@ -1643,93 +1858,9 @@ func TestPatchVGSCDeletionPolicy(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			updated := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-			err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgsc"}, updated)
+			updated, err := csi.GetVGSC(t.Context(), crClient, "test-vgsc")
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedPolicy, updated.Spec.DeletionPolicy)
-		})
-	}
-}
-
-func TestDeleteVGSAndVGSC(t *testing.T) {
-	makeVGS := func(name, namespace string, boundVGSCName *string) *volumegroupsnapshotv1beta2.VolumeGroupSnapshot {
-		return &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: namespace,
-			},
-			Status: &volumegroupsnapshotv1beta2.VolumeGroupSnapshotStatus{
-				BoundVolumeGroupSnapshotContentName: boundVGSCName,
-			},
-		}
-	}
-
-	makeVGSC := func(name string) *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent {
-		return &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-		}
-	}
-
-	tests := []struct {
-		name             string
-		vgs              *volumegroupsnapshotv1beta2.VolumeGroupSnapshot
-		existingVGSC     *volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent
-		expectVGSCDelete bool
-		expectVGSDelete  bool
-	}{
-		{
-			name:             "deletes both VGSC and VGS",
-			vgs:              makeVGS("test-vgs", "ns", pointer.String("test-vgsc")),
-			existingVGSC:     makeVGSC("test-vgsc"),
-			expectVGSCDelete: true,
-			expectVGSDelete:  true,
-		},
-		{
-			name:             "VGSC not found, still deletes VGS",
-			vgs:              makeVGS("test-vgs", "ns", pointer.String("missing-vgsc")),
-			existingVGSC:     nil,
-			expectVGSCDelete: false,
-			expectVGSDelete:  true,
-		},
-		{
-			name:             "no BoundVGSCName set, only deletes VGS",
-			vgs:              makeVGS("test-vgs", "ns", nil),
-			existingVGSC:     nil,
-			expectVGSCDelete: false,
-			expectVGSDelete:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var objs []runtime.Object
-			objs = append(objs, tt.vgs)
-			if tt.existingVGSC != nil {
-				objs = append(objs, tt.existingVGSC)
-			}
-
-			client := velerotest.NewFakeControllerRuntimeClient(t, objs...)
-			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: client,
-			}
-
-			err := action.deleteVGSAndVGSC(t.Context(), tt.vgs)
-			require.NoError(t, err)
-
-			// Check VGSC is deleted
-			if tt.expectVGSCDelete {
-				got := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-				err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgsc"}, got)
-				assert.True(t, apierrors.IsNotFound(err), "expected VGSC to be deleted")
-			}
-
-			// Check VGS is deleted
-			gotVGS := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
-			err = client.Get(t.Context(), crclient.ObjectKey{Name: "test-vgs", Namespace: "ns"}, gotVGS)
-			assert.True(t, apierrors.IsNotFound(err), "expected VGS to be deleted")
 		})
 	}
 }
@@ -1754,7 +1885,7 @@ func TestFindExistingVSForBackup(t *testing.T) {
 			},
 			Spec: snapshotv1api.VolumeSnapshotSpec{
 				Source: snapshotv1api.VolumeSnapshotSource{
-					PersistentVolumeClaimName: pointer.String(pvc),
+					PersistentVolumeClaimName: ptr.To(pvc),
 				},
 			},
 		}
@@ -1822,8 +1953,8 @@ func TestFindExistingVSForBackup(t *testing.T) {
 }
 
 func TestWaitForVGSCBinding(t *testing.T) {
-	makeVGS := func(name string, withStatus bool) *volumegroupsnapshotv1beta2.VolumeGroupSnapshot {
-		vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+	makeVGS := func(name string, withStatus bool) *volumegroupsnapshotv1.VolumeGroupSnapshot {
+		vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "ns",
@@ -1831,7 +1962,7 @@ func TestWaitForVGSCBinding(t *testing.T) {
 		}
 		if withStatus {
 			contentName := "vgsc-123"
-			vgs.Status = &volumegroupsnapshotv1beta2.VolumeGroupSnapshotStatus{
+			vgs.Status = &volumegroupsnapshotv1.VolumeGroupSnapshotStatus{
 				BoundVolumeGroupSnapshotContentName: &contentName,
 			}
 		}
@@ -1840,7 +1971,7 @@ func TestWaitForVGSCBinding(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		vgs       *volumegroupsnapshotv1beta2.VolumeGroupSnapshot
+		vgs       *volumegroupsnapshotv1.VolumeGroupSnapshot
 		expectErr bool
 	}{
 		{
@@ -1857,14 +1988,16 @@ func TestWaitForVGSCBinding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := velerotest.NewFakeControllerRuntimeClient(t, tt.vgs.DeepCopy())
-
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
-				crClient: client,
+				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgs.DeepCopy()),
 			}
 
-			err := action.waitForVGSCBinding(t.Context(), tt.vgs, 1*time.Second)
+			timeout := 1 * time.Second
+			if tt.expectErr {
+				timeout = 20 * time.Millisecond
+			}
+			err := action.waitForVGSCBinding(t.Context(), tt.vgs, timeout)
 
 			if tt.expectErr {
 				require.Error(t, err)
@@ -1883,8 +2016,8 @@ func TestGetVGSByLabels(t *testing.T) {
 	labelVal := "backup-123"
 	testLabels := map[string]string{labelKey: labelVal}
 
-	makeVGS := func(name string, labels map[string]string) *volumegroupsnapshotv1beta2.VolumeGroupSnapshot {
-		return &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+	makeVGS := func(name string, labels map[string]string) *volumegroupsnapshotv1.VolumeGroupSnapshot {
+		return &volumegroupsnapshotv1.VolumeGroupSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "test-ns",
@@ -1928,17 +2061,15 @@ func TestGetVGSByLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var client crclient.Client
+			var crClient = velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgsObjects...)
 			if tt.name == "client list error" {
-				// Inject a client that always errors on List
-				client = &failingClient{}
-			} else {
-				client = velerotest.NewFakeControllerRuntimeClient(t, tt.vgsObjects...)
+				// Simulate the VGS API being unavailable, which surfaces as a list error.
+				crClient = velerotest.NewFakeControllerRuntimeClientBuilder(t).WithRESTMapper(velerotest.VGSTestRESTMapper()).Build()
 			}
 
 			action := &pvcBackupItemAction{
 				log:      velerotest.NewLogger(),
-				crClient: client,
+				crClient: crClient,
 			}
 
 			vgs, err := action.getVGSByLabels(t.Context(), "test-ns", testLabels)
@@ -1969,7 +2100,7 @@ func (f *failingClient) List(ctx context.Context, list crclient.ObjectList, opts
 }
 
 func TestHasOwnerReference(t *testing.T) {
-	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-vgs",
 			Namespace: "test-ns",
@@ -1986,7 +2117,7 @@ func TestHasOwnerReference(t *testing.T) {
 			name: "match kind, apiversion, uid",
 			ownerRef: metav1.OwnerReference{
 				Kind:       kuberesource.VGSKind,
-				APIVersion: volumegroupsnapshotv1beta2.GroupName + "/" + volumegroupsnapshotv1beta2.SchemeGroupVersion.Version,
+				APIVersion: volumegroupsnapshotv1.SchemeGroupVersion.String(),
 				UID:        vgs.UID,
 			},
 			expect: true,
@@ -1995,25 +2126,28 @@ func TestHasOwnerReference(t *testing.T) {
 			name: "mismatch kind",
 			ownerRef: metav1.OwnerReference{
 				Kind:       "other-kind",
-				APIVersion: volumegroupsnapshotv1beta2.GroupName + "/" + volumegroupsnapshotv1beta2.SchemeGroupVersion.Version,
+				APIVersion: volumegroupsnapshotv1.SchemeGroupVersion.String(),
 				UID:        vgs.UID,
 			},
 			expect: false,
 		},
 		{
-			name: "mismatch apiversion",
+			// Owner-ref matching is version-independent: the CSI controller may
+			// stamp the ref with any served VGS version, so Kind + UID must match
+			// regardless of apiVersion.
+			name: "different apiversion still matches on kind+uid",
 			ownerRef: metav1.OwnerReference{
 				Kind:       kuberesource.VGSKind,
-				APIVersion: "wrong.group/v1",
+				APIVersion: "groupsnapshot.storage.k8s.io/v1beta1",
 				UID:        vgs.UID,
 			},
-			expect: false,
+			expect: true,
 		},
 		{
 			name: "mismatch uid",
 			ownerRef: metav1.OwnerReference{
 				Kind:       kuberesource.VGSKind,
-				APIVersion: volumegroupsnapshotv1beta2.GroupName + "/" + volumegroupsnapshotv1beta2.SchemeGroupVersion.Version,
+				APIVersion: volumegroupsnapshotv1.SchemeGroupVersion.String(),
 				UID:        "wrong-uid",
 			},
 			expect: false,
@@ -2107,7 +2241,7 @@ func TestPVCRequestSize(t *testing.T) {
 					Name: "testVSC",
 				},
 				Status: &snapshotv1api.VolumeSnapshotContentStatus{
-					RestoreSize: pointer.Int64(rsQty.Value()),
+					RestoreSize: ptr.To(rsQty.Value()),
 				},
 			}
 
@@ -2161,4 +2295,147 @@ func TestGetOrCreateVolumeHelper(t *testing.T) {
 
 	// The pvcPodCache should be the same instance
 	require.Same(t, cache1, action.pvcPodCache, "Expected same pvcPodCache instance on repeated calls")
+}
+
+func TestNewDataUpload(t *testing.T) {
+	tests := []struct {
+		name                      string
+		backupType                velerov1api.BackupType
+		vsClassName               *string
+		uploaderConfig            *velerov1api.UploaderConfigForBackup
+		dataMoverFromVolumePolicy string
+		expectedParentSnap        string
+		expectedDataMoverCfg      map[string]string
+	}{
+		{
+			name:                 "Full backup type, no uploader config, no vs class name",
+			backupType:           velerov1api.BackupTypeFull,
+			vsClassName:          nil,
+			uploaderConfig:       nil,
+			expectedParentSnap:   "none",
+			expectedDataMoverCfg: nil,
+		},
+		{
+			name:               "Incremental backup type, with uploader config, with vs class name",
+			backupType:         velerov1api.BackupTypeIncremental,
+			vsClassName:        ptr.To("test-vs-class"),
+			uploaderConfig:     &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 10},
+			expectedParentSnap: "",
+			expectedDataMoverCfg: map[string]string{
+				uploaderUtil.ParallelFilesUpload: "10",
+			},
+		},
+		{
+			name:                 "Default backup type, uploader config with 0 parallel files",
+			backupType:           "",
+			vsClassName:          ptr.To("test-vs-class"),
+			uploaderConfig:       &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
+			expectedParentSnap:   "",
+			expectedDataMoverCfg: nil,
+		},
+		{
+			name:                      "Default backup type, uploader config with 0 parallel files",
+			backupType:                "",
+			vsClassName:               ptr.To("test-vs-class"),
+			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
+			dataMoverFromVolumePolicy: "velero-block",
+			expectedParentSnap:        "",
+			expectedDataMoverCfg:      nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backup := &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+					UID:       types.UID("backup-uid"),
+				},
+				Spec: velerov1api.BackupSpec{
+					BackupType:         tc.backupType,
+					DataMover:          "velero",
+					StorageLocation:    "default",
+					CSISnapshotTimeout: metav1.Duration{Duration: 10 * time.Minute},
+					UploaderConfig:     tc.uploaderConfig,
+				},
+			}
+
+			vs := &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-vs",
+				},
+				Spec: snapshotv1api.VolumeSnapshotSpec{
+					VolumeSnapshotClassName: tc.vsClassName,
+				},
+			}
+
+			pvc := &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "test-ns",
+					UID:       types.UID("pvc-uid"),
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					StorageClassName: ptr.To("test-storage-class"),
+				},
+			}
+
+			vsc := &snapshotv1api.VolumeSnapshotContent{
+				Spec: snapshotv1api.VolumeSnapshotContentSpec{
+					Driver: "test-driver",
+				},
+			}
+
+			operationID := "test-op-id"
+			fsType := "ext4"
+
+			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy)
+
+			require.NotNil(t, du)
+			assert.Equal(t, velerov2alpha1.SchemeGroupVersion.String(), du.APIVersion)
+			assert.Equal(t, "DataUpload", du.Kind)
+			assert.Equal(t, backup.Namespace, du.Namespace)
+			assert.Equal(t, backup.Name+"-", du.GenerateName)
+
+			require.Len(t, du.OwnerReferences, 1)
+			assert.Equal(t, velerov1api.SchemeGroupVersion.String(), du.OwnerReferences[0].APIVersion)
+			assert.Equal(t, "Backup", du.OwnerReferences[0].Kind)
+			assert.Equal(t, backup.Name, du.OwnerReferences[0].Name)
+			assert.Equal(t, backup.UID, du.OwnerReferences[0].UID)
+			assert.Equal(t, boolptr.True(), du.OwnerReferences[0].Controller)
+
+			expectedLabels := map[string]string{
+				velerov1api.BackupNameLabel:       label.GetValidName(backup.Name),
+				velerov1api.BackupUIDLabel:        string(backup.UID),
+				velerov1api.PVCUIDLabel:           string(pvc.UID),
+				velerov1api.AsyncOperationIDLabel: operationID,
+			}
+			assert.Equal(t, expectedLabels, du.Labels)
+
+			assert.Equal(t, velerov2alpha1.SnapshotTypeCSI, du.Spec.SnapshotType)
+			assert.Equal(t, vs.Name, du.Spec.CSISnapshot.VolumeSnapshot)
+			assert.Equal(t, *pvc.Spec.StorageClassName, du.Spec.CSISnapshot.StorageClass)
+			assert.Equal(t, vsc.Spec.Driver, du.Spec.CSISnapshot.Driver)
+			if tc.vsClassName != nil {
+				assert.Equal(t, *tc.vsClassName, du.Spec.CSISnapshot.SnapshotClass)
+			} else {
+				assert.Empty(t, du.Spec.CSISnapshot.SnapshotClass)
+			}
+
+			assert.Equal(t, pvc.Name, du.Spec.SourcePVC)
+			if tc.dataMoverFromVolumePolicy != "" {
+				assert.Equal(t, tc.dataMoverFromVolumePolicy, du.Spec.DataMover)
+			} else {
+				assert.Equal(t, backup.Spec.DataMover, du.Spec.DataMover)
+			}
+
+			assert.Equal(t, backup.Spec.StorageLocation, du.Spec.BackupStorageLocation)
+			assert.Equal(t, pvc.Namespace, du.Spec.SourceNamespace)
+			assert.Equal(t, backup.Spec.CSISnapshotTimeout, du.Spec.OperationTimeout)
+			assert.Equal(t, fsType, du.Spec.SourceFSType)
+			assert.Equal(t, tc.expectedParentSnap, du.Spec.ParentSnapshot)
+			assert.Equal(t, tc.expectedDataMoverCfg, du.Spec.DataMoverConfig)
+		})
+	}
 }

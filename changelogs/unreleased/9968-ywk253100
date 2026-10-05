@@ -1,0 +1,1 @@
+Use forward slash as the path separator to make sure it works on both Linux and Windows nodes

@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -1155,6 +1156,98 @@ func TestGetBackupVolumeInfos(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRestoreVolumeInfos(t *testing.T) {
+	tests := []struct {
+		name           string
+		volumeInfo     []*volume.RestoreVolumeInfo
+		volumeInfoStr  string
+		expectedErr    string
+		expectedResult []*volume.RestoreVolumeInfo
+	}{
+		{
+			name: "No VolumeInfos, expect no error.",
+		},
+		{
+			name: "Valid RestoreVolumeInfo, should pass.",
+			volumeInfo: []*volume.RestoreVolumeInfo{
+				{
+					PVCName:       "pvcName",
+					PVCNamespace:  "pvcNamespace",
+					RestoreMethod: volume.CSISnapshot,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover:       "velero",
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
+						Phase:           "Completed",
+					},
+				},
+			},
+			expectedResult: []*volume.RestoreVolumeInfo{
+				{
+					PVCName:       "pvcName",
+					PVCNamespace:  "pvcNamespace",
+					RestoreMethod: volume.CSISnapshot,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						DataMover:       "velero",
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
+						Phase:           "Completed",
+					},
+				},
+			},
+		},
+		{
+			name:          "Invalid RestoreVolumeInfo string, should also pass.",
+			volumeInfoStr: `[{"abc": "123", "def": "456", "pvcName": "pvcName"}]`,
+			expectedResult: []*volume.RestoreVolumeInfo{
+				{
+					PVCName: "pvcName",
+				},
+			},
+		},
+	}
+
+	harness := newObjectBackupStoreTestHarness("test-bucket", "")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.volumeInfo != nil {
+				obj := new(bytes.Buffer)
+				gzw := gzip.NewWriter(obj)
+
+				require.NoError(t, json.NewEncoder(gzw).Encode(tc.volumeInfo))
+				require.NoError(t, gzw.Close())
+				harness.objectStore.PutObject(harness.bucket, "restores/test-restore/test-restore-volumeinfo.json.gz", obj)
+			}
+
+			if tc.volumeInfoStr != "" {
+				obj := new(bytes.Buffer)
+				gzw := gzip.NewWriter(obj)
+				_, err := gzw.Write([]byte(tc.volumeInfoStr))
+				require.NoError(t, err)
+
+				require.NoError(t, gzw.Close())
+				harness.objectStore.PutObject(harness.bucket, "restores/test-restore/test-restore-volumeinfo.json.gz", obj)
+			}
+
+			result, err := harness.GetRestoreVolumeInfos("test-restore")
+			if tc.expectedErr != "" {
+				require.Equal(t, tc.expectedErr, err.Error())
+			} else {
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+				require.NoError(t, err)
+			}
+
+			if len(tc.expectedResult) > 0 {
+				require.Equal(t, tc.expectedResult, result)
+			}
+		})
+	}
+}
+
 func TestGetRestoreResults(t *testing.T) {
 	harness := newObjectBackupStoreTestHarness("test-bucket", "")
 
@@ -1247,6 +1340,51 @@ func TestPutBackupVolumeInfos(t *testing.T) {
 			bufferContent := buf.Bytes()
 
 			err := harness.PutBackupVolumeInfos("backup-1", buf)
+
+			velerotest.AssertErrorMatches(t, tc.expectedErr, err)
+			assert.Len(t, harness.objectStore.Data[harness.bucket], len(tc.expectedKeys))
+			for _, key := range tc.expectedKeys {
+				assert.Contains(t, harness.objectStore.Data[harness.bucket], key)
+				assert.Equal(t, harness.objectStore.Data[harness.bucket][key], bufferContent)
+			}
+		})
+	}
+}
+
+func TestPutRestoreVolumeInfo(t *testing.T) {
+	tests := []struct {
+		name         string
+		prefix       string
+		expectedErr  string
+		expectedKeys []string
+	}{
+		{
+			name:        "normal case",
+			expectedErr: "",
+			expectedKeys: []string{
+				"restores/restore-1/restore-1-volumeinfo.json.gz",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newObjectBackupStoreTestHarness("foo", tc.prefix)
+
+			volumeInfos := []*volume.RestoreVolumeInfo{
+				{
+					PVCName: "test",
+				},
+			}
+
+			buf := new(bytes.Buffer)
+			gzw := gzip.NewWriter(buf)
+			defer gzw.Close()
+
+			require.NoError(t, json.NewEncoder(gzw).Encode(volumeInfos))
+			bufferContent := buf.Bytes()
+
+			err := harness.PutRestoreVolumeInfo("restore-1", buf)
 
 			velerotest.AssertErrorMatches(t, tc.expectedErr, err)
 			assert.Len(t, harness.objectStore.Data[harness.bucket], len(tc.expectedKeys))

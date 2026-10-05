@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -346,7 +346,15 @@ func getOrderedResourcesForType(
 	if !ok || len(orderStr) == 0 {
 		return nil
 	}
-	orders := strings.Split(orderStr, ",")
+	parts := strings.Split(orderStr, ",")
+	orders := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		orders = append(orders, name)
+	}
 	return orders
 }
 
@@ -462,6 +470,7 @@ func (r *itemCollector) getResourceItems(
 	}
 
 	clusterScoped := !resource.Namespaced
+
 	namespacesToList := getNamespacesToList(r.backupRequest.NamespaceIncludesExcludes)
 
 	// If we get here, we're backing up something other than namespaces
@@ -469,18 +478,88 @@ func (r *itemCollector) getResourceItems(
 		namespacesToList = []string{""}
 	}
 
+	grString := gr.String()
+	hasNamespacedPolicies := len(r.backupRequest.NamespacedFilterMap) > 0
+
 	var items []*kubernetesResource
 
 	for _, namespace := range namespacesToList {
+		// Check per-namespace resource type filter from ResourcePolicy
+		if nsFilter := r.backupRequest.GetNamespaceFilter(namespace); nsFilter != nil {
+			_, hasSpecific := nsFilter.ResourceFilterMap[grString]
+			if !hasSpecific && nsFilter.CatchAllFilter == nil {
+				log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
+					gr, namespace)
+				continue
+			}
+		}
+
 		unstructuredItems, err := r.listResourceByLabelsPerNamespace(
 			namespace, gr, gv, resource, log)
 		if err != nil {
 			continue
 		}
 
+		var lastNS string
+		var lastNSFilter *ResolvedNamespaceFilter
+
 		// Collect items in included Namespaces
 		for i := range unstructuredItems {
 			item := &unstructuredItems[i]
+			itemNS := item.GetNamespace()
+
+			// Apply namespace inclusion/exclusion and fine-grained filter policies in-memory for cluster-wide queries.
+			if itemNS != "" && namespace == "" {
+				if r.backupRequest.NamespaceIncludesExcludes != nil &&
+					!r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(itemNS) {
+					log.Debugf("Skipping resource %s in namespace %s: namespace excluded",
+						gr, itemNS)
+					continue
+				}
+
+				if hasNamespacedPolicies {
+					if itemNS != lastNS {
+						lastNS = itemNS
+						lastNSFilter = r.backupRequest.GetNamespaceFilter(itemNS)
+					}
+
+					if lastNSFilter != nil {
+						rf := lastNSFilter.ResourceFilterMap[grString]
+						if rf == nil {
+							rf = lastNSFilter.CatchAllFilter
+						}
+						if rf == nil {
+							log.Debugf("Skipping resource %s in namespace %s: not in resourceFilters",
+								gr, itemNS)
+							continue
+						}
+
+						// In-memory label selector checks for fine-grained filters
+						if rf.LabelSelector != nil || len(rf.OrLabelSelectors) > 0 {
+							itemLabels := labels.Set(item.GetLabels())
+							if rf.LabelSelector != nil && !rf.LabelSelector.Matches(itemLabels) {
+								log.Debugf("Skipping resource %s in namespace %s: does not match labelSelector",
+									gr, itemNS)
+								continue
+							}
+							if len(rf.OrLabelSelectors) > 0 {
+								matched := false
+								for _, s := range rf.OrLabelSelectors {
+									if s.Matches(itemLabels) {
+										matched = true
+										break
+									}
+								}
+								if !matched {
+									log.Debugf("Skipping resource %s in namespace %s: does not match orLabelSelectors",
+										gr, itemNS)
+									continue
+								}
+							}
+						}
+					}
+				}
+			}
 
 			path, err := r.writeToFile(item)
 			if err != nil {
@@ -497,7 +576,8 @@ func (r *itemCollector) getResourceItems(
 				kind:          resource.Kind,
 			})
 
-			if item.GetNamespace() != "" {
+			if item.GetNamespace() != "" &&
+				r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(item.GetNamespace()) {
 				log.Debugf("Track namespace %s in nsTracker", item.GetNamespace())
 				r.nsTracker.track(item.GetNamespace())
 			}
@@ -527,13 +607,55 @@ func (r *itemCollector) listResourceByLabelsPerNamespace(
 		return nil, err
 	}
 
+	// 1. Start with global selectors (existing default behavior)
 	var orLabelSelectors []string
+	var labelSelector string
+
 	if r.backupRequest.Spec.OrLabelSelectors != nil {
 		for _, s := range r.backupRequest.Spec.OrLabelSelectors {
 			orLabelSelectors = append(orLabelSelectors, metav1.FormatLabelSelector(s))
 		}
-	} else {
-		orLabelSelectors = []string{}
+	}
+	if selector := r.backupRequest.Spec.LabelSelector; selector != nil {
+		labelSelector = metav1.FormatLabelSelector(selector)
+	}
+
+	// 2. Apply fine-grained filter overrides if applicable
+	if !resource.Namespaced && r.backupRequest.ClusterScopedFilterMap != nil {
+		if rf := r.backupRequest.ClusterScopedFilterMap[gr.String()]; rf != nil {
+			// Overwrite global selectors with specific filter
+			orLabelSelectors = nil
+			labelSelector = ""
+			if rf.LabelSelector != nil {
+				labelSelector = rf.LabelSelector.String()
+			}
+			for _, s := range rf.OrLabelSelectors {
+				orLabelSelectors = append(orLabelSelectors, s.String())
+			}
+		}
+		// ClusterScopedFilterPolicy: If rf == nil, it intentionally falls back to the global selectors initialized above
+	} else if nsFilter := r.backupRequest.GetNamespaceFilter(namespace); nsFilter != nil {
+		rf := nsFilter.ResourceFilterMap[gr.String()]
+		if rf == nil {
+			rf = nsFilter.CatchAllFilter
+		}
+
+		if rf != nil {
+			// Overwrite global selectors with specific filter
+			orLabelSelectors = nil
+			labelSelector = ""
+			if rf.LabelSelector != nil {
+				labelSelector = rf.LabelSelector.String()
+			}
+			for _, s := range rf.OrLabelSelectors {
+				orLabelSelectors = append(orLabelSelectors, s.String())
+			}
+		} else {
+			// NamespacedFilterPolicies: namespacedFilterPolicies acts as an exclusive allowlist.
+			// If neither a kind-specific entry nor a catch-all entry exists, skip the kind.
+			logger.Debug("Skipping resource kind for namespace as it is not present in the namespace filter policy")
+			return nil, nil
+		}
 	}
 
 	logger.Info("Listing items")
@@ -551,11 +673,6 @@ func (r *itemCollector) listResourceByLabelsPerNamespace(
 	if errListingForNS {
 		logger.WithError(err).Error("Error listing items")
 		return nil, err
-	}
-
-	var labelSelector string
-	if selector := r.backupRequest.Spec.LabelSelector; selector != nil {
-		labelSelector = metav1.FormatLabelSelector(selector)
 	}
 
 	// Listing items for labelSelector (singular)
