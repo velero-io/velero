@@ -48,6 +48,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -171,6 +172,16 @@ func TestProcessBackupNonProcessedItems(t *testing.T) {
 			// is what we expect.
 		})
 	}
+}
+
+func TestBackupControllerPredicatesAcceptReadyToStartCreate(t *testing.T) {
+	predicates := backupControllerPredicates()
+
+	readyToStart := defaultBackup().Result()
+	require.True(t, predicates.CreateFunc(event.CreateEvent{Object: readyToStart}))
+
+	newBackup := defaultBackup().Phase(velerov1api.BackupPhaseNew).Result()
+	require.False(t, predicates.CreateFunc(event.CreateEvent{Object: newBackup}))
 }
 
 func TestProcessBackupValidationFailures(t *testing.T) {

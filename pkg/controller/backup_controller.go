@@ -178,26 +178,31 @@ func NewBackupReconciler(
 
 func (b *backupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&velerov1api.Backup{}, builder.WithPredicates(predicate.Funcs{
-			UpdateFunc: func(ue event.UpdateEvent) bool {
-				backup := ue.ObjectNew.(*velerov1api.Backup)
-				return backup.Status.Phase == velerov1api.BackupPhaseReadyToStart
-			},
-			CreateFunc: func(ce event.CreateEvent) bool {
-				return false
-			},
-			DeleteFunc: func(de event.DeleteEvent) bool {
-				return false
-			},
-			GenericFunc: func(ge event.GenericEvent) bool {
-				return false
-			},
-		})).
+		For(&velerov1api.Backup{}, builder.WithPredicates(backupControllerPredicates())).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: b.concurrentBackups,
 		}).
 		Named(constant.ControllerBackup).
 		Complete(b)
+}
+
+func backupControllerPredicates() predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(ue event.UpdateEvent) bool {
+			backup := ue.ObjectNew.(*velerov1api.Backup)
+			return backup.Status.Phase == velerov1api.BackupPhaseReadyToStart
+		},
+		CreateFunc: func(ce event.CreateEvent) bool {
+			backup := ce.Object.(*velerov1api.Backup)
+			return backup.Status.Phase == velerov1api.BackupPhaseReadyToStart
+		},
+		DeleteFunc: func(de event.DeleteEvent) bool {
+			return false
+		},
+		GenericFunc: func(ge event.GenericEvent) bool {
+			return false
+		},
+	}
 }
 
 func (b *backupReconciler) updateTotalBackupMetric() {
