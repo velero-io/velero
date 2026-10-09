@@ -114,6 +114,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      csi-matrix: ${{ steps.set-matrix.outputs.csi-matrix }}
     steps:
       - name: Set k8s versions
         id: set-matrix
@@ -159,6 +160,29 @@ jobs:
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
+            ]}" >> $GITHUB_OUTPUT
+
+          # The CSI cases need a snapshot stack installed per job, which the
+          # other label sets do not, so they run as their own job rather than
+          # adding that cost to all of them.
+          #
+          # The newest three versions rather than every one. csi-driver-host-path
+          # ships deploy manifests only for recent Kubernetes releases, so the
+          # older end of the matrix has nothing to install, and running every
+          # version would add about a quarter to the matrix for coverage of a
+          # driver that is only used by this job.
+          csi_k8s_json=$(printf '%s\n' "${valid[@]+"${valid[@]}"}" | jq -R -c -s '
+            split("\n") | map(select(length > 0))
+            | sort_by(split(".") | map(tonumber))
+            | .[-3:]')
+          # Every CSI label is listed explicitly. A Ginkgo label filter matches a
+          # bare token by exact equality, not as a substring, so CSISnapshot does
+          # not select CSIVolumeGroupSnapshot. A new CSI label has to be added
+          # here or its cases silently never run.
+          echo "csi-matrix={\
+            \"k8s\":${csi_k8s_json},\
+            \"labels\":[\
+              \"BackupVolumeInfo && (CSISnapshot || CSIDataMover || CSIVolumeGroupSnapshot)\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
@@ -252,4 +276,107 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: DebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
+          path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
+
+  # The CSI cases need a driver that can take snapshots, which kind does not
+  # have, so they run as their own job with the snapshot stack installed and the
+  # StorageClass pointed at it. Everything else mirrors run-e2e-test.
+  run-csi-e2e-test:
+    needs:
+      - build
+      - setup-test-matrix
+      - get-go-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.setup-test-matrix.outputs.csi-matrix)}}
+      fail-fast: false
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ needs.get-go-version.outputs.version }}
+
+      # Fetch the pre-built MinIO image from the build job
+      - name: Fetch built MinIO Image
+        uses: actions/cache/restore@v6
+        id: minio-cache
+        with:
+          path: ./minio-image.tar
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
+      - name: Load MinIO Image
+        run: |
+          echo "Loading MinIO image..."
+          docker load < ./minio-image.tar
+      - name: Install MinIO
+        run: |
+          docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
+        with:
+          cluster_name: "kind"
+          version: "v0.32.0"
+          node_image: "kindest/node:v${{ matrix.k8s }}"
+
+      # Match kubectl to the server version before the installer uses it
+      - name: Install kubectl
+        run: |
+          curl -fLO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - name: Install CSI snapshot support
+        run: ./hack/install-csi-hostpath.sh
+        timeout-minutes: 10
+
+      - name: Fetch built CLI
+        id: cli-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ./_output/bin/linux/amd64/velero
+          key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Fetch built Image
+        id: image-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ./velero.tar
+          key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Load Velero Image
+        run:
+          kind load image-archive velero.tar
+      - name: Run CSI E2E test
+        run: |
+          cat << EOF > /tmp/credential
+          [default]
+          aws_access_key_id=minio
+          aws_secret_access_key=minio123
+          EOF
+
+          git init -q /tmp/kibishii
+          git -C /tmp/kibishii remote add origin https://github.com/vmware-tanzu-experiments/distributed-data-generator.git
+          git -C /tmp/kibishii fetch --depth 1 origin "${KIBISHII_COMMIT}"
+          git -C /tmp/kibishii checkout -q FETCH_HEAD
+
+          GOPATH=~/go \
+              CLOUD_PROVIDER=kind \
+              OBJECT_STORE_PROVIDER=aws \
+              FEATURES=EnableCSI \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              CREDS_FILE=/tmp/credential \
+              BSL_BUCKET=bucket \
+              ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_CREDS_FILE=/tmp/credential \
+              ADDITIONAL_BSL_BUCKET=additional-bucket \
+              VELERO_IMAGE=velero:pr-test-linux-amd64 \
+              PLUGINS=velero/velero-plugin-for-aws:latest \
+              STORAGE_CLASS_FILE=../testdata/storage-class/kind-csi.yaml \
+              GINKGO_LABELS="${{ matrix.labels }}" \
+              KIBISHII_DIRECTORY=/tmp/kibishii/kubernetes/yaml/ \
+              make -C test/ run-e2e
+        timeout-minutes: 30
+      - name: Upload debug bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: CSIDebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
           path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
