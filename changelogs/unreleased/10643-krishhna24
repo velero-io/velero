@@ -1,0 +1,1 @@
+Document the StorageClass flag for CSI e2e on kind instead of editing shared test data

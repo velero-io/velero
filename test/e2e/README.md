@@ -207,16 +207,29 @@ Every CSI label has to be named in the filter. A Ginkgo label filter matches a
 bare token by exact equality and not as a substring, so `CSISnapshot` does not
 select a case labelled `CSIVolumeGroupSnapshot`.
 
-The PVCs those cases create have to land on a CSI-backed StorageClass. The suite
-builds `e2e-storage-class` from the provider's file, and the kind one uses the
-local-path provisioner, so until that definition is configurable the file has to
-be pointed at `hostpath.csi.k8s.io` locally:
+The PVCs those cases create have to land on a CSI-backed StorageClass. The kind
+provider file uses the local-path provisioner, so point the suite at a CSI
+definition rather than editing the shared file, which every other kind job reads:
+
+``` yaml
+# /tmp/kind-csi-sc.yaml
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: e2e-storage-class
+provisioner: hostpath.csi.k8s.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+```
 
 ``` bash
-# local change, do not commit it: every other kind job reads this file
-sed -i 's|^provisioner: rancher.io/local-path$|provisioner: hostpath.csi.k8s.io|' \
-  test/testdata/storage-class/kind.yaml
+STORAGE_CLASS_FILE=/tmp/kind-csi-sc.yaml
 ```
+
+`STORAGE_CLASS_FILE` changes only the definition. The class is still named
+`e2e-storage-class`, so no spec needs to know about it, and a relative path is
+resolved from `test/e2e` like the default provider file.
 
 Kibishii brings its own StorageClass for the cases that use it
 (`kubernetes/yaml/kind/kibishiiKINDStorageClass.yaml` in
