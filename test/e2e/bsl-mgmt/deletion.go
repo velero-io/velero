@@ -130,6 +130,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 					veleroCfg.AdditionalBSLConfig,
 					secretName,
 					secretKey,
+					veleroCfg.AdditionalBSLCACertFile,
 				)).To(Succeed())
 			})
 

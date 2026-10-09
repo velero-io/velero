@@ -52,3 +52,52 @@ func Test_getVersionWithoutPatch(t *testing.T) {
 		})
 	}
 }
+
+func Test_createBackupLocationArgs(t *testing.T) {
+	// argValue returns the value following flag, and whether flag was present.
+	argValue := func(args []string, flag string) (string, bool) {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1], true
+			}
+		}
+		return "", false
+	}
+
+	const (
+		namespace = "velero"
+		bslName   = "additional-bsl"
+		provider  = "aws"
+		bucket    = "additional-bucket"
+		config    = "region=minio,s3ForcePathStyle=\"true\",s3Url=https://minio.example.com:9000"
+		caCert    = "/tmp/minio-certs/public.crt"
+	)
+
+	t.Run("emits --cacert when a CA bundle is configured", func(t *testing.T) {
+		args := createBackupLocationArgs(
+			namespace, bslName, provider, bucket, "", config,
+			"bsl-credentials", "creds-aws", caCert,
+		)
+
+		require.Equal(t, []string{
+			"--namespace", namespace,
+			"create", "backup-location", bslName,
+			"--provider", provider,
+			"--bucket", bucket,
+		}, args[:9], "leading subcommand shape changed")
+
+		value, found := argValue(args, "--cacert")
+		require.True(t, found, "expected --cacert to be emitted, got %v", args)
+		require.Equal(t, caCert, value, "--cacert must be followed by the bundle path")
+	})
+
+	t.Run("omits --cacert when no CA bundle is configured", func(t *testing.T) {
+		args := createBackupLocationArgs(
+			namespace, bslName, provider, bucket, "", config,
+			"bsl-credentials", "creds-aws", "",
+		)
+
+		_, found := argValue(args, "--cacert")
+		require.False(t, found, "did not expect --cacert, got %v", args)
+	})
+}

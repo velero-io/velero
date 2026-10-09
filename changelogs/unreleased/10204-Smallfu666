@@ -1,0 +1,1 @@
+Run the kind E2E object store (MinIO) over TLS and plumb a CA bundle through the E2E test framework to `velero install --cacert`.
