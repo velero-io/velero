@@ -28,7 +28,7 @@ These are the current set of limitations with the E2E tests.
 1. Flag `-install-velero` is for purpose of having tests on an existed Velero instance, but by default `-install-velero` is set to true, because it's mandatory for some of cases to testing on specific version of Velero, such as upgrade and migration tests. In upgrade tests, we must install a specific old version and then upgrade it to  the target version, multiple installations is involved here, also migration tests have the same situation with upgrade tests, therefore if you're going to test against an existed Velero instance, make sure to skip upgrade and migration tests from a single E2E test execution.
 1. To improve E2E test execution efficiency, E2E tests will skip re-installation between test cases except for those which need a fresh Velero installation like upgrade , migration and some other test cases. When starting a E2E test execution which setting flag `-install-velero` with the default value(true), there will be a Velero installation at the beginning, then test cases will be run in random order, and test cases behavior is as below: 
     1. If the scheduled test case is upgrade (or other cases needs a fresh Velero installation), then upgrade test will uninstall the current Velero instance at the beginning and uninstall the tested Velero instance in the end to avoid unexpected installation parameters for the following test cases. 
-    1. If the scheduled test case is the normal one,  it will check the existence of Velero instance, if no one there then start a new standard instaillation, otherwise proceeding test steps.
+    1. If the scheduled test case is the normal one,  it will check the existence of Velero instance, if no one there then start a new standard installation, otherwise proceeding test steps.
 
 
 ## 3. Configuration for E2E tests
@@ -113,10 +113,10 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `MIGRATE_FROM_VELERO_VERSION `: `-migrate-from-velero-version`. Optional.
 1. `ADDITIONAL_BSL_PLUGINS `: `-additional-bsl-plugins`. Optional.
 1. `ADDITIONAL_OBJECT_STORE_PROVIDER`: `-additional-bsl-object-store-provider`. Optional.
-1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-bucket`. Optional.
-1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-prefix`. Optional.
-1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-config`. Optional.
-1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_CREDS_FILE`: `-additional-bsl-credentials-file`. Optional.
+1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-bucket`. Optional.
+1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-prefix`. Optional.
+1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-config`. Optional.
 1. `FEATURES`: `-features`. Optional.
 1. `REGISTRY_CREDENTIAL_FILE`: `-registry-credential-file`. Optional.
 1. `KIBISHII_DIRECTORY`: `-kibishii-directory`. Optional.
@@ -127,14 +127,14 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `SNAPSHOT_MOVE_DATA`: `-snapshot-move-data`. Optional.
 1. `DATA_MOVER_plugin`: `-data-mover-plugin`. Optional.
 1. `STANDBY_CLUSTER_CLOUD_PROVIDER`: `-standby-cluster-cloud-provider`. Optional.
-1. `STANDBY_CLUSTER_PLUGINS`: `-dstandby-cluster-plugins`. Optional.
+1. `STANDBY_CLUSTER_PLUGINS`: `-standby-cluster-plugins`. Optional.
 1. `STANDBY_CLUSTER_OBJECT_STORE_PROVIDER`: `-standby-cluster-object-store-provider`. Optional.
 1. `INSTALL_VELERO `: `-install-velero`. Optional.
 1. `DEBUG_VELERO_POD_RESTART`: `-debug-velero-pod-restart`. Optional.
 1. `FAIL_FAST`: `--fail-fast`. Optional.
 1. `HAS_VSPHERE_PLUGIN`: `--has-vsphere-plugin`. Optional.
 1. `WORKER_OS`: `--worker-os`. Optional.
-1. `IMAGE_REGISTRY_PROXY`: `--image-registry-proxy.` Optional.
+1. `IMAGE_REGISTRY_PROXY`: `--image-registry-proxy` Optional.
 
 ### Examples
 
@@ -160,6 +160,74 @@ Stop kind cluster
 ``` bash
 kind delete cluster
 ```
+
+#### CSI snapshots on kind
+
+kind has no CSI driver that can take snapshots: its default storage is the
+local-path provisioner, which no CSI snapshotter can act on. The CSI cases are
+therefore skipped on a plain kind cluster.
+
+`hack/install-csi-hostpath.sh` installs what they need: the snapshot CRDs, the
+snapshot controller, the CSI sidecar RBAC and csi-driver-host-path, plus a
+`csi-hostpath-sc` StorageClass. Versions are pinned in the script.
+
+``` bash
+kind create cluster
+./hack/install-csi-hostpath.sh
+```
+
+The script also turns on the `CSIVolumeGroupSnapshot` feature gate, which has to
+be set on both the snapshot controller and the `csi-snapshotter` sidecar, and is
+not enabled by either project's own manifests. Set
+`ENABLE_VOLUME_GROUP_SNAPSHOT=false` to leave the group snapshot CRDs and gates
+out.
+
+Then run the CSI cases with `FEATURES=EnableCSI`:
+
+``` bash
+CLOUD_PROVIDER=kind \
+OBJECT_STORE_PROVIDER=aws \
+FEATURES=EnableCSI \
+BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+CREDS_FILE=/path/to/minio-creds \
+BSL_BUCKET=bucket \
+GINKGO_LABELS="BackupVolumeInfo && (CSISnapshot || CSIDataMover)" \
+make -C test/ run-e2e
+```
+
+`$(hostname -i)` is what CI uses, but it resolves to an address the cluster
+cannot reach under WSL2, which leaves the BackupStorageLocation unreachable and
+every backup failing to upload. Use the kind network's gateway instead:
+
+``` bash
+docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}'
+```
+
+Every CSI label has to be named in the filter. A Ginkgo label filter matches a
+bare token by exact equality and not as a substring, so `CSISnapshot` does not
+select a case labelled `CSIVolumeGroupSnapshot`.
+
+The PVCs those cases create have to land on a CSI-backed StorageClass. The suite
+builds `e2e-storage-class` from the provider's file, and the kind one uses the
+local-path provisioner, so until that definition is configurable the file has to
+be pointed at `hostpath.csi.k8s.io` locally:
+
+``` bash
+# local change, do not commit it: every other kind job reads this file
+sed -i 's|^provisioner: rancher.io/local-path$|provisioner: hostpath.csi.k8s.io|' \
+  test/testdata/storage-class/kind.yaml
+```
+
+Kibishii brings its own StorageClass for the cases that use it
+(`kubernetes/yaml/kind/kibishiiKINDStorageClass.yaml` in
+`vmware-tanzu-experiments/distributed-data-generator`), which is also local-path,
+so those cases need the same change in the clone that `KIBISHII_DIRECTORY` points
+at.
+
+`GINKGO_LABELS="BackupVolumeInfo && CSIVolumeGroupSnapshot"` runs the
+VolumeGroupSnapshot case, which additionally needs a VolumeGroupSnapshotClass;
+the suite installs one for providers that have the test data under
+`test/testdata/volume-group-snapshot-class/`.
 
 1. Run Velero tests in an AWS cluster:
 ```bash
@@ -270,7 +338,7 @@ OBJECT_STORE_PROVIDER=aws \
 CREDS_FILE=<AWS_CREDENTIAL_FILE> \ 
 BSL_CONFIG=region=<AWS_REGION> \ 
 BSL_BUCKET=<S3_BUCKET> \ 
-BSL_PREFIX=<S3_BUCKET_PREFIC> \ 
+BSL_PREFIX=<S3_BUCKET_PREFIX> \ 
 VSL_CONFIG=region=<AWS_REGION> \ 
 SNAPSHOT_MOVE_DATA=true \ 
 STANDBY_CLUSTER_CLOUD_PROVIDER=aws \ 
@@ -369,7 +437,7 @@ there're some tests need to be run in a single execution or pipeline with specif
 Following pipelines should cover all E2E tests along with proper filters:
 
 1. **CSI pipeline:** As we can see lots of labels in E2E test code, there're many snapshot-labeled test scripts. To cover CSI scenario, a pipeline with CSI enabled should be a good choice, otherwise, we will double all the snapshot cases for CSI scenario, it's very time-wasting. By providing `FEATURES=EnableCSI` and  `PLUGINS=<provider-plugin-images>`, a CSI pipeline is ready for testing.
-1. **Data mover pipeline:** Data mover scenario is the same scenario with migaration test except the restriction of migaration between different providers, so it better to separated it out from other pipelines. Please refer the example in previous.
+1. **Data mover pipeline:** Data mover scenario is the same scenario with migration test except the restriction of migration between different providers, so it better to separated it out from other pipelines. Please refer the example in previous.
 1. **File system backup pipeline:** Set `UPLOADER_TYPE` to `kopia` for all file system backup test cases;
 1. **Long time pipeline:** Long time cases should be group into one pipeline, currently these test cases with labels `Scale`, `Schedule` or `TTL` can be group into a pipeline, and make sure to skip them off in any other pipelines.
     
@@ -381,7 +449,7 @@ Following pipelines should cover all E2E tests along with proper filters:
 When adding a test, aim to instantiate an API client only once at the beginning of the test. There is a constructor `newTestClient` that facilitates the configuration and instantiation of clients. Also, please use the `kubebuilder` runtime controller client for any new test, as we will phase out usage of `client-go` API clients.
 
 ## 8. TestCase frame related
-TestCase frame provide a serials of interface to concatenate one complete e2e test. it's makes the testing be concise and explicit.
+TestCase frame provide a series of interfaces to concatenate one complete e2e test. it makes the testing be concise and explicit.
 
 ### VeleroBackupRestoreTest interface 
 VeleroBackupRestoreTest interface provided a standard workflow of backup and restore, which makes the whole testing process clearer and code reusability.
@@ -418,6 +486,25 @@ Look for the ⛵ emoji printed at the end of each install and uninstall log. The
 
 ## `Failed to get bucket region` error
 If velero log shows `level=error msg="Failed to get bucket region, bucket: xbucket, error: operation error S3: HeadBucket, failed to resolve service endpoint, endpoint rule error, A region must be set when sending requests to S3." backup-storage-location=velero/default cmd=/plugins/velero-plugin-for-aws controller=backup-storage-location logSource="/go/src/velero-plugin-for-aws/velero-plugin-for-aws/object_store.go:136" pluginName=velero-plugin-for-aws`, it means you need to set `BSL_CONFIG` to include `region=<region>`.
+
+## `multiple VolumeGroupSnapshotClasses found` error
+
+If a VolumeGroupSnapshot backup fails with `failed to determine
+VolumeGroupSnapshotClass for CSI driver ...: multiple VolumeGroupSnapshotClasses
+found`, the cluster has more than one VolumeGroupSnapshotClass carrying the
+`velero.io/csi-volumegroupsnapshot-class=true` label and Velero cannot choose
+between them. The suite removes the class it installs, so this usually means one
+was left behind by hand. `kubectl get volumegroupsnapshotclass` shows them.
+
+## snapshots that never become ready
+
+If VolumeSnapshots stay `readyToUse: false` with nothing in the logs, check that
+the `csi-snapshotter` sidecar synced its caches:
+`kubectl logs csi-hostpathplugin-0 -c csi-snapshotter | grep "Caches populated"`.
+A sidecar watching an API the cluster does not serve, for instance the
+VolumeGroupSnapshot feature gate is on while the group snapshot CRDs are
+missing, waits on a cache that never syncs rather than failing.
+`hack/install-csi-hostpath.sh` checks for this at the end of its run.
 
 ## fail fast
 If need to debug the failed test case, please set the `FAIL_FAST=true` for the `make test-e2e` CLI.

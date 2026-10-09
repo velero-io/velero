@@ -184,7 +184,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		return "", errors.Wrap(err, "error to create data path")
 	}
 
-	log.Debug("Async fs br created")
+	log.Debug("Async br created")
 
 	if err := dp.Init(ctx, &datapath.InitParam{
 		BSLName:           du.Spec.BackupStorageLocation,
@@ -198,18 +198,23 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		return "", errors.Wrap(err, "error to initialize data path")
 	}
 
-	log.Info("Async fs br init")
+	log.Info("Async br init")
 
 	tags := map[string]string{
 		velerov1api.AsyncOperationIDLabel: du.Labels[velerov1api.AsyncOperationIDLabel],
 	}
 
-	// Modify the ParentSnapshot to "" and ForceFull to true when ParentSnapshot is "none".
+	// "none" requests a full backup. "auto" requests that the data mover finds the most
+	// recent backup of the same volume as parent, which is what an empty ParentSnapshot
+	// already does, so both map to "".
 	parentSnapshot := du.Spec.ParentSnapshot
 	forceFull := false
-	if du.Spec.ParentSnapshot == veleroshared.DataUploadParentSnapshotNone {
+	switch du.Spec.ParentSnapshot {
+	case veleroshared.ParentSnapshotNone:
 		parentSnapshot = ""
 		forceFull = true
+	case veleroshared.ParentSnapshotAuto:
+		parentSnapshot = ""
 	}
 
 	if err := dp.StartBackup(r.sourceTargetPath, du.Spec.DataMoverConfig, &datapath.BackupStartParam{
@@ -231,7 +236,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	result := ""
 	select {
 	case <-ctx.Done():
-		err = errors.New("timed out waiting for fs backup to complete")
+		err = errors.New("timed out waiting for backup to complete")
 		break
 	case res := <-r.resultSignal:
 		err = res.err
@@ -315,9 +320,9 @@ func (r *BackupMicroService) OnDataUploadProgress(ctx context.Context, namespace
 }
 
 func (r *BackupMicroService) closeDataPath(ctx context.Context, duName string) {
-	fsBackup := r.dataPathMgr.GetAsyncBR(duName)
-	if fsBackup != nil {
-		fsBackup.Close(ctx)
+	asyncBR := r.dataPathMgr.GetAsyncBR(duName)
+	if asyncBR != nil {
+		asyncBR.Close(ctx)
 	}
 
 	r.dataPathMgr.RemoveAsyncBR(duName)
@@ -328,11 +333,11 @@ func (r *BackupMicroService) cancelDataUpload(du *velerov2alpha1api.DataUpload) 
 
 	r.eventRecorder.Event(du, false, datapath.EventReasonCancelling, "Canceling for data upload %s", du.Name)
 
-	fsBackup := r.dataPathMgr.GetAsyncBR(du.Name)
-	if fsBackup == nil {
+	asyncBR := r.dataPathMgr.GetAsyncBR(du.Name)
+	if asyncBR == nil {
 		r.OnDataUploadCancelled(r.ctx, du.GetNamespace(), du.GetName())
 		r.eventRecorder.EndingEvent(du, false, datapath.EventReasonStopped, "Data path for %s exited without start", du.Name)
 	} else {
-		fsBackup.Cancel()
+		asyncBR.Cancel()
 	}
 }

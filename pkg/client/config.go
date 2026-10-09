@@ -27,10 +27,16 @@ import (
 )
 
 const (
-	ConfigKeyNamespace = "namespace"
-	ConfigKeyFeatures  = "features"
-	ConfigKeyCACert    = "cacert"
-	ConfigKeyColorized = "colorized"
+	ConfigKeyNamespace     = "namespace"
+	ConfigKeyNamespaceMode = "namespace-mode"
+	ConfigKeyFeatures      = "features"
+	ConfigKeyCACert        = "cacert"
+	ConfigKeyColorized     = "colorized"
+
+	// NamespaceModeAuto is the ConfigKeyNamespaceMode value that makes Velero resolve the
+	// namespace for operational commands from the current kubeconfig context on every
+	// invocation, instead of the static ConfigKeyNamespace value.
+	NamespaceModeAuto = "auto"
 )
 
 // VeleroConfig is a map of strings to any for deserializing Velero client config options.
@@ -97,6 +103,20 @@ func (c VeleroConfig) Namespace() string {
 	}
 
 	return ns
+}
+
+func (c VeleroConfig) NamespaceMode() string {
+	val, ok := c[ConfigKeyNamespaceMode]
+	if !ok {
+		return ""
+	}
+
+	mode, ok := val.(string)
+	if !ok {
+		return ""
+	}
+
+	return mode
 }
 
 func (c VeleroConfig) Features() []string {

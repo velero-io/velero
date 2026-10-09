@@ -485,6 +485,8 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		return err
 	}
 
+	pvcMustInclusionTracker := NewPVCMustInclusionTracker(backupRequest.MustIncludeAdditionalItemPVCs)
+
 	volumeHelperImpl, err := volumehelper.NewVolumeHelperImplWithNamespaces(
 		backupRequest.ResPolicies,
 		backupRequest.Spec.SnapshotVolumes,
@@ -493,6 +495,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		boolptr.IsSetToTrue(backupRequest.Spec.DefaultVolumesToFsBackup),
 		!backupRequest.ResourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()),
 		namespaces,
+		pvcMustInclusionTracker,
 	)
 	if err != nil {
 		log.WithError(err).Error("Failed to build PVC-to-Pod cache for volume policy lookups")
@@ -743,10 +746,10 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		log.WithError(errors.WithStack((err))).Warn("Got error trying to update backup's status.progress and hook status")
 	}
 
-	if skippedPVSummary, err := json.Marshal(backupRequest.SkippedPVTracker.Summary()); err != nil {
-		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped PV summary.")
+	if skippedVolumeSummary, err := json.Marshal(backupRequest.SkippedVolumeTracker.Summary()); err != nil {
+		log.WithError(errors.WithStack(err)).Warn("Fail to generate skipped volume summary.")
 	} else {
-		log.Infof("Summary for skipped PVs: %s", skippedPVSummary)
+		log.Infof("Summary for skipped volumes: %s", skippedVolumeSummary)
 	}
 
 	backupRequest.Status.Progress = &velerov1api.BackupProgress{TotalItems: backedUpItems, ItemsBackedUp: backedUpItems}
@@ -1263,21 +1266,12 @@ func buildFinalTarball(tr *tar.Reader, tw tarWriter, updateFiles map[string]File
 				return errors.WithStack(err)
 			}
 			delete(updateFiles, header.Name)
-			// skip over file contents from old tarball
-			_, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 		} else {
 			// Add original content to new tarball, as item wasn't updated
-			oldContents, err := io.ReadAll(tr)
-			if err != nil {
-				return errors.WithStack(err)
-			}
 			if err := tw.WriteHeader(header); err != nil {
 				return errors.WithStack(err)
 			}
-			if _, err := tw.Write(oldContents); err != nil {
+			if _, err := io.Copy(tw, tr); err != nil {
 				return errors.WithStack(err)
 			}
 		}
@@ -1334,7 +1328,9 @@ func updateVolumeInfos(
 				volumeInfos[index].SnapshotDataMovementInfo.RetainedSnapshot = dataUpload.Spec.CSISnapshot.VolumeSnapshot
 				volumeInfos[index].SnapshotDataMovementInfo.Size = dataUpload.Status.Progress.TotalBytes
 				volumeInfos[index].SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
+				volumeInfos[index].SnapshotDataMovementInfo.SourceSize = dataUpload.Status.SourceSize
 				volumeInfos[index].SnapshotDataMovementInfo.Phase = dataUpload.Status.Phase
+				volumeInfos[index].FallbackFull = dataUpload.Status.FallbackFull
 
 				if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
 					volumeInfos[index].Result = volume.VolumeResultSucceeded

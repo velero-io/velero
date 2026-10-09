@@ -395,7 +395,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 									{
 										MatchExpressions: []corev1api.NodeSelectorRequirement{
 											{
-												Key:      "kubernetes.io/os",
+												Key:      corev1api.LabelOSStable,
 												Values:   []string{"windows"},
 												Operator: corev1api.NodeSelectorOpNotIn,
 											},
@@ -444,6 +444,15 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 								},
 							},
 							Resources: c.resources,
+							SecurityContext: &corev1api.SecurityContext{
+								Capabilities: &corev1api.Capabilities{
+									Drop: []corev1api.Capability{"ALL"},
+								},
+								AllowPrivilegeEscalation: ptr.To(false),
+								SeccompProfile: &corev1api.SeccompProfile{
+									Type: corev1api.SeccompProfileTypeRuntimeDefault,
+								},
+							},
 						},
 					},
 					Volumes: []corev1api.Volume{
@@ -523,7 +532,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 
 	if len(c.plugins) > 0 {
 		for _, image := range c.plugins {
-			container := *builder.ForPluginContainer(image, pullPolicy).Result()
+			container := *builder.ForPluginContainer(image, pullPolicy, deployment.Spec.Template.Spec.InitContainers).Result()
 			deployment.Spec.Template.Spec.InitContainers = append(deployment.Spec.Template.Spec.InitContainers, container)
 		}
 	}

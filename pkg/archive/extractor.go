@@ -32,14 +32,27 @@ import (
 // Extractor unzips/extracts a backup tarball to a local
 // temp directory.
 type Extractor struct {
-	log logrus.FieldLogger
-	fs  filesystem.Interface
+	log                logrus.FieldLogger
+	fs                 filesystem.Interface
+	maxExtractionSize  int64
+	totalExtractedSize int64
+}
+
+var maxExtractionSize = int64(16) << 30
+
+// SetMaxExtractionSize sets the maximum extraction size. It is normally called at server startup.
+func SetMaxExtractionSize(size int64) {
+	if size > 0 {
+		maxExtractionSize = size
+	}
 }
 
 func NewExtractor(log logrus.FieldLogger, fs filesystem.Interface) *Extractor {
 	return &Extractor{
-		log: log,
-		fs:  fs,
+		log:                log,
+		fs:                 fs,
+		maxExtractionSize:  maxExtractionSize,
+		totalExtractedSize: 0,
 	}
 }
 
@@ -71,11 +84,20 @@ func (e *Extractor) writeFile(target string, tarRdr *tar.Reader) error {
 // sanitizeArchivePath sanitizes archive file path from "G305: Zip Slip vulnerability"
 func sanitizeArchivePath(destDir, sourcePath string) (targetPath string, err error) {
 	targetPath = filepath.Join(destDir, sourcePath)
-	if strings.HasPrefix(targetPath, filepath.Clean(destDir)) {
-		return targetPath, nil
+
+	// filepath.Rel reports targetPath relative to destDir; a result of ".." or one that
+	// starts with "../" means the joined path landed outside destDir. A plain
+	// strings.HasPrefix check has no separator boundary, so a sibling directory whose
+	// name begins with destDir's (e.g. "<destDir>-evil") would wrongly be accepted.
+	rel, err := filepath.Rel(destDir, targetPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid archive path %q: %w", sourcePath, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid archive path %q: escapes target directory", sourcePath)
 	}
 
-	return "", fmt.Errorf("invalid archive path %q: escapes target directory", sourcePath)
+	return targetPath, nil
 }
 
 func (e *Extractor) readBackup(tarRdr *tar.Reader) (string, error) {
@@ -93,6 +115,15 @@ func (e *Extractor) readBackup(tarRdr *tar.Reader) (string, error) {
 		}
 		if err != nil {
 			e.log.Infof("error reading tar: %v", err)
+			return "", err
+		}
+
+		// Enforce maximum extraction size to prevent memory/storage exhaustion and zip bombs.
+		maxSize := e.maxExtractionSize
+		e.totalExtractedSize += header.Size
+		if e.totalExtractedSize > maxSize {
+			err := fmt.Errorf("decompressed backup exceeds maximum allowed size of %d bytes", maxSize)
+			e.log.Infof("error checking extracted size: %v", err)
 			return "", err
 		}
 

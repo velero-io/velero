@@ -1,0 +1,1 @@
+Fix issue #10341, avoid mutating the cached node-agent LoadAffinity so the OS node selector term is not appended repeatedly to data mover pods

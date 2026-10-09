@@ -57,16 +57,18 @@ type Provider interface {
 		cbtParam CBTParam,
 		volMode uploader.PersistentVolumeMode,
 		uploaderCfg map[string]string,
-		updater uploader.ProgressUpdater) (string, bool, int64, int64, error)
+		updater uploader.ProgressUpdater) (string, bool, int64, int64, int64, bool, error)
 	// RunRestore which will do restore for one specific volume with given snapshot id and return error
 	// updater is used for updating backup progress which implement by third-party
 	RunRestore(
 		ctx context.Context,
 		snapshotID string,
 		volumePath string,
+		incremental bool,
+		cbtParam CBTParam,
 		volMode uploader.PersistentVolumeMode,
 		uploaderConfig map[string]string,
-		updater uploader.ProgressUpdater) (int64, error)
+		updater uploader.ProgressUpdater) (int64, int64, bool, error)
 	// Close which will close related repository
 	Close(ctx context.Context) error
 }

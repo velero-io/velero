@@ -102,7 +102,9 @@ The VGS backup workflow is triggered by a simple label on your PVCs.
     *   Waits for the CSI driver to create the individual `VolumeSnapshot` objects.
     *   Applies the backup's labels to each `VolumeSnapshot` for tracking.
 
-4.  **Resource Cleanup:** To keep your cluster tidy, Velero deletes the temporary `VolumeGroupSnapshot` and `VolumeGroupSnapshotContent` resources after the individual `VolumeSnapshots` have been created and secured.
+4.  **Resource Cleanup:** Velero keeps the temporary `VolumeGroupSnapshot` and `VolumeGroupSnapshotContent` resources while the Backup processes and finalizes the individual `VolumeSnapshots`. After the Backup reaches a terminal phase and its archive is persisted, Velero retains the backend snapshot data, deletes the VGS/VGSC API resources, and completes cleanup.
+
+    While the parent VGS exists, external-snapshotter may keep VGS member `VolumeSnapshot` objects in `Terminating` while its protection finalizers are processed. This is expected; terminal VGS cleanup releases the member snapshots after Backup finalization.
 
 Here is a visual representation of the backup workflow:
 
@@ -123,11 +125,15 @@ Before using Volume Group Snapshots with Velero, ensure your environment meets t
 - Check your version: `kubectl version --short`
 
 ### 2. External-Snapshotter Version
-Velero 1.18.1+ uses the VolumeGroupSnapshot v1beta2 API. This requires external-snapshotter v8.2.0 or later, which introduced v1beta2 support. Older versions of external-snapshotter only ship v1beta1 CRDs and are not compatible with VGS in Velero 1.18.1+.
+Velero detects the served VolumeGroupSnapshot API version at runtime and works with any of `groupsnapshot.storage.k8s.io/v1`, `v1beta2`, or `v1beta1`. When a cluster serves more than one, Velero prefers the newest (`v1` > `v1beta2` > `v1beta1`). The installed external-snapshotter CRDs and controllers must serve at least one of these versions.
 
 ```bash
-# Check your external-snapshotter CRD version
-kubectl get crd volumegroupsnapshotcontents.groupsnapshot.storage.k8s.io -o jsonpath='{.spec.versions[*].name}'
+# Check which group-snapshot API versions the CRDs serve
+kubectl get crd \
+  volumegroupsnapshots.groupsnapshot.storage.k8s.io \
+  volumegroupsnapshotcontents.groupsnapshot.storage.k8s.io \
+  volumegroupsnapshotclasses.groupsnapshot.storage.k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.versions[*]}{"  "}{.name}{" served="}{.served}{"\n"}{end}{end}'
 ```
 
 ### 3. VolumeGroupSnapshot CRDs
@@ -160,15 +166,14 @@ kubectl get volumegroupsnapshotclass -o wide
 **Important:** The VolumeGroupSnapshotClass must have the label `velero.io/csi-volumegroupsnapshot-class: "true"` for Velero to automatically discover and use it:
 
 ```yaml
-apiVersion: groupsnapshot.storage.k8s.io/v1alpha1
+apiVersion: groupsnapshot.storage.k8s.io/v1
 kind: VolumeGroupSnapshotClass
 metadata:
   name: csi-vgs-class
   labels:
     velero.io/csi-volumegroupsnapshot-class: "true"
-spec:
-  driver: ebs.csi.aws.com
-  deletionPolicy: Delete
+driver: ebs.csi.aws.com
+deletionPolicy: Delete
 ```
 
 Verify your VolumeGroupSnapshotClass has the correct label:
@@ -504,4 +509,3 @@ kubectl patch volumesnapshotclass ocs-storagecluster-rbdplugin-snapclass \
 3. **Label Consistency:** Use consistent labeling across your organization
 4. **Backup Validation:** Always verify backup success before relying on it for disaster recovery
 5. **Storage Quotas:** Ensure sufficient storage quota for group snapshots
-

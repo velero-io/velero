@@ -231,11 +231,11 @@ func (m *manager) Forget(ctx context.Context, repo *velerov1api.BackupRepository
 		return errors.WithStack(err)
 	}
 
-	if err := prd.BoostRepoConnect(context.Background(), param); err != nil {
+	if err := prd.BoostRepoConnect(ctx, param); err != nil {
 		return errors.WithStack(err)
 	}
 
-	return prd.Forget(context.Background(), snapshot, param)
+	return prd.Forget(ctx, snapshot, param)
 }
 
 func (m *manager) BatchForget(ctx context.Context, repo *velerov1api.BackupRepository, snapshots []string) []error {
@@ -254,15 +254,15 @@ func (m *manager) BatchForget(ctx context.Context, repo *velerov1api.BackupRepos
 	// Disable FIPS-140 compliance check, because Kopia doesn't support FIPS-140 yet.
 	var connectErr error
 	fips140.WithoutEnforcement(func() {
-		connectErr = prd.BoostRepoConnect(context.Background(), param)
+		connectErr = prd.BoostRepoConnect(ctx, param)
 	})
 	if connectErr != nil {
-		return []error{errors.WithStack(err)}
+		return []error{errors.WithStack(connectErr)}
 	}
 
 	forgetErr := make([]error, 0)
 	fips140.WithoutEnforcement(func() {
-		forgetErr = prd.BatchForget(context.Background(), snapshots, param)
+		forgetErr = prd.BatchForget(ctx, snapshots, param)
 	})
 	return forgetErr
 }

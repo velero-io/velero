@@ -29,6 +29,10 @@ func UpdateVolumeSnapshotLocationWithCredentialConfig(location *velerov1api.Volu
 	if location.Spec.Config == nil {
 		location.Spec.Config = make(map[string]string)
 	}
+
+	// Delete any user-provided credentialsFile to prevent path traversal vulnerabilities
+	delete(location.Spec.Config, "credentialsFile")
+
 	// If the VSL specifies a credential, fetch its path on disk and pass to
 	// plugin via the config.
 	if location.Spec.Credential != nil && credentialStore != nil {

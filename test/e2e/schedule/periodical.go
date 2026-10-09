@@ -184,7 +184,7 @@ func (n *PeriodicalCase) Verify() error {
 	By("Namespaces were restored", func() {
 		for _, ns := range *n.NSIncluded {
 			_, err := k8sutil.GetConfigMap(n.Client.ClientGo, ns, n.CaseBaseName)
-			Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("failed to list CM in namespace: %s\n", ns))
+			Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("failed to list CM in namespace: %s\n", ns))
 		}
 	})
 	return nil

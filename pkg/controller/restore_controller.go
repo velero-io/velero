@@ -107,6 +107,7 @@ type restoreReconciler struct {
 	metrics                     *metrics.ServerMetrics
 	logFormat                   logging.Format
 	clock                       clock.WithTickerAndDelayedExecution
+	defaultCSISnapshotTimeout   time.Duration
 	defaultItemOperationTimeout time.Duration
 	disableInformerCache        bool
 
@@ -133,6 +134,7 @@ func NewRestoreReconciler(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	logFormat logging.Format,
+	defaultCSISnapshotTimeout time.Duration,
 	defaultItemOperationTimeout time.Duration,
 	disableInformerCache bool,
 	globalCrClient client.Client,
@@ -149,6 +151,7 @@ func NewRestoreReconciler(
 		metrics:                     metrics,
 		logFormat:                   logFormat,
 		clock:                       &clock.RealClock{},
+		defaultCSISnapshotTimeout:   defaultCSISnapshotTimeout,
 		defaultItemOperationTimeout: defaultItemOperationTimeout,
 		disableInformerCache:        disableInformerCache,
 
@@ -250,6 +253,10 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		restore.Status.StartTimestamp = &metav1.Time{Time: r.clock.Now()}
 		restore.Status.Phase = api.RestorePhaseInProgress
 	}
+	if restore.Spec.CSISnapshotTimeout.Duration == 0 {
+		// set default CSI snapshot timeout
+		restore.Spec.CSISnapshotTimeout.Duration = r.defaultCSISnapshotTimeout
+	}
 	if restore.Spec.ItemOperationTimeout.Duration == 0 {
 		// set default item operation timeout
 		restore.Spec.ItemOperationTimeout.Duration = r.defaultItemOperationTimeout
@@ -275,7 +282,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.runValidatedRestore(restore, info, resourceModifiers, restoreResPolicies); err != nil {
 		log.WithError(err).Debug("Restore failed")
 		restore.Status.Phase = api.RestorePhaseFailed
-		restore.Status.FailureReason = err.Error()
+		restore.Status.FailureReason = fmt.Sprintf("restore execution failed: %v", err)
 		r.metrics.RegisterRestoreFailed(backupScheduleName)
 	}
 
@@ -349,7 +356,7 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 	// validate Restore Init Hook's InitContainers
 	restoreHooks, err := hook.GetRestoreHooksFromSpec(&restore.Spec.Hooks)
 	if err != nil {
-		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, err.Error())
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("invalid restore hooks: %v", err))
 	}
 	for _, resource := range restoreHooks {
 		for _, h := range resource.RestoreHooks {
@@ -357,7 +364,7 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 				for _, container := range h.Init.InitContainers {
 					err = hook.ValidateContainer(container.Raw)
 					if err != nil {
-						restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, err.Error())
+						restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("invalid init container in restore hook %q: %v", resource.Name, err))
 					}
 				}
 			}
@@ -365,8 +372,13 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 	}
 
 	// validate ExistingResourcePolicy
-	if restore.Spec.ExistingResourcePolicy != "" && !pkgrestoreUtil.IsResourcePolicyValid(string(restore.Spec.ExistingResourcePolicy)) {
+	if !pkgrestoreUtil.IsResourcePolicyValid(string(restore.Spec.ExistingResourcePolicy)) {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingResourcePolicy: %s", restore.Spec.ExistingResourcePolicy))
+	}
+
+	// validate ExistingVolumeDataPolicy
+	if !pkgrestoreUtil.IsVolumeDataPolicyValid(string(restore.Spec.ExistingVolumeDataPolicy)) {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Invalid ExistingVolumeDataPolicy: %s", restore.Spec.ExistingVolumeDataPolicy))
 	}
 
 	// if ScheduleName is specified, fill in BackupName with the most recent successful backup from
@@ -428,7 +440,7 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		)
 		if err != nil {
 			restore.Status.ValidationErrors = append(
-				restore.Status.ValidationErrors, err.Error(),
+				restore.Status.ValidationErrors, fmt.Sprintf("invalid restore resource policies: %v", err),
 			)
 			return backupInfo{}, nil, nil
 		}

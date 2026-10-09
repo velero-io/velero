@@ -295,6 +295,7 @@ func TestBlockUploaderBackup(t *testing.T) {
 			var iterator cbt.Iterator
 			if !tc.nilBitmap {
 				iterMock := cbtmocks.NewIterator(t)
+				iterMock.On("Errors").Return(nil).Maybe()
 				iterator = iterMock
 
 				backupMode := udmrepo.ObjectDataBackupModeInc
@@ -573,6 +574,7 @@ func TestRestoreData(t *testing.T) {
 		reader := bytes.NewReader(data)
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Errors").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
@@ -603,6 +605,7 @@ func TestRestoreData(t *testing.T) {
 		reader := &errReader{err: errors.New("read error")}
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Errors").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
@@ -623,7 +626,8 @@ func TestBlockUploaderRestore(t *testing.T) {
 		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(nil, errors.New("meta not found"))
 
 		iterMock := cbtmocks.NewIterator(t)
-		_, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
+		iterMock.On("Errors").Return(nil).Maybe()
+		_, _, err := blkup.Restore(udmrepo.Snapshot{RootObject: udmrepo.ObjectMetadata{ID: "root-id"}}, destInfo{}, iterMock, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "meta not found")
 	})
@@ -663,7 +667,7 @@ func TestBlockUploaderRestore(t *testing.T) {
 		objReader.On("Read", mock.Anything).Return(0, io.EOF)
 		objReader.On("Close").Return(nil)
 
-		repoWriter.On("OpenObject", mock.Anything, udmrepo.ID("data-id")).Return(objReader, nil)
+		repoWriter.On("OpenObject", mock.Anything, udmrepo.ID("data-id"), mock.Anything).Return(objReader, nil)
 
 		snap := udmrepo.Snapshot{
 			Description: "test snapshot",
@@ -680,13 +684,64 @@ func TestBlockUploaderRestore(t *testing.T) {
 		}
 
 		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Errors").Return(nil).Maybe()
 		iterMock.On("Count").Return(uint64(1))
 		iterMock.On("Next").Return(uint64(0), true).Once()
 		iterMock.On("Next").Return(uint64(0), false)
 		iterMock.On("BlockSize").Return(uint(1048576))
 
-		written, err := blkup.Restore(snap, dest, iterMock, nil)
+		written, _, err := blkup.Restore(snap, dest, iterMock, nil)
 		require.NoError(t, err)
 		assert.Equal(t, int64(1048576), written)
+	})
+
+	t.Run("source size tag larger than object size", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		blkup := NewUploader(ctx, repoWriter, nil, logrus.New())
+
+		meta := &udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{
+				{ID: "data-id", Name: "bdev", Size: 1048576},
+			},
+		}
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(meta, nil)
+
+		snap := udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-id"},
+			Tags:       map[string]string{bdevSourceSizeTag: "2097152"},
+		}
+		dest := destInfo{size: 4194304, path: "/dev/target"}
+		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Errors").Return(nil).Maybe()
+
+		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected size (1048576 vs. 2097152) for bdev object bdev")
+	})
+
+	t.Run("destination smaller than source size", func(t *testing.T) {
+		ctx := context.Background()
+		repoWriter := udmrepomocks.NewBackupRepo(t)
+		blkup := NewUploader(ctx, repoWriter, nil, logrus.New())
+
+		meta := &udmrepo.Metadata{
+			SubObjects: []udmrepo.ObjectMetadata{
+				{ID: "data-id", Name: "bdev", Size: 1048576},
+			},
+		}
+		repoWriter.On("ReadMetadata", mock.Anything, udmrepo.ID("root-id")).Return(meta, nil)
+
+		snap := udmrepo.Snapshot{
+			RootObject: udmrepo.ObjectMetadata{ID: "root-id"},
+			Tags:       map[string]string{bdevSourceSizeTag: "1048576"},
+		}
+		dest := destInfo{size: 512, path: "/dev/small"}
+		iterMock := cbtmocks.NewIterator(t)
+		iterMock.On("Errors").Return(nil).Maybe()
+
+		_, _, err := blkup.Restore(snap, dest, iterMock, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "dest dev(/dev/small) size is too small")
 	})
 }

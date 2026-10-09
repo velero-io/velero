@@ -170,7 +170,7 @@ func (s *InProgressCase) Backup() error {
 				}
 
 				// There should be at most one in-progress backup per schedule.
-				Expect(inProgressBackupCount).Should(BeNumerically("<=", 1))
+				Expect(inProgressBackupCount).To(BeNumerically("<=", 1))
 
 				// Already ensured at most one in-progress backup when schedule triggered 2 backups.
 				// Succeed.

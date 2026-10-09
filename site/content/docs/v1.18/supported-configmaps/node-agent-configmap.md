@@ -295,6 +295,8 @@ For detailed information, see [BackupPVC Configuration for Data Movement Backup]
 - **`storageClass`**: Alternative storage class for backup PVCs (defaults to source PVC's storage class)
 - **`readOnly`**: This is a boolean value. If set to `true` then `ReadOnlyMany` will be the only value set to the backupPVC's access modes. Otherwise `ReadWriteOnce` value will be used.
 - **`spcNoRelabeling`**: This is a boolean value. If set to true, then `pod.Spec.SecurityContext.SELinuxOptions.Type` will be set to `spc_t`. From the SELinux point of view, this will be considered a `Super Privileged Container` which means that selinux enforcement will be disabled and volume relabeling will not occur. This field is ignored if `readOnly` is `false`.
+- **`secretNames`**: List of secret names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped secrets to provision the volume, e.g. ODF/ceph-csi encrypted volumes (`ceph-csi-kms-token`).
+- **`configMapNames`**: List of configmap names to copy from the source PVC's namespace to the Velero namespace before creating the backupPVC (deleted after the DataUpload completes). Needed for CSI drivers that require namespace-scoped configmaps to provision the volume, e.g. a tenant ceph-csi KMS config (`ceph-csi-kms-config`).
 
 **Use Cases:**
 - Use read-only volumes for faster snapshot-to-volume conversion
@@ -358,6 +360,8 @@ For detailed information, see [RestorePVC Configuration for Data Movement Restor
 
 #### Configuration Options
 - **`ignoreDelayBinding`**: Ignore `WaitForFirstConsumer` binding mode constraints
+- **`secretNames`**: List of secret names to copy from the target (restore) namespace to the Velero namespace before creating the restorePVC (deleted after the DataDownload completes). Needed for CSI drivers that require namespace-scoped secrets to provision the volume, e.g. ODF/ceph-csi encrypted volumes (`ceph-csi-kms-token`).
+- **`configMapNames`**: List of configmap names to copy from the target (restore) namespace to the Velero namespace before creating the restorePVC (deleted after the DataDownload completes). Needed for CSI drivers that require namespace-scoped configmaps to provision the volume, e.g. a tenant ceph-csi KMS config (`ceph-csi-kms-config`).
 
 **Use Cases:**
 - Improve restore parallelism by not waiting for pod scheduling

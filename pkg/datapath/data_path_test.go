@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/uploader/provider"
@@ -70,7 +71,7 @@ func TestAsyncBackup(t *testing.T) {
 			err: provider.ErrorCanceled,
 		},
 		{
-			name: "async backup complete",
+			name: "async backup complete with totalBytes larger than sourceSize",
 			callbacks: Callbacks{
 				OnFailed:    nil,
 				OnCancelled: nil,
@@ -82,10 +83,37 @@ func TestAsyncBackup(t *testing.T) {
 			},
 			result: Result{
 				Backup: BackupResult{
-					SnapshotID:    "fake-snapshot",
-					EmptySnapshot: false,
-					Source:        AccessPoint{ByPath: "fake-path"},
-					TotalBytes:    1000,
+					SnapshotID:       "fake-snapshot",
+					EmptySnapshot:    false,
+					Source:           AccessPoint{ByPath: "fake-path"},
+					TotalBytes:       3000,
+					IncrementalBytes: ptr.To(int64(200)),
+					SourceSize:       2000,
+					FallbackFull:     true,
+				},
+			},
+			path: "fake-path",
+		},
+		{
+			name: "async backup complete with totalBytes equal to sourceSize",
+			callbacks: Callbacks{
+				OnFailed:    nil,
+				OnCancelled: nil,
+				OnCompleted: func(ctx context.Context, namespace string, job string, result Result) {
+					asyncResult = result
+					asyncErr = nil
+					finish <- struct{}{}
+				},
+			},
+			result: Result{
+				Backup: BackupResult{
+					SnapshotID:       "fake-snapshot",
+					EmptySnapshot:    false,
+					Source:           AccessPoint{ByPath: "fake-path"},
+					TotalBytes:       2000,
+					IncrementalBytes: ptr.To(int64(200)),
+					SourceSize:       2000,
+					FallbackFull:     false,
 				},
 			},
 			path: "fake-path",
@@ -96,7 +124,11 @@ func TestAsyncBackup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dp := newGeneralDataPath("job-1", "test", nil, "velero", Callbacks{}, velerotest.NewLogger()).(*generalDataPath)
 			mockProvider := providerMock.NewProvider(t)
-			mockProvider.On("RunBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Backup.SnapshotID, test.result.Backup.EmptySnapshot, test.result.Backup.TotalBytes, test.result.Backup.IncrementalBytes, test.err)
+			var incrementalBytes int64
+			if test.result.Backup.IncrementalBytes != nil {
+				incrementalBytes = *test.result.Backup.IncrementalBytes
+			}
+			mockProvider.On("RunBackup", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Backup.SnapshotID, test.result.Backup.EmptySnapshot, test.result.Backup.TotalBytes, incrementalBytes, test.result.Backup.SourceSize, test.result.Backup.FallbackFull, test.err)
 			mockProvider.On("Close", mock.Anything).Return(nil)
 			dp.uploaderProv = mockProvider
 			dp.initialized = true
@@ -171,8 +203,10 @@ func TestAsyncRestore(t *testing.T) {
 			},
 			result: Result{
 				Restore: RestoreResult{
-					Target:     AccessPoint{ByPath: "fake-path"},
-					TotalBytes: 1000,
+					Target:           AccessPoint{ByPath: "fake-path"},
+					TotalBytes:       1000,
+					IncrementalBytes: 500,
+					FallbackFull:     true,
 				},
 			},
 			path:     "fake-path",
@@ -184,7 +218,7 @@ func TestAsyncRestore(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dp := newGeneralDataPath("job-1", "test", nil, "velero", Callbacks{}, velerotest.NewLogger()).(*generalDataPath)
 			mockProvider := providerMock.NewProvider(t)
-			mockProvider.On("RunRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Restore.TotalBytes, test.err)
+			mockProvider.On("RunRestore", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(test.result.Restore.IncrementalBytes, test.result.Restore.TotalBytes, test.result.Restore.FallbackFull, test.err)
 			mockProvider.On("Close", mock.Anything).Return(nil)
 			dp.uploaderProv = mockProvider
 			dp.initialized = true

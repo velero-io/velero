@@ -57,13 +57,11 @@ var resToDelete = []kbclient.ObjectList{}
 
 // uninstallOptions collects all the options for uninstalling Velero from a Kubernetes cluster.
 type uninstallOptions struct {
-	wait  bool // deprecated
 	force bool
 }
 
 // BindFlags adds command line values to the options struct.
 func (o *uninstallOptions) BindFlags(flags *pflag.FlagSet) {
-	flags.BoolVar(&o.wait, "wait", o.wait, "Wait for Velero uninstall to be ready. Optional. Deprecated.")
 	flags.BoolVar(&o.force, "force", o.force, "Forces the Velero uninstall. Optional.")
 }
 
@@ -81,10 +79,6 @@ Use '--force' to skip the prompt confirming if you want to uninstall Velero.
 		`,
 		Example: ` # velero uninstall --namespace staging`,
 		Run: func(c *cobra.Command, args []string) {
-			if o.wait {
-				fmt.Println("Warning: the \"--wait\" option is deprecated and will be removed in a future release. The uninstall command always waits for the uninstall to complete.")
-			}
-
 			// Confirm if not asked to force-skip confirmation
 			if !o.force {
 				fmt.Println("You are about to uninstall Velero.")
@@ -185,7 +179,7 @@ func deleteNamespace(ctx context.Context, kbClient kbclient.Client, namespace st
 
 	// Deal with resources with attached finalizers to ensure proper handling of those finalizers.
 	if err := deleteResourcesWithFinalizer(ctx, kbClient, namespace); err != nil {
-		return errors.Wrap(err, "Fail to remove finalizer from restores")
+		return errors.Wrap(err, "failed to remove finalizer from restores")
 	}
 
 	if err := kbClient.Delete(ctx, ns); err != nil {
@@ -244,7 +238,7 @@ func checkResources(ctx context.Context, kbClient kbclient.Client) error {
 		key := kbclient.ObjectKey{Name: crd}
 		if err = kbClient.Get(ctx, key, v1crd); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return errors.Wrapf(err, "Error getting %s crd", crd)
+				return errors.Wrapf(err, "error getting %s crd", crd)
 			}
 		} else {
 			// no error with found CRD that we should delete
@@ -274,13 +268,13 @@ func deleteResources(ctx context.Context, kbClient kbclient.Client, namespace st
 	// it is likely that there may be errors during the finalization of restores. In such cases, we should proceed with forcefully deleting the restores.
 	err = gracefullyDeleteResources(ctx, kbClient, namespace)
 	if err != nil && !wait.Interrupted(err) {
-		return errors.Wrap(err, "Error deleting resources")
+		return errors.Wrap(err, "error deleting resources")
 	}
 
 	if wait.Interrupted(err) {
 		err = forcedlyDeleteResources(ctx, kbClient, namespace)
 		if err != nil {
-			return errors.Wrap(err, "Error deleting resources forcedly")
+			return errors.Wrap(err, "error deleting resources forcedly")
 		}
 	}
 
@@ -316,7 +310,7 @@ func gracefullyDeleteResources(ctx context.Context, kbClient kbclient.Client, na
 
 func gracefullyDeleteResource(ctx context.Context, kbClient kbclient.Client, namespace string, list kbclient.ObjectList) error {
 	if err := kbClient.List(ctx, list, &kbclient.ListOptions{Namespace: namespace}); err != nil {
-		return errors.Wrap(err, "Error getting resources during graceful deletion")
+		return errors.Wrap(err, "error getting resources during graceful deletion")
 	}
 
 	var objectsToDelete []kbclient.Object
@@ -333,7 +327,7 @@ func gracefullyDeleteResource(ctx context.Context, kbClient kbclient.Client, nam
 		case *velerov2alpha1api.DataDownload:
 			objectsToDelete = append(objectsToDelete, typedItem)
 		default:
-			return errors.New("Unsupported resource type")
+			return errors.New("unsupported resource type")
 		}
 	}
 
@@ -343,7 +337,7 @@ func gracefullyDeleteResource(ctx context.Context, kbClient kbclient.Client, nam
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return errors.Wrap(err, "Error deleting resources during graceful deletion")
+			return errors.Wrap(err, "error deleting resources during graceful deletion")
 		}
 	}
 	return nil
@@ -383,7 +377,7 @@ func forcedlyDeleteResources(ctx context.Context, kbClient kbclient.Client, name
 
 	err := kbClient.Delete(ctx, deploy)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return errors.Wrap(err, "Error deleting velero deployment during force deletion")
+		return errors.Wrap(err, "error deleting velero deployment during force deletion")
 	}
 
 	ctxc, cancel := context.WithCancel(ctx)
@@ -405,7 +399,7 @@ func forcedlyDeleteResources(ctx context.Context, kbClient kbclient.Client, name
 	// Wait until velero deployment are deleted.
 	wait.Until(checkFunc, 100*time.Millisecond, ctxc.Done())
 	if err != nil {
-		return errors.Wrap(err, "Error deleting velero deployment during force deletion")
+		return errors.Wrap(err, "error deleting velero deployment during force deletion")
 	}
 	return removeResourcesFinalizer(ctx, kbClient, namespace)
 }
@@ -422,7 +416,7 @@ func removeResourcesFinalizer(ctx context.Context, kbClient kbclient.Client, nam
 func removeResourceFinalizer(ctx context.Context, kbClient kbclient.Client, namespace string, resourceList kbclient.ObjectList) error {
 	listOptions := &kbclient.ListOptions{Namespace: namespace}
 	if err := kbClient.List(ctx, resourceList, listOptions); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Error getting resources of type %T during force deletion", resourceList))
+		return errors.Wrapf(err, "error getting resources of type %T during force deletion", resourceList)
 	}
 
 	items := reflect.ValueOf(resourceList).Elem().FieldByName("Items")
@@ -438,7 +432,7 @@ func removeResourceFinalizer(ctx context.Context, kbClient kbclient.Client, name
 		case *velerov2alpha1api.DataDownload:
 			err = removeFinalizerForObject(typedItem, controller.DataUploadDownloadFinalizer, kbClient)
 		default:
-			err = errors.Errorf("Unsupported resource type %T", typedItem)
+			err = errors.Errorf("unsupported resource type %T", typedItem)
 		}
 		if err != nil {
 			return err
@@ -455,7 +449,7 @@ func removeFinalizerForObject(obj kbclient.Object, finalizer string, kbClient kb
 
 		controllerutil.RemoveFinalizer(update, finalizer)
 		if err := kubeutil.PatchResource(original, update, kbClient); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Error removing finalizer %q during force deletion", finalizer))
+			return errors.Wrapf(err, "error removing finalizer %q during force deletion", finalizer)
 		}
 	}
 	return nil

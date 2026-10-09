@@ -17,10 +17,11 @@ limitations under the License.
 package nodeagent
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
@@ -29,7 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
@@ -217,22 +220,6 @@ func TestIsRunningInNode(t *testing.T) {
 func TestIsReady(t *testing.T) {
 	scheme := runtime.NewScheme()
 	appsv1api.AddToScheme(scheme)
-	corev1api.AddToScheme(scheme)
-
-	log := logrus.New()
-
-	linuxNode := &corev1api.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "linux-node",
-			Labels: map[string]string{kube.NodeOSLabel: kube.NodeOSLinux},
-		},
-	}
-	windowsNode := &corev1api.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "windows-node",
-			Labels: map[string]string{kube.NodeOSLabel: kube.NodeOSWindows},
-		},
-	}
 
 	dsLinuxNotReady := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "fake-ns", Name: "node-agent"},
@@ -255,83 +242,146 @@ func TestIsReady(t *testing.T) {
 		name          string
 		kubeClientObj []runtime.Object
 		namespace     string
+		interceptor   *interceptor.Funcs
 		expectErr     string
 	}{
 		{
-			name:      "no nodes in cluster",
+			name:      "both daemonsets not found",
 			namespace: "fake-ns",
 			expectErr: "node-agent is not ready: no ready pods found",
 		},
 		{
-			name:      "linux node exists but daemonset not found",
+			name:      "linux daemonset get error",
 			namespace: "fake-ns",
-			kubeClientObj: []runtime.Object{
-				linuxNode,
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
 			},
-			expectErr: "failed to get linux node-agent daemonset",
+			expectErr: "failed to get linux node-agent daemonset: fake-get-error",
 		},
 		{
-			name:      "linux node and daemonset exist but no ready pods",
+			name:      "windows daemonset get error",
+			namespace: "fake-ns",
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent-windows" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+			expectErr: "failed to get windows node-agent daemonset: fake-get-error",
+		},
+		{
+			name:      "linux daemonset get error but windows ready",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				linuxNode,
+				dsWindowsReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+		},
+		{
+			name:      "windows daemonset get error but linux ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsLinuxReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent-windows" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+		},
+		{
+			name:      "linux daemonset get error and windows not ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsWindowsNotReady,
+			},
+			interceptor: &interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+					if key.Name == "node-agent" {
+						return errors.New("fake-get-error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			},
+			expectErr: "failed to get linux node-agent daemonset: fake-get-error",
+		},
+		{
+			name:      "linux ds exist but no ready pods",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
 				dsLinuxNotReady,
 			},
 			expectErr: "node-agent is not ready: no ready pods found",
 		},
 		{
-			name:      "linux node and daemonset with ready pods",
+			name:      "linux ds with ready pods",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				linuxNode,
 				dsLinuxReady,
 			},
 		},
 		{
-			name:      "windows node and daemonset with ready pods",
+			name:      "windows ds exist but no ready pods",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				windowsNode,
-				dsWindowsReady,
-			},
-		},
-		{
-			name:      "windows node and daemonset with no ready pods",
-			namespace: "fake-ns",
-			kubeClientObj: []runtime.Object{
-				windowsNode,
 				dsWindowsNotReady,
 			},
 			expectErr: "node-agent is not ready: no ready pods found",
 		},
 		{
-			name:      "both node types with both daemonsets ready",
+			name:      "windows ds with ready pods",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				linuxNode,
-				windowsNode,
-				dsLinuxReady,
 				dsWindowsReady,
 			},
 		},
 		{
-			name:      "both node types but neither daemonset has ready pods",
+			name:      "both daemonsets exist but no ready pods",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				linuxNode,
-				windowsNode,
 				dsLinuxNotReady,
 				dsWindowsNotReady,
 			},
 			expectErr: "node-agent is not ready: no ready pods found",
 		},
 		{
-			name:      "linux not ready but windows ready",
+			name:      "both daemonsets exist, linux ready",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				linuxNode,
-				windowsNode,
+				dsLinuxReady,
+				dsWindowsNotReady,
+			},
+		},
+		{
+			name:      "both daemonsets exist, windows ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
 				dsLinuxNotReady,
+				dsWindowsReady,
+			},
+		},
+		{
+			name:      "both daemonsets exist, both ready",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				dsLinuxReady,
 				dsWindowsReady,
 			},
 		},
@@ -339,12 +389,17 @@ func TestIsReady(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			fakeClient := clientFake.NewClientBuilder().
+			builder := clientFake.NewClientBuilder().
 				WithScheme(scheme).
-				WithRuntimeObjects(test.kubeClientObj...).
-				Build()
+				WithRuntimeObjects(test.kubeClientObj...)
 
-			err := IsReady(t.Context(), test.namespace, fakeClient, log)
+			if test.interceptor != nil {
+				builder = builder.WithInterceptorFuncs(*test.interceptor)
+			}
+
+			fakeClient := builder.Build()
+
+			err := IsReady(t.Context(), test.namespace, fakeClient)
 			if test.expectErr == "" {
 				assert.NoError(t, err)
 			} else {
@@ -352,6 +407,34 @@ func TestIsReady(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIsReadyBothDaemonsetsGetError ensures that when both daemonset lookups
+// return a non-NotFound error, the linux error is returned as the primary
+// error while the windows error is retained as a secondary/attached error
+// rather than being silently discarded.
+func TestIsReadyBothDaemonsetsGetError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	appsv1api.AddToScheme(scheme)
+
+	fakeClient := clientFake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c ctrlclient.WithWatch, key ctrlclient.ObjectKey, obj ctrlclient.Object, opts ...ctrlclient.GetOption) error {
+				if key.Name == "node-agent" {
+					return errors.New("fake-linux-get-error")
+				}
+				if key.Name == "node-agent-windows" {
+					return errors.New("fake-windows-get-error")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	err := IsReady(t.Context(), "fake-ns", fakeClient)
+	require.EqualError(t, err, "failed to get linux node-agent daemonset: fake-linux-get-error")
+	assert.Contains(t, fmt.Sprintf("%+v", err), "failed to get windows node-agent daemonset: fake-windows-get-error")
 }
 
 func TestGetPodSpec(t *testing.T) {
@@ -801,7 +884,7 @@ func TestGetAnnotationValue(t *testing.T) {
 	}
 }
 
-func TestGetToleration(t *testing.T) {
+func TestGetTolerations(t *testing.T) {
 	daemonSet := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "fake-ns",
@@ -812,7 +895,7 @@ func TestGetToleration(t *testing.T) {
 		},
 	}
 
-	daemonSetWithOtherToleration := &appsv1api.DaemonSet{
+	daemonSetWithTolerations := &appsv1api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "fake-ns",
 			Name:      "node-agent",
@@ -825,7 +908,14 @@ func TestGetToleration(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					Tolerations: []corev1api.Toleration{
 						{
-							Key: "other-toleration-key",
+							Key:   "custom-taint",
+							Value: "true",
+						},
+						{
+							Key:      "kubernetes.azure.com/scalesetpriority",
+							Operator: "Equal",
+							Value:    "spot",
+							Effect:   "NoSchedule",
 						},
 					},
 				},
@@ -833,66 +923,96 @@ func TestGetToleration(t *testing.T) {
 		},
 	}
 
-	daemonSetWithToleration := &appsv1api.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "fake-ns",
-			Name:      "node-agent",
-		},
-		TypeMeta: metav1.TypeMeta{
-			Kind: "DaemonSet",
-		},
-		Spec: appsv1api.DaemonSetSpec{
-			Template: corev1api.PodTemplateSpec{
-				Spec: corev1api.PodSpec{
-					Tolerations: []corev1api.Toleration{
-						{
-							Key:   "fake-toleration",
-							Value: "true",
-						},
-					},
-				},
-			},
-		},
+	configuredToleration := corev1api.Toleration{
+		Key:      "dedicated",
+		Operator: "Equal",
+		Value:    "backup",
+		Effect:   "NoSchedule",
 	}
 
 	tests := []struct {
-		name          string
-		kubeClientObj []runtime.Object
-		namespace     string
-		expectedValue corev1api.Toleration
-		expectErr     string
+		name                  string
+		kubeClientObj         []runtime.Object
+		namespace             string
+		configuredTolerations []corev1api.Toleration
+		expectedValues        []corev1api.Toleration
+		expectErr             string
 	}{
-		// {
-		// 	name:      "ds get error",
-		// 	namespace: "fake-ns",
-		// 	expectErr: "error getting node-agent daemonset: daemonsets.apps \"node-agent\" not found",
-		// },
 		{
-			name:      "no toleration",
-			namespace: "fake-ns",
-			kubeClientObj: []runtime.Object{
-				daemonSet,
-			},
-			expectErr: ErrNodeAgentTolerationNotFound.Error(),
+			name:           "no tolerations",
+			namespace:      "fake-ns",
+			kubeClientObj:  []runtime.Object{daemonSet},
+			expectedValues: []corev1api.Toleration{},
 		},
 		{
-			name:      "no expecting toleration",
+			name:      "only non-allowlisted daemonset tolerations are dropped",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				daemonSetWithOtherToleration,
+				daemonSetWithTolerations,
 			},
-			expectErr: ErrNodeAgentTolerationNotFound.Error(),
+			expectedValues: []corev1api.Toleration{
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Value:    "spot",
+					Effect:   "NoSchedule",
+				},
+			},
 		},
 		{
-			name:      "expecting toleration",
+			name:                  "configured tolerations only",
+			namespace:             "fake-ns",
+			kubeClientObj:         []runtime.Object{daemonSet},
+			configuredTolerations: []corev1api.Toleration{configuredToleration},
+			expectedValues:        []corev1api.Toleration{configuredToleration},
+		},
+		{
+			name:      "configured and allowlisted daemonset tolerations are merged",
 			namespace: "fake-ns",
 			kubeClientObj: []runtime.Object{
-				daemonSetWithToleration,
+				daemonSetWithTolerations,
 			},
-			expectedValue: corev1api.Toleration{
-				Key:   "fake-toleration",
-				Value: "true",
+			configuredTolerations: []corev1api.Toleration{configuredToleration},
+			expectedValues: []corev1api.Toleration{
+				configuredToleration,
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Value:    "spot",
+					Effect:   "NoSchedule",
+				},
 			},
+		},
+		{
+			name:      "duplicate between configured and daemonset tolerations is deduplicated",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				daemonSetWithTolerations,
+			},
+			configuredTolerations: []corev1api.Toleration{
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Value:    "spot",
+					Effect:   "NoSchedule",
+				},
+			},
+			expectedValues: []corev1api.Toleration{
+				{
+					Key:      "kubernetes.azure.com/scalesetpriority",
+					Operator: "Equal",
+					Value:    "spot",
+					Effect:   "NoSchedule",
+				},
+			},
+		},
+		{
+			name:                  "daemonset get error still returns configured tolerations",
+			namespace:             "fake-ns",
+			kubeClientObj:         []runtime.Object{},
+			configuredTolerations: []corev1api.Toleration{configuredToleration},
+			expectedValues:        []corev1api.Toleration{configuredToleration},
+			expectErr:             "error getting node-agent daemonset: daemonsets.apps \"node-agent\" not found",
 		},
 	}
 
@@ -900,12 +1020,13 @@ func TestGetToleration(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
 
-			value, err := GetToleration(t.Context(), fakeKubeClient, test.namespace, "fake-toleration", kube.NodeOSLinux)
+			values, err := GetTolerations(t.Context(), fakeKubeClient, test.namespace, kube.NodeOSLinux, test.configuredTolerations)
 			if test.expectErr == "" {
 				require.NoError(t, err)
-				assert.Equal(t, test.expectedValue, *value)
+				assert.Equal(t, test.expectedValues, values)
 			} else {
-				assert.EqualError(t, err, test.expectErr)
+				require.EqualError(t, err, test.expectErr)
+				assert.Equal(t, test.expectedValues, values)
 			}
 		})
 	}

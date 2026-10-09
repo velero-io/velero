@@ -42,8 +42,8 @@ func (_m *GenericRestoreExposer) EXPECT() *GenericRestoreExposer_Expecter {
 }
 
 // CleanUp provides a mock function for the type GenericRestoreExposer
-func (_mock *GenericRestoreExposer) CleanUp(context1 context.Context, objectReference v1.ObjectReference) {
-	_mock.Called(context1, objectReference)
+func (_mock *GenericRestoreExposer) CleanUp(context1 context.Context, objectReference v1.ObjectReference, param *exposer.GenericRestoreCleanUpParam) {
+	_mock.Called(context1, objectReference, param)
 	return
 }
 
@@ -55,11 +55,12 @@ type GenericRestoreExposer_CleanUp_Call struct {
 // CleanUp is a helper method to define mock.On call
 //   - context1 context.Context
 //   - objectReference v1.ObjectReference
-func (_e *GenericRestoreExposer_Expecter) CleanUp(context1 interface{}, objectReference interface{}) *GenericRestoreExposer_CleanUp_Call {
-	return &GenericRestoreExposer_CleanUp_Call{Call: _e.mock.On("CleanUp", context1, objectReference)}
+//   - param *exposer.GenericRestoreCleanUpParam
+func (_e *GenericRestoreExposer_Expecter) CleanUp(context1 interface{}, objectReference interface{}, param interface{}) *GenericRestoreExposer_CleanUp_Call {
+	return &GenericRestoreExposer_CleanUp_Call{Call: _e.mock.On("CleanUp", context1, objectReference, param)}
 }
 
-func (_c *GenericRestoreExposer_CleanUp_Call) Run(run func(context1 context.Context, objectReference v1.ObjectReference)) *GenericRestoreExposer_CleanUp_Call {
+func (_c *GenericRestoreExposer_CleanUp_Call) Run(run func(context1 context.Context, objectReference v1.ObjectReference, param *exposer.GenericRestoreCleanUpParam)) *GenericRestoreExposer_CleanUp_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -69,9 +70,14 @@ func (_c *GenericRestoreExposer_CleanUp_Call) Run(run func(context1 context.Cont
 		if args[1] != nil {
 			arg1 = args[1].(v1.ObjectReference)
 		}
+		var arg2 *exposer.GenericRestoreCleanUpParam
+		if args[2] != nil {
+			arg2 = args[2].(*exposer.GenericRestoreCleanUpParam)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -82,7 +88,7 @@ func (_c *GenericRestoreExposer_CleanUp_Call) Return() *GenericRestoreExposer_Cl
 	return _c
 }
 
-func (_c *GenericRestoreExposer_CleanUp_Call) RunAndReturn(run func(context1 context.Context, objectReference v1.ObjectReference)) *GenericRestoreExposer_CleanUp_Call {
+func (_c *GenericRestoreExposer_CleanUp_Call) RunAndReturn(run func(context1 context.Context, objectReference v1.ObjectReference, param *exposer.GenericRestoreCleanUpParam)) *GenericRestoreExposer_CleanUp_Call {
 	_c.Run(run)
 	return _c
 }

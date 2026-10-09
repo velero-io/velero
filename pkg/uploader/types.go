@@ -52,14 +52,17 @@ func ValidateUploaderType(t string) (string, error) {
 
 type SnapshotInfo struct {
 	ID              string
-	Size            int64
+	SnapshotSize    int64
 	IncrementalSize int64
+	SourceSize      int64
+	Fallback        bool
 }
 
 // Progress which defined two variables to record progress
 type Progress struct {
-	TotalBytes int64 `json:"totalBytes,omitempty"`
-	BytesDone  int64 `json:"doneBytes,omitempty"`
+	TotalBytes int64  `json:"totalBytes,omitempty"`
+	BytesDone  int64  `json:"doneBytes,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 // UploaderProgress which defined generic interface to update progress

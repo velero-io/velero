@@ -129,30 +129,34 @@ func TestCreateOptions_ValidateBackupType(t *testing.T) {
 		o.BackupType = ""
 		err := o.validateBackupType()
 		require.NoError(t, err)
+		require.Empty(t, o.BackupType)
 
 		o.BackupType = "Incremental"
 		err = o.validateBackupType()
 		require.NoError(t, err)
+		require.EqualValues(t, velerov1api.BackupTypeIncremental, o.BackupType)
 
 		o.BackupType = "Full"
 		err = o.validateBackupType()
 		require.NoError(t, err)
+		require.EqualValues(t, velerov1api.BackupTypeFull, o.BackupType)
 
 		o.BackupType = " Incremental "
 		err = o.validateBackupType()
 		require.NoError(t, err)
+		require.EqualValues(t, velerov1api.BackupTypeIncremental, o.BackupType)
+
+		o.BackupType = "iNcReMeNtAl"
+		err = o.validateBackupType()
+		require.NoError(t, err)
+		require.EqualValues(t, velerov1api.BackupTypeIncremental, o.BackupType)
 	})
 
 	t.Run("invalid backup type", func(t *testing.T) {
 		o := NewCreateOptions()
 
-		o.BackupType = "incremental"
-		err := o.validateBackupType()
-		require.Error(t, err)
-		require.Equal(t, "invalid backup type incremental - valid values are 'Incremental', and 'Full'", err.Error())
-
 		o.BackupType = "invalid"
-		err = o.validateBackupType()
+		err := o.validateBackupType()
 		require.Error(t, err)
 		require.Equal(t, "invalid backup type invalid - valid values are 'Incremental', and 'Full'", err.Error())
 	})
@@ -230,10 +234,18 @@ func TestCreateOptions_OrderedResources(t *testing.T) {
 		"persistentvolumes": "pv1,pv2",
 	}
 	assert.Equal(t, expectedMixedResources, orderedResources)
+
+	// Spaces after commas in the resource list must be trimmed.
+	orderedResources, err = ParseOrderedResources("pods=ns1/p1, ns1/p2 ; persistentvolumeclaims= ns2/pvc1,  ns2/pvc2")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"pods":                   "ns1/p1,ns1/p2",
+		"persistentvolumeclaims": "ns2/pvc1,ns2/pvc2",
+	}, orderedResources)
 }
 
 func TestCreateCommand(t *testing.T) {
-	name := "nameToBeCreated"
+	name := "name-to-be-created"
 	args := []string{name}
 
 	t.Run("create a backup create command with full options except fromSchedule and wait, then run by create option", func(t *testing.T) {
@@ -444,4 +456,128 @@ func TestCreateCommand(t *testing.T) {
 		e = c.Execute()
 		assert.NoError(t, e)
 	})
+}
+func TestCreateCommand_Args(t *testing.T) {
+	testCases := []struct {
+		name         string
+		args         []string
+		fromSchedule string
+		expectError  bool
+	}{
+		{
+			name:        "should error when no name and no from-schedule",
+			args:        []string{},
+			expectError: true,
+		},
+		{
+			name:        "should pass when a valid name is provided",
+			args:        []string{"my-backup"},
+			expectError: false,
+		},
+		{
+			name:        "should error when the name is not a valid DNS1123 subdomain",
+			args:        []string{"Invalid_Name!"},
+			expectError: true,
+		},
+		{
+			name:         "should pass with no name when from-schedule is set",
+			args:         []string{},
+			fromSchedule: "daily-backup",
+			expectError:  false,
+		},
+		{
+			name:        "should error when more than one arg is given",
+			args:        []string{"name1", "name2"},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &factorymocks.Factory{}
+			cmd := NewCreateCommand(f, "")
+			if tc.fromSchedule != "" {
+				err := cmd.Flags().Set("from-schedule", tc.fromSchedule)
+				require.NoError(t, err)
+			}
+
+			err := cmd.Args(cmd, tc.args)
+
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCreateOptions_Validate(t *testing.T) {
+	testCases := []struct {
+		name         string
+		optName      string
+		fromSchedule string
+		args         []string
+		expectError  bool
+	}{
+		{
+			name:        "should error when no name and no from-schedule",
+			optName:     "",
+			args:        []string{},
+			expectError: true,
+		},
+		{
+			name:        "should pass with a valid name and no from-schedule",
+			optName:     "my-backup",
+			args:        []string{"my-backup"},
+			expectError: false,
+		},
+		{
+			name:         "should error when name is invalid, regardless of from-schedule",
+			optName:      "Invalid_Name!",
+			fromSchedule: "daily-backup",
+			args:         []string{"Invalid_Name!"},
+			expectError:  true,
+		},
+		{
+			name:         "should pass when from-schedule is set and no name given",
+			optName:      "",
+			fromSchedule: "daily-backup",
+			args:         []string{},
+			expectError:  false,
+		},
+		{
+			name:         "should pass when schedule name leaves room for timestamp suffix",
+			optName:      "",
+			fromSchedule: strings.Repeat("a", 238), // exactly at the 238-char limit
+			args:         []string{},
+			expectError:  false,
+		},
+		{
+			name:         "should error when schedule name is too long to leave room for timestamp suffix",
+			optName:      "",
+			fromSchedule: strings.Repeat("a", 239), // one over the 238-char limit
+			args:         []string{},
+			expectError:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &factorymocks.Factory{}
+			cmd := NewCreateCommand(f, "")
+
+			o := NewCreateOptions()
+			o.Name = tc.optName
+			o.FromSchedule = tc.fromSchedule
+
+			err := o.Validate(cmd, tc.args, f)
+
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

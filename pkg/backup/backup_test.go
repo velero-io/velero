@@ -43,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/volume"
@@ -79,10 +80,10 @@ func TestBackedUpItemsMatchesTarballContents(t *testing.T) {
 	defer h.itemBlockPool.Stop()
 
 	req := &Request{
-		Backup:           defaultBackup().Result(),
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       &h.itemBlockPool,
+		Backup:               defaultBackup().Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           &h.itemBlockPool,
 	}
 
 	backupFile := bytes.NewBuffer([]byte{})
@@ -141,10 +142,10 @@ func TestBackupProgressIsUpdated(t *testing.T) {
 	h := newHarness(t, nil)
 	defer h.itemBlockPool.Stop()
 	req := &Request{
-		Backup:           defaultBackup().Result(),
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       &h.itemBlockPool,
+		Backup:               defaultBackup().Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           &h.itemBlockPool,
 	}
 	backupFile := bytes.NewBuffer([]byte{})
 
@@ -881,10 +882,10 @@ func TestBackupOldResourceFiltering(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1062,10 +1063,10 @@ func TestCRDInclusion(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1161,10 +1162,10 @@ func TestBackupResourceCohabitation(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1190,10 +1191,10 @@ func TestBackupUsesNewCohabitatingResourcesForEachBackup(t *testing.T) {
 
 	// run and verify backup 1
 	backup1 := &Request{
-		Backup:           defaultBackup().Result(),
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       &h.itemBlockPool,
+		Backup:               defaultBackup().Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           &h.itemBlockPool,
 	}
 	backup1File := bytes.NewBuffer([]byte{})
 
@@ -1206,10 +1207,10 @@ func TestBackupUsesNewCohabitatingResourcesForEachBackup(t *testing.T) {
 
 	// run and verify backup 2
 	backup2 := &Request{
-		Backup:           defaultBackup().Result(),
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       &h.itemBlockPool,
+		Backup:               defaultBackup().Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           &h.itemBlockPool,
 	}
 	backup2File := bytes.NewBuffer([]byte{})
 
@@ -1260,10 +1261,10 @@ func TestBackupResourceOrdering(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1361,9 +1362,9 @@ func (a *recordResourcesAction) WithSkippedCSISnapshotFlag(flag bool) *recordRes
 	return a
 }
 
-// TestBackupItemActionsForSkippedPV runs backups with backup item actions, and
-// verifies that the data in SkippedPVTracker is updated as expected.
-func TestBackupItemActionsForSkippedPV(t *testing.T) {
+// TestBackupItemActionsForSkippedVolume runs backups with backup item actions, and
+// verifies that the data in SkippedVolumeTracker is updated as expected.
+func TestBackupItemActionsForSkippedVolume(t *testing.T) {
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
 	defer itemBlockPool.Stop()
 
@@ -1375,16 +1376,16 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 		actions          []*recordResourcesAction
 		resPolicies      *resourcepolicies.ResourcePolicies
 		// {pvName:{approach: reason}}
-		expectSkippedPVs    map[string]map[string]string
-		expectNotSkippedPVs []string
+		expectSkippedVolumes    map[string]map[string]string
+		expectNotSkippedVolumes []string
 	}{
 		{
 			name: "backup item action returns the 'not a CSI volume' error and the PV should be tracked as skippedPV",
 			backupReq: &Request{
-				Backup:           defaultBackup().SnapshotVolumes(false).Result(),
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				Backup:               defaultBackup().SnapshotVolumes(false).Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			resPolicies: &resourcepolicies.ResourcePolicies{
 				Version: "v1",
@@ -1412,24 +1413,29 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 			actions: []*recordResourcesAction{
 				new(recordResourcesAction).WithName(csiBIAPluginName).ForNamespace("ns-1").ForResource("persistentvolumeclaims").WithSkippedCSISnapshotFlag(true),
 			},
-			expectSkippedPVs: map[string]map[string]string{
+			expectSkippedVolumes: map[string]map[string]string{
 				"pv-1": {
 					csiSnapshotApproach: "skipped b/c it's not a CSI volume",
 				},
 			},
 		},
 		{
-			name: "backup item action named as CSI plugin executed successfully and the PV will be removed from the skipped PV tracker",
+			name: "backup item action named as CSI plugin executed successfully and the PV will be removed from the skipped Volume tracker",
 			backupReq: &Request{
 				Backup: defaultBackup().Result(),
-				SkippedPVTracker: &skipPVTracker{
+				SkippedVolumeTracker: &skipVolumeTracker{
 					RWMutex: &sync.RWMutex{},
-					pvs: map[string]map[string]string{
-						"pv-1": {
+					volumes: map[string]map[string]string{
+						"pv:pv-1": {
 							"any": "whatever reason",
 						},
 					},
-					includedPVs: map[string]struct{}{},
+					includedVolumes: map[string]struct{}{},
+					volumeInfo: map[string]SkippedVolume{
+						"pv:pv-1": {
+							PVName: "pv-1",
+						},
+					},
 				},
 				BackedUpItems: NewBackedUpItemsMap(),
 				WorkerPool:    itemBlockPool,
@@ -1446,7 +1452,7 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 			actions: []*recordResourcesAction{
 				new(recordResourcesAction).ForNamespace("ns-1").ForResource("persistentvolumeclaims").WithName(csiBIAPluginName),
 			},
-			expectNotSkippedPVs: []string{"pv-1"},
+			expectNotSkippedVolumes: []string{"pv-1"},
 		},
 	}
 	// Enable CSI feature before running the test, because Velero will check whether
@@ -1481,17 +1487,17 @@ func TestBackupItemActionsForSkippedPV(t *testing.T) {
 			err := h.backupper.Backup(h.log, tc.backupReq, backupFile, actions, nil, nil)
 			require.NoError(t, err)
 
-			if tc.expectSkippedPVs != nil {
-				for pvName, reasons := range tc.expectSkippedPVs {
-					v, ok := tc.backupReq.SkippedPVTracker.pvs[pvName]
+			if tc.expectSkippedVolumes != nil {
+				for pvName, reasons := range tc.expectSkippedVolumes {
+					v, ok := tc.backupReq.SkippedVolumeTracker.volumes["pv:"+pvName]
 					assert.True(tt, ok)
 					for approach, reason := range reasons {
 						assert.Equal(tt, reason, v[approach])
 					}
 				}
 			}
-			for _, pvName := range tc.expectNotSkippedPVs {
-				_, ok := tc.backupReq.SkippedPVTracker.pvs[pvName]
+			for _, pvName := range tc.expectNotSkippedVolumes {
+				_, ok := tc.backupReq.SkippedVolumeTracker.volumes["pv:"+pvName]
 				assert.False(tt, ok)
 			}
 		})
@@ -1679,10 +1685,10 @@ func TestBackupActionsRunForCorrectItems(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1764,10 +1770,10 @@ func TestBackupWithInvalidActions(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -1918,10 +1924,10 @@ func TestBackupActionModifications(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -2178,10 +2184,10 @@ func TestBackupActionAdditionalItems(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -2439,10 +2445,10 @@ func TestItemBlockActionsRunForCorrectItems(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -2524,10 +2530,10 @@ func TestBackupWithInvalidItemBlockActions(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -2780,10 +2786,10 @@ func TestItemBlockActionRelatedItems(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -2931,16 +2937,16 @@ func (*fakeVolumeSnapshotter) DeleteSnapshot(snapshotID string) error {
 // looking at the backup request's VolumeSnapshots field. This test uses the fakeVolumeSnapshotter
 // struct in place of real volume snapshotters.
 func TestBackupWithSnapshots(t *testing.T) {
-	// TODO: add more verification for skippedPVTracker
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
 	defer itemBlockPool.Stop()
 	tests := []struct {
-		name              string
-		req               *Request
-		vsls              []*velerov1.VolumeSnapshotLocation
-		apiResources      []*test.APIResource
-		snapshotterGetter volumeSnapshotterGetter
-		want              []*volume.Snapshot
+		name               string
+		req                *Request
+		vsls               []*velerov1.VolumeSnapshotLocation
+		apiResources       []*test.APIResource
+		snapshotterGetter  volumeSnapshotterGetter
+		want               []*volume.Snapshot
+		wantSkippedVolumes []SkippedVolume
 	}{
 		{
 			name: "persistent volume with no zone annotation creates a snapshot",
@@ -2949,9 +2955,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -2977,6 +2983,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 		{
 			name: "persistent volume with deprecated zone annotation creates a snapshot",
@@ -2985,13 +2992,13 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("failure-domain.beta.kubernetes.io/zone", "zone-1")).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels(corev1api.LabelFailureDomainBetaZone, "zone-1")).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3014,6 +3021,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 		{
 			name: "persistent volume with GA zone annotation creates a snapshot",
@@ -3022,13 +3030,13 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels("topology.kubernetes.io/zone", "zone-1")).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabels(corev1api.LabelTopologyZone, "zone-1")).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3051,6 +3059,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 		{
 			name: "persistent volume with both GA and deprecated zone annotation creates a snapshot and should use the GA",
@@ -3059,13 +3068,13 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
-					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{"failure-domain.beta.kubernetes.io/zone": "zone-1-deprecated", "topology.kubernetes.io/zone": "zone-1-ga"})).Result(),
+					builder.ForPersistentVolume("pv-1").ObjectMeta(builder.WithLabelsMap(map[string]string{corev1api.LabelFailureDomainBetaZone: "zone-1-deprecated", corev1api.LabelTopologyZone: "zone-1-ga"})).Result(),
 				),
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
@@ -3088,6 +3097,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 		{
 			name: "error returned from CreateSnapshot results in a failed snapshot",
@@ -3096,9 +3106,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3123,6 +3133,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 		{
 			name: "backup with SnapshotVolumes=false does not create any snapshots",
@@ -3131,9 +3142,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3144,14 +3155,25 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter).WithVolume("pv-1", "vol-1", "", "type-1", 100, false),
 			},
 			want: nil,
+			wantSkippedVolumes: []SkippedVolume{
+				{
+					PVName: "pv-1",
+					Reasons: []Reason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "not satisfy the criteria for VolumePolicy or the legacy snapshot way",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "backup with no volume snapshot locations does not create any snapshots",
 			req: &Request{
-				Backup:           defaultBackup().Result(),
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3162,6 +3184,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter).WithVolume("pv-1", "vol-1", "", "type-1", 100, false),
 			},
 			want: nil,
+			wantSkippedVolumes: []SkippedVolume{
+				{
+					PVName: "pv-1",
+					Reasons: []Reason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "backup with no volume snapshotters does not create any snapshots",
@@ -3170,9 +3203,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3181,6 +3214,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{},
 			want:              nil,
+			wantSkippedVolumes: []SkippedVolume{
+				{
+					PVName: "pv-1",
+					Reasons: []Reason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "unsupported persistent volume type does not create any snapshots",
@@ -3189,9 +3233,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
 					newSnapshotLocation("velero", "default", "default"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3202,6 +3246,17 @@ func TestBackupWithSnapshots(t *testing.T) {
 				"default": new(fakeVolumeSnapshotter),
 			},
 			want: nil,
+			wantSkippedVolumes: []SkippedVolume{
+				{
+					PVName: "pv-1",
+					Reasons: []Reason{
+						{
+							Approach: volumeSnapshotApproach,
+							Reason:   "no applicable volumesnapshotter found",
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "when there are multiple volumes, snapshot locations, and snapshotters, volumes are matched to the right snapshotters",
@@ -3211,9 +3266,9 @@ func TestBackupWithSnapshots(t *testing.T) {
 					newSnapshotLocation("velero", "default", "default"),
 					newSnapshotLocation("velero", "another", "another"),
 				},
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.PVs(
@@ -3255,6 +3310,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 					},
 				},
 			},
+			wantSkippedVolumes: []SkippedVolume{},
 		},
 	}
 
@@ -3273,6 +3329,7 @@ func TestBackupWithSnapshots(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.want, tc.req.VolumeSnapshots.Get())
+			assert.Equal(t, tc.wantSkippedVolumes, tc.req.SkippedVolumeTracker.Summary())
 		})
 	}
 }
@@ -3344,10 +3401,10 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 		{
 			name: "action that starts a short-running process records operation",
 			req: &Request{
-				Backup:           defaultBackup().Result(),
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.Pods(
@@ -3376,10 +3433,10 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 		{
 			name: "action that starts a long-running process records operation",
 			req: &Request{
-				Backup:           defaultBackup().Result(),
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.Pods(
@@ -3408,10 +3465,10 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 		{
 			name: "action that has no operation doesn't record one",
 			req: &Request{
-				Backup:           defaultBackup().Result(),
-				SkippedPVTracker: NewSkipPVTracker(),
-				BackedUpItems:    NewBackedUpItemsMap(),
-				WorkerPool:       itemBlockPool,
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
 			},
 			apiResources: []*test.APIResource{
 				test.Pods(
@@ -3494,10 +3551,10 @@ func TestBackupWithInvalidHooks(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -3968,10 +4025,10 @@ func TestBackupWithHooks(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile         = bytes.NewBuffer([]byte{})
 				podCommandExecutor = new(test.MockPodCommandExecutor)
@@ -4192,11 +4249,11 @@ func TestBackupWithPodVolume(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:            tc.backup,
-					SnapshotLocations: []*velerov1.VolumeSnapshotLocation{tc.vsl},
-					SkippedPVTracker:  NewSkipPVTracker(),
-					BackedUpItems:     NewBackedUpItemsMap(),
-					WorkerPool:        itemBlockPool,
+					Backup:               tc.backup,
+					SnapshotLocations:    []*velerov1.VolumeSnapshotLocation{tc.vsl},
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -5312,10 +5369,10 @@ func TestBackupNewResourceFiltering(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -5430,6 +5487,29 @@ func TestBackupNamespaces(t *testing.T) {
 			},
 		},
 		{
+			name:   "Wildcard star with excluded namespaces test",
+			backup: defaultBackup().IncludedNamespaces("*").ExcludedNamespaces("ns-2").Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-3").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").Result(),
+				),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/namespaces/cluster/ns-3.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
+				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
+				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
+			},
+		},
+		{
 			name:   "Empty namespace test",
 			backup: defaultBackup().IncludedNamespaces("invalid*").Result(),
 			apiResources: []*test.APIResource{
@@ -5468,6 +5548,32 @@ func TestBackupNamespaces(t *testing.T) {
 				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
 			},
 		},
+		{
+			// Regression guard for the design/namespace-label-selector-in-resource-policy_design.md
+			// Precedence and Interaction trade-off: a namespace admitted into
+			// BackupSpec.IncludedNamespaces by name (which is exactly what
+			// resourcepolicies.ResolveNamespacesByLabel + prepareBackupRequest produce for
+			// includedNamespacesByLabel) still gets its own Namespace object backed up even
+			// when nothing in it matches a separately configured LabelSelector -
+			// namespace-selection and resource-selection-by-label are independent axes.
+			name: "namespace explicitly included is backed up even when nothing inside matches LabelSelector",
+			backup: defaultBackup().IncludedNamespaces("ns-1").
+				LabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"team": "platform"}}).
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+				),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+			},
+		},
 	}
 
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
@@ -5477,10 +5583,10 @@ func TestBackupNamespaces(t *testing.T) {
 			var (
 				h   = newHarness(t, itemBlockPool)
 				req = &Request{
-					Backup:           tc.backup,
-					SkippedPVTracker: NewSkipPVTracker(),
-					BackedUpItems:    NewBackedUpItemsMap(),
-					WorkerPool:       itemBlockPool,
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
@@ -5494,6 +5600,212 @@ func TestBackupNamespaces(t *testing.T) {
 			assertTarballContents(t, backupFile, append(tc.want, "metadata/version")...)
 		})
 	}
+}
+
+// TestBackupWithResourcePolicyNamespaceLabelSelector is an integration-style test spanning
+// resourcepolicies.ResolveNamespacesByLabel and the real backup item-collection path: it
+// resolves includedNamespacesByLabel against live namespaces the way prepareBackupRequest
+// does, combines the result with an explicit BackupSpec.IncludedNamespaces entry the way
+// mergeNamespacesByLabel's union branch does, and verifies the resulting backup contains both
+// namespaces' resources - simulating a Schedule configured with both a ResourcePolicy label
+// selector and an explicit include.
+func TestBackupWithResourcePolicyNamespaceLabelSelector(t *testing.T) {
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+	nsOps := builder.ForNamespace("ops-ns").Result()
+	nsOther := builder.ForNamespace("other-ns").ObjectMeta(builder.WithLabels("team", "infra")).Result()
+
+	fakeClient := test.NewFakeControllerRuntimeClient(t, nsPlatform, nsOps, nsOther)
+
+	resolvedIncluded, _, err := resourcepolicies.ResolveNamespacesByLabel(
+		t.Context(), fakeClient, []string{"team=platform"}, nil, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"platform-ns"}, resolvedIncluded)
+
+	// "ops-ns" stands in for BackupSpec.IncludedNamespaces already having an explicit entry;
+	// mergeNamespacesByLabel would union resolvedIncluded into it additively (see
+	// TestMergeNamespacesByLabel in pkg/controller for that merge decision in isolation).
+	effectiveIncludes := append([]string{"ops-ns"}, resolvedIncluded...)
+
+	backup := defaultBackup().IncludedNamespaces(effectiveIncludes...).Result()
+
+	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
+	defer itemBlockPool.Stop()
+
+	h := newHarness(t, itemBlockPool)
+	req := &Request{
+		Backup:               backup,
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           itemBlockPool,
+	}
+	backupFile := bytes.NewBuffer([]byte{})
+
+	h.addItems(t, test.Namespaces(
+		builder.ForNamespace("platform-ns").Phase(corev1api.NamespaceActive).ObjectMeta(builder.WithLabels("team", "platform")).Result(),
+		builder.ForNamespace("ops-ns").Phase(corev1api.NamespaceActive).Result(),
+		builder.ForNamespace("other-ns").Phase(corev1api.NamespaceActive).ObjectMeta(builder.WithLabels("team", "infra")).Result(),
+	))
+	h.addItems(t, test.Deployments(
+		builder.ForDeployment("platform-ns", "app-1").Result(),
+		builder.ForDeployment("ops-ns", "app-2").Result(),
+		builder.ForDeployment("other-ns", "app-3").Result(),
+	))
+
+	h.backupper.Backup(h.log, req, backupFile, nil, nil, nil)
+
+	assertTarballContents(t, backupFile,
+		"metadata/version",
+		"resources/namespaces/cluster/platform-ns.json",
+		"resources/namespaces/v1-preferredversion/cluster/platform-ns.json",
+		"resources/namespaces/cluster/ops-ns.json",
+		"resources/namespaces/v1-preferredversion/cluster/ops-ns.json",
+		"resources/deployments.apps/namespaces/platform-ns/app-1.json",
+		"resources/deployments.apps/v1-preferredversion/namespaces/platform-ns/app-1.json",
+		"resources/deployments.apps/namespaces/ops-ns/app-2.json",
+		"resources/deployments.apps/v1-preferredversion/namespaces/ops-ns/app-2.json",
+	)
+}
+
+// TestBackupResourcePolicyNamespaceLabelSelectorEdgeCases runs several scenarios through the
+// real backup item-collection path (not just prepareBackupRequest's intermediate spec value),
+// each constructing the same effective IncludedNamespaces/ExcludedNamespaces that
+// mergeNamespacesByLabel (pkg/controller) produces for the given resource-policy configuration.
+// Guards against an empty include-selector result silently expanding to "back up everything"
+// downstream, and covers the explicit-wildcard and exclude-precedence handling.
+func TestBackupResourcePolicyNamespaceLabelSelectorEdgeCases(t *testing.T) {
+	runBackup := func(t *testing.T, backup *velerov1.Backup, namespaces *test.APIResource, resources ...*test.APIResource) *bytes.Buffer {
+		t.Helper()
+
+		itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
+		defer itemBlockPool.Stop()
+
+		h := newHarness(t, itemBlockPool)
+		req := &Request{
+			Backup:               backup,
+			SkippedVolumeTracker: NewSkipVolumeTracker(),
+			BackedUpItems:        NewBackedUpItemsMap(),
+			WorkerPool:           itemBlockPool,
+		}
+		backupFile := bytes.NewBuffer([]byte{})
+
+		h.addItems(t, namespaces)
+		for _, r := range resources {
+			h.addItems(t, r)
+		}
+
+		require.NoError(t, h.backupper.Backup(h.log, req, backupFile, nil, nil, nil))
+		return backupFile
+	}
+
+	t.Run("include selector matching zero namespaces backs up nothing, not everything", func(t *testing.T) {
+		// mergeNamespacesByLabel's fix: an include selector matching zero namespaces must
+		// resolve to resourcepolicies.NoNamespaceMatchesPattern, not a bare empty slice
+		// (which wildcard.ShouldExpandWildcards would otherwise treat as "match everything").
+		backup := defaultBackup().IncludedNamespaces(resourcepolicies.NoNamespaceMatchesPattern).Result()
+
+		backupFile := runBackup(t, backup,
+			test.Namespaces(
+				builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+				builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+			),
+			test.Deployments(builder.ForDeployment("ns-1", "app-1").Result()),
+		)
+
+		assertTarballContents(t, backupFile, "metadata/version")
+	})
+
+	t.Run("explicit wildcard plus include selector keeps everything, not narrowed", func(t *testing.T) {
+		// mergeNamespacesByLabel's other fix: an explicitly-configured ["*"] keeps everything
+		// included regardless of includedNamespacesByLabel, rather than being narrowed down to
+		// just the label matches. The merge canonicalizes this case back down to ["*"] (see
+		// TestMergeNamespacesByLabel), which is what's fed in here.
+		backup := defaultBackup().IncludedNamespaces("*").Result()
+
+		backupFile := runBackup(t, backup,
+			test.Namespaces(
+				builder.ForNamespace("platform-ns").Phase(corev1api.NamespaceActive).ObjectMeta(builder.WithLabels("team", "platform")).Result(),
+				builder.ForNamespace("other-ns").Phase(corev1api.NamespaceActive).Result(),
+			),
+			test.Deployments(
+				builder.ForDeployment("platform-ns", "app-1").Result(),
+				builder.ForDeployment("other-ns", "app-2").Result(),
+			),
+		)
+
+		assertTarballContents(t, backupFile,
+			"metadata/version",
+			"resources/namespaces/cluster/platform-ns.json",
+			"resources/namespaces/v1-preferredversion/cluster/platform-ns.json",
+			"resources/namespaces/cluster/other-ns.json",
+			"resources/namespaces/v1-preferredversion/cluster/other-ns.json",
+			"resources/deployments.apps/namespaces/platform-ns/app-1.json",
+			"resources/deployments.apps/v1-preferredversion/namespaces/platform-ns/app-1.json",
+			"resources/deployments.apps/namespaces/other-ns/app-2.json",
+			"resources/deployments.apps/v1-preferredversion/namespaces/other-ns/app-2.json",
+		)
+	})
+
+	t.Run("namespace matching both included and excluded label selectors is excluded", func(t *testing.T) {
+		// A namespace resolved into both resolvedIncluded and resolvedExcluded - exclusion
+		// wins, same as BackupSpec.ExcludedNamespaces vs IncludedNamespaces always has.
+		backup := defaultBackup().
+			IncludedNamespaces("both-ns", "include-only-ns").
+			ExcludedNamespaces("both-ns").
+			Result()
+
+		backupFile := runBackup(t, backup, test.Namespaces(
+			builder.ForNamespace("both-ns").Phase(corev1api.NamespaceActive).Result(),
+			builder.ForNamespace("include-only-ns").Phase(corev1api.NamespaceActive).Result(),
+		))
+
+		assertTarballContents(t, backupFile,
+			"metadata/version",
+			"resources/namespaces/cluster/include-only-ns.json",
+			"resources/namespaces/v1-preferredversion/cluster/include-only-ns.json",
+		)
+	})
+
+	t.Run("velero.io/exclude-from-backup hard exclusion wins over an include-label match", func(t *testing.T) {
+		// prepareBackupRequest's ordering guarantee: hard-excluded namespaces are already in
+		// ExcludedNamespaces by the time includedNamespacesByLabel resolution runs, so a
+		// namespace that also matches an include selector must still end up excluded.
+		backup := defaultBackup().
+			IncludedNamespaces("hard-excluded-ns", "platform-ns").
+			ExcludedNamespaces("hard-excluded-ns").
+			Result()
+
+		backupFile := runBackup(t, backup, test.Namespaces(
+			builder.ForNamespace("hard-excluded-ns").Phase(corev1api.NamespaceActive).
+				ObjectMeta(builder.WithLabels("velero.io/exclude-from-backup", "true")).Result(),
+			builder.ForNamespace("platform-ns").Phase(corev1api.NamespaceActive).Result(),
+		))
+
+		assertTarballContents(t, backupFile,
+			"metadata/version",
+			"resources/namespaces/cluster/platform-ns.json",
+			"resources/namespaces/v1-preferredversion/cluster/platform-ns.json",
+		)
+	})
+
+	t.Run("every included namespace also excluded backs up nothing, not everything", func(t *testing.T) {
+		// mergeNamespacesByLabel's exclude-subtraction step (added to satisfy
+		// collections.ValidateIncludesExcludes' invariants) can itself empty out the
+		// included set when every included name is also excluded. When that happens, the
+		// merge must emit resourcepolicies.NoNamespaceMatchesPattern rather than a bare
+		// empty include list, which wildcard.ShouldExpandWildcards would otherwise treat as
+		// "match everything" - the same hazard the zero-match sentinel exists for, reached
+		// through a different path.
+		backup := defaultBackup().
+			IncludedNamespaces(resourcepolicies.NoNamespaceMatchesPattern).
+			ExcludedNamespaces("only-ns").
+			Result()
+
+		backupFile := runBackup(t, backup, test.Namespaces(
+			builder.ForNamespace("only-ns").Phase(corev1api.NamespaceActive).Result(),
+		))
+
+		assertTarballContents(t, backupFile, "metadata/version")
+	})
 }
 
 func TestUpdateVolumeInfos(t *testing.T) {
@@ -5591,7 +5903,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover: "velero",
 					},
 				},
@@ -5602,12 +5914,12 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultFailed,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
 						Size:             1000,
-						IncrementalSize:  500,
+						IncrementalSize:  ptr.To(int64(500)),
 						Phase:            velerov2alpha1.DataUploadPhaseFailed,
 					},
 				},
@@ -5631,7 +5943,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover: "velero",
 					},
 				},
@@ -5642,12 +5954,12 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultSucceeded,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
 						Size:             1000,
-						IncrementalSize:  500,
+						IncrementalSize:  ptr.To(int64(500)),
 						Phase:            velerov2alpha1.DataUploadPhaseCompleted,
 					},
 				},
@@ -6043,10 +6355,10 @@ func TestBackupWithResPoliciesLogs(t *testing.T) {
 	h.addItems(t, test.PVs(builder.ForPersistentVolume("pv-1").Result()))
 
 	backupReq := &Request{
-		Backup:           defaultBackup().ExcludedNamespaceScopedResources("pods").Result(),
-		SkippedPVTracker: NewSkipPVTracker(),
-		BackedUpItems:    NewBackedUpItemsMap(),
-		WorkerPool:       itemBlockPool,
+		Backup:               defaultBackup().ExcludedNamespaceScopedResources("pods").Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           itemBlockPool,
 	}
 
 	p := new(resourcepolicies.Policies)

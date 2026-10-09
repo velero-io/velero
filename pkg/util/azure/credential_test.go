@@ -69,6 +69,28 @@ func TestNewCredential(t *testing.T) {
 	assert.IsType(t, &azidentity.WorkloadIdentityCredential{}, tokenCredential)
 	os.Clearenv()
 
+	// a leftover AZURE_USERNAME must not hijack credential selection. Username/password
+	// handling was removed from newConfigCredential in #9041, so routing on it sends the
+	// caller into a function that cannot serve it and short-circuits the workload
+	// identity and managed identity branches below.
+	os.Setenv(CredentialKeyTenantID, "tenantid")
+	os.Setenv(CredentialKeyClientID, "clientid")
+	os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/tmp/token")
+	creds = map[string]string{CredentialKeyUsername: "username"}
+	tokenCredential, err = NewCredential(creds, options)
+	require.NoError(t, err)
+	assert.IsType(t, &azidentity.WorkloadIdentityCredential{}, tokenCredential)
+	os.Clearenv()
+
+	// ... and must not short-circuit managed identity either
+	creds = map[string]string{
+		CredentialKeyClientID: "clientid",
+		CredentialKeyUsername: "username",
+	}
+	tokenCredential, err = NewCredential(creds, options)
+	require.NoError(t, err)
+	assert.IsType(t, &azidentity.ManagedIdentityCredential{}, tokenCredential)
+
 	// managed identity credential
 	creds = map[string]string{CredentialKeyClientID: "clientid"}
 	tokenCredential, err = NewCredential(creds, options)

@@ -1,0 +1,1 @@
+Fixed a bug in the backup sync controller where transient API errors could cause backups to incorrectly lose their schedule owner references.

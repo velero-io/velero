@@ -68,19 +68,19 @@ func (p *PVCBuilder) WithResourceStorage(q resource.Quantity) *PVCBuilder {
 }
 
 func CreatePVC(client TestClient, ns, name, sc string, ann map[string]string) (*corev1api.PersistentVolumeClaim, error) {
-	pvcBulder := NewPVC(ns, name)
+	pvcBuilder := NewPVC(ns, name)
 	if ann != nil {
-		pvcBulder.WithAnnotation(ann)
+		pvcBuilder.WithAnnotation(ann)
 	}
 	if sc != "" {
-		pvcBulder.WithStorageClass(sc)
+		pvcBuilder.WithStorageClass(sc)
 	}
 
-	return client.ClientGo.CoreV1().PersistentVolumeClaims(ns).Create(context.TODO(), pvcBulder.Result(), metav1.CreateOptions{})
+	return client.ClientGo.CoreV1().PersistentVolumeClaims(ns).Create(context.TODO(), pvcBuilder.Result(), metav1.CreateOptions{})
 }
 
-func CreatePvc(client TestClient, pvcBulder *PVCBuilder) error {
-	_, err := client.ClientGo.CoreV1().PersistentVolumeClaims(pvcBulder.Namespace).Create(context.TODO(), pvcBulder.Result(), metav1.CreateOptions{})
+func CreatePvc(client TestClient, pvcBuilder *PVCBuilder) error {
+	_, err := client.ClientGo.CoreV1().PersistentVolumeClaims(pvcBuilder.Namespace).Create(context.TODO(), pvcBuilder.Result(), metav1.CreateOptions{})
 	return err
 }
 

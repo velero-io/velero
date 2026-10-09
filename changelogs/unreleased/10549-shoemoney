@@ -1,0 +1,1 @@
+Fix velero schedule create silently dropping --annotations

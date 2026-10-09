@@ -41,7 +41,7 @@ func TestDaemonSet(t *testing.T) {
 					{
 						MatchExpressions: []corev1api.NodeSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Values:   []string{"windows"},
 								Operator: corev1api.NodeSelectorOpNotIn,
 							},
@@ -107,7 +107,7 @@ func TestDaemonSet(t *testing.T) {
 					{
 						MatchExpressions: []corev1api.NodeSelectorRequirement{
 							{
-								Key:      "kubernetes.io/os",
+								Key:      corev1api.LabelOSStable,
 								Values:   []string{"windows"},
 								Operator: corev1api.NodeSelectorOpIn,
 							},

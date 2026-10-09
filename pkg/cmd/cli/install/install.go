@@ -372,6 +372,7 @@ All namespaced resources will be placed in the 'velero' namespace by default.
 
 The '--namespace' flag can be used to specify a different namespace to install into.
 
+By default, the command returns immediately after creating resources.
 Use '--wait' to wait for the Velero Deployment to be ready before proceeding.
 
 Use '-o yaml' or '-o json' with '--dry-run' to output all generated resources as text instead of sending the resources to the server.

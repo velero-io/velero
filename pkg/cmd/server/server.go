@@ -28,7 +28,7 @@ import (
 
 	logrusr "github.com/bombsimon/logrusr/v3"
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -61,6 +61,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/storage"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	"github.com/vmware-tanzu/velero/pkg/archive"
 	"github.com/vmware-tanzu/velero/pkg/backup"
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
 	"github.com/vmware-tanzu/velero/pkg/client"
@@ -248,7 +249,7 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		cancelFunc()
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
@@ -667,7 +668,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.config.DefaultVolumesToFsBackup,
 			s.config.DefaultBackupTTL,
 			s.config.DefaultVGSLabelKey,
-			s.config.DefaultCSISnapshotTimeout,
+			s.config.DefaultBackupCSISnapshotTimeout,
 			s.config.ResourceTimeout,
 			s.config.DefaultItemOperationTimeout,
 			defaultVolumeSnapshotLocations,
@@ -877,6 +878,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			backupStoreGetter,
 			s.metrics,
 			s.config.LogFormat.Parse(),
+			s.config.DefaultRestoreCSISnapshotTimeout,
 			s.config.DefaultItemOperationTimeout,
 			s.config.DisableInformerCache,
 			s.crClient,
@@ -933,6 +935,11 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		).SetupWithManager(s.mgr); err != nil {
 			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerBackupQueue)
 		}
+	}
+
+	if s.config.MaxBackupExtractionSize > 0 {
+		s.logger.Infof("Setting backup data extraction cap as %v MB", s.config.MaxBackupExtractionSize)
+		archive.SetMaxExtractionSize(int64(s.config.MaxBackupExtractionSize) * 1024 * 1024)
 	}
 
 	s.logger.Info("Server starting...")

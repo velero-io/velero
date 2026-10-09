@@ -65,6 +65,23 @@ order in which item action plugins are invoked. However, if a single binary impl
 they may be invoked in the order in which they are registered but it is best to not depend on this
 implementation. This is not guaranteed officially and the implementation can change at any time.
 
+### Must-include additional items (Backup Item Actions)
+
+Backup Item Actions may return `AdditionalItems` that Velero backs up as dependencies of the current item.
+By default those additional items must still pass the backup's global resource and namespace include/exclude filters.
+
+To force-backup hard dependencies despite those filters, set the following annotation on the `UpdatedItem` returned from `Execute()`:
+
+```
+backup.velero.io/must-include-additional-items: "true"
+```
+
+Behavior:
+- Only the string value `"true"` enables the bypass.
+- The annotation applies blanket to all `AdditionalItems` from that BIA invocation (not per-item).
+- Velero strips the annotation before saving the item to the backup tarball.
+- **Important Note for File System Backup (FSB):** If your plugin returns both a Pod and its associated PersistentVolumeClaims (PVCs) as `AdditionalItems`, and you expect Velero to create PodVolumeBackups (PVBs) for those PVCs using File System Backup, using this annotation ensures Velero correctly evaluates the PVCs for FSB. Velero explicitly tracks PVCs returned as additional items with this annotation, guaranteeing that PVBs are created even if the PVCs are excluded by global or fine-grained backup filters, regardless of the order they are returned in the `AdditionalItems` slice.
+
 ### Must-include additional items (Restore Item Actions)
 
 Restore Item Actions may return `AdditionalItems` that Velero restores as dependencies of the current item.

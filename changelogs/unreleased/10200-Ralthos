@@ -1,0 +1,1 @@
+Add printer columns for Backup and Restore CRDs so kubectl shows status, errors, warnings and timing

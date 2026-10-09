@@ -34,11 +34,27 @@ default the source PVC's storage class will be used.
   the SELinux point of view, this will be considered a "Super Privileged Container" which means that selinux enforcement will be disabled and
   volume relabeling will not occur. This field is ignored if `readOnly` is `false`.
 
+- `readWriteOncePod`: This is a boolean value. If set to `true`, then `ReadWriteOncePod` will be the only value set to the backupPVC's access modes. On
+  SELinux-enabled clusters the kubelet applies the SELinux label to a `ReadWriteOncePod` volume at mount time (`-o context=`) instead of recursively
+  relabeling every file on the volume, which can take hours on volumes with a high file count. It requires a CSI driver that advertises SELinux mount
+  support (`CSIDriver.spec.seLinuxMount: true`) and a storage class that supports creating `ReadWriteOncePod` PVCs from a snapshot. This field is ignored
+  if `readOnly` is `true`.
+
 The users can specify the ConfigMap name during velero installation by CLI:
 `velero install --node-agent-configmap=<ConfigMap-Name>`
 
 - `annotations`: permits to set annotations on the backupPVC itself. typically useful for some CSI provider which cannot mount
   a VolumeSnapshot without a custom annotation.
+
+- `secretNames`: a list of secret names to copy from the source PVC's namespace to the Velero namespace before the backupPVC is
+  created, and delete after the DataUpload completes. This is needed for CSI drivers that require namespace-scoped secrets to
+  provision the volume, for example ODF/ceph-csi encrypted volumes that fetch a KMS token secret (`ceph-csi-kms-token`) from the
+  PVC's namespace. Without this, the backupPVC created in the Velero namespace fails to provision because the secret only exists
+  in the source namespace.
+
+- `configMapNames`: a list of configmap names to copy from the source PVC's namespace to the Velero namespace before the backupPVC
+  is created, and delete after the DataUpload completes. This is needed for CSI drivers that require namespace-scoped configmaps to
+  provision the volume, for example a tenant-specific ceph-csi KMS connection override configmap (`ceph-csi-kms-config`).
 
 A sample of `backupPVC` config as part of the ConfigMap would look like:
 ```json
@@ -60,10 +76,23 @@ A sample of `backupPVC` config as part of the ConfigMap would look like:
         "storage-class-4": {
             "readOnly": true,
             "spcNoRelabeling": true
+        },
+        "ocs-storagecluster-ceph-rbd-encrypted": {
+            "secretNames": ["ceph-csi-kms-token"],
+            "configMapNames": ["ceph-csi-kms-config"]
+        },
+        "storage-class-5": {
+            "readWriteOncePod": true
         }
     }
 }
 ```
+
+**Note on encrypted volumes:** the copied secrets/configmaps are labeled `velero.io/backup-pvc-secret=<DataUpload UID>` and
+deleted when the DataUpload completes (or on failure). If concurrent DataUploads from different namespaces need a secret with the same
+name but different content in the Velero namespace, they conflict. For ceph-csi,
+this can be avoided by configuring a unique
+[`tenantTokenName` per tenant](https://github.com/ceph/ceph-csi/blob/devel/docs/design/proposals/encryption-with-vault-tokens.md#example-of-the-kms-configuration-file-for-vault-tokens).
 
 **Note:** 
 - Users should make sure that the storage class specified in `backupPVC` config should exist in the cluster and can be used by the
@@ -73,6 +102,10 @@ A sample of `backupPVC` config as part of the ConfigMap would look like:
 timeout (data movement prepare timeout value is 30m by default).
 - In an SELinux-enabled cluster, any time users set `readOnly=true` they must also set `spcNoRelabeling=true`. There is no need to set `spcNoRelabeling=true`
 if the volume is not readOnly.
+- `readWriteOncePod` and `readOnly` are mutually exclusive. If both are set to `true`, `readOnly` wins, `readWriteOncePod` is ignored and a warning is logged.
+- `readWriteOncePod` is an alternative to `readOnly`+`spcNoRelabeling` for SELinux-enabled clusters whose storage does not support `ReadOnlyMany`
+(for example Ceph RBD in Filesystem mode or LVM). Users must make sure the storage class used for `backupPVC` supports creating a `ReadWriteOncePod` PVC from
+a snapshot, otherwise the corresponding DataUpload CR will stay in `Accepted` phase until timeout.
 - If any of the above problems occur, then the DataUpload CR is `canceled` after timeout, and the backupPod and backupPVC will be deleted, and the backup
 will be marked as `PartiallyFailed`.
 

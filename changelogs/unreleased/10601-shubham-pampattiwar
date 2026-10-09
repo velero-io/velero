@@ -1,0 +1,1 @@
+Detect the VolumeGroupSnapshot API version (v1/v1beta2/v1beta1) at runtime so VGS backup and restore work across clusters serving different versions

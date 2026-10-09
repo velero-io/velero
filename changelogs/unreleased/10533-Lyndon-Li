@@ -1,0 +1,1 @@
+Fix issue #10429, sync the calls to IsConstrained

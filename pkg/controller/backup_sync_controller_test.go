@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlClient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -203,10 +204,10 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 			},
@@ -308,10 +309,10 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("velero"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 			},
@@ -321,10 +322,10 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 				existingBackups: []*velerov1api.Backup{
@@ -340,7 +341,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 				existingBackups: []*velerov1api.Backup{
@@ -355,10 +356,10 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").StorageLocation("foo").ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "foo")).Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").StorageLocation("foo").ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "foo")).Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 			},
@@ -369,10 +370,10 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				longLocationNameEnabled: true,
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").StorageLocation("foo").ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "foo")).Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").StorageLocation("foo").ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, "foo")).Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 					},
 				},
 			},
@@ -382,13 +383,13 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
 							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
 						},
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
 							builder.ForPodVolumeBackup("ns-1", "pvb-2").Result(),
 						},
@@ -401,13 +402,13 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				location:  defaultLocation("ns-1"),
 				cloudBackups: []*cloudBackupData{
 					{
-						backup: builder.ForBackup("ns-1", "backup-1").Result(),
+						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
 							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
 						},
 					},
 					{
-						backup: builder.ForBackup("ns-1", "backup-2").Result(),
+						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
 							builder.ForPodVolumeBackup("ns-1", "pvb-3").Result(),
 						},
@@ -438,7 +439,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			}
 
 			if test.location != nil {
-				Expect(r.client.Create(ctx, test.location)).ShouldNot(HaveOccurred())
+				Expect(r.client.Create(ctx, test.location)).ToNot(HaveOccurred())
 				backupStores[test.location.Name] = &persistencemocks.BackupStore{}
 
 				backupStore, ok := backupStores[test.location.Name]
@@ -456,12 +457,12 @@ var _ = Describe("Backup Sync Reconciler", func() {
 
 			for _, existingBackup := range test.existingBackups {
 				err := client.Create(context.TODO(), existingBackup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			for _, existingPodVolumeBackup := range test.existingPodVolumeBackups {
 				err := client.Create(context.TODO(), existingPodVolumeBackup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			actualResult, err := r.Reconcile(ctx, ctrl.Request{
@@ -533,7 +534,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 							cloudBackupData.backup.Status.Expiration.After(fakeClock.Now())) {
 						Expect(apierrors.IsNotFound(err)).To(BeTrue())
 					} else {
-						Expect(err).ShouldNot(HaveOccurred())
+						Expect(err).ToNot(HaveOccurred())
 
 						// did this cloud pod volume backup already exist in the cluster?
 						var existingPodVolumeBackup *velerov1api.PodVolumeBackup
@@ -553,6 +554,184 @@ var _ = Describe("Backup Sync Reconciler", func() {
 					}
 				}
 			}
+		}
+	})
+
+	It("Test synced backups are never picked up by the backup queue controller", func() {
+		fakeClock := testclocks.NewFakeClock(time.Now())
+		hooks := velerov1api.BackupHooks{
+			Resources: []velerov1api.BackupResourceHookSpec{
+				{
+					Name: "hook-1",
+					PreHooks: []velerov1api.BackupResourceHook{
+						{
+							Exec: &velerov1api.ExecHook{
+								Container: "container-1",
+								Command:   []string{"/bin/sh", "-c", "echo hello"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		tests := []struct {
+			name         string
+			cloudBackup  *velerov1api.Backup
+			expectSynced bool
+			// phase expected in the cluster after the sync and queue reconciles have run.
+			// only checked when expectSynced is true.
+			expectPhase velerov1api.BackupPhase
+		}{
+			{
+				name:         "backup metadata with an empty phase is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase New is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseNew).Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase Queued is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseQueued).Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase ReadyToStart is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseReadyToStart).Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase InProgress is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseInProgress).Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase Deleting is not synced",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseDeleting).Hooks(hooks).Result(),
+				expectSynced: false,
+			},
+			{
+				name:         "backup metadata in phase Completed is synced and stays Completed",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Hooks(hooks).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhaseCompleted,
+			},
+			{
+				name:         "backup metadata in phase PartiallyFailed is synced and stays PartiallyFailed",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhasePartiallyFailed).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhasePartiallyFailed,
+			},
+			{
+				name:         "backup metadata in phase Failed is synced and stays Failed",
+				cloudBackup:  builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseFailed).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhaseFailed,
+			},
+			{
+				name: "non-expired backup waiting for plugin operations is not synced",
+				cloudBackup: builder.ForBackup("ns-1", "backup-1").
+					Phase(velerov1api.BackupPhaseWaitingForPluginOperations).
+					Expiration(fakeClock.Now().Add(time.Hour)).Result(),
+				expectSynced: false,
+			},
+			{
+				name: "expired backup waiting for plugin operations is synced as PartiallyFailed",
+				cloudBackup: builder.ForBackup("ns-1", "backup-1").
+					Phase(velerov1api.BackupPhaseWaitingForPluginOperations).
+					Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhasePartiallyFailed,
+			},
+			{
+				name: "expired backup waiting for plugin operations partially failed is synced as PartiallyFailed",
+				cloudBackup: builder.ForBackup("ns-1", "backup-1").
+					Phase(velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed).
+					Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhasePartiallyFailed,
+			},
+			{
+				name: "expired finalizing backup is synced as PartiallyFailed",
+				cloudBackup: builder.ForBackup("ns-1", "backup-1").
+					Phase(velerov1api.BackupPhaseFinalizing).
+					Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhasePartiallyFailed,
+			},
+			{
+				name: "expired finalizing partially failed backup is synced as PartiallyFailed",
+				cloudBackup: builder.ForBackup("ns-1", "backup-1").
+					Phase(velerov1api.BackupPhaseFinalizingPartiallyFailed).
+					Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
+				expectSynced: true,
+				expectPhase:  velerov1api.BackupPhasePartiallyFailed,
+			},
+		}
+
+		queueScheme := runtime.NewScheme()
+		Expect(velerov1api.AddToScheme(queueScheme)).ToNot(HaveOccurred())
+
+		for _, test := range tests {
+			var (
+				client        = ctrlfake.NewClientBuilder().Build()
+				pluginManager = &pluginmocks.Manager{}
+				backupStores  = make(map[string]*persistencemocks.BackupStore)
+				location      = defaultLocation("ns-1")
+			)
+
+			pluginManager.On("CleanupClients").Return(nil)
+			syncReconciler := backupSyncReconciler{
+				client:                  client,
+				namespace:               "ns-1",
+				defaultBackupSyncPeriod: time.Second * 10,
+				newPluginManager:        func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+				backupStoreGetter:       NewFakeObjectBackupStoreGetter(backupStores),
+				logger:                  velerotest.NewLogger(),
+			}
+
+			Expect(client.Create(ctx, location)).ToNot(HaveOccurred(), test.name)
+			backupStore := &persistencemocks.BackupStore{}
+			backupStores[location.Name] = backupStore
+			backupStore.On("ListBackups").Return([]string{test.cloudBackup.Name}, nil)
+			backupStore.On("BackupExists", "bucket-1", test.cloudBackup.Name).Return(true, nil)
+			backupStore.On("GetBackupMetadata", test.cloudBackup.Name).Return(test.cloudBackup, nil)
+			backupStore.On("GetPodVolumeBackups", test.cloudBackup.Name).Return(nil, nil)
+
+			_, err := syncReconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Namespace: location.Namespace, Name: location.Name},
+			})
+			Expect(err).ToNot(HaveOccurred(), test.name)
+
+			backupKey := types.NamespacedName{Namespace: "ns-1", Name: test.cloudBackup.Name}
+			synced := &velerov1api.Backup{}
+			err = client.Get(ctx, backupKey, synced)
+
+			if !test.expectSynced {
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), test.name)
+				continue
+			}
+			Expect(err).ToNot(HaveOccurred(), test.name)
+
+			// Reconcile the synced backup with the queue controller twice: the first
+			// reconcile would move a New/empty-phase backup to Queued, the second one
+			// would move it on to ReadyToStart, which is what hands it to the backup
+			// controller for execution.
+			queueReconciler := NewBackupQueueReconciler(client, queueScheme, velerotest.NewLogger(), 1, NewBackupTracker())
+			for range 2 {
+				_, err = queueReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: backupKey})
+				Expect(err).ToNot(HaveOccurred(), test.name)
+			}
+
+			after := &velerov1api.Backup{}
+			Expect(client.Get(ctx, backupKey, after)).ToNot(HaveOccurred(), test.name)
+			Expect(after.Status.Phase).To(BeEquivalentTo(test.expectPhase), test.name)
+			// Hooks are dropped on sync, so the stored metadata cannot carry a payload
+			// that a later code path could execute.
+			Expect(after.Spec.Hooks.Resources).To(BeEmpty(), test.name)
 		}
 	})
 
@@ -701,7 +880,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			for _, backup := range test.k8sBackups {
 				// add test backup to client
 				err := client.Create(context.TODO(), backup, &ctrlClient.CreateOptions{})
-				Expect(err).ShouldNot(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			}
 
 			bslName := "default"
@@ -711,7 +890,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			r.deleteOrphanedBackups(ctx, bslName, test.cloudBackups, velerotest.NewLogger())
 
 			numBackups, err := numBackups(client)
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred())
 
 			fmt.Println("")
 
@@ -734,7 +913,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 
 		testObjList := backupSyncSourceOrderFunc(locationList)
 		testObjArray, err := meta.ExtractList(testObjList)
-		Expect(err).ShouldNot(HaveOccurred())
+		Expect(err).ToNot(HaveOccurred())
 
 		expectLocation := testObjArray[0].(*velerov1api.BackupStorageLocation)
 		Expect(expectLocation.Spec.Default).To(BeEquivalentTo(true))
@@ -906,12 +1085,55 @@ var _ = Describe("Backup Sync Reconciler", func() {
 				//create all required schedules as needed.
 				for _, creatable := range test.toCreate {
 					err := b.client.Create(context.Background(), creatable)
-					Expect(err).ShouldNot(HaveOccurred())
+					Expect(err).ToNot(HaveOccurred())
 				}
 
 				references := b.filterBackupOwnerReferences(context.Background(), test.backup, logger)
 				Expect(references).To(BeEquivalentTo(test.expectedReferences))
 			})
 		}
+	})
+
+	It("filterBackupOwnerReferences preserves owner reference on transient API error", func() {
+		// This test verifies the fix for the switch case ordering bug:
+		// When client.Get returns a non-NotFound error (e.g. transient API failure),
+		// the owner reference must be kept on the backup rather than silently dropped
+		// due to an incorrect UID comparison against a zero-value struct.
+		scheduleUID := types.UID("schedule-uid-1")
+		backup := &velerov1api.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-backup",
+				Namespace: "test-namespace",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "Schedule",
+						Name: "my-schedule",
+						UID:  scheduleUID,
+					},
+				},
+			},
+		}
+
+		// Build a fake client that returns a generic (non-NotFound) error on Get,
+		// simulating a transient API server failure.
+		transientErr := fmt.Errorf("transient connection error")
+		fakeClient := ctrlfake.NewClientBuilder().
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c ctrlClient.WithWatch, key ctrlClient.ObjectKey, obj ctrlClient.Object, opts ...ctrlClient.GetOption) error {
+					return transientErr
+				},
+			}).
+			Build()
+
+		b := backupSyncReconciler{
+			client: fakeClient,
+		}
+
+		logger := velerotest.NewLogger()
+		references := b.filterBackupOwnerReferences(context.Background(), backup, logger)
+
+		// The owner reference must be preserved when a transient error occurs.
+		Expect(references).To(HaveLen(1))
+		Expect(references[0].UID).To(Equal(scheduleUID))
 	})
 })

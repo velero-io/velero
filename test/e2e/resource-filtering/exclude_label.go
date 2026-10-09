@@ -127,7 +127,7 @@ func (e *ExcludeFromBackup) CreateResources() error {
 	}
 	By(fmt.Sprintf("Checking secret %s should exists in namespaces ...%s\n", secretName, namespace), func() {
 		_, err = GetSecret(e.Client.ClientGo, namespace, e.CaseBaseName)
-		Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
+		Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
 	})
 	//Create Configmap: to be included
 	configmaptName := e.CaseBaseName
@@ -148,21 +148,21 @@ func (e *ExcludeFromBackup) Verify() error {
 	By(fmt.Sprintf("Checking resources in namespaces ...%s\n", namespace), func() {
 		//Check namespace
 		checkNS, err := GetNamespace(e.Ctx, e.Client, namespace)
-		Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("Could not retrieve test namespace %s", namespace))
+		Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Could not retrieve test namespace %s", namespace))
 		Expect(checkNS.Name).To(Equal(namespace), fmt.Sprintf("Retrieved namespace for %s has name %s instead", namespace, checkNS.Name))
 
 		//Check deployment: should be included
 		_, err = GetDeployment(e.Client.ClientGo, namespace, e.CaseBaseName)
-		Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
+		Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
 
 		//Check secrets: secrets should not be included
 		_, err = GetSecret(e.Client.ClientGo, namespace, e.CaseBaseName)
-		Expect(err).Should(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
+		Expect(err).To(HaveOccurred(), fmt.Sprintf("failed to list deployment in namespace: %q", namespace))
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 
 		//Check configmap: should be included
 		_, err = GetConfigMap(e.Client.ClientGo, namespace, e.CaseBaseName)
-		Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("failed to list configmap in namespace: %q", namespace))
+		Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("failed to list configmap in namespace: %q", namespace))
 	})
 	return nil
 }

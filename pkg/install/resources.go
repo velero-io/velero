@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	v1crds "github.com/vmware-tanzu/velero/config/crd/v1/crds"
-	v2alpha1crds "github.com/vmware-tanzu/velero/config/crd/v2alpha1/crds"
+	v1crds "github.com/vmware-tanzu/velero/config/crd/v1"
+	v2alpha1crds "github.com/vmware-tanzu/velero/config/crd/v2alpha1"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )

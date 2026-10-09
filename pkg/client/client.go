@@ -58,6 +58,23 @@ func Config(kubeconfig, kubecontext, baseName string, qps float32, burst int) (*
 	return clientConfig, nil
 }
 
+// NamespaceFromKubeContext returns the namespace associated with the given kubeconfig context
+// (or the current context if kubecontext is empty), using the given kubeconfig file (or the
+// default loading rules if kubeconfig is empty).
+func NamespaceFromKubeContext(kubeconfig, kubecontext string) (string, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	loadingRules.ExplicitPath = kubeconfig
+	configOverrides := &clientcmd.ConfigOverrides{CurrentContext: kubecontext}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	namespace, _, err := kubeConfig.Namespace()
+	if err != nil {
+		return "", errors.Wrap(err, "error finding namespace in --kubeconfig, $KUBECONFIG, or in-cluster configuration")
+	}
+
+	return namespace, nil
+}
+
 // buildUserAgent builds a User-Agent string from given args.
 func buildUserAgent(command, version, formattedSha, os, arch string) string {
 	return fmt.Sprintf(

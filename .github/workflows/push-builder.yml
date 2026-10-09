@@ -6,6 +6,9 @@ on:
     paths:
     - 'hack/build-image/Dockerfile'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build

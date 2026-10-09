@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,7 +270,8 @@ func initDataUploaderReconcilerWithError(needError ...error) (*DataUploadReconci
 		"",  // dataMovePriorityClass
 		nil, // podLabels
 		nil, // podAnnotations
-		nil,
+		nil, // snapshotMetadataServiceConfigs
+		nil, // tolerations
 	), nil
 }
 
@@ -672,7 +674,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if test.sportTime != nil {
-				r.cancelledDataUpload[test.du.Name] = test.sportTime.Time
+				r.cancelledDataUpload.Store(test.du.Name, test.sportTime.Time)
 			}
 
 			if test.constrained {
@@ -752,9 +754,15 @@ func TestReconcile(t *testing.T) {
 			}
 
 			if test.expectCancelRecord {
-				assert.Contains(t, r.cancelledDataUpload, test.du.Name)
+				_, ok := r.cancelledDataUpload.Load(test.du.Name)
+				assert.True(t, ok)
 			} else {
-				assert.Empty(t, r.cancelledDataUpload)
+				empty := true
+				r.cancelledDataUpload.Range(func(key, value any) bool {
+					empty = false
+					return false
+				})
+				assert.True(t, empty)
 			}
 
 			if isDataUploadInFinalState(&du) || du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
@@ -803,6 +811,15 @@ func TestOnDataUploadProgress(t *testing.T) {
 			},
 		},
 		{
+			name: "patch in progress phase with negative progress values and message",
+			du:   dataUploadBuilder().Result(),
+			progress: uploader.Progress{
+				TotalBytes: -1,
+				BytesDone:  -1,
+				Message:    "some warning message",
+			},
+		},
+		{
 			name:     "failed to get dataupload",
 			du:       dataUploadBuilder().Result(),
 			needErrs: []bool{true, false, false, false},
@@ -830,20 +847,33 @@ func TestOnDataUploadProgress(t *testing.T) {
 			require.NoError(t, r.client.Create(t.Context(), du))
 
 			// Create a Progress object
-			progress := &uploader.Progress{
-				TotalBytes: totalBytes,
-				BytesDone:  bytesDone,
-			}
+			progress := &test.progress
 
 			// Call the OnDataUploadProgress function
 			r.OnDataUploadProgress(ctx, namespace, duName, progress)
-			if len(test.needErrs) != 0 && !test.needErrs[0] {
+			if len(test.needErrs) == 0 {
 				// Get the updated DataUpload object from the fake client
 				updatedDu := &velerov2alpha1api.DataUpload{}
 				require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
 				// Assert that the DataUpload object has been updated with the progress
-				assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
-				assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				if progress.TotalBytes != -1 {
+					assert.Equal(t, test.progress.TotalBytes, updatedDu.Status.Progress.TotalBytes)
+				} else {
+					assert.Equal(t, int64(0), updatedDu.Status.Progress.TotalBytes) // assuming default or original value
+				}
+				if progress.BytesDone != -1 {
+					assert.Equal(t, test.progress.BytesDone, updatedDu.Status.Progress.BytesDone)
+				} else {
+					assert.Equal(t, int64(0), updatedDu.Status.Progress.BytesDone) // assuming default or original value
+				}
+				if progress.Message != "" {
+					assert.Contains(t, updatedDu.Status.Activities, progress.Message)
+
+					// Call with the same message again to verify deduplication
+					r.OnDataUploadProgress(ctx, namespace, duName, progress)
+					require.NoError(t, r.client.Get(ctx, types.NamespacedName{Name: duName, Namespace: namespace}, updatedDu))
+					assert.Equal(t, []string{progress.Message}, updatedDu.Status.Activities)
+				}
 			}
 		})
 	}
@@ -1541,7 +1571,8 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 				"upload-priority",
 				tt.args.customLabels,
 				tt.args.customAnnotations,
-				nil,
+				nil, // snapshotMetadataServiceConfigs
+				nil, // tolerations
 			)
 
 			// Act
@@ -1560,4 +1591,51 @@ func TestDataUploadSetupExposeParam(t *testing.T) {
 			assert.Equal(t, tt.want.annotations, csiParam.HostingPodAnnotations)
 		})
 	}
+}
+
+type dataUploadSequenceClock struct {
+	*testclocks.FakeClock
+	mu sync.Mutex
+}
+
+func (c *dataUploadSequenceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FakeClock.Step(time.Second)
+	return c.FakeClock.Now()
+}
+
+func TestDataUploadCancelConcurrency(t *testing.T) {
+	ctx := t.Context()
+	du := dataUploadBuilder().Cancel(true).Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result()
+
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	err = r.client.Create(ctx, du)
+	require.NoError(t, err)
+
+	firstTime := time.Now()
+	// manually store the initial time
+	r.cancelledDataUpload.Store(du.Name, firstTime)
+
+	// Custom clock that returns a different time each call
+	r.Clock = &dataUploadSequenceClock{FakeClock: testclocks.NewFakeClock(firstTime)}
+
+	var wg sync.WaitGroup
+	routines := 50
+	wg.Add(routines)
+
+	for i := 0; i < routines; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: du.Name, Namespace: du.Namespace}})
+		}()
+	}
+
+	wg.Wait()
+
+	v, ok := r.cancelledDataUpload.Load(du.Name)
+	assert.True(t, ok)
+	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
 }

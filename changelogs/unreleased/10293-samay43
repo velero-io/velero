@@ -1,0 +1,1 @@
+Fix nil pointer dereference in EnsureDeletePVC, EnsureDeletePV and EnsureDeletePod when the API call times out before the object is retrieved

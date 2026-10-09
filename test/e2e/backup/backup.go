@@ -76,9 +76,15 @@ func BackupRestoreTest(backupRestoreTestConfig BackupRestoreTestConfig) {
 		veleroCfg.UseNodeAgent = !useVolumeSnapshots
 		if veleroCfg.CloudProvider == Kind {
 			Skip("Volume snapshots plugin and File System Backups are not supported on kind")
-			// on kind cluster snapshots are not supported since there is no velero snapshot plugin for kind volumes.
-			// and PodVolumeBackups are not supported because PVB creation gets skipped for hostpath volumes, which are the only
-			// volumes created on kind clusters using the default storage class and provisioner (provisioner: rancher.io/local-path)
+			// Both halves of this are about the StorageClass, not about kind itself.
+			// Kibishii's PVCs use kibishii-storage-class, which the kind overlay
+			// defines on rancher.io/local-path, so the PVs are hostPath volumes:
+			// CSI snapshots skip them because pkg/backup/actions/csi/pvc_action.go
+			// requires pv.Spec.CSI, and PodVolumeBackups skip them because
+			// isHostPathVolume in pkg/podvolume/backupper.go matches pv.Spec.HostPath.
+			// A CSI-backed class produces pv.Spec.CSI instead and neither applies,
+			// but Kibishii brings its own class, so unskipping these needs a CSI
+			// overlay in vmware-tanzu-experiments/distributed-data-generator.
 			// This test suite checks for volume snapshots and PVBs generated from FileSystemBackups, so skip it on kind clusters
 		}
 

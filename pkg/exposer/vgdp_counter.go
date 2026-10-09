@@ -2,6 +2,7 @@ package exposer
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
@@ -23,6 +24,7 @@ type dynamicQueueLength struct {
 }
 
 type VgdpCounter struct {
+	lock               sync.Mutex
 	client             ctlclient.Client
 	allowedQueueLength int
 
@@ -164,6 +166,9 @@ func (w *VgdpCounter) initListeners(ctx context.Context, mgr manager.Manager) er
 }
 
 func (w *VgdpCounter) IsConstrained(ctx context.Context, log logrus.FieldLogger) bool {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
 	id := atomic.LoadUint64(&w.duState.changeID)
 	if id != w.duCacheState.changeID {
 		duList := &velerov2alpha1api.DataUploadList{}

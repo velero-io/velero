@@ -129,6 +129,12 @@ func EnsureDeletePod(ctx context.Context, podGetter corev1client.CoreV1Interface
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			// updated is only set once the pod has been retrieved successfully, so it
+			// is still nil when the deadline is exceeded before that happens, e.g.
+			// when the first Get times out. No finalizers are available to report.
+			if updated == nil {
+				return errors.Errorf("timeout to assure pod %s is deleted", pod)
+			}
 			return errors.Errorf("timeout to assure pod %s is deleted, finalizers in pod %v", pod, updated.Finalizers)
 		} else {
 			return errors.Wrapf(err, "error to assure pod is deleted, %s", pod)
@@ -318,9 +324,26 @@ func ExitPodWithMessage(logger logrus.FieldLogger, succeed bool, message string,
 	funcExit(exitCode)
 }
 
+// deepCopy returns a deep copy of the LoadAffinity, so that the returned value
+// can be safely modified without affecting the source.
+func (a *LoadAffinity) deepCopy() *LoadAffinity {
+	if a == nil {
+		return nil
+	}
+
+	result := &LoadAffinity{
+		StorageClass: a.StorageClass,
+	}
+	a.NodeSelector.DeepCopyInto(&result.NodeSelector)
+
+	return result
+}
+
 // GetLoadAffinityByStorageClass retrieves the LoadAffinity from the parameter affinityList.
 // The function first try to find by the scName. If there is no such LoadAffinity,
 // it will try to get the LoadAffinity whose StorageClass has no value.
+// The returned LoadAffinity is a deep copy of the matched element, so that the
+// callers can modify it without corrupting the shared node-agent configuration.
 func GetLoadAffinityByStorageClass(
 	affinityList []*LoadAffinity,
 	scName string,
@@ -331,7 +354,7 @@ func GetLoadAffinityByStorageClass(
 	for _, affinity := range affinityList {
 		if affinity.StorageClass == scName {
 			logger.WithField("StorageClass", scName).Info("Found pod's affinity setting per StorageClass.")
-			return affinity
+			return affinity.deepCopy()
 		}
 
 		if affinity.StorageClass == "" && globalAffinity == nil {
@@ -345,5 +368,5 @@ func GetLoadAffinityByStorageClass(
 		logger.Info("No Affinity is found for pod.")
 	}
 
-	return globalAffinity
+	return globalAffinity.deepCopy()
 }

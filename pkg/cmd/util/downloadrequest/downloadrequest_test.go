@@ -463,6 +463,7 @@ func TestDownload(t *testing.T) {
 		expectedContent       string
 		expectedError         bool
 		errorType             error
+		expectedErrMsg        string
 	}{
 		{
 			name: "successful download with gzip for logs",
@@ -473,6 +474,16 @@ func TestDownload(t *testing.T) {
 			target:          velerov1api.DownloadTargetKindBackupLog,
 			expectedContent: testContent,
 			expectedError:   false,
+		},
+		{
+			name: "error decompressed data exceeds the limit",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write(compressedContent.Bytes())
+			},
+			target:         velerov1api.DownloadTargetKindBackupLog,
+			expectedError:  true,
+			expectedErrMsg: "decompressed data exceeds the limit",
 		},
 		{
 			name: "successful download without gzip for backup contents",
@@ -506,6 +517,12 @@ func TestDownload(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			originalLimit := unzipLimit
+			if tc.expectedErrMsg == "decompressed data exceeds the limit" {
+				unzipLimit = 10
+			}
+			defer func() { unzipLimit = originalLimit }()
+
 			server := httptest.NewServer(tc.serverHandler)
 			defer server.Close()
 
@@ -524,6 +541,9 @@ func TestDownload(t *testing.T) {
 				require.Error(t, err)
 				if tc.errorType != nil {
 					assert.Equal(t, tc.errorType, err)
+				}
+				if tc.expectedErrMsg != "" {
+					assert.Contains(t, err.Error(), tc.expectedErrMsg)
 				}
 			} else {
 				require.NoError(t, err)

@@ -263,3 +263,65 @@ func TestNewCommandRunClosureOrder(t *testing.T) {
 	// looks up the ConfigMap in targetNS (succeeds), Run returns early via DryRun.
 	require.NoError(t, c.Execute())
 }
+
+// TestWaitDefaultsToFalse verifies that --wait defaults to false,
+// consistent with velero backup create and velero restore create.
+func TestWaitDefaultsToFalse(t *testing.T) {
+	o := NewInstallOptions()
+	assert.False(t, o.Wait, "--wait should default to false")
+}
+
+func TestWaitFlag(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		expectedWait bool
+	}{
+		{
+			name:         "default: wait is false",
+			args:         []string{},
+			expectedWait: false,
+		},
+		{
+			name:         "--wait enables wait",
+			args:         []string{"--wait"},
+			expectedWait: true,
+		},
+		{
+			name:         "--wait=false disables wait",
+			args:         []string{"--wait=false"},
+			expectedWait: false,
+		},
+		{
+			name:         "--wait=true enables wait",
+			args:         []string{"--wait=true"},
+			expectedWait: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := NewInstallOptions()
+			o.NoDefaultBackupLocation = true
+			o.UseVolumeSnapshots = false
+			o.NoSecret = true
+
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			o.BindFlags(flags)
+			err := flags.Parse(tc.args)
+			require.NoError(t, err)
+
+			c := makeValidateCmd()
+			c.SetContext(context.Background())
+
+			f := &factorymocks.Factory{}
+			f.On("Namespace").Return("velero")
+			f.On("KubebuilderClient").Return(velerotest.NewFakeControllerRuntimeClient(t), nil)
+
+			require.NoError(t, o.Complete([]string{}, f))
+			err = o.Validate(c, []string{}, f)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedWait, o.Wait)
+		})
+	}
+}

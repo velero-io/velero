@@ -307,3 +307,20 @@ func (_c *Iterator_VolumeID_Call) RunAndReturn(run func() string) *Iterator_Volu
 	_c.Call.Return(run)
 	return _c
 }
+// Errors provides a mock function for the type Iterator
+func (_mock *Iterator) Errors() []error {
+	ret := _mock.Called()
+	if len(ret) == 0 {
+		panic("no return value specified for Errors")
+	}
+
+	var r0 []error
+	if returnFunc, ok := ret.Get(0).(func() []error); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]error)
+		}
+	}
+	return r0
+}

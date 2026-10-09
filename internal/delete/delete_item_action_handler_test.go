@@ -26,9 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -154,9 +151,9 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// test harness contains the fake API server/discovery client
-			h := newHarness(t)
+			h, dh := newHarness(t)
 			for _, r := range tc.apiResources {
-				h.addResource(t, r)
+				h.AddResource(t, dh, r)
 			}
 
 			// Get the plugins out of the map in order to use them.
@@ -169,7 +166,7 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 				Backup:          tc.backup,
 				BackupReader:    tc.tarball,
 				Filesystem:      fs,
-				DiscoveryHelper: h.discoveryHelper,
+				DiscoveryHelper: dh,
 				Actions:         actions,
 				Log:             log,
 			}
@@ -187,46 +184,15 @@ func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
 	}
 }
 
-// TODO: unify this with the test harness in pkg/restore/restore_test.go
-type harness struct {
-	*test.APIServer
-	discoveryHelper discovery.Helper
-}
-
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) (*test.Harness, discovery.Helper) {
 	t.Helper()
 
 	apiServer := test.NewAPIServer(t)
 	log := logrus.StandardLogger()
-
-	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
+	dh, err := discovery.NewHelper(apiServer.DiscoveryClient, log)
 	require.NoError(t, err)
 
-	return &harness{
-		APIServer:       apiServer,
-		discoveryHelper: discoveryHelper,
-	}
-}
-
-// addResource adds an APIResource and it's items to a faked API server for testing.
-func (h *harness) addResource(t *testing.T, resource *test.APIResource) {
-	t.Helper()
-
-	h.DiscoveryClient.WithAPIResource(resource)
-	require.NoError(t, h.discoveryHelper.Refresh())
-
-	for _, item := range resource.Items {
-		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item)
-		require.NoError(t, err)
-
-		unstructuredObj := &unstructured.Unstructured{Object: obj}
-		if resource.Namespaced {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Namespace(item.GetNamespace()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		} else {
-			_, err = h.DynamicClient.Resource(resource.GVR()).Create(t.Context(), unstructuredObj, metav1.CreateOptions{})
-		}
-		require.NoError(t, err)
-	}
+	return test.NewHarness(t, apiServer), dh
 }
 
 // recordResourcesAction is a delete item action that can be configured to run
@@ -306,14 +272,14 @@ func TestInvokeDeleteActionsReturnsPluginErrors(t *testing.T) {
 
 	action := &failingAction{err: errors.New("could not delete artifact")}
 
-	h := newHarness(t)
-	h.addResource(t, test.Pods())
+	h, dh := newHarness(t)
+	h.AddResource(t, dh, test.Pods())
 
 	c := &Context{
 		Backup:          builder.ForBackup("velero", "velero").Result(),
 		BackupReader:    tarball,
 		Filesystem:      fs,
-		DiscoveryHelper: h.discoveryHelper,
+		DiscoveryHelper: dh,
 		Actions:         []velero.DeleteItemAction{action},
 		Log:             log,
 	}

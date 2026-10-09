@@ -1,5 +1,9 @@
 name: Pull Request File Path Check
 on: [pull_request]
+
+permissions:
+  contents: read
+
 jobs:
 
   filepath-check:

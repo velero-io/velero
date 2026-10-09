@@ -85,7 +85,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
@@ -96,7 +96,7 @@ func TestGetStorageCredentials(t *testing.T) {
 			},
 			credFileStore: new(credmock.FileStore),
 			expected: map[string]string{
-				"accessKeyID":     "from: credentials-from-config-map",
+				"accessKeyID":     "from: ",
 				"providerName":    "",
 				"secretAccessKey": "",
 				"sessionToken":    "",
@@ -108,7 +108,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 					Credential: &corev1api.SecretKeySelector{},
 				},
@@ -134,7 +134,7 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/aws",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
@@ -176,16 +176,16 @@ func TestGetStorageCredentials(t *testing.T) {
 				Spec: velerov1api.BackupStorageLocationSpec{
 					Provider: "velero.io/gcp",
 					Config: map[string]string{
-						"credentialsFile": "credentials-from-config-map",
+						"credentialsFile": "credentials-from-config-map", // This should be ignored
 					},
 				},
 			},
 			getGCPCredentials: func(config map[string]string) string {
-				return "credentials-from-config-map"
+				return config["credentialsFile"]
 			},
 			credFileStore: new(credmock.FileStore),
 			expected: map[string]string{
-				"credFile": "credentials-from-config-map",
+				"credFile": "",
 			},
 		},
 	}
@@ -1061,6 +1061,41 @@ func TestBatchForget(t *testing.T) {
 				return errors.New("fake-error-4")
 			},
 			expectedErr: []string{"error to flush repo: fake-error-4"},
+		},
+		{
+			name:            "delete and flush fail",
+			getter:          new(credmock.SecretStore),
+			credStoreReturn: "fake-password",
+			funcTable: localFuncTable{
+				getStorageVariables: func(*velerov1api.BackupStorageLocation, string, string, map[string]string, velerocredentials.CredentialGetter) (map[string]string, error) {
+					return map[string]string{}, nil
+				},
+				getStorageCredentials: func(*velerov1api.BackupStorageLocation, velerocredentials.FileStore) (map[string]string, error) {
+					return map[string]string{}, nil
+				},
+			},
+			repoService: new(reposervicenmocks.BackupRepoService),
+			backupRepo:  new(reposervicenmocks.BackupRepo),
+			retFuncOpen: []any{
+				func(context.Context, udmrepo.RepoOptions) udmrepo.BackupRepo {
+					return backupRepo
+				},
+
+				func(context.Context, udmrepo.RepoOptions) error {
+					return nil
+				},
+			},
+			retFuncDelete: func(context.Context, udmrepo.ID) error {
+				return errors.New("fake-delete-error")
+			},
+			retFuncFlush: func(context.Context) error {
+				return errors.New("fake-flush-error")
+			},
+			snapshots: []string{"snapshot-1"},
+			expectedErr: []string{
+				"error to delete manifest snapshot-1: fake-delete-error",
+				"error to flush repo: fake-flush-error",
+			},
 		},
 	}
 

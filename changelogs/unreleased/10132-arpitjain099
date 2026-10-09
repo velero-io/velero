@@ -1,0 +1,1 @@
+Fix a panic when a port name in the last-applied-configuration annotation is not a string

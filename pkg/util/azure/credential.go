@@ -37,8 +37,7 @@ func NewCredential(creds map[string]string, options policy.ClientOptions) (azcor
 	// config credential
 	if len(creds[CredentialKeyClientSecret]) > 0 ||
 		len(creds[CredentialKeyClientCertificate]) > 0 ||
-		len(creds[CredentialKeyClientCertificatePath]) > 0 ||
-		len(creds[CredentialKeyUsername]) > 0 {
+		len(creds[CredentialKeyClientCertificatePath]) > 0 {
 		return newConfigCredential(creds, configCredentialOptions{
 			ClientOptions:              options,
 			AdditionallyAllowedTenants: additionalTenants,

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/constant"
@@ -58,27 +59,29 @@ import (
 
 // DataDownloadReconciler reconciles a DataDownload object
 type DataDownloadReconciler struct {
-	client                client.Client
-	kubeClient            kubernetes.Interface
-	mgr                   manager.Manager
-	logger                logrus.FieldLogger
-	Clock                 clock.WithTickerAndDelayedExecution
-	restoreExposer        exposer.GenericRestoreExposer
-	nodeName              string
-	dataPathMgr           *datapath.Manager
-	vgdpCounter           *exposer.VgdpCounter
-	loadAffinity          []*kube.LoadAffinity
-	restorePVCConfig      velerotypes.RestorePVC
-	backupRepoConfigs     map[string]string
-	cacheVolumeConfigs    *velerotypes.CachePVC
-	podResources          corev1api.ResourceRequirements
-	preparingTimeout      time.Duration
-	metrics               *metrics.ServerMetrics
-	cancelledDataDownload map[string]time.Time
-	dataMovePriorityClass string
-	repoConfigMgr         repository.ConfigManager
-	podLabels             map[string]string
-	podAnnotations        map[string]string
+	client                         client.Client
+	kubeClient                     kubernetes.Interface
+	mgr                            manager.Manager
+	logger                         logrus.FieldLogger
+	Clock                          clock.WithTickerAndDelayedExecution
+	restoreExposer                 exposer.GenericRestoreExposer
+	nodeName                       string
+	dataPathMgr                    *datapath.Manager
+	vgdpCounter                    *exposer.VgdpCounter
+	loadAffinity                   []*kube.LoadAffinity
+	restorePVCConfig               velerotypes.RestorePVC
+	backupRepoConfigs              map[string]string
+	cacheVolumeConfigs             *velerotypes.CachePVC
+	podResources                   corev1api.ResourceRequirements
+	preparingTimeout               time.Duration
+	metrics                        *metrics.ServerMetrics
+	cancelledDataDownload          sync.Map
+	dataMovePriorityClass          string
+	repoConfigMgr                  repository.ConfigManager
+	podLabels                      map[string]string
+	podAnnotations                 map[string]string
+	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+	tolerations                    []corev1api.Toleration
 }
 
 func NewDataDownloadReconciler(
@@ -100,29 +103,32 @@ func NewDataDownloadReconciler(
 	repoConfigMgr repository.ConfigManager,
 	podLabels map[string]string,
 	podAnnotations map[string]string,
+	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
+	tolerations []corev1api.Toleration,
 ) *DataDownloadReconciler {
 	return &DataDownloadReconciler{
-		client:                client,
-		kubeClient:            kubeClient,
-		mgr:                   mgr,
-		logger:                logger.WithField("controller", "DataDownload"),
-		Clock:                 &clock.RealClock{},
-		nodeName:              nodeName,
-		restoreExposer:        exposer.NewGenericRestoreExposer(kubeClient, logger),
-		restorePVCConfig:      restorePVCConfig,
-		backupRepoConfigs:     backupRepoConfigs,
-		cacheVolumeConfigs:    cacheVolumeConfigs,
-		dataPathMgr:           dataPathMgr,
-		vgdpCounter:           counter,
-		loadAffinity:          loadAffinity,
-		podResources:          podResources,
-		preparingTimeout:      preparingTimeout,
-		metrics:               metrics,
-		cancelledDataDownload: make(map[string]time.Time),
-		dataMovePriorityClass: dataMovePriorityClass,
-		repoConfigMgr:         repoConfigMgr,
-		podLabels:             podLabels,
-		podAnnotations:        podAnnotations,
+		client:                         client,
+		kubeClient:                     kubeClient,
+		mgr:                            mgr,
+		logger:                         logger.WithField("controller", "DataDownload"),
+		Clock:                          &clock.RealClock{},
+		nodeName:                       nodeName,
+		restoreExposer:                 exposer.NewGenericRestoreExposer(kubeClient, client, logger),
+		restorePVCConfig:               restorePVCConfig,
+		backupRepoConfigs:              backupRepoConfigs,
+		cacheVolumeConfigs:             cacheVolumeConfigs,
+		dataPathMgr:                    dataPathMgr,
+		vgdpCounter:                    counter,
+		loadAffinity:                   loadAffinity,
+		podResources:                   podResources,
+		preparingTimeout:               preparingTimeout,
+		metrics:                        metrics,
+		dataMovePriorityClass:          dataMovePriorityClass,
+		repoConfigMgr:                  repoConfigMgr,
+		podLabels:                      podLabels,
+		podAnnotations:                 podAnnotations,
+		snapshotMetadataServiceConfigs: snapshotMetadataServiceConfigs,
+		tolerations:                    tolerations,
 	}
 }
 
@@ -131,6 +137,7 @@ func NewDataDownloadReconciler(
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumerclaims,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;create;delete
 
 func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.logger.WithFields(logrus.Fields{
@@ -198,7 +205,7 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 		}
 	} else {
-		delete(r.cancelledDataDownload, dd.Name)
+		r.cancelledDataDownload.Delete(dd.Name)
 
 		// put the finalizer remove action here for all cr will goes to the final status, we could check finalizer and do remove action in final status
 		// instead of intermediate state.
@@ -223,9 +230,9 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if dd.Spec.Cancel {
-		if spotted, found := r.cancelledDataDownload[dd.Name]; !found {
-			r.cancelledDataDownload[dd.Name] = r.Clock.Now()
-		} else {
+		v, loaded := r.cancelledDataDownload.LoadOrStore(dd.Name, r.Clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if dd.Status.Phase == velerov2alpha1api.DataDownloadPhaseInProgress {
 				delay = cancelDelayInProgress
@@ -234,7 +241,7 @@ func (r *DataDownloadReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			if time.Since(spotted) > delay {
 				log.Infof("Data download %s is canceled in Phase %s but not handled in rasonable time", dd.GetName(), dd.Status.Phase)
 				if r.tryCancelDataDownload(ctx, dd, "") {
-					delete(r.cancelledDataDownload, dd.Name)
+					r.cancelledDataDownload.Delete(dd.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -487,7 +494,9 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	log.Info("Cleaning up exposed environment")
-	r.restoreExposer.CleanUp(ctx, objRef)
+	r.restoreExposer.CleanUp(ctx, objRef, &exposer.GenericRestoreCleanUpParam{
+		Snapshot: dd.Spec.CSISnapshot,
+	})
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -495,6 +504,8 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 		}
 
 		dd.Status.Phase = velerov2alpha1api.DataDownloadPhaseCompleted
+		dd.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
+		dd.Status.FallbackFull = result.Restore.FallbackFull
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
@@ -536,7 +547,9 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		return
 	}
 	// cleans up any objects generated during the snapshot expose
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(&dd))
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(&dd), &exposer.GenericRestoreCleanUpParam{
+		Snapshot: dd.Spec.CSISnapshot,
+	})
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log, func(dd *velerov2alpha1api.DataDownload) bool {
 		if isDataDownloadInFinalState(dd) {
@@ -556,7 +569,7 @@ func (r *DataDownloadReconciler) OnDataDownloadCancelled(ctx context.Context, na
 		log.WithError(err).Error("error updating data download status")
 	} else {
 		r.metrics.RegisterDataDownloadCancel(r.nodeName)
-		delete(r.cancelledDataDownload, dd.Name)
+		r.cancelledDataDownload.Delete(dd.Name)
 	}
 }
 
@@ -586,7 +599,9 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 
 	// success update
 	r.metrics.RegisterDataDownloadCancel(r.nodeName)
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+		Snapshot: dd.Spec.CSISnapshot,
+	})
 
 	log.Warn("data download is canceled")
 
@@ -597,7 +612,20 @@ func (r *DataDownloadReconciler) OnDataDownloadProgress(ctx context.Context, nam
 	log := r.logger.WithField("datadownload", ddName)
 
 	if err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: namespace, Name: ddName}, log, func(dd *velerov2alpha1api.DataDownload) bool {
-		dd.Status.Progress = shared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
+		if progress.TotalBytes != -1 {
+			dd.Status.Progress.TotalBytes = progress.TotalBytes
+		}
+
+		if progress.BytesDone != -1 {
+			dd.Status.Progress.BytesDone = progress.BytesDone
+		}
+
+		if progress.Message != "" {
+			if len(dd.Status.Activities) == 0 || dd.Status.Activities[len(dd.Status.Activities)-1] != progress.Message {
+				dd.Status.Activities = append(dd.Status.Activities, progress.Message)
+			}
+		}
+
 		return true
 	}); err != nil {
 		log.WithError(err).Error("Failed to update progress")
@@ -693,11 +721,11 @@ func (r *DataDownloadReconciler) findSnapshotRestoreForPod(ctx context.Context, 
 				r.prepareDataDownload(dd)
 				return true
 			}); err != nil {
-			log.WithError(err).Warn("failed to update dataudownload, prepare will halt for this dataudownload")
+			log.WithError(err).Warn("failed to update datadownload, prepare will halt for this datadownload")
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
-		err := UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownlad", dd.Name),
+		err := UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownload", dd.Name),
 			func(dataDownload *velerov2alpha1api.DataDownload) bool {
 				if dataDownload.Spec.Cancel {
 					return false
@@ -734,7 +762,9 @@ func (r *DataDownloadReconciler) prepareDataDownload(ssb *velerov2alpha1api.Data
 
 func (r *DataDownloadReconciler) errorOut(ctx context.Context, dd *velerov2alpha1api.DataDownload, err error, msg string, log logrus.FieldLogger) (ctrl.Result, error) {
 	if r.restoreExposer != nil {
-		r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+		r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+			Snapshot: dd.Spec.CSISnapshot,
+		})
 	}
 	return ctrl.Result{}, r.updateStatusToFailed(ctx, dd, err, msg, log)
 }
@@ -824,7 +854,9 @@ func (r *DataDownloadReconciler) onPrepareTimeout(ctx context.Context, dd *veler
 		log.Warnf("[Diagnose DD expose]%s", diag)
 	}
 
-	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd))
+	r.restoreExposer.CleanUp(ctx, getDataDownloadOwnerObject(dd), &exposer.GenericRestoreCleanUpParam{
+		Snapshot: dd.Spec.CSISnapshot,
+	})
 
 	log.Info("Datadownload has been cleaned up")
 
@@ -910,15 +942,9 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 		}
 	}
 
-	hostingPodTolerations := []corev1api.Toleration{}
-	for _, k := range util.ThirdPartyTolerations {
-		if v, err := nodeagent.GetToleration(context.Background(), r.kubeClient, dd.Namespace, k, nodeOS); err != nil {
-			if err != nodeagent.ErrNodeAgentTolerationNotFound {
-				log.WithError(err).Warnf("Failed to check node-agent toleration, skip adding host pod toleration %s", k)
-			}
-		} else {
-			hostingPodTolerations = append(hostingPodTolerations, *v)
-		}
+	hostingPodTolerations, err := nodeagent.GetTolerations(context.Background(), r.kubeClient, dd.Namespace, nodeOS, r.tolerations)
+	if err != nil {
+		log.WithError(err).Warn("Failed to get node-agent daemonset tolerations, hosting pod will only get configured tolerations")
 	}
 
 	var cacheVolume *exposer.CacheConfigs
@@ -936,6 +962,7 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 
 	return exposer.GenericRestoreExposeParam{
 		TargetPVCName:         dd.Spec.TargetVolume.PVC,
+		TargetPVName:          dd.Spec.TargetVolume.PV,
 		TargetNamespace:       dd.Spec.TargetVolume.Namespace,
 		HostingPodLabels:      hostingPodLabels,
 		HostingPodAnnotations: hostingPodAnnotation,
@@ -950,6 +977,10 @@ func (r *DataDownloadReconciler) setupExposeParam(dd *velerov2alpha1api.DataDown
 		RestoreSize:           dd.Spec.SnapshotSize,
 		CacheVolume:           cacheVolume,
 		DataMover:             dd.Spec.DataMover,
+		CSI: &exposer.GenericRestoreExposeCSI{
+			Snapshot:                       dd.Spec.CSISnapshot,
+			SnapshotMetadataServiceConfigs: r.snapshotMetadataServiceConfigs,
+		},
 	}, nil
 }
 

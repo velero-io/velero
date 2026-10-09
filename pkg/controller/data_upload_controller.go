@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -41,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/constant"
@@ -81,11 +81,12 @@ type DataUploadReconciler struct {
 	podResources                   corev1api.ResourceRequirements
 	preparingTimeout               time.Duration
 	metrics                        *metrics.ServerMetrics
-	cancelledDataUpload            map[string]time.Time
+	cancelledDataUpload            sync.Map
 	dataMovePriorityClass          string
 	podLabels                      map[string]string
 	podAnnotations                 map[string]string
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService
+	tolerations                    []corev1api.Toleration
 }
 
 func NewDataUploadReconciler(
@@ -107,6 +108,7 @@ func NewDataUploadReconciler(
 	podLabels map[string]string,
 	podAnnotations map[string]string,
 	snapshotMetadataServiceConfigs *velerotypes.CSISnapshotMetadataService,
+	tolerations []corev1api.Toleration,
 ) *DataUploadReconciler {
 	return &DataUploadReconciler{
 		client:            client,
@@ -130,11 +132,11 @@ func NewDataUploadReconciler(
 		podResources:                   podResources,
 		preparingTimeout:               preparingTimeout,
 		metrics:                        metrics,
-		cancelledDataUpload:            make(map[string]time.Time),
 		dataMovePriorityClass:          dataMovePriorityClass,
 		podLabels:                      podLabels,
 		podAnnotations:                 podAnnotations,
 		snapshotMetadataServiceConfigs: snapshotMetadataServiceConfigs,
+		tolerations:                    tolerations,
 	}
 }
 
@@ -143,6 +145,7 @@ func NewDataUploadReconciler(
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumerclaims,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;create;delete
 
 func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.logger.WithFields(logrus.Fields{
@@ -207,7 +210,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 	} else {
-		delete(r.cancelledDataUpload, du.Name)
+		r.cancelledDataUpload.Delete(du.Name)
 
 		// put the finalizer remove action here for all cr will goes to the final status, we could check finalizer and do remove action in final status
 		// instead of intermediate state.
@@ -232,9 +235,9 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if du.Spec.Cancel {
-		if spotted, found := r.cancelledDataUpload[du.Name]; !found {
-			r.cancelledDataUpload[du.Name] = r.Clock.Now()
-		} else {
+		v, loaded := r.cancelledDataUpload.LoadOrStore(du.Name, r.Clock.Now())
+		if loaded {
+			spotted := v.(time.Time)
 			delay := cancelDelayOthers
 			if du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
 				delay = cancelDelayInProgress
@@ -243,7 +246,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if time.Since(spotted) > delay {
 				log.Infof("Data upload %s is canceled in Phase %s but not handled in reasonable time", du.GetName(), du.Status.Phase)
 				if r.tryCancelDataUpload(ctx, du, "") {
-					delete(r.cancelledDataUpload, du.Name)
+					r.cancelledDataUpload.Delete(du.Name)
 				}
 
 				return ctrl.Result{}, nil
@@ -513,6 +516,9 @@ func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namesp
 		du.Status.Phase = velerov2alpha1api.DataUploadPhaseCompleted
 		du.Status.SnapshotID = result.Backup.SnapshotID
 		du.Status.IncrementalBytes = result.Backup.IncrementalBytes
+		du.Status.SourceSize = result.Backup.SourceSize
+		du.Status.FallbackFull = result.Backup.FallbackFull
+
 		du.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
 		if result.Backup.EmptySnapshot {
 			du.Status.Message = "volume was empty so no data was upload"
@@ -577,7 +583,7 @@ func (r *DataUploadReconciler) OnDataUploadCancelled(ctx context.Context, namesp
 		log.WithError(err).Error("error updating DataUpload status")
 	} else {
 		r.metrics.RegisterDataUploadCancel(r.nodeName)
-		delete(r.cancelledDataUpload, du.Name)
+		r.cancelledDataUpload.Delete(du.Name)
 	}
 }
 
@@ -633,7 +639,20 @@ func (r *DataUploadReconciler) OnDataUploadProgress(ctx context.Context, namespa
 	log := r.logger.WithField("dataupload", duName)
 
 	if err := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: namespace, Name: duName}, log, func(du *velerov2alpha1api.DataUpload) bool {
-		du.Status.Progress = shared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
+		if progress.TotalBytes != -1 {
+			du.Status.Progress.TotalBytes = progress.TotalBytes
+		}
+
+		if progress.BytesDone != -1 {
+			du.Status.Progress.BytesDone = progress.BytesDone
+		}
+
+		if progress.Message != "" {
+			if len(du.Status.Activities) == 0 || du.Status.Activities[len(du.Status.Activities)-1] != progress.Message {
+				du.Status.Activities = append(du.Status.Activities, progress.Message)
+			}
+		}
+
 		return true
 	}); err != nil {
 		log.WithError(err).Error("Failed to update progress")
@@ -993,15 +1012,9 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 			}
 		}
 
-		hostingPodTolerations := []corev1api.Toleration{}
-		for _, k := range util.ThirdPartyTolerations {
-			if v, err := nodeagent.GetToleration(context.Background(), r.kubeClient, du.Namespace, k, nodeOS); err != nil {
-				if err != nodeagent.ErrNodeAgentTolerationNotFound {
-					log.WithError(err).Warnf("Failed to check node-agent toleration, skip adding host pod toleration %s", k)
-				}
-			} else {
-				hostingPodTolerations = append(hostingPodTolerations, *v)
-			}
+		hostingPodTolerations, err := nodeagent.GetTolerations(context.Background(), r.kubeClient, du.Namespace, nodeOS, r.tolerations)
+		if err != nil {
+			log.WithError(err).Warn("Failed to get node-agent daemonset tolerations, hosting pod will only get configured tolerations")
 		}
 
 		return &exposer.CSISnapshotExposeParam{

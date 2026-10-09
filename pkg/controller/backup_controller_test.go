@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -46,6 +47,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -352,6 +354,417 @@ func TestPrepareBackupRequest_EmptyIncludedNamespacesNormalizedToWildcard(t *tes
 	defer res.WorkerPool.Stop()
 
 	assert.Equal(t, []string{"*"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_ReplacesWildcardBaseline verifies that
+// when includedNamespacesByLabel is configured and BackupSpec.IncludedNamespaces was left
+// empty (normalized to the ["*"] wildcard), the label-resolved namespace set REPLACES the
+// wildcard baseline rather than being unioned into it - otherwise "all" unioned with anything
+// is still "all", defeating the feature.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_ReplacesWildcardBaseline(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=platform"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+	nsOther := builder.ForNamespace("other-ns").ObjectMeta(builder.WithLabels("team", "infra")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsPlatform, nsOther)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.Equal(t, []string{"platform-ns"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_UnionsWithExplicitIncludes verifies that
+// when BackupSpec.IncludedNamespaces already has explicit names, the label-resolved set is
+// additive (unioned), not a replacement.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_UnionsWithExplicitIncludes(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=platform"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsPlatform)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().IncludedNamespaces("explicit-ns").Result()
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.ElementsMatch(t, []string{"explicit-ns", "platform-ns"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_ZeroMatchesResolvesToNoMatchSentinel
+// verifies that a configured includedNamespacesByLabel selector matching zero namespaces
+// resolves to resourcepolicies.NoNamespaceMatchesPattern, not a fall-through to "all
+// namespaces" - this is deliberate fail-safe behavior, not a bug.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_ZeroMatchesResolvesToNoMatchSentinel(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=nonexistent"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsOther := builder.ForNamespace("other-ns").ObjectMeta(builder.WithLabels("team", "infra")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsOther)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	// Not a plain empty slice - see resourcepolicies.NoNamespaceMatchesPattern's doc comment
+	// for why a bare empty list here would be silently reinterpreted downstream as "include
+	// everything" instead of the intended "include nothing".
+	assert.Equal(t, []string{resourcepolicies.NoNamespaceMatchesPattern}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_IncludedNamespacesByLabel_ExplicitWildcardCanonicalized verifies
+// that when BackupSpec.IncludedNamespaces was explicitly set to ["*"] (as opposed to left
+// empty and normalized to ["*"]), includedNamespacesByLabel does not narrow the backup down
+// to only the label matches - the two must not be conflated (see mergeNamespacesByLabel's doc
+// comment). The result stays canonicalized to ["*"] rather than widened to ["*", "platform-ns"]:
+// both are equivalent at match time, but only the former satisfies
+// collections.ValidateIncludesExcludes' "'*' must be alone in includes" invariant.
+func TestPrepareBackupRequest_IncludedNamespacesByLabel_ExplicitWildcardCanonicalized(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  includedNamespacesByLabel:
+  - "team=platform"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsPlatform := builder.ForNamespace("platform-ns").ObjectMeta(builder.WithLabels("team", "platform")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsPlatform)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().IncludedNamespaces("*").Result()
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	assert.ElementsMatch(t, []string{"*"}, res.Spec.IncludedNamespaces)
+}
+
+// TestPrepareBackupRequest_ExcludedNamespacesByLabel_Subtracted verifies excludedNamespacesByLabel
+// resolves independently and is merged into BackupSpec.ExcludedNamespaces, regardless of whether
+// includedNamespacesByLabel is configured.
+func TestPrepareBackupRequest_ExcludedNamespacesByLabel_Subtracted(t *testing.T) {
+	formatFlag := logging.FormatText
+	logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+	policyYAML := `version: v1
+includeExcludePolicy:
+  excludedNamespacesByLabel:
+  - "confidential=true"
+`
+	policyConfigMap := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-label-policy", Namespace: velerov1api.DefaultNamespace},
+		Data:       map[string]string{"policy": policyYAML},
+	}
+
+	backupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+	nsConfidential := builder.ForNamespace("secret-ns").ObjectMeta(builder.WithLabels("confidential", "true")).Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, policyConfigMap, backupLocation, nsConfidential)
+
+	apiServer := velerotest.NewAPIServer(t)
+	discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+	require.NoError(t, err)
+
+	c := &backupReconciler{
+		discoveryHelper:       discoveryHelper,
+		kbClient:              fakeClient,
+		defaultBackupLocation: backupLocation.Name,
+		clock:                 &clock.RealClock{},
+		formatFlag:            formatFlag,
+	}
+
+	backup := defaultBackup().Result()
+	backup.Spec.IncludedNamespaces = nil
+	backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "ns-label-policy"}
+
+	res := c.prepareBackupRequest(ctx, backup, logger)
+	defer res.WorkerPool.Stop()
+
+	assert.Empty(t, res.Status.ValidationErrors)
+	// includedNamespacesByLabel not configured, so baseline stays the wildcard.
+	assert.Equal(t, []string{"*"}, res.Spec.IncludedNamespaces)
+	assert.Equal(t, []string{"secret-ns"}, res.Spec.ExcludedNamespaces)
+}
+
+// TestMergeNamespacesByLabel exercises the union/replacement decision directly, without
+// the full prepareBackupRequest scaffold (fake client, discovery helper, resource policy
+// ConfigMap, etc.) - see mergeNamespacesByLabel's doc comment for the precedence rules.
+func TestMergeNamespacesByLabel(t *testing.T) {
+	tests := []struct {
+		name                            string
+		includedNamespaces              []string
+		excludedNamespaces              []string
+		labelIncludeActive              bool
+		includedNamespacesWereDefaulted bool
+		resolvedIncluded                []string
+		resolvedExcluded                []string
+		wantIncluded                    []string
+		wantExcluded                    []string
+	}{
+		{
+			name:                            "defaulted wildcard baseline is replaced",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: true,
+			resolvedIncluded:                []string{"platform-ns"},
+			wantIncluded:                    []string{"platform-ns"},
+			wantExcluded:                    nil,
+		},
+		{
+			name:                            "explicit includes union additively",
+			includedNamespaces:              []string{"explicit-ns"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedIncluded:                []string{"platform-ns"},
+			wantIncluded:                    []string{"explicit-ns", "platform-ns"},
+			wantExcluded:                    nil,
+		},
+		{
+			// Explicit includes can themselves be a non-"*" wildcard glob (e.g. from
+			// --include-namespaces 'app-*'), not just concrete names - the union branch must
+			// pass that through unchanged alongside the resolved concrete names; downstream
+			// wildcard.ShouldExpandWildcards still expands it normally since it isn't the bare
+			// "*" special case.
+			name:                            "explicit glob-pattern include unions with resolved names unchanged",
+			includedNamespaces:              []string{"app-*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedIncluded:                []string{"platform-ns"},
+			wantIncluded:                    []string{"app-*", "platform-ns"},
+			wantExcluded:                    nil,
+		},
+		{
+			// A bare empty []string here would be interpreted downstream by
+			// wildcard.ShouldExpandWildcards as "match everything" (its own documented
+			// behavior), silently defeating the fail-safe. Must come back as
+			// resourcepolicies.NoNamespaceMatchesPattern instead - see
+			// mergeNamespacesByLabel's doc comment.
+			name:                            "defaulted wildcard matching zero namespaces resolves to the no-match sentinel, not empty",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: true,
+			resolvedIncluded:                nil,
+			wantIncluded:                    []string{resourcepolicies.NoNamespaceMatchesPattern},
+			wantExcluded:                    nil,
+		},
+		{
+			// The code must not re-derive "was this defaulted" by checking
+			// includedNamespaces == ["*"], since an explicitly-configured wildcard looks
+			// identical to the normalized default by this point. An explicit ["*"] must stay
+			// "everything", never narrow to just the label matches - canonicalized back to
+			// ["*"] rather than widened to ["*", "platform-ns"], since the latter is
+			// semantically identical at match time but would violate
+			// collections.ValidateIncludesExcludes' "'*' must be alone in includes" invariant.
+			name:                            "explicitly-configured wildcard canonicalizes to itself instead of widening",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedIncluded:                []string{"platform-ns"},
+			wantIncluded:                    []string{"*"},
+			wantExcluded:                    nil,
+		},
+		{
+			name:                            "explicitly-configured wildcard stays everything even on zero matches",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedIncluded:                nil,
+			wantIncluded:                    []string{"*"},
+			wantExcluded:                    nil,
+		},
+		{
+			name:                            "not labelIncludeActive leaves includedNamespaces untouched",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              false,
+			includedNamespacesWereDefaulted: true,
+			resolvedIncluded:                []string{"platform-ns"}, // should be ignored
+			wantIncluded:                    []string{"*"},
+			wantExcluded:                    nil,
+		},
+		{
+			name:                            "resolvedExcluded unions in regardless of labelIncludeActive",
+			includedNamespaces:              []string{"*"},
+			excludedNamespaces:              []string{"legacy-ns"},
+			labelIncludeActive:              false,
+			includedNamespacesWereDefaulted: true,
+			resolvedExcluded:                []string{"secret-ns"},
+			wantIncluded:                    []string{"*"},
+			wantExcluded:                    []string{"legacy-ns", "secret-ns"},
+		},
+		{
+			name:                            "empty resolvedExcluded leaves excludedNamespaces untouched",
+			includedNamespaces:              []string{"*"},
+			excludedNamespaces:              []string{"legacy-ns"},
+			labelIncludeActive:              false,
+			includedNamespacesWereDefaulted: true,
+			resolvedExcluded:                nil,
+			wantIncluded:                    []string{"*"},
+			wantExcluded:                    []string{"legacy-ns"},
+		},
+		{
+			// A resolved-include name overlapping an already-excluded name violates
+			// collections.ValidateIncludesExcludes' "excludes list cannot contain an item in
+			// the includes list" invariant if the merged result were ever re-validated.
+			// Exclusion already wins at match time regardless (IncludesExcludes.ShouldInclude
+			// checks excludes first), so dropping the overlap from mergedIncluded changes only
+			// the returned representation, not resolved backup behavior.
+			name:                            "a resolved include overlapping an existing exclude is dropped from the merged includes",
+			includedNamespaces:              []string{"explicit-ns"},
+			excludedNamespaces:              []string{"both-ns"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedIncluded:                []string{"both-ns", "platform-ns"},
+			wantIncluded:                    []string{"explicit-ns", "platform-ns"},
+			wantExcluded:                    []string{"both-ns"},
+		},
+		{
+			// The exclude-subtraction step itself can produce a bare empty []string when
+			// every explicit include is also excluded - the same "empty means include
+			// everything" hazard the zero-match sentinel exists for, reached through a
+			// different path.
+			name:                            "an explicit include fully removed by exclusion resolves to the no-match sentinel, not empty",
+			includedNamespaces:              []string{"explicit-ns"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: false,
+			resolvedExcluded:                []string{"explicit-ns"},
+			wantIncluded:                    []string{resourcepolicies.NoNamespaceMatchesPattern},
+			wantExcluded:                    []string{"explicit-ns"},
+		},
+		{
+			// Same hazard, but for a defaulted-wildcard-replaced resolved include (rather
+			// than an explicit one) that a same-namespace excludedNamespacesByLabel match
+			// fully removes.
+			name:                            "a resolved include fully removed by exclusion resolves to the no-match sentinel, not empty",
+			includedNamespaces:              []string{"*"},
+			labelIncludeActive:              true,
+			includedNamespacesWereDefaulted: true,
+			resolvedIncluded:                []string{"both-ns"},
+			resolvedExcluded:                []string{"both-ns"},
+			wantIncluded:                    []string{resourcepolicies.NoNamespaceMatchesPattern},
+			wantExcluded:                    []string{"both-ns"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotIncluded, gotExcluded := mergeNamespacesByLabel(
+				tc.includedNamespaces,
+				tc.excludedNamespaces,
+				tc.labelIncludeActive,
+				tc.includedNamespacesWereDefaulted,
+				tc.resolvedIncluded,
+				tc.resolvedExcluded,
+			)
+			assert.ElementsMatch(t, tc.wantIncluded, gotIncluded)
+			assert.ElementsMatch(t, tc.wantExcluded, gotExcluded)
+		})
+	}
 }
 
 func Test_prepareBackupRequest_BackupStorageLocation(t *testing.T) {
@@ -1205,7 +1618,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
-					FailureReason:       "backup already exists in object storage",
+					FailureReason:       "backup execution failed: backup already exists in object storage",
 					Version:             1,
 					FormatVersion:       "1.1.0",
 					StartTimestamp:      &timestamp,
@@ -1250,7 +1663,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 				},
 				Status: velerov1api.BackupStatus{
 					Phase:               velerov1api.BackupPhaseFailed,
-					FailureReason:       "error checking if backup already exists in object storage: Backup already exists in object storage",
+					FailureReason:       "backup execution failed: error checking if backup already exists in object storage: Backup already exists in object storage",
 					Version:             1,
 					FormatVersion:       "1.1.0",
 					StartTimestamp:      &timestamp,
@@ -1924,7 +2337,7 @@ func TestValidateAndGetSnapshotLocations(t *testing.T) {
 				require.NoError(t, c.kbClient.Create(t.Context(), location))
 			}
 
-			providerLocations, errs := c.validateAndGetSnapshotLocations(backup)
+			providerLocations, errs := c.validateAndGetSnapshotLocations(t.Context(), backup)
 			if test.expectedSuccess {
 				for _, err := range errs {
 					require.NoError(t, errors.New(err), "validateAndGetSnapshotLocations unexpected error: %v", err)
@@ -1944,6 +2357,31 @@ func TestValidateAndGetSnapshotLocations(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("returns error when context is canceled", func(t *testing.T) {
+		backup := defaultBackup().Phase(velerov1api.BackupPhaseNew).VolumeSnapshotLocations("aws-us-west-1").Result()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		crClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, client kbclient.WithWatch, key kbclient.ObjectKey, obj kbclient.Object, opts ...kbclient.GetOption) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					return client.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+
+		c := &backupReconciler{
+			logger:   velerotest.NewLogger(),
+			kbClient: crClient,
+		}
+
+		_, errs := c.validateAndGetSnapshotLocations(ctx, backup)
+		require.NotEmpty(t, errs)
+		require.Contains(t, errs[0], "context canceled")
+	})
 }
 
 // Test_getLastSuccessBySchedule verifies that the getLastSuccessBySchedule helper function correctly returns
@@ -2487,6 +2925,123 @@ func TestPrepareBackupRequest_FilterPoliciesWithNewFilters(t *testing.T) {
 			} else {
 				assert.Nil(t, res.ResPolicies.GetClusterScopedFilterPolicy())
 			}
+		})
+	}
+}
+
+func TestPrepareBackupRequest_DeduplicateExcludedNamespaces(t *testing.T) {
+	tests := []struct {
+		name              string
+		specExcluded      []string
+		clusterNamespaces []*corev1api.Namespace
+		expectedExcluded  []string
+	}{
+		{
+			name:         "duplicates in spec.excludedNamespaces are de-duped",
+			specExcluded: []string{"ns-1", "ns-2", "ns-1", "ns-2", "ns-3"},
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-4",
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2", "ns-3"},
+		},
+		{
+			name:         "labeled namespaces overlapping with spec.excludedNamespaces are de-duped",
+			specExcluded: []string{"ns-1", "ns-2"},
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-2",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-3",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-4",
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2", "ns-3"},
+		},
+		{
+			name:         "empty spec.excludedNamespaces with labeled namespaces",
+			specExcluded: nil,
+			clusterNamespaces: []*corev1api.Namespace{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-1",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ns-2",
+						Labels: map[string]string{
+							velerov1api.ExcludeFromBackupLabel: "true",
+						},
+					},
+				},
+			},
+			expectedExcluded: []string{"ns-1", "ns-2"},
+		},
+		{
+			name:              "empty spec.excludedNamespaces with no labeled namespaces remains empty",
+			specExcluded:      nil,
+			clusterNamespaces: nil,
+			expectedExcluded:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatFlag := logging.FormatText
+			logger := logging.DefaultLogger(logrus.DebugLevel, formatFlag)
+
+			backupLocation := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "loc-1").
+				Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+
+			var objects []runtime.Object
+			objects = append(objects, backupLocation)
+			for _, ns := range tt.clusterNamespaces {
+				objects = append(objects, ns)
+			}
+
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objects...)
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+
+			c := &backupReconciler{
+				logger:          logger,
+				discoveryHelper: discoveryHelper,
+				kbClient:        fakeClient,
+				clock:           &clock.RealClock{},
+				formatFlag:      formatFlag,
+			}
+
+			backup := defaultBackup().StorageLocation("loc-1").Result()
+			backup.Spec.ExcludedNamespaces = tt.specExcluded
+
+			res := c.prepareBackupRequest(t.Context(), backup, logger)
+			defer res.WorkerPool.Stop()
+
+			assert.Empty(t, res.Status.ValidationErrors)
+			assert.Equal(t, tt.expectedExcluded, res.Spec.ExcludedNamespaces)
 		})
 	}
 }

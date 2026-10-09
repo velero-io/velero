@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	kubeclientfake "k8s.io/client-go/kubernetes/fake"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -120,6 +121,7 @@ type startWatchFake struct {
 	redirectErr        error
 	complete           bool
 	failed             bool
+	failedErr          error
 	canceled           bool
 	progress           int
 }
@@ -142,6 +144,7 @@ func (sw *startWatchFake) OnCompleted(ctx context.Context, namespace string, tas
 
 func (sw *startWatchFake) OnFailed(ctx context.Context, namespace string, task string, err error) {
 	sw.failed = true
+	sw.failedErr = err
 }
 
 func (sw *startWatchFake) OnCancelled(ctx context.Context, namespace string, task string) {
@@ -175,6 +178,7 @@ func TestStartWatch(t *testing.T) {
 		expectComplete       bool
 		expectCancel         bool
 		expectFail           bool
+		expectFailMsg        string
 		expectProgress       int
 	}{
 		{
@@ -370,6 +374,27 @@ func TestStartWatch(t *testing.T) {
 			expectTerminateEvent: true,
 			expectCancel:         true,
 		},
+		{
+			name:          "evicted",
+			thisPod:       "fak-pod-1",
+			thisContainer: "fake-container-1",
+			insertPod:     builder.ForPod("velero", "fake-pod-1").Phase(corev1api.PodFailed).Result(),
+			insertEventsBefore: []insertEvent{
+				{
+					event: &corev1api.Event{Reason: EventReasonStarted},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonEvicted, Message: "fake-evicted-message"},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonStopped},
+				},
+			},
+			expectStartEvent:     true,
+			expectTerminateEvent: true,
+			expectFail:           true,
+			expectFailMsg:        "data path pod was evicted, message: fake-evicted-message",
+		},
 	}
 
 	for _, test := range tests {
@@ -437,11 +462,14 @@ func TestStartWatch(t *testing.T) {
 
 			ms.wgWatcher.Wait()
 
-			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent)
-			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent)
+			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent.Load())
+			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent.Load())
 			assert.Equal(t, test.expectComplete, sw.complete)
 			assert.Equal(t, test.expectCancel, sw.canceled)
 			assert.Equal(t, test.expectFail, sw.failed)
+			if test.expectFailMsg != "" {
+				require.EqualError(t, sw.failedErr, test.expectFailMsg)
+			}
 			assert.Equal(t, test.expectProgress, sw.progress)
 
 			cancel()
@@ -480,6 +508,42 @@ func TestGetResultFromMessage(t *testing.T) {
 						ByPath:  "fake-path-1",
 						VolMode: uploader.PersistentVolumeBlock,
 					},
+				},
+			},
+		},
+		{
+			// An old data mover (release-1.17 and earlier) predates IncrementalBytes and
+			// never writes the key at all -- this pins that its absence unmarshals to nil
+			// ("not measured"), not a zero value.
+			name:     "old mover message omits incrementalBytes -> nil",
+			taskType: TaskTypeBackup,
+			message:  "{\"snapshotID\":\"fake-snapshot-id\",\"emptySnapshot\":false,\"source\":{\"byPath\":\"fake-path-1\",\"volumeMode\":\"Block\"}}",
+			expectResult: Result{
+				Backup: BackupResult{
+					SnapshotID: "fake-snapshot-id",
+					Source: AccessPoint{
+						ByPath:  "fake-path-1",
+						VolMode: uploader.PersistentVolumeBlock,
+					},
+					IncrementalBytes: nil,
+				},
+			},
+		},
+		{
+			// A current mover reports a genuine zero explicitly -- this pins that the key
+			// being present with value 0 unmarshals to a non-nil pointer to 0 ("measured
+			// zero"), distinguishing it from the omitted-key case above.
+			name:     "current mover reports measured zero incrementalBytes -> non-nil zero",
+			taskType: TaskTypeBackup,
+			message:  "{\"snapshotID\":\"fake-snapshot-id\",\"emptySnapshot\":false,\"source\":{\"byPath\":\"fake-path-1\",\"volumeMode\":\"Block\"},\"incrementalBytes\":0}",
+			expectResult: Result{
+				Backup: BackupResult{
+					SnapshotID: "fake-snapshot-id",
+					Source: AccessPoint{
+						ByPath:  "fake-path-1",
+						VolMode: uploader.PersistentVolumeBlock,
+					},
+					IncrementalBytes: ptr.To(int64(0)),
 				},
 			},
 		},

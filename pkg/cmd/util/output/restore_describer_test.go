@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 	"text/tabwriter"
@@ -10,11 +11,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
+	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -309,11 +312,13 @@ CSI Snapshot Restores:
 					PVName:            "pv-3",
 					RestoreMethod:     volume.CSISnapshot,
 					SnapshotDataMoved: true,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
-						OperationID:  "op-3",
-						DataMover:    "velero",
-						UploaderType: "kopia",
-						Size:         1234,
+					RestoreType:       "Incremental",
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						OperationID:     "op-3",
+						DataMover:       "velero",
+						UploaderType:    "kopia",
+						Size:            1234,
+						IncrementalSize: ptr.To(int64(500)),
 					},
 				},
 			},
@@ -325,6 +330,42 @@ CSI Snapshot Restores:
       Operation ID: op-3
       Data Mover: velero
       Uploader Type: kopia
+      Restore Type: Incremental
+      Restored data Size (bytes): 1234
+      Incremental data Size (bytes): 500
+`,
+		},
+		{
+			name: "CSI restore with data movement, detailed, fallback to full",
+			inputVolInfoList: []volume.RestoreVolumeInfo{
+				{
+					PVCName:           "pvc-4",
+					PVCNamespace:      "ns-4",
+					PVName:            "pv-4",
+					RestoreMethod:     volume.CSISnapshot,
+					SnapshotDataMoved: true,
+					RestoreType:       "Incremental",
+					FallbackFull:      true,
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
+						OperationID:     "op-4",
+						DataMover:       "velero",
+						UploaderType:    "kopia",
+						Size:            2345,
+						IncrementalSize: ptr.To(int64(600)),
+					},
+				},
+			},
+			inputDetail: true,
+			expect: `
+CSI Snapshot Restores:
+  ns-4/pvc-4:
+    Data Movement:
+      Operation ID: op-4
+      Data Mover: velero
+      Uploader Type: kopia
+      Restore Type: Incremental (fallen back to Full)
+      Restored data Size (bytes): 2345
+      Incremental data Size (bytes): 600
 `,
 		},
 		{
@@ -336,7 +377,7 @@ CSI Snapshot Restores:
 					PVName:            "pv-3",
 					RestoreMethod:     volume.CSISnapshot,
 					SnapshotDataMoved: true,
-					SnapshotDataMovementInfo: &volume.SnapshotDataMovementInfo{
+					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
 						OperationID:  "op-3",
 						DataMover:    "velero",
 						UploaderType: "kopia",
@@ -414,4 +455,17 @@ func TestDescribeResourceModifier(t *testing.T) {
 
 	fmt.Println(d.buf.String())
 	require.Equal(t, expectOutput, d.buf.String())
+}
+
+func TestDescribeRestore(t *testing.T) {
+	kbClient := velerotest.NewFakeControllerRuntimeClient(t)
+	restore := builder.ForRestore("velero", "test-restore").
+		Backup("test-backup").
+		ExistingResourcePolicy(string(velerov1api.ResourcePolicyTypeUpdate)).
+		ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull)).
+		Result()
+
+	out := DescribeRestore(context.Background(), kbClient, restore, nil, false, false, "")
+	assert.Contains(t, out, "Existing Resource Policy:      update")
+	assert.Contains(t, out, "Existing Volume Data Policy:   full")
 }

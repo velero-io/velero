@@ -258,9 +258,3 @@ func GetMappingNamespaces(ctx context.Context, client TestClient, excludeNS []st
 	}
 	return joinedNsMapping, nil
 }
-
-func KubectlCreateNamespace(ctx context.Context, name string) error {
-	args := []string{"create", "namespace", name}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
-}

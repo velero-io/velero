@@ -98,7 +98,13 @@ func (b *RestoreBuilder) ExcludedResources(resources ...string) *RestoreBuilder 
 
 // ExistingResourcePolicy sets the Restore's resource policy.
 func (b *RestoreBuilder) ExistingResourcePolicy(policy string) *RestoreBuilder {
-	b.object.Spec.ExistingResourcePolicy = velerov1api.PolicyType(policy)
+	b.object.Spec.ExistingResourcePolicy = velerov1api.ResourcePolicyType(policy)
+	return b
+}
+
+// ExistingVolumeDataPolicy sets the Restore's volume data policy.
+func (b *RestoreBuilder) ExistingVolumeDataPolicy(policy string) *RestoreBuilder {
+	b.object.Spec.ExistingVolumeDataPolicy = velerov1api.VolumeDataPolicyType(policy)
 	return b
 }
 
@@ -170,6 +176,12 @@ func (b *RestoreBuilder) CompletionTimestamp(val time.Time) *RestoreBuilder {
 // ItemOperationTimeout sets the Restore's ItemOperationTimeout
 func (b *RestoreBuilder) ItemOperationTimeout(timeout time.Duration) *RestoreBuilder {
 	b.object.Spec.ItemOperationTimeout.Duration = timeout
+	return b
+}
+
+// CSISnapshotTimeout sets the Restore's CSISnapshotTimeout
+func (b *RestoreBuilder) CSISnapshotTimeout(timeout time.Duration) *RestoreBuilder {
+	b.object.Spec.CSISnapshotTimeout.Duration = timeout
 	return b
 }
 

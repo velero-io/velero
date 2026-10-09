@@ -111,7 +111,7 @@ func NewAddCommand(f client.Factory) *cobra.Command {
 			}
 
 			// add the plugin as an init container
-			plugin := *builder.ForPluginContainer(args[0], corev1api.PullPolicy(imagePullPolicyFlag.String())).Result()
+			plugin := *builder.ForPluginContainer(args[0], corev1api.PullPolicy(imagePullPolicyFlag.String()), veleroDeploy.Spec.Template.Spec.InitContainers).Result()
 
 			veleroDeploy.Spec.Template.Spec.InitContainers = append(veleroDeploy.Spec.Template.Spec.InitContainers, plugin)
 

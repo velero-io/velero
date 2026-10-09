@@ -67,6 +67,29 @@ func TestDataUploadRetrieveActionExectue(t *testing.T) {
 			expectedDataUploadResult: builder.ForConfigMap("velero", "").ObjectMeta(builder.WithGenerateName("testDU-"), builder.WithLabels(velerov1.PVCNamespaceNameLabel, "testNamespace.testPVC", velerov1.RestoreUIDLabel, "testingUID", velerov1.ResourceUsageLabel, string(velerov1.VeleroResourceUsageDataUploadResult))).Data("testingUID", `{"backupStorageLocation":"testLocation","snapshotID":"fake-id","sourceNamespace":"testNamespace","snapshotSize":1000}`).Result(),
 		},
 		{
+			name: "DataUploadRetrieve Action test with optional fields",
+			dataUpload: func() *velerov2alpha1.DataUpload {
+				du := builder.ForDataUpload("velero", "testDU").
+					SourceNamespace("testNamespace").
+					SourcePVC("testPVC").
+					SnapshotID("fake-id").
+					TotalBytes(1000).
+					DataMover("velero").
+					NodeOS("linux").
+					CSISnapshot(&velerov2alpha1.CSISnapshotSpec{SnapshotClass: "testClass"}).
+					Result()
+				du.Status.DataMoverResult = &map[string]string{"key": "value"}
+				du.Spec.SourceFSType = "ext4"
+				return du
+			}(),
+			restore:       builder.ForRestore("velero", "testRestore").ObjectMeta(builder.WithUID("testingUID")).Backup("testBackup").Result(),
+			runtimeScheme: scheme,
+			veleroObjs: []runtime.Object{
+				builder.ForBackup("velero", "testBackup").StorageLocation("testLocation").Result(),
+			},
+			expectedDataUploadResult: builder.ForConfigMap("velero", "").ObjectMeta(builder.WithGenerateName("testDU-"), builder.WithLabels(velerov1.PVCNamespaceNameLabel, "testNamespace.testPVC", velerov1.RestoreUIDLabel, "testingUID", velerov1.ResourceUsageLabel, string(velerov1.VeleroResourceUsageDataUploadResult))).Data("testingUID", `{"backupStorageLocation":"testLocation","datamover":"velero","snapshotID":"fake-id","sourceNamespace":"testNamespace","dataMoverResult":{"key":"value"},"nodeOS":"linux","snapshotSize":1000,"fsType":"ext4","snapshotClass":"testClass"}`).Result(),
+		},
+		{
 			name:          "Long source namespace and PVC name should also work",
 			dataUpload:    builder.ForDataUpload("velero", "testDU").SourceNamespace("migre209d0da-49c7-45ba-8d5a-3e59fd591ec1").SourcePVC("kibishii-data-kibishii-deployment-0").Result(),
 			restore:       builder.ForRestore("velero", "testRestore").ObjectMeta(builder.WithUID("testingUID")).Backup("testBackup").Result(),

@@ -20,6 +20,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -111,6 +112,97 @@ func TestUnzipAndExtractBackupRejectsPathTraversal(t *testing.T) {
 	_, err = ext.UnzipAndExtractBackup(&buf)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid archive path")
+}
+
+func TestUnzipAndExtractBackupRejectsLargeFile(t *testing.T) {
+	SetMaxExtractionSize(1024)
+	defer SetMaxExtractionSize(16 * 1024 * 1024 * 1024)
+	ext := NewExtractor(test.NewLogger(), test.NewFakeFileSystem())
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	data := make([]byte, 2048) // 2KB data
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "large.txt",
+		Mode:     0600,
+		Typeflag: tar.TypeReg,
+		Size:     int64(len(data)),
+	})
+	require.NoError(t, err)
+
+	_, err = tw.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gzw.Close())
+
+	_, err = ext.UnzipAndExtractBackup(&buf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decompressed backup exceeds maximum allowed size")
+}
+
+func TestUnzipAndExtractBackupRejectsManySmallFiles(t *testing.T) {
+	SetMaxExtractionSize(1024)
+	defer SetMaxExtractionSize(16 * 1024 * 1024 * 1024)
+	ext := NewExtractor(test.NewLogger(), test.NewFakeFileSystem())
+
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	// Create 100 files of 20 bytes each (total 2000 bytes, exceeding the 1024 byte limit)
+	for i := 0; i < 100; i++ {
+		data := make([]byte, 20)
+		err := tw.WriteHeader(&tar.Header{
+			Name:     fmt.Sprintf("small_%d.txt", i),
+			Mode:     0600,
+			Typeflag: tar.TypeReg,
+			Size:     int64(len(data)),
+		})
+		require.NoError(t, err)
+
+		_, err = tw.Write(data)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, tw.Close())
+	require.NoError(t, gzw.Close())
+
+	_, err := ext.UnzipAndExtractBackup(&buf)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decompressed backup exceeds maximum allowed size")
+}
+
+func TestSanitizeArchivePath(t *testing.T) {
+	const destDir = "/tmp/velero-restore"
+	tests := []struct {
+		name       string
+		sourcePath string
+		wantPath   string
+		wantErr    bool
+	}{
+		{"regular nested entry stays inside destDir", "resources/pods/ns/a.json", destDir + "/resources/pods/ns/a.json", false},
+		{"parent traversal escapes destDir", "../../../etc/passwd", "", true},
+		{"sibling directory sharing the destDir name prefix escapes", "../velero-restore-evil/x.json", "", true},
+		// An entry naming destDir itself is contained, so it is accepted and resolves to
+		// destDir. Nothing escapes; a regular-file entry like this just fails later on the
+		// directory when it is created.
+		{"entry naming destDir itself resolves to destDir", ".", destDir, false},
+		{"entry with an empty name resolves to destDir", "", destDir, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			targetPath, err := sanitizeArchivePath(destDir, tc.sourcePath)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "invalid archive path")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPath, targetPath)
+		})
+	}
 }
 
 func createArchive(files []string, fs filesystem.Interface) (string, error) {

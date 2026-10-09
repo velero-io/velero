@@ -40,6 +40,12 @@ import (
 // not found
 var ErrNotFound = errors.New("file not found")
 var ErrDownloadRequestDownloadURLTimeout = errors.New("download request download url timeout, check velero server logs for errors. backup storage location may not be available")
+var unzipLimit int64 = 1024 * 1024 * 1024 // 1GB limit
+
+// ErrDownloadRequestFailed is returned when the server refused the request and gave no
+// reason. The controller sets a message in every path that fails today, so this is a
+// fallback rather than the usual case.
+var ErrDownloadRequestFailed = errors.New("download request failed, check velero server logs for errors")
 
 func Stream(
 	ctx context.Context,
@@ -113,6 +119,16 @@ func getDownloadURL(
 
 			if updated.Status.DownloadURL != "" {
 				return updated.Status.DownloadURL, nil
+			}
+
+			// Failed is terminal. Waiting for a URL that will never be signed would end in
+			// ErrDownloadRequestDownloadURLTimeout, which blames the storage location for
+			// something the status already explains.
+			if updated.Status.Phase == veleroV1api.DownloadRequestPhaseFailed {
+				if updated.Status.Message != "" {
+					return "", errors.New(updated.Status.Message)
+				}
+				return "", ErrDownloadRequestFailed
 			}
 		}
 	}
@@ -202,17 +218,35 @@ func download(
 		return errors.Errorf("request failed: %v", string(body))
 	}
 
-	reader := resp.Body
+	var r io.Reader = resp.Body
+	var gzipReader *gzip.Reader
 	if kind != veleroV1api.DownloadTargetKindBackupContents {
 		// need to decompress logs
-		gzipReader, err := gzip.NewReader(resp.Body)
+		var err error
+		gzipReader, err = gzip.NewReader(resp.Body)
 		if err != nil {
 			return err
 		}
 		defer gzipReader.Close()
-		reader = gzipReader
+
+		r = io.LimitReader(gzipReader, unzipLimit)
 	}
 
-	_, err = io.Copy(w, reader)
-	return err
+	_, err = io.Copy(w, r)
+	if err != nil {
+		return err
+	}
+
+	if gzipReader != nil {
+		var buf [1]byte
+		n, err := gzipReader.Read(buf[:])
+		if n > 0 || err == nil {
+			return errors.Errorf("decompressed data exceeds the limit")
+		}
+		if err != io.EOF {
+			return err
+		}
+	}
+
+	return nil
 }

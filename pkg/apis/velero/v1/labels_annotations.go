@@ -119,6 +119,12 @@ const (
 	// defaultVGSLabelKey is the default label key used to group PVCs under a VolumeGroupSnapshot
 	DefaultVGSLabelKey = "velero.io/volume-group"
 
+	// VolumeGroupSnapshotBackupAnnotation marks a Backup that created a VGS.
+	VolumeGroupSnapshotBackupAnnotation = "velero.io/has-volume-group-snapshot"
+
+	// VolumeGroupSnapshotCleanupCompletedAnnotation marks completed VGS cleanup.
+	VolumeGroupSnapshotCleanupCompletedAnnotation = "velero.io/vgs-cleanup-completed"
+
 	// PVBLabel is the label key used to identify the pvb for pvb pod
 	PVBLabel = "velero.io/pod-volume-backup"
 
@@ -174,6 +180,32 @@ const (
 	// Notice: SkipRestore on the Execute output takes precedence. If SkipRestore is true, the
 	// annotation is never inspected and AdditionalItems are not processed.
 	MustIncludeAdditionalItemRestoreAnnotation = "restore.velero.io/must-include-additional-items"
+
+	// InplaceRestoreSelectedNodeAnnotation is a Velero-internal carrier annotation set by the
+	// PVC CSI RestoreItemAction during an in-place volume data restore. It carries the
+	// "volume.kubernetes.io/selected-node" value captured from the existing PVC right before
+	// that PVC is deleted, so the restore engine can re-apply it to the recreated target PVC
+	// after all RestoreItemActions have run. This keeps the recreated PVC (and the workload
+	// Pod, for WaitForFirstConsumer StorageClasses) scheduled to the original node/zone.
+	// The annotation is always translated and stripped by the restore engine; it never lands
+	// on the cluster. Using a carrier annotation avoids any dependency on the execution order
+	// of RestoreItemActions.
+	InplaceRestoreSelectedNodeAnnotation = "restore.velero.io/inplace-restore-selected-node"
+
+	// InplaceRestoreSourceSizeAnnotation is a Velero-internal carrier annotation set by the
+	// restore engine on a PVC item before RestoreItemActions run. It carries the size of the
+	// source volume recorded in the backup volume info, so the PVC CSI RestoreItemAction can
+	// run the in-place restore capacity pre-flight check without access to the volume info.
+	// The annotation is always stripped by the restore engine; it never lands on the cluster.
+	InplaceRestoreSourceSizeAnnotation = "restore.velero.io/inplace-restore-source-size"
+
+	// InplaceRestoreVolumeHandleAnnotation is a Velero-internal carrier annotation set by the
+	// restore engine on a PVC item before RestoreItemActions run. It carries the CSI volume
+	// handle of the PV the PVC was bound to at backup time, recorded in the backup volume info,
+	// so the PVC CSI RestoreItemAction can verify the existing PVC is still bound to the
+	// backed-up volume. The annotation is always stripped by the restore engine; it never lands
+	// on the cluster.
+	InplaceRestoreVolumeHandleAnnotation = "restore.velero.io/inplace-restore-volume-handle"
 	// SkippedNoCSIPVAnnotation - Velero checks this annotation on processed PVC to
 	// find out if the snapshot was skipped b/c the PV is not provisioned via CSI
 	SkippedNoCSIPVAnnotation = "backup.velero.io/skipped-no-csi-pv"

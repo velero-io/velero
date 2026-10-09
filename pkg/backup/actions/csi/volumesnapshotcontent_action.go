@@ -107,8 +107,7 @@ func (p *volumeSnapshotContentBackupItemAction) Execute(
 	}
 
 	p.log.Infof(
-		"Returning from VolumeSnapshotContentBackupItemAction",
-		"with %d additionalItems to backup",
+		"Returning from VolumeSnapshotContentBackupItemAction with %d additionalItems to backup",
 		len(additionalItems),
 	)
 	return &unstructured.Unstructured{Object: snapContMap}, additionalItems, "", nil, nil

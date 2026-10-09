@@ -28,6 +28,11 @@ const (
 	defaultPodVolumeOperationTimeout  = 240 * time.Minute
 	defaultResourceTerminatingTimeout = 10 * time.Minute
 
+	// DefaultResourceTimeout is the default for --resource-timeout. It matches
+	// defaultResourceTerminatingTimeout so controller fallbacks stay aligned with
+	// server defaults (see pkg/cmd/server/config/config.go).
+	DefaultResourceTimeout = defaultResourceTerminatingTimeout
+
 	// server's client default qps and burst
 	defaultClientQPS      float32 = 100.0
 	defaultClientBurst    int     = 100
@@ -38,10 +43,11 @@ const (
 	// the default TTL for a backup
 	defaultBackupTTL = 30 * 24 * time.Hour
 
-	defaultCSISnapshotTimeout   = 10 * time.Minute
-	defaultItemOperationTimeout = 4 * time.Hour
+	defaultBackupCSISnapshotTimeout  = 10 * time.Minute
+	defaultRestoreCSISnapshotTimeout = 30 * time.Minute
+	defaultItemOperationTimeout      = 4 * time.Hour
 
-	resourceTimeout = 10 * time.Minute
+	resourceTimeout = defaultResourceTerminatingTimeout
 
 	defaultMaxConcurrentK8SConnections = 30
 	defaultDisableInformerCache        = false
@@ -154,7 +160,8 @@ type Config struct {
 	DefaultBackupTTL                    time.Duration
 	DefaultVGSLabelKey                  string
 	StoreValidationFrequency            time.Duration
-	DefaultCSISnapshotTimeout           time.Duration
+	DefaultBackupCSISnapshotTimeout     time.Duration
+	DefaultRestoreCSISnapshotTimeout    time.Duration
 	DefaultItemOperationTimeout         time.Duration
 	ResourceTimeout                     time.Duration
 	RestoreResourcePriorities           types.Priorities
@@ -183,39 +190,41 @@ type Config struct {
 	ConcurrentBackups                   int
 	GlobalBackupVolumePoliciesConfigMap string
 	DefaultResourceModifierConfigMap    string
+	MaxBackupExtractionSize             int
 }
 
 func GetDefaultConfig() *Config {
 	config := &Config{
-		PluginDir:                      "/plugins",
-		MetricsAddress:                 defaultMetricsAddress,
-		DefaultBackupLocation:          "default",
-		DefaultVolumeSnapshotLocations: flag.NewMap().WithKeyValueDelimiter(':'),
-		BackupSyncPeriod:               defaultBackupSyncPeriod,
-		DefaultBackupTTL:               defaultBackupTTL,
-		DefaultVGSLabelKey:             velerov1api.DefaultVGSLabelKey,
-		DefaultCSISnapshotTimeout:      defaultCSISnapshotTimeout,
-		DefaultItemOperationTimeout:    defaultItemOperationTimeout,
-		ResourceTimeout:                resourceTimeout,
-		StoreValidationFrequency:       defaultStoreValidationFrequency,
-		PodVolumeOperationTimeout:      defaultPodVolumeOperationTimeout,
-		RestoreResourcePriorities:      defaultRestorePriorities,
-		ClientQPS:                      defaultClientQPS,
-		ClientBurst:                    defaultClientBurst,
-		ClientPageSize:                 defaultClientPageSize,
-		ProfilerAddress:                defaultProfilerAddress,
-		ResourceTerminatingTimeout:     defaultResourceTerminatingTimeout,
-		LogLevel:                       logging.LogLevelFlag(logrus.InfoLevel),
-		LogFormat:                      logging.NewFormatFlag(),
-		DefaultVolumesToFsBackup:       podvolumeconfigs.DefaultVolumesToFsBackup,
-		UploaderType:                   uploader.KopiaType,
-		MaxConcurrentK8SConnections:    defaultMaxConcurrentK8SConnections,
-		DefaultSnapshotMoveData:        false,
-		DisableInformerCache:           defaultDisableInformerCache,
-		ScheduleSkipImmediately:        false,
-		CredentialsDirectory:           credentials.DefaultStoreDirectory(),
-		ItemBlockWorkerCount:           DefaultItemBlockWorkerCount,
-		ConcurrentBackups:              DefaultConcurrentBackups,
+		PluginDir:                        "/plugins",
+		MetricsAddress:                   defaultMetricsAddress,
+		DefaultBackupLocation:            "default",
+		DefaultVolumeSnapshotLocations:   flag.NewMap().WithKeyValueDelimiter(':'),
+		BackupSyncPeriod:                 defaultBackupSyncPeriod,
+		DefaultBackupTTL:                 defaultBackupTTL,
+		DefaultVGSLabelKey:               velerov1api.DefaultVGSLabelKey,
+		DefaultBackupCSISnapshotTimeout:  defaultBackupCSISnapshotTimeout,
+		DefaultRestoreCSISnapshotTimeout: defaultRestoreCSISnapshotTimeout,
+		DefaultItemOperationTimeout:      defaultItemOperationTimeout,
+		ResourceTimeout:                  resourceTimeout,
+		StoreValidationFrequency:         defaultStoreValidationFrequency,
+		PodVolumeOperationTimeout:        defaultPodVolumeOperationTimeout,
+		RestoreResourcePriorities:        defaultRestorePriorities,
+		ClientQPS:                        defaultClientQPS,
+		ClientBurst:                      defaultClientBurst,
+		ClientPageSize:                   defaultClientPageSize,
+		ProfilerAddress:                  defaultProfilerAddress,
+		ResourceTerminatingTimeout:       defaultResourceTerminatingTimeout,
+		LogLevel:                         logging.LogLevelFlag(logrus.InfoLevel),
+		LogFormat:                        logging.NewFormatFlag(),
+		DefaultVolumesToFsBackup:         podvolumeconfigs.DefaultVolumesToFsBackup,
+		UploaderType:                     uploader.KopiaType,
+		MaxConcurrentK8SConnections:      defaultMaxConcurrentK8SConnections,
+		DefaultSnapshotMoveData:          false,
+		DisableInformerCache:             defaultDisableInformerCache,
+		ScheduleSkipImmediately:          false,
+		CredentialsDirectory:             credentials.DefaultStoreDirectory(),
+		ItemBlockWorkerCount:             DefaultItemBlockWorkerCount,
+		ConcurrentBackups:                DefaultConcurrentBackups,
 	}
 
 	return config
@@ -288,5 +297,11 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 		"default-resource-modifier-configmap",
 		c.DefaultResourceModifierConfigMap,
 		"The name of a ConfigMap in the Velero namespace containing default resource modifier rules applied to all restores. Ignored when a per-restore resource modifier is specified.",
+	)
+	flags.IntVar(
+		&c.MaxBackupExtractionSize,
+		"max-backup-extraction-size",
+		c.MaxBackupExtractionSize,
+		"Maximum size of a backup extraction in megabytes. If not set, default value (16GB) will be used.",
 	)
 }

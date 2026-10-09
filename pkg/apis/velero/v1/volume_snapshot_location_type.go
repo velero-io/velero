@@ -27,6 +27,9 @@ import (
 // +kubebuilder:resource:shortName=vsl
 // +kubebuilder:object:generate=true
 // +kubebuilder:storageversion
+// +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".spec.provider",description="Provider is the provider of the volume storage"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Volume Snapshot Location status such as Available/Unavailable"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // VolumeSnapshotLocation is a location where Velero stores volume snapshots.
 type VolumeSnapshotLocation struct {

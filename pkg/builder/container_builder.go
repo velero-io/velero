@@ -18,10 +18,12 @@ package builder
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	corev1api "k8s.io/api/core/v1"
 	apimachineryRuntime "k8s.io/apimachinery/pkg/runtime"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 
 	"github.com/vmware-tanzu/velero/pkg/label"
 )
@@ -42,15 +44,22 @@ func ForContainer(name, image string) *ContainerBuilder {
 }
 
 // ForPluginContainer is a helper builder specifically for plugin init containers
-func ForPluginContainer(image string, pullPolicy corev1api.PullPolicy) *ContainerBuilder {
+func ForPluginContainer(image string, pullPolicy corev1api.PullPolicy, existingContainers []corev1api.Container) *ContainerBuilder {
 	volumeMount := ForVolumeMount("plugins", "/target").Result()
-	return ForContainer(getName(image), image).PullPolicy(pullPolicy).VolumeMounts(volumeMount)
+	return ForContainer(getName(image, existingContainers), image).PullPolicy(pullPolicy).VolumeMounts(volumeMount)
 }
 
 // getName returns the 'name' component of a docker image that includes the entire string
 // except the registry name, and transforms the combined string into a DNS-1123 compatible name
 // that fits within the 63-character limit for Kubernetes container names.
-func getName(image string) string {
+// It appends a random string if there is a collision with existing container names.
+func getName(image string, existingContainers []corev1api.Container) string {
+	// Convert existingContainers to a map for O(1) collision lookups
+	existingNames := make(map[string]bool, len(existingContainers))
+	for _, c := range existingContainers {
+		existingNames[c.Name] = true
+	}
+
 	slashIndex := strings.Index(image, "/")
 	slashCount := 0
 	if slashIndex >= 0 {
@@ -88,7 +97,20 @@ func getName(image string) string {
 	name := re.Replace(image[start:end])
 
 	// Ensure the name doesn't exceed Kubernetes container name length limit
-	return label.GetValidName(name)
+	name = label.GetValidName(name)
+
+	for existingNames[name] {
+		name = re.Replace(image[start:end])
+		if len(name) > 57 {
+			// Leave 6 characters for "-xxxxx" random string
+			name = name[:57]
+			name = strings.TrimSuffix(name, "-")
+		}
+		name = fmt.Sprintf("%s-%s", name, utilrand.String(5))
+		name = label.GetValidName(name)
+	}
+
+	return name
 }
 
 // Result returns the built Container.

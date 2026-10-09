@@ -1,0 +1,1 @@
+Cleanup: Remove deprecated --wait flag from velero uninstall

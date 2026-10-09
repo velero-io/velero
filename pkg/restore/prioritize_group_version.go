@@ -245,7 +245,11 @@ func parseUserPriorities(ctx *restoreContext, prioritiesData string) map[string]
 	// orchestras.music.example.io=v2,v3alpha1\n
 	// subscriptions.operators.coreos.com=v2,v1
 
-	lines := strings.Split(prioritiesData, "\n")
+	// Normalize Windows (CRLF) and legacy Mac (CR) line endings before splitting.
+	normalized := strings.ReplaceAll(prioritiesData, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	lines := strings.Split(normalized, "\n")
 	lines = formatUserPriorities(lines)
 
 	for _, line := range lines {

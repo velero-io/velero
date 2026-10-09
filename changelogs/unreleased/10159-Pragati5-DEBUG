@@ -1,0 +1,1 @@
+Fix excluded namespace objects leaking into backups when using cross-namespace listing

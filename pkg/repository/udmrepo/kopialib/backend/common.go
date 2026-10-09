@@ -26,15 +26,15 @@ import (
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/format"
-	"github.com/kopia/kopia/repo/hashing"
 	"github.com/kopia/kopia/repo/splitter"
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 )
 
 const (
-	DefaultCacheLimitMB    = 5000
-	maxCacheDurationSecond = 30
+	DefaultCacheLimitMB     = 5000
+	maxCacheDurationSecond  = 30
+	defaultHashingAlgorithm = "HMAC-SHA256-128"
 )
 
 func setupLimits(ctx context.Context, flags map[string]string) throttling.Limits {
@@ -51,7 +51,7 @@ func setupLimits(ctx context.Context, flags map[string]string) throttling.Limits
 func SetupNewRepositoryOptions(ctx context.Context, flags map[string]string) repo.NewRepositoryOptions {
 	return repo.NewRepositoryOptions{
 		BlockFormat: format.ContentFormat{
-			Hash:       optionalHaveStringWithDefault(udmrepo.StoreOptionGenHashAlgo, flags, hashing.DefaultAlgorithm),
+			Hash:       optionalHaveStringWithDefault(udmrepo.StoreOptionGenHashAlgo, flags, defaultHashingAlgorithm),
 			Encryption: optionalHaveStringWithDefault(udmrepo.StoreOptionGenEncryptAlgo, flags, encryption.DefaultAlgorithm),
 		},
 
