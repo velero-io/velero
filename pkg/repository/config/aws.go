@@ -19,9 +19,10 @@ package config
 
 import (
 	"context"
-	"fmt"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/cockroachdb/errors"
@@ -98,7 +99,7 @@ func GetS3Credentials(config map[string]string) (*aws.Credentials, error) {
 
 		// TODO: Handle expiring tokens
 		if cfg.Credentials.CanExpire {
-			return nil, fmt.Errorf("credentials from bsl credential configuration have to be static")
+			return nil, errors.New("credentials from bsl credential configuration have to be static")
 		}
 
 		return &cfg.Credentials, nil
@@ -138,17 +139,21 @@ func GetS3Credentials(config map[string]string) (*aws.Credentials, error) {
 // if the region cannot be determined.
 // It will use us-east-1 as a hinting server and requires config param to use as credentials
 func GetAWSBucketRegion(bucket string, config map[string]string) (string, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithCredentialsProvider(
-		aws.CredentialsProviderFunc(
-			func(context.Context) (aws.Credentials, error) {
-				s3creds, err := GetS3Credentials(config)
-				if s3creds == nil {
-					return aws.Credentials{}, err
-				}
-				return *s3creds, err
-			},
-		),
-	))
+	s3creds, err := GetS3Credentials(config)
+	if err != nil {
+		return "", errors.WithStack(err)
+	}
+
+	var opts []func(*awsconfig.LoadOptions) error
+	if s3creds != nil {
+		opts = append(opts, awsconfig.WithCredentialsProvider(credentials.StaticCredentialsProvider{Value: *s3creds}))
+	} else if awsProfile, ok := config[awsProfileKey]; ok {
+		// No static credentials means they can expire, so we let the
+		// default aws provider chain resolve and refresh them
+		opts = append(opts, awsconfig.WithSharedConfigProfile(awsProfile))
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), opts...)
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
