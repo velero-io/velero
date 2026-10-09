@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -5814,80 +5815,74 @@ func TestUpdateVolumeInfos(t *testing.T) {
 	logger := logrus.StandardLogger()
 
 	tests := []struct {
-		name                string
-		operations          []*itemoperation.BackupOperation
-		dataUpload          *velerov2alpha1.DataUpload
-		volumeInfos         []*volume.BackupVolumeInfo
-		expectedVolumeInfos []*volume.BackupVolumeInfo
+		name                  string
+		operations            []*itemoperation.BackupOperation
+		dataUpload            *velerov2alpha1.DataUpload
+		volumeSnapshot        *snapshotv1api.VolumeSnapshot
+		volumeSnapshotContent *snapshotv1api.VolumeSnapshotContent
+		volumeInfos           []*volume.BackupVolumeInfo
+		expectedVolumeInfos   []*volume.BackupVolumeInfo
 	}{
 		{
-			name: "CSISnapshot VolumeInfo update with Operation fails",
+			name: "DataUpload VolumeInfo created with completed phase",
 			operations: []*itemoperation.BackupOperation{
 				{
 					Spec: itemoperation.BackupOperationSpec{
-						OperationID: "test-operation",
-					},
-					Status: itemoperation.OperationStatus{
-						Error:   "failed",
-						Updated: &now,
-					},
-				},
-			},
-			volumeInfos: []*volume.BackupVolumeInfo{
-				{
-					BackupMethod:        volume.CSISnapshot,
-					CompletionTimestamp: &metav1.Time{},
-					CSISnapshotInfo: &volume.CSISnapshotInfo{
-						OperationID: "test-operation",
+						OperationID: "op-du-1",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.PersistentVolumeClaims,
+							Namespace:     "ns-1",
+							Name:          "pvc-1",
+						},
 					},
 				},
 			},
+			dataUpload: builder.ForDataUpload("velero", "du-1").
+				CompletionTimestamp(&now).
+				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
+				SnapshotID("snapshot-id").
+				Progress(shared.DataMoveOperationProgress{TotalBytes: 1000}).
+				IncrementalBytes(500).
+				Phase(velerov2alpha1.DataUploadPhaseCompleted).
+				SourceNamespace("ns-1").
+				SourcePVC("pvc-1").
+				Result(),
+			volumeInfos: []*volume.BackupVolumeInfo{},
 			expectedVolumeInfos: []*volume.BackupVolumeInfo{
 				{
 					BackupMethod:        volume.CSISnapshot,
-					CompletionTimestamp: &now,
-					Result:              volume.VolumeResultFailed,
-					CSISnapshotInfo: &volume.CSISnapshotInfo{
-						OperationID: "test-operation",
-					},
-				},
-			},
-		},
-		{
-			name: "CSISnapshot VolumeInfo update",
-			operations: []*itemoperation.BackupOperation{
-				{
-					Spec: itemoperation.BackupOperationSpec{
-						OperationID: "test-operation",
-					},
-					Status: itemoperation.OperationStatus{
-						Updated: &now,
-					},
-				},
-			},
-			volumeInfos: []*volume.BackupVolumeInfo{
-				{
-					BackupMethod:        volume.CSISnapshot,
-					CompletionTimestamp: &metav1.Time{},
-					CSISnapshotInfo: &volume.CSISnapshotInfo{
-						OperationID: "test-operation",
-					},
-				},
-			},
-			expectedVolumeInfos: []*volume.BackupVolumeInfo{
-				{
-					BackupMethod:        volume.CSISnapshot,
+					PVCName:             "pvc-1",
+					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultSucceeded,
-					CSISnapshotInfo: &volume.CSISnapshotInfo{
-						OperationID: "test-operation",
+					SnapshotDataMoved:   true,
+					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
+						DataMover:        "velero",
+						UploaderType:     velerov1.BackupRepositoryTypeKopia,
+						RetainedSnapshot: "vs-1",
+						SnapshotHandle:   "snapshot-id",
+						OperationID:      "op-du-1",
+						Size:             1000,
+						IncrementalSize:  ptr.To(int64(500)),
+						Phase:            velerov2alpha1.DataUploadPhaseCompleted,
 					},
 				},
 			},
 		},
 		{
-			name:       "DataUpload VolumeInfo update with fail phase",
-			operations: []*itemoperation.BackupOperation{},
+			name: "DataUpload VolumeInfo created with failed phase",
+			operations: []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						OperationID: "op-du-fail",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.PersistentVolumeClaims,
+							Namespace:     "ns-1",
+							Name:          "pvc-1",
+						},
+					},
+				},
+			},
 			dataUpload: builder.ForDataUpload("velero", "du-1").
 				CompletionTimestamp(&now).
 				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
@@ -5898,26 +5893,21 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				SourceNamespace("ns-1").
 				SourcePVC("pvc-1").
 				Result(),
-			volumeInfos: []*volume.BackupVolumeInfo{
-				{
-					PVCName:             "pvc-1",
-					PVCNamespace:        "ns-1",
-					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
-						DataMover: "velero",
-					},
-				},
-			},
+			volumeInfos: []*volume.BackupVolumeInfo{},
 			expectedVolumeInfos: []*volume.BackupVolumeInfo{
 				{
+					BackupMethod:        volume.CSISnapshot,
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultFailed,
+					SnapshotDataMoved:   true,
 					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
+						UploaderType:     velerov1.BackupRepositoryTypeKopia,
 						RetainedSnapshot: "vs-1",
 						SnapshotHandle:   "snapshot-id",
+						OperationID:      "op-du-fail",
 						Size:             1000,
 						IncrementalSize:  ptr.To(int64(500)),
 						Phase:            velerov2alpha1.DataUploadPhaseFailed,
@@ -5926,73 +5916,170 @@ func TestUpdateVolumeInfos(t *testing.T) {
 			},
 		},
 		{
-			name:       "DataUpload VolumeInfo update",
-			operations: []*itemoperation.BackupOperation{},
-			dataUpload: builder.ForDataUpload("velero", "du-1").
-				CompletionTimestamp(&now).
-				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
-				SnapshotID("snapshot-id").
-				Progress(shared.DataMoveOperationProgress{TotalBytes: 1000}).
-				IncrementalBytes(500).
-				Phase(velerov2alpha1.DataUploadPhaseCompleted).
-				SourceNamespace("ns-1").
-				SourcePVC("pvc-1").
-				Result(),
-			volumeInfos: []*volume.BackupVolumeInfo{
+			name: "CSISnapshot VolumeInfo created with operation success",
+			operations: []*itemoperation.BackupOperation{
 				{
-					PVCName:             "pvc-1",
-					PVCNamespace:        "ns-1",
-					CompletionTimestamp: &metav1.Time{},
-					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
-						DataMover: "velero",
+					Spec: itemoperation.BackupOperationSpec{
+						OperationID: "op-csi-success",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.VolumeSnapshots,
+							Namespace:     "ns-1",
+							Name:          "vs-1",
+						},
+					},
+					Status: itemoperation.OperationStatus{
+						Updated: &now,
 					},
 				},
 			},
+			volumeSnapshot: builder.ForVolumeSnapshot("ns-1", "vs-1").
+				SourcePVC("pvc-1").
+				Status().
+				BoundVolumeSnapshotContentName("vsc-1").
+				ReadyToUse(true).
+				RestoreSize("2Gi").
+				Result(),
+			volumeSnapshotContent: builder.ForVolumeSnapshotContent("vsc-1").
+				Driver("driver.csi").
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{
+					SnapshotHandle: ptr.To("snap-handle-1"),
+				}).
+				Result(),
+			volumeInfos: []*volume.BackupVolumeInfo{},
 			expectedVolumeInfos: []*volume.BackupVolumeInfo{
 				{
+					BackupMethod:        volume.CSISnapshot,
 					PVCName:             "pvc-1",
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultSucceeded,
-					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
-						DataMover:        "velero",
-						RetainedSnapshot: "vs-1",
-						SnapshotHandle:   "snapshot-id",
-						Size:             1000,
-						IncrementalSize:  ptr.To(int64(500)),
-						Phase:            velerov2alpha1.DataUploadPhaseCompleted,
+					SnapshotDataMoved:   false,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						OperationID:    "op-csi-success",
+						VSCName:        "vsc-1",
+						Driver:         "driver.csi",
+						SnapshotHandle: "snap-handle-1",
+						Size:           2147483648,
+						ReadyToUse:     ptr.To(true),
 					},
 				},
 			},
 		},
 		{
-			// This is an error case. No crash happen here is good enough.
-			name:       "VolumeInfo doesn't have SnapshotDataMovementInfo when there is a matching DataUpload",
-			operations: []*itemoperation.BackupOperation{},
-			dataUpload: builder.ForDataUpload("velero", "du-1").
-				CompletionTimestamp(&now).
-				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
-				SnapshotID("snapshot-id").
-				Progress(shared.DataMoveOperationProgress{TotalBytes: 1000}).
-				IncrementalBytes(500).
-				Phase(velerov2alpha1.DataUploadPhaseCompleted).
-				SourceNamespace("ns-1").
+			name: "CSISnapshot VolumeInfo created with operation failure",
+			operations: []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						OperationID: "op-csi-fail",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.VolumeSnapshots,
+							Namespace:     "ns-1",
+							Name:          "vs-1",
+						},
+					},
+					Status: itemoperation.OperationStatus{
+						Error:   "snapshot failed",
+						Updated: &now,
+					},
+				},
+			},
+			volumeSnapshot: builder.ForVolumeSnapshot("ns-1", "vs-1").
 				SourcePVC("pvc-1").
+				Status().
+				BoundVolumeSnapshotContentName("vsc-1").
+				ReadyToUse(false).
+				RestoreSize("2Gi").
+				Result(),
+			volumeSnapshotContent: builder.ForVolumeSnapshotContent("vsc-1").
+				Driver("driver.csi").
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{
+					SnapshotHandle: ptr.To("snap-handle-1"),
+				}).
+				Result(),
+			volumeInfos: []*volume.BackupVolumeInfo{},
+			expectedVolumeInfos: []*volume.BackupVolumeInfo{
+				{
+					BackupMethod:        volume.CSISnapshot,
+					PVCName:             "pvc-1",
+					PVCNamespace:        "ns-1",
+					CompletionTimestamp: &now,
+					Result:              volume.VolumeResultFailed,
+					SnapshotDataMoved:   false,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						OperationID:    "op-csi-fail",
+						VSCName:        "vsc-1",
+						Driver:         "driver.csi",
+						SnapshotHandle: "snap-handle-1",
+						Size:           2147483648,
+						ReadyToUse:     ptr.To(false),
+					},
+				},
+			},
+		},
+		{
+			name: "Duplicate prevention does not re-add existing volumeInfo",
+			operations: []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						OperationID: "op-csi-dup",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.VolumeSnapshots,
+							Namespace:     "ns-1",
+							Name:          "vs-1",
+						},
+					},
+					Status: itemoperation.OperationStatus{
+						Updated: &now,
+					},
+				},
+			},
+			volumeSnapshot: builder.ForVolumeSnapshot("ns-1", "vs-1").
+				SourcePVC("pvc-1").
+				Status().
+				BoundVolumeSnapshotContentName("vsc-1").
+				ReadyToUse(true).
+				RestoreSize("2Gi").
+				Result(),
+			volumeSnapshotContent: builder.ForVolumeSnapshotContent("vsc-1").
+				Driver("driver.csi").
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{
+					SnapshotHandle: ptr.To("snap-handle-1"),
+				}).
 				Result(),
 			volumeInfos: []*volume.BackupVolumeInfo{
 				{
-					PVCName:                  "pvc-1",
-					PVCNamespace:             "ns-1",
-					CompletionTimestamp:      &metav1.Time{},
-					SnapshotDataMovementInfo: nil,
+					BackupMethod:        volume.CSISnapshot,
+					PVCName:             "pvc-1",
+					PVCNamespace:        "ns-1",
+					CompletionTimestamp: &now,
+					Result:              volume.VolumeResultSucceeded,
+					SnapshotDataMoved:   false,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						OperationID:    "op-csi-dup",
+						VSCName:        "vsc-1",
+						Driver:         "driver.csi",
+						SnapshotHandle: "snap-handle-1",
+						Size:           2147483648,
+						ReadyToUse:     ptr.To(true),
+					},
 				},
 			},
 			expectedVolumeInfos: []*volume.BackupVolumeInfo{
 				{
-					PVCName:                  "pvc-1",
-					PVCNamespace:             "ns-1",
-					CompletionTimestamp:      &metav1.Time{},
-					SnapshotDataMovementInfo: nil,
+					BackupMethod:        volume.CSISnapshot,
+					PVCName:             "pvc-1",
+					PVCNamespace:        "ns-1",
+					CompletionTimestamp: &now,
+					Result:              volume.VolumeResultSucceeded,
+					SnapshotDataMoved:   false,
+					CSISnapshotInfo: &volume.CSISnapshotInfo{
+						OperationID:    "op-csi-dup",
+						VSCName:        "vsc-1",
+						Driver:         "driver.csi",
+						SnapshotHandle: "snap-handle-1",
+						Size:           2147483648,
+						ReadyToUse:     ptr.To(true),
+					},
 				},
 			},
 		},
@@ -6000,21 +6087,49 @@ func TestUpdateVolumeInfos(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			unstructures := []unstructured.Unstructured{}
+			unstructuredDUs := []unstructured.Unstructured{}
 			if tc.dataUpload != nil {
 				duMap, error := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.dataUpload)
 				require.NoError(t, error)
-				unstructures = append(unstructures,
+				unstructuredDUs = append(unstructuredDUs,
 					unstructured.Unstructured{
 						Object: duMap,
 					},
 				)
 			}
+			unstructuredVSs := []unstructured.Unstructured{}
+			if tc.volumeSnapshot != nil {
+				vsMap, error := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.volumeSnapshot)
+				require.NoError(t, error)
+				unstructuredVSs = append(unstructuredVSs,
+					unstructured.Unstructured{
+						Object: vsMap,
+					},
+				)
+			}
+			unstructuredVSCs := []unstructured.Unstructured{}
+			if tc.volumeSnapshotContent != nil {
+				vscMap, error := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.volumeSnapshotContent)
+				require.NoError(t, error)
+				unstructuredVSCs = append(unstructuredVSCs,
+					unstructured.Unstructured{
+						Object: vscMap,
+					},
+				)
+			}
 
-			require.NoError(t, updateVolumeInfos(tc.volumeInfos, unstructures, tc.operations, logger))
-			if len(tc.expectedVolumeInfos) > 0 {
-				require.Equal(t, tc.expectedVolumeInfos[0].CompletionTimestamp, tc.volumeInfos[0].CompletionTimestamp)
-				require.Equal(t, tc.expectedVolumeInfos[0].SnapshotDataMovementInfo, tc.volumeInfos[0].SnapshotDataMovementInfo)
+			res, err := updateVolumeInfos(tc.volumeInfos, unstructuredDUs, unstructuredVSs, unstructuredVSCs, tc.operations, nil, logger)
+			require.NoError(t, err)
+			require.Equal(t, len(tc.expectedVolumeInfos), len(res))
+			for i := range tc.expectedVolumeInfos {
+				require.Equal(t, tc.expectedVolumeInfos[i].CompletionTimestamp, res[i].CompletionTimestamp)
+				require.Equal(t, tc.expectedVolumeInfos[i].SnapshotDataMovementInfo, res[i].SnapshotDataMovementInfo)
+				if tc.expectedVolumeInfos[i].CSISnapshotInfo != nil {
+					require.Equal(t, tc.expectedVolumeInfos[i].CSISnapshotInfo, res[i].CSISnapshotInfo)
+				}
+				if tc.expectedVolumeInfos[i].Result != "" {
+					require.Equal(t, tc.expectedVolumeInfos[i].Result, res[i].Result)
+				}
 			}
 		})
 	}

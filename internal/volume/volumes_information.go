@@ -33,11 +33,7 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	"github.com/vmware-tanzu/velero/pkg/datamover"
-	"github.com/vmware-tanzu/velero/pkg/features"
 	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/util/stringptr"
 )
 
 type Method string
@@ -390,7 +386,11 @@ type PVInfo struct {
 	VolumeHandle string `json:"volumeHandle,omitempty"`
 }
 
-func newPVInfo(pv *corev1api.PersistentVolume) *PVInfo {
+// NewPVInfo creates a PVInfo from PersistentVolume.
+func NewPVInfo(pv *corev1api.PersistentVolume) *PVInfo {
+	if pv == nil {
+		return nil
+	}
 	info := &PVInfo{
 		ReclaimPolicy: string(pv.Spec.PersistentVolumeReclaimPolicy),
 		Labels:        pv.Labels,
@@ -415,16 +415,12 @@ type BackupVolumesInformation struct {
 	pvMap       *pvcPvMap
 	volumeInfos []*BackupVolumeInfo
 
-	logger                 logrus.FieldLogger
-	crClient               kbclient.Client
-	volumeSnapshots        []snapshotv1api.VolumeSnapshot
-	volumeSnapshotContents []snapshotv1api.VolumeSnapshotContent
-	volumeSnapshotClasses  []snapshotv1api.VolumeSnapshotClass
-	SkippedVolumes         []SkippedVolume
-	NativeSnapshots        []*Snapshot
-	PodVolumeBackups       []*velerov1api.PodVolumeBackup
-	BackupOperations       []*itemoperation.BackupOperation
-	BackupName             string
+	logger           logrus.FieldLogger
+	crClient         kbclient.Client
+	SkippedVolumes   []SkippedVolume
+	NativeSnapshots  []*Snapshot
+	PodVolumeBackups []*velerov1api.PodVolumeBackup
+	BackupName       string
 }
 
 type pvcPvInfo struct {
@@ -448,23 +444,18 @@ func (v *BackupVolumesInformation) InsertPVMap(pv corev1api.PersistentVolume, pv
 }
 
 func (v *BackupVolumesInformation) Result(
-	csiVolumeSnapshots []snapshotv1api.VolumeSnapshot,
-	csiVolumeSnapshotContents []snapshotv1api.VolumeSnapshotContent,
-	csiVolumesnapshotClasses []snapshotv1api.VolumeSnapshotClass,
 	crClient kbclient.Client,
 	logger logrus.FieldLogger,
 ) []*BackupVolumeInfo {
 	v.logger = logger
 	v.crClient = crClient
-	v.volumeSnapshots = csiVolumeSnapshots
-	v.volumeSnapshotContents = csiVolumeSnapshotContents
-	v.volumeSnapshotClasses = csiVolumesnapshotClasses
 
 	v.generateVolumeInfoForSkippedVolume()
 	v.generateVolumeInfoForVeleroNativeSnapshot()
-	v.generateVolumeInfoForCSIVolumeSnapshot()
 	v.generateVolumeInfoFromPVB()
-	v.generateVolumeInfoFromDataUpload()
+	// As per issue #10510, CSI snapshots and DataUploads are asynchronous operations
+	// and cannot generate complete information before entering the waiting for operations phase.
+	// Their volumeInfos are generated during the finalizing phase.
 
 	return v.volumeInfos
 }
@@ -483,7 +474,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForSkippedVolume() {
 				SnapshotDataMoved: false,
 				Skipped:           true,
 				SkippedReason:     skippedVolume.Reasons,
-				PVInfo:            newPVInfo(&pvcPVInfo.PV),
+				PVInfo:            NewPVInfo(&pvcPVInfo.PV),
 			}
 		} else {
 			// If we cannot find it in pvMap, it might be a PVC without PV.
@@ -524,7 +515,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoForVeleroNativeSnapshot() {
 				// although NativeSnapshot doesn't check whether the snapshot creation result.
 				Result:             volumeResult,
 				NativeSnapshotInfo: newNativeSnapshotInfo(nativeSnapshot),
-				PVInfo:             newPVInfo(&pvcPVInfo.PV),
+				PVInfo:             NewPVInfo(&pvcPVInfo.PV),
 			}
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
@@ -536,102 +527,208 @@ func (v *BackupVolumesInformation) generateVolumeInfoForVeleroNativeSnapshot() {
 	v.volumeInfos = append(v.volumeInfos, tmpVolumeInfos...)
 }
 
-// generateVolumeInfoForCSIVolumeSnapshot generate VolumeInfos for CSI VolumeSnapshot
-func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
-	tmpVolumeInfos := make([]*BackupVolumeInfo, 0)
-
-	for _, volumeSnapshot := range v.volumeSnapshots {
-		var volumeSnapshotContent *snapshotv1api.VolumeSnapshotContent
-
-		// This is protective logic. The passed-in VS should be all related
-		// to this backup.
-		if volumeSnapshot.Labels[velerov1api.BackupNameLabel] != v.BackupName {
-			continue
-		}
-
-		if volumeSnapshot.Status == nil || volumeSnapshot.Status.BoundVolumeSnapshotContentName == nil {
-			v.logger.Warnf("Cannot fine VolumeSnapshotContent for VolumeSnapshot %s/%s", volumeSnapshot.Namespace, volumeSnapshot.Name)
-			continue
-		}
-
-		if volumeSnapshot.Spec.Source.PersistentVolumeClaimName == nil {
-			v.logger.Warnf("VolumeSnapshot %s/%s doesn't have a source PVC", volumeSnapshot.Namespace, volumeSnapshot.Name)
-			continue
-		}
-
-		for index := range v.volumeSnapshotContents {
-			if *volumeSnapshot.Status.BoundVolumeSnapshotContentName == v.volumeSnapshotContents[index].Name {
-				volumeSnapshotContent = &v.volumeSnapshotContents[index]
+// NewBackupVolumeInfoFromCSISnapshot creates a BackupVolumeInfo from VolumeSnapshot, VolumeSnapshotContent and operation.
+func NewBackupVolumeInfoFromCSISnapshot(
+	vs *snapshotv1api.VolumeSnapshot,
+	vsc *snapshotv1api.VolumeSnapshotContent,
+	operation *itemoperation.BackupOperation,
+	pv *corev1api.PersistentVolume,
+	pvName string,
+) *BackupVolumeInfo {
+	var size int64
+	if vs != nil && vs.Status != nil && vs.Status.RestoreSize != nil {
+		size = vs.Status.RestoreSize.Value()
+	}
+	snapshotHandle := ""
+	driver := ""
+	volumeGroupSnapshotHandle := ""
+	vscName := ""
+	if vs != nil && vs.Status != nil && vs.Status.BoundVolumeSnapshotContentName != nil {
+		vscName = *vs.Status.BoundVolumeSnapshotContentName
+	}
+	if vsc != nil {
+		driver = vsc.Spec.Driver
+		if vsc.Status != nil {
+			if vsc.Status.SnapshotHandle != nil {
+				snapshotHandle = *vsc.Status.SnapshotHandle
 			}
-		}
-
-		if volumeSnapshotContent == nil {
-			v.logger.Warnf("fail to get VolumeSnapshotContent for VolumeSnapshot: %s/%s",
-				volumeSnapshot.Namespace, volumeSnapshot.Name)
-			continue
-		}
-
-		var operation itemoperation.BackupOperation
-		for _, op := range v.BackupOperations {
-			if op.Spec.ResourceIdentifier.GroupResource.String() == kuberesource.VolumeSnapshots.String() &&
-				op.Spec.ResourceIdentifier.Name == volumeSnapshot.Name &&
-				op.Spec.ResourceIdentifier.Namespace == volumeSnapshot.Namespace {
-				operation = *op
+			if vsc.Status.VolumeGroupSnapshotHandle != nil {
+				volumeGroupSnapshotHandle = *vsc.Status.VolumeGroupSnapshotHandle
 			}
-		}
-
-		var size int64
-		if volumeSnapshot.Status.RestoreSize != nil {
-			size = volumeSnapshot.Status.RestoreSize.Value()
-		}
-		snapshotHandle := ""
-		if volumeSnapshotContent.Status.SnapshotHandle != nil {
-			snapshotHandle = *volumeSnapshotContent.Status.SnapshotHandle
-		}
-		volumeGroupSnapshotHandle := ""
-		if volumeSnapshotContent.Status != nil && volumeSnapshotContent.Status.VolumeGroupSnapshotHandle != nil {
-			volumeGroupSnapshotHandle = *volumeSnapshotContent.Status.VolumeGroupSnapshotHandle
-		}
-		if pvcPVInfo := v.pvMap.retrieve("", *volumeSnapshot.Spec.Source.PersistentVolumeClaimName, volumeSnapshot.Namespace); pvcPVInfo != nil {
-			volumeResult := VolumeResultFailed
-			if volumeSnapshot.Status != nil && volumeSnapshot.Status.ReadyToUse != nil && *volumeSnapshot.Status.ReadyToUse {
-				volumeResult = VolumeResultSucceeded
-			}
-
-			volumeInfo := &BackupVolumeInfo{
-				BackupMethod:          CSISnapshot,
-				PVCName:               pvcPVInfo.PVCName,
-				PVCNamespace:          pvcPVInfo.PVCNamespace,
-				PVName:                pvcPVInfo.PV.Name,
-				Skipped:               false,
-				SnapshotDataMoved:     false,
-				PreserveLocalSnapshot: true,
-				Result:                volumeResult,
-				CSISnapshotInfo: &CSISnapshotInfo{
-					VSCName:                   *volumeSnapshot.Status.BoundVolumeSnapshotContentName,
-					Size:                      size,
-					Driver:                    volumeSnapshotContent.Spec.Driver,
-					SnapshotHandle:            snapshotHandle,
-					OperationID:               operation.Spec.OperationID,
-					ReadyToUse:                volumeSnapshot.Status.ReadyToUse,
-					VolumeGroupSnapshotHandle: volumeGroupSnapshotHandle,
-				},
-				PVInfo: newPVInfo(&pvcPVInfo.PV),
-			}
-
-			if volumeSnapshot.Status.CreationTime != nil {
-				volumeInfo.StartTimestamp = volumeSnapshot.Status.CreationTime
-			}
-
-			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
-		} else {
-			v.logger.Warnf("cannot find info for PVC %s/%s", volumeSnapshot.Namespace,
-				stringptr.GetString(volumeSnapshot.Spec.Source.PersistentVolumeClaimName))
-			continue
 		}
 	}
 
-	v.volumeInfos = append(v.volumeInfos, tmpVolumeInfos...)
+	pvcName := ""
+	if vs != nil && vs.Spec.Source.PersistentVolumeClaimName != nil {
+		pvcName = *vs.Spec.Source.PersistentVolumeClaimName
+	}
+	namespace := ""
+	if vs != nil {
+		namespace = vs.Namespace
+	}
+
+	volumeResult := VolumeResultFailed
+	if operation != nil {
+		if operation.Status.Error == "" {
+			volumeResult = VolumeResultSucceeded
+		}
+	} else if vs != nil && vs.Status != nil && vs.Status.ReadyToUse != nil && *vs.Status.ReadyToUse {
+		volumeResult = VolumeResultSucceeded
+	}
+
+	operationID := ""
+	var completionTimestamp *metav1.Time
+	if operation != nil {
+		operationID = operation.Spec.OperationID
+		completionTimestamp = operation.Status.Updated
+	}
+
+	var startTimestamp *metav1.Time
+	var readyToUse *bool
+	if vs != nil && vs.Status != nil {
+		startTimestamp = vs.Status.CreationTime
+		readyToUse = vs.Status.ReadyToUse
+	}
+
+	var pvInfo *PVInfo
+	if pv != nil {
+		pvInfo = NewPVInfo(pv)
+	}
+
+	volumeInfo := &BackupVolumeInfo{
+		BackupMethod:          CSISnapshot,
+		PVCName:               pvcName,
+		PVCNamespace:          namespace,
+		PVName:                pvName,
+		Skipped:               false,
+		SnapshotDataMoved:     false,
+		PreserveLocalSnapshot: true,
+		Result:                volumeResult,
+		StartTimestamp:        startTimestamp,
+		CompletionTimestamp:   completionTimestamp,
+		CSISnapshotInfo: &CSISnapshotInfo{
+			VSCName:                   vscName,
+			Size:                      size,
+			Driver:                    driver,
+			SnapshotHandle:            snapshotHandle,
+			OperationID:               operationID,
+			ReadyToUse:                readyToUse,
+			VolumeGroupSnapshotHandle: volumeGroupSnapshotHandle,
+		},
+		PVInfo: pvInfo,
+	}
+
+	return volumeInfo
+}
+
+// NewBackupVolumeInfoFromDataUpload creates a BackupVolumeInfo from DataUpload and its operation.
+func NewBackupVolumeInfoFromDataUpload(
+	dataUpload *velerov2alpha1.DataUpload,
+	operation *itemoperation.BackupOperation,
+	pv *corev1api.PersistentVolume,
+	pvName string,
+) *BackupVolumeInfo {
+	dataMover := veleroDatamover
+	if dataUpload.Spec.DataMover != "" {
+		dataMover = dataUpload.Spec.DataMover
+	}
+
+	volumeResult := VolumeResultFailed
+	if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
+		volumeResult = VolumeResultSucceeded
+	}
+
+	backupType := velerov1api.BackupTypeIncremental
+	if dataUpload.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
+		backupType = velerov1api.BackupTypeFull
+	}
+
+	operationID := ""
+	if operation != nil {
+		operationID = operation.Spec.OperationID
+	}
+
+	var pvInfo *PVInfo
+	if pv != nil {
+		pvInfo = NewPVInfo(pv)
+	}
+
+	driver := ""
+	retainedSnapshot := ""
+	if dataUpload.Spec.CSISnapshot != nil {
+		driver = dataUpload.Spec.CSISnapshot.Driver
+		retainedSnapshot = dataUpload.Spec.CSISnapshot.VolumeSnapshot
+	}
+
+	volumeInfo := &BackupVolumeInfo{
+		BackupMethod:        CSISnapshot,
+		PVCName:             dataUpload.Spec.SourcePVC,
+		PVCNamespace:        dataUpload.Spec.SourceNamespace,
+		PVName:              pvName,
+		SnapshotDataMoved:   true,
+		Skipped:             false,
+		Result:              volumeResult,
+		BackupType:          backupType,
+		FallbackFull:        dataUpload.Status.FallbackFull,
+		StartTimestamp:      dataUpload.Status.StartTimestamp,
+		CompletionTimestamp: dataUpload.Status.CompletionTimestamp,
+		CSISnapshotInfo: &CSISnapshotInfo{
+			SnapshotHandle: FieldValueIsUnknown,
+			VSCName:        FieldValueIsUnknown,
+			OperationID:    FieldValueIsUnknown,
+			Driver:         driver,
+		},
+		SnapshotDataMovementInfo: &BackupSnapshotDataMovementInfo{
+			DataMover:        dataMover,
+			UploaderType:     datamover.GetUploaderType(dataMover),
+			OperationID:      operationID,
+			Phase:            dataUpload.Status.Phase,
+			SnapshotHandle:   dataUpload.Status.SnapshotID,
+			RetainedSnapshot: retainedSnapshot,
+			Size:             dataUpload.Status.Progress.TotalBytes,
+			IncrementalSize:  dataUpload.Status.IncrementalBytes,
+			SourceSize:       dataUpload.Status.SourceSize,
+		},
+		PVInfo: pvInfo,
+	}
+
+	return volumeInfo
+}
+
+// NewRestoreVolumeInfoFromDataDownload creates a RestoreVolumeInfo from DataDownload.
+func NewRestoreVolumeInfoFromDataDownload(
+	dd *velerov2alpha1.DataDownload,
+	pvName string,
+) *RestoreVolumeInfo {
+	operationID := dd.Labels[velerov1api.AsyncOperationIDLabel]
+	dataMover := veleroDatamover
+	if dd.Spec.DataMover != "" {
+		dataMover = dd.Spec.DataMover
+	}
+	if pvName == "" {
+		pvName = dd.Spec.TargetVolume.PV
+	}
+
+	volumeInfo := &RestoreVolumeInfo{
+		PVName:            pvName,
+		PVCNamespace:      dd.Spec.TargetVolume.Namespace,
+		PVCName:           dd.Spec.TargetVolume.PVC,
+		SnapshotDataMoved: true,
+		RestoreMethod:     CSISnapshot,
+		RestoreType:       dd.Spec.RestoreType,
+		FallbackFull:      dd.Status.FallbackFull,
+		SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
+			DataMover:       dataMover,
+			UploaderType:    datamover.GetUploaderType(dataMover),
+			SnapshotHandle:  dd.Spec.SnapshotID,
+			OperationID:     operationID,
+			Size:            dd.Status.Progress.TotalBytes,
+			IncrementalSize: dd.Status.IncrementalBytes,
+			Phase:           dd.Status.Phase,
+		},
+	}
+
+	return volumeInfo
 }
 
 // generateVolumeInfoFromPVB generate BackupVolumeInfo for PVB.
@@ -670,7 +767,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromPVB() {
 				volumeInfo.PVCName = pvcPVInfo.PVCName
 				volumeInfo.PVCNamespace = pvcPVInfo.PVCNamespace
 				volumeInfo.PVName = pvcPVInfo.PV.Name
-				volumeInfo.PVInfo = newPVInfo(&pvcPVInfo.PV)
+				volumeInfo.PVInfo = NewPVInfo(&pvcPVInfo.PV)
 			} else {
 				v.logger.Warnf("Cannot find info for PVC %s/%s", pvb.Spec.Pod.Namespace, pvcName)
 				continue
@@ -680,131 +777,6 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromPVB() {
 		}
 		tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 	}
-	v.volumeInfos = append(v.volumeInfos, tmpVolumeInfos...)
-}
-
-func (v *BackupVolumesInformation) getVolumeSnapshotClasses() (
-	[]snapshotv1api.VolumeSnapshotClass,
-	error,
-) {
-	vsClassList := new(snapshotv1api.VolumeSnapshotClassList)
-	if err := v.crClient.List(context.TODO(), vsClassList); err != nil {
-		v.logger.Warnf("Cannot list VolumeSnapshotClass with error %s.", err.Error())
-		return nil, err
-	}
-
-	return vsClassList.Items, nil
-}
-
-// generateVolumeInfoFromDataUpload generate BackupVolumeInfo for DataUpload.
-func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
-	if !features.IsEnabled(velerov1api.CSIFeatureFlag) {
-		v.logger.Debug("Skip generating BackupVolumeInfo when the CSI feature is disabled.")
-		return
-	}
-
-	// Retrieve the operations containing DataUpload.
-	duOperationMap := make(map[kbclient.ObjectKey]*itemoperation.BackupOperation)
-	for _, operation := range v.BackupOperations {
-		if operation.Spec.ResourceIdentifier.GroupResource.String() == kuberesource.PersistentVolumeClaims.String() {
-			for _, identifier := range operation.Spec.PostOperationItems {
-				if identifier.GroupResource.String() == "datauploads.velero.io" {
-					duOperationMap[kbclient.ObjectKey{
-						Namespace: identifier.Namespace,
-						Name:      identifier.Name,
-					}] = operation
-
-					break
-				}
-			}
-		}
-	}
-
-	if len(duOperationMap) <= 0 {
-		// No DataUpload is found. Return early.
-		return
-	}
-
-	tmpVolumeInfos := make([]*BackupVolumeInfo, 0)
-	for duObjectKey, operation := range duOperationMap {
-		dataUpload := new(velerov2alpha1.DataUpload)
-		err := v.crClient.Get(
-			context.TODO(),
-			duObjectKey,
-			dataUpload,
-		)
-		if err != nil {
-			v.logger.Warnf("Fail to get DataUpload %s: %s",
-				duObjectKey.Namespace+"/"+duObjectKey.Name,
-				err.Error(),
-			)
-			continue
-		}
-
-		if pvcPVInfo := v.pvMap.retrieve(
-			"",
-			operation.Spec.ResourceIdentifier.Name,
-			operation.Spec.ResourceIdentifier.Namespace,
-		); pvcPVInfo != nil {
-			dataMover := veleroDatamover
-			if dataUpload.Spec.DataMover != "" {
-				dataMover = dataUpload.Spec.DataMover
-			}
-
-			volumeResult := VolumeResultFailed
-			if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
-				volumeResult = VolumeResultSucceeded
-			}
-
-			volumeInfo := &BackupVolumeInfo{
-				BackupMethod:      CSISnapshot,
-				PVCName:           pvcPVInfo.PVCName,
-				PVCNamespace:      pvcPVInfo.PVCNamespace,
-				PVName:            pvcPVInfo.PV.Name,
-				SnapshotDataMoved: true,
-				Skipped:           false,
-				Result:            volumeResult,
-				BackupType:        velerov1api.BackupTypeIncremental,
-				CSISnapshotInfo: &CSISnapshotInfo{
-					SnapshotHandle: FieldValueIsUnknown,
-					VSCName:        FieldValueIsUnknown,
-					OperationID:    FieldValueIsUnknown,
-					Driver:         dataUpload.Spec.CSISnapshot.Driver,
-				},
-				SnapshotDataMovementInfo: &BackupSnapshotDataMovementInfo{
-					DataMover:      dataMover,
-					UploaderType:   datamover.GetUploaderType(dataMover),
-					OperationID:    operation.Spec.OperationID,
-					Phase:          dataUpload.Status.Phase,
-					Size:           dataUpload.Status.Progress.TotalBytes,
-					SnapshotHandle: dataUpload.Status.SnapshotID,
-				},
-				PVInfo: newPVInfo(&pvcPVInfo.PV),
-			}
-
-			if dataUpload.Spec.ParentSnapshot == veleroshared.ParentSnapshotNone {
-				volumeInfo.BackupType = velerov1api.BackupTypeFull
-			}
-
-			if dataUpload.Status.StartTimestamp != nil {
-				volumeInfo.StartTimestamp = dataUpload.Status.StartTimestamp
-			}
-
-			if dataUpload.Status.CompletionTimestamp != nil {
-				volumeInfo.CompletionTimestamp = dataUpload.Status.CompletionTimestamp
-			}
-
-			if dataUpload.Status.IncrementalBytes != nil {
-				volumeInfo.SnapshotDataMovementInfo.IncrementalSize = dataUpload.Status.IncrementalBytes
-			}
-
-			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
-		} else {
-			v.logger.Warnf("Cannot find info for PVC %s/%s", operation.Spec.ResourceIdentifier.Namespace, operation.Spec.ResourceIdentifier.Name)
-			continue
-		}
-	}
-
 	v.volumeInfos = append(v.volumeInfos, tmpVolumeInfos...)
 }
 
@@ -869,7 +841,6 @@ type RestoreVolumeInfoTracker struct {
 	// map of PVC object to the CSISnapshot object from which the PV is restored
 	// the key is in the form of $pvc-ns/$pvc-name
 	pvcCSISnapshotMap map[string]snapshotv1api.VolumeSnapshot
-	datadownloadList  *velerov2alpha1.DataDownloadList
 	pvrs              []*velerov1api.PodVolumeRestore
 }
 
@@ -908,12 +879,6 @@ func (t *RestoreVolumeInfoTracker) Populate(ctx context.Context, restoredResourc
 			log.Warn("PVC is not bound or has no volume name")
 			continue
 		}
-	}
-	if err := t.client.List(ctx, t.datadownloadList, &kbclient.ListOptions{
-		Namespace:     t.restore.Namespace,
-		LabelSelector: label.NewSelectorForRestore(t.restore.Name),
-	}); err != nil {
-		t.log.WithError(err).Error("Failed to List DataDownloads")
 	}
 }
 
@@ -1002,49 +967,9 @@ func (t *RestoreVolumeInfoTracker) Result() []*RestoreVolumeInfo {
 		volumeInfos = append(volumeInfos, volumeInfo)
 	}
 
-	for _, dd := range t.datadownloadList.Items {
-		var pvcName, pvcNS, pvName string
-		if pvcPVInfo := t.pvPvc.retrieve(dd.Spec.TargetVolume.PV, dd.Spec.TargetVolume.PVC, dd.Spec.TargetVolume.Namespace); pvcPVInfo != nil {
-			pvcName = pvcPVInfo.PVCName
-			pvcNS = pvcPVInfo.PVCNamespace
-			pvName = pvcPVInfo.PV.Name
-		} else {
-			pvcName = dd.Spec.TargetVolume.PVC
-			pvName = dd.Spec.TargetVolume.PV
-			pvcNS = dd.Spec.TargetVolume.Namespace
-		}
-		operationID := dd.Labels[velerov1api.AsyncOperationIDLabel]
-		dataMover := veleroDatamover
-		if dd.Spec.DataMover != "" {
-			dataMover = dd.Spec.DataMover
-		}
-		volumeInfo := &RestoreVolumeInfo{
-			PVName:            pvName,
-			PVCNamespace:      pvcNS,
-			PVCName:           pvcName,
-			SnapshotDataMoved: true,
-			// The method will be CSI always no CSI related CRs are created during restore, because
-			// the datadownload was initiated in CSI plugin
-			// For the same reason, no CSI snapshot info will be populated into volumeInfo
-			RestoreMethod: CSISnapshot,
-			RestoreType:   dd.Spec.RestoreType,
-			SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
-				DataMover:       dataMover,
-				UploaderType:    datamover.GetUploaderType(dataMover),
-				SnapshotHandle:  dd.Spec.SnapshotID,
-				OperationID:     operationID,
-				Size:            dd.Status.Progress.TotalBytes,
-				IncrementalSize: dd.Status.IncrementalBytes,
-				Phase:           dd.Status.Phase,
-			},
-		}
-
-		if dd.Status.IncrementalBytes != nil {
-			volumeInfo.SnapshotDataMovementInfo.IncrementalSize = dd.Status.IncrementalBytes
-		}
-
-		volumeInfos = append(volumeInfos, volumeInfo)
-	}
+	// As per issue #10510, DataDownloads are asynchronous operations and cannot
+	// generate complete information before entering the waiting for operations phase.
+	// Their restore volumeInfos are generated during the finalizing phase.
 
 	return volumeInfos
 }
@@ -1060,7 +985,7 @@ func NewRestoreVolInfoTracker(restore *velerov1api.Restore, logger logrus.FieldL
 		},
 		pvNativeSnapshotMap: make(map[string]*NativeSnapshotInfo),
 		pvcCSISnapshotMap:   make(map[string]snapshotv1api.VolumeSnapshot),
-		datadownloadList:    &velerov2alpha1.DataDownloadList{},
+		pvrs:                make([]*velerov1api.PodVolumeRestore, 0),
 	}
 }
 
