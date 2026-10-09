@@ -117,3 +117,14 @@ func NewCreateEventPredicate(
 		},
 	}
 }
+
+// NewDeleteEventPredicate creates a new Predicate that checks the Delete event with the provided func
+func NewDeleteEventPredicate(
+	f func(object client.Object) bool,
+) predicate.Predicate {
+	return predicate.Funcs{
+		DeleteFunc: func(event event.DeleteEvent) bool {
+			return f(event.Object)
+		},
+	}
+}
