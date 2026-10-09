@@ -324,6 +324,14 @@ When Velero processes PVCs for a VolumeGroupSnapshot:
 3. **Group Creation:** Only PVCs that should be snapshotted (not excluded by policy) are included in the VGS
 4. **Warning Logging:** If any PVCs are excluded from the group by volume policy, a warning is logged
 
+Velero adds a temporary label to each eligible PVC and uses that label as the
+VolumeGroupSnapshot selector. This makes the snapshot controller select the same
+PVCs that passed the volume policies. The label key is unique to the backup so
+overlapping backups can select different members. Velero removes these labels
+during group snapshot cleanup and excludes them from archived PVCs. Your original
+grouping labels are preserved. The Velero service account needs permission to
+patch PVC metadata.
+
 This behavior ensures that volume policies take precedence over VGS labels. The VGS label indicates "group these volumes **if they're being backed up**", while the volume policy determines "which volumes to back up".
 
 ### Example Scenario

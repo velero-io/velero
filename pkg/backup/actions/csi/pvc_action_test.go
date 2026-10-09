@@ -19,7 +19,6 @@ package csi
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -1391,6 +1390,88 @@ func TestDetermineVGSClass(t *testing.T) {
 		expectResult     string
 	}{
 		{
+			name: "PVC annotation wins over backup annotation and default class",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotClassAnnotationPVC: "pvc-class",
+					},
+				},
+			},
+			backup: &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotClassAnnotationBackupPrefix + testDriver: "backup-class",
+					},
+				},
+			},
+			existingVGSClass: []volumegroupsnapshotv1.VolumeGroupSnapshotClass{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "default-class",
+						Labels: map[string]string{velerov1api.VolumeGroupSnapshotClassDefaultLabel: "true"},
+					},
+					Driver: testDriver,
+				},
+			},
+			expectResult: "pvc-class",
+		},
+		{
+			name: "Backup annotation wins over default with empty PVC override",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{velerov1api.VolumeGroupSnapshotClassAnnotationPVC: ""},
+				},
+			},
+			backup: &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotClassAnnotationBackupPrefix + testDriver: "backup-class",
+					},
+				},
+			},
+			existingVGSClass: []volumegroupsnapshotv1.VolumeGroupSnapshotClass{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "default-class",
+						Labels: map[string]string{velerov1api.VolumeGroupSnapshotClassDefaultLabel: "true"},
+					},
+					Driver: testDriver,
+				},
+			},
+			expectResult: "backup-class",
+		},
+		{
+			name: "Empty overrides fall back to the default for the matching driver",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{velerov1api.VolumeGroupSnapshotClassAnnotationPVC: ""},
+				},
+			},
+			backup: &velerov1api.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{velerov1api.VolumeGroupSnapshotClassAnnotationBackupPrefix + testDriver: ""},
+				},
+			},
+			existingVGSClass: []volumegroupsnapshotv1.VolumeGroupSnapshotClass{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "other-driver-class",
+						Labels: map[string]string{velerov1api.VolumeGroupSnapshotClassDefaultLabel: "true"},
+					},
+					Driver: "other.csi.example.com",
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "default-class",
+						Labels: map[string]string{velerov1api.VolumeGroupSnapshotClassDefaultLabel: "true"},
+					},
+					Driver: testDriver,
+				},
+			},
+			expectResult: "default-class",
+		},
+		{
 			name: "PVC annotation override",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1507,13 +1588,13 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	}
 
 	log := logrus.New()
-	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, testBackup)
+	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, testBackup, &testPVC)
 	action := &pvcBackupItemAction{
 		log:      log,
 		crClient: crClient,
 	}
 
-	vgs, err := action.createVolumeGroupSnapshot(t.Context(), testBackup, testPVC, testLabelKey, testLabelValue, testVGSClass)
+	vgs, err := action.createVolumeGroupSnapshot(t.Context(), testBackup, testPVC, []corev1api.PersistentVolumeClaim{testPVC}, testLabelKey, testLabelValue, testVGSClass)
 	require.NoError(t, err)
 	require.NotNil(t, vgs)
 	updatedBackup := &velerov1api.Backup{}
@@ -1524,7 +1605,7 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	assert.Equal(t, testNamespace, vgs.Namespace)
 	assert.Equal(t, testVGSClass, *vgs.Spec.VolumeGroupSnapshotClassName)
 	assert.NotNil(t, vgs.Spec.Source.Selector)
-	assert.Equal(t, testLabelValue, vgs.Spec.Source.Selector.MatchLabels[testLabelKey])
+	assert.Equal(t, testLabelValue, vgs.Spec.Source.Selector.MatchLabels[csi.VGSMembershipLabelKey(testBackup.UID)])
 	assert.Equal(t, testLabelValue, vgs.Labels[testLabelKey])
 	assert.Equal(t, label.GetValidName(testBackup.Name), vgs.Labels[velerov1api.BackupNameLabel])
 	assert.Equal(t, string(testBackup.UID), vgs.Labels[velerov1api.BackupUIDLabel])
@@ -1533,6 +1614,101 @@ func TestCreateVolumeGroupSnapshot(t *testing.T) {
 	retrieved, err := csi.GetVGS(t.Context(), crClient, vgs.Namespace, vgs.Name)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved)
+}
+
+func TestCreateVolumeGroupSnapshotSelectsPolicyApprovedPVCs(t *testing.T) {
+	for _, grouping := range []struct {
+		name string
+		key  string
+	}{
+		{name: "Velero default key", key: velerov1api.DefaultVGSLabelKey},
+		{name: "Custom key", key: "example.com/snapshot-group"},
+		{name: "Application key", key: "app.kubernetes.io/instance"},
+	} {
+		for _, version := range []string{"v1", "v1beta2", "v1beta1"} {
+			for _, excludedStorage := range []string{"NFS", "CSI with same driver", "CSI with different driver"} {
+				t.Run(grouping.name+"/"+version+"/"+excludedStorage, func(t *testing.T) {
+					groupKey := grouping.key
+					backup := builder.ForBackup("velero", "mixed-storage").ObjectMeta(builder.WithUID("backup-uid")).Result()
+					backup.Spec.VolumeGroupSnapshotLabelKey = groupKey
+					backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "ConfigMap", Name: "skip-volume"}
+					policy := "version: v1\nvolumePolicies:\n- conditions:\n    nfs: {}\n  action:\n    type: skip\n"
+					if excludedStorage != "NFS" {
+						policy = "version: v1\nvolumePolicies:\n- conditions:\n    storageClass: [excluded-csi]\n  action:\n    type: skip\n"
+					}
+					pvcs := []corev1api.PersistentVolumeClaim{
+						*builder.ForPersistentVolumeClaim("app", "mysql-data").VolumeName("pv-mysql").StorageClass("rbd").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithLabels(groupKey, "test")).Result(),
+						*builder.ForPersistentVolumeClaim("app", "mysql-data1").VolumeName("pv-mysql1").StorageClass("rbd").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithLabels(groupKey, "test")).Result(),
+						*builder.ForPersistentVolumeClaim("app", "postgresql").VolumeName("pv-nfs").StorageClass("nfs").Phase(corev1api.ClaimBound).ObjectMeta(builder.WithLabels(groupKey, "test")).Result(),
+					}
+					if excludedStorage != "NFS" {
+						pvcs[2].Spec.StorageClassName = ptr.To("excluded-csi")
+					}
+					objects := []runtime.Object{backup, &corev1api.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{Name: "skip-volume", Namespace: "velero"},
+						Data:       map[string]string{"volume-policy": policy},
+					}}
+					for i := range pvcs {
+						objects = append(objects, &pvcs[i])
+						pv := &corev1api.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: pvcs[i].Spec.VolumeName}}
+						pv.Spec.StorageClassName = *pvcs[i].Spec.StorageClassName
+						if i == 2 && excludedStorage == "NFS" {
+							pv.Spec.NFS = &corev1api.NFSVolumeSource{Server: "nfs", Path: "/export"}
+						} else {
+							pv.Spec.CSI = &corev1api.CSIPersistentVolumeSource{Driver: testDriver}
+							if i == 2 && excludedStorage == "CSI with different driver" {
+								pv.Spec.CSI.Driver = "other.csi.example.com"
+							}
+						}
+						objects = append(objects, pv)
+					}
+					client := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+						WithRESTMapper(velerotest.VGSTestRESTMapper(version)).WithRuntimeObjects(objects...).Build()
+					action := &pvcBackupItemAction{log: velerotest.NewLogger(), crClient: client}
+					require.NoError(t, action.ensurePVCPodCacheForNamespace(t.Context(), "app"))
+					vh, err := action.getOrCreateVolumeHelper(backup)
+					require.NoError(t, err)
+					grouped, err := action.listGroupedPVCs(t.Context(), "app", groupKey, "test")
+					require.NoError(t, err)
+					filtered, err := action.filterPVCsByVolumePolicy(grouped, vh)
+					require.NoError(t, err)
+					require.Len(t, filtered, 2)
+					driver, err := action.determineCSIDriver(filtered)
+					require.NoError(t, err)
+					require.Equal(t, testDriver, driver)
+					vgs, err := action.createVolumeGroupSnapshot(t.Context(), backup, pvcs[0], filtered, groupKey, "test", "rbd-group-class")
+					require.NoError(t, err)
+
+					// Exercise the selection the external snapshot controller performs,
+					// rather than checking only Velero's internal filtered list.
+					selector, err := metav1.LabelSelectorAsSelector(vgs.Spec.Source.Selector)
+					require.NoError(t, err)
+					selected := &corev1api.PersistentVolumeClaimList{}
+					require.NoError(t, client.List(t.Context(), selected, crclient.InNamespace("app"), crclient.MatchingLabelsSelector{Selector: selector}))
+					var names []string
+					for _, pvc := range selected.Items {
+						names = append(names, pvc.Name)
+					}
+					require.ElementsMatch(t, []string{"mysql-data", "mysql-data1"}, names)
+
+					// Processing another member before snapshots exist must reuse this
+					// VGS, including after a timeout or a plugin restart.
+					restartedAction := &pvcBackupItemAction{log: velerotest.NewLogger(), crClient: client}
+					reused, err := restartedAction.createVolumeGroupSnapshot(t.Context(), backup, pvcs[1], filtered, groupKey, "test", "rbd-group-class")
+					require.NoError(t, err)
+					require.Equal(t, vgs.Name, reused.Name)
+					groups, err := csi.ListVGS(t.Context(), client, "app", map[string]string{velerov1api.BackupUIDLabel: string(backup.UID)})
+					require.NoError(t, err)
+					require.Len(t, groups.Items, 1)
+					// A different requested class must not silently reuse this VGS.
+					otherClass, err := restartedAction.createVolumeGroupSnapshot(t.Context(), backup, pvcs[1], filtered, groupKey, "test", "other-rbd-group-class")
+					require.NoError(t, err)
+					require.NotEqual(t, vgs.Name, otherClass.Name)
+					require.Equal(t, "other-rbd-group-class", *otherClass.Spec.VolumeGroupSnapshotClassName)
+				})
+			}
+		}
+	}
 }
 
 func TestWaitForVGSAssociatedVS(t *testing.T) {
@@ -2009,94 +2185,6 @@ func TestWaitForVGSCBinding(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestGetVGSByLabels(t *testing.T) {
-	labelKey := "velero.io/backup-name"
-	labelVal := "backup-123"
-	testLabels := map[string]string{labelKey: labelVal}
-
-	makeVGS := func(name string, labels map[string]string) *volumegroupsnapshotv1.VolumeGroupSnapshot {
-		return &volumegroupsnapshotv1.VolumeGroupSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: "test-ns",
-				Labels:    labels,
-			},
-		}
-	}
-
-	tests := []struct {
-		name        string
-		vgsObjects  []runtime.Object
-		expectError string
-		expectName  string
-	}{
-		{
-			name: "exactly one matching VGS",
-			vgsObjects: []runtime.Object{
-				makeVGS("vgs1", testLabels),
-			},
-			expectName: "vgs1",
-		},
-		{
-			name:        "no matching VGS",
-			vgsObjects:  []runtime.Object{},
-			expectError: "no VolumeGroupSnapshot found matching labels",
-		},
-		{
-			name: "multiple matching VGS",
-			vgsObjects: []runtime.Object{
-				makeVGS("vgs1", testLabels),
-				makeVGS("vgs2", testLabels),
-			},
-			expectError: "multiple VolumeGroupSnapshots found matching labels",
-		},
-		{
-			name:        "client list error",
-			vgsObjects:  []runtime.Object{},
-			expectError: "failed to list VolumeGroupSnapshots by labels",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var crClient = velerotest.NewFakeControllerRuntimeClientWithVGS(t, tt.vgsObjects...)
-			if tt.name == "client list error" {
-				// Simulate the VGS API being unavailable, which surfaces as a list error.
-				crClient = velerotest.NewFakeControllerRuntimeClientBuilder(t).WithRESTMapper(velerotest.VGSTestRESTMapper()).Build()
-			}
-
-			action := &pvcBackupItemAction{
-				log:      velerotest.NewLogger(),
-				crClient: crClient,
-			}
-
-			vgs, err := action.getVGSByLabels(t.Context(), "test-ns", testLabels)
-
-			if tt.expectError != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.expectError) {
-					t.Errorf("expected error containing '%s', got: %v", tt.expectError, err)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if vgs == nil || vgs.Name != tt.expectName {
-					t.Errorf("expected VGS name %s, got %v", tt.expectName, vgs)
-				}
-			}
-		})
-	}
-}
-
-// failingClient is a dummy client that fails on List
-type failingClient struct {
-	crclient.Client
-}
-
-func (f *failingClient) List(ctx context.Context, list crclient.ObjectList, opts ...crclient.ListOption) error {
-	return fmt.Errorf("simulated list error")
 }
 
 func TestHasOwnerReference(t *testing.T) {
