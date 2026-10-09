@@ -33,6 +33,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 )
 
+// betaStorageClassAnnotation is the legacy annotation for a PV/PVC's storage class.
+const betaStorageClassAnnotation = "volume.beta.kubernetes.io/storage-class"
+
 // ChangeStorageClassAction updates a PV or PVC's storage class name
 // if a mapping is found in the plugin's config map.
 type ChangeStorageClassAction struct {
@@ -135,6 +138,14 @@ func (a *ChangeStorageClassAction) Execute(input *velero.RestoreItemActionExecut
 
 		if err := unstructured.SetNestedField(obj.UnstructuredContent(), newStorageClass, "spec", "storageClassName"); err != nil {
 			return nil, errors.Wrap(err, "unable to set item's spec.storageClassName")
+		}
+
+		// The legacy beta annotation takes precedence over spec.storageClassName
+		// when set, so keep it consistent with the new storage class.
+		annotations := obj.GetAnnotations()
+		if _, ok := annotations[betaStorageClassAnnotation]; ok {
+			annotations[betaStorageClassAnnotation] = newStorageClass
+			obj.SetAnnotations(annotations)
 		}
 	}
 	return velero.NewRestoreItemActionExecuteOutput(obj), nil

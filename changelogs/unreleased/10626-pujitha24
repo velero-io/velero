@@ -1,0 +1,1 @@
+Update the volume.beta.kubernetes.io/storage-class annotation of PVs/PVCs when the change-storage-class plugin remaps the storage class
