@@ -1,0 +1,1 @@
+Fix test delete wait helpers to poll the requested object name.
