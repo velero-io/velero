@@ -21,9 +21,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/vmware-tanzu/velero/pkg/util"
 )
 
 const (
@@ -130,7 +131,7 @@ func (c VeleroConfig) Features() []string {
 		return []string{}
 	}
 
-	return strings.Split(features, ",")
+	return util.SplitAndTrimCSV(features)
 }
 
 func (c VeleroConfig) Colorized() bool {
