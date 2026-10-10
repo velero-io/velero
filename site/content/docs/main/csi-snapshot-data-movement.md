@@ -650,7 +650,7 @@ Sometimes, `RestorePVC` needs to be configured to increase the performance of re
 [7]: https://docs.microsoft.com/en-us/azure/aks/azure-files-dynamic-pv
 [8]: api-types/backupstoragelocation.md
 [9]: supported-providers.md
-[10]: restore-reference.md#changing-pv/pvc-Storage-Classes
+[10]: restore-reference.md#changing-pvpvc-storage-classes
 [11]: data-movement-pod-resource-configuration.md
 [12]: performance-guidance.md
 [13]: https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/

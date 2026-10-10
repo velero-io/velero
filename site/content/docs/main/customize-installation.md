@@ -475,7 +475,7 @@ You now have to ensure that the velero completion script gets sourced in all you
     echo 'complete -F __start_velero v' >>~/.bashrc
     ```
 
-- If you installed velero with Homebrew (as explained [above](#install-with-homebrew-on-macos)), then the velero completion script should already be in `/usr/local/etc/bash_completion.d/velero`. In that case, you don't need to do anything.
+- If you installed velero with Homebrew (as explained in [Basic Install](basic-install.md#option-1-macos---homebrew)), then the velero completion script should already be in `/usr/local/etc/bash_completion.d/velero`. In that case, you don't need to do anything.
 
 > The Homebrew installation of bash-completion v2 sources all the files in the `BASH_COMPLETION_COMPAT_DIR` directory, that's why the latter two methods work.
 
