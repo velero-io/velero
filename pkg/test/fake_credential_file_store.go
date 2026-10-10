@@ -17,6 +17,8 @@ limitations under the License.
 package test
 
 import (
+	"context"
+
 	corev1api "k8s.io/api/core/v1"
 )
 
@@ -25,7 +27,7 @@ import (
 type FileStore interface {
 	// Path returns a path on disk where the secret key defined by
 	// the given selector is serialized.
-	Path(selector *corev1api.SecretKeySelector) (string, error)
+	Path(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error)
 }
 
 type fakeCredentialsFileStore struct {
@@ -35,7 +37,7 @@ type fakeCredentialsFileStore struct {
 
 // Path returns a path on disk where the secret key defined by
 // the given selector is serialized.
-func (f *fakeCredentialsFileStore) Path(*corev1api.SecretKeySelector) (string, error) {
+func (f *fakeCredentialsFileStore) Path(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error) {
 	return f.path, f.err
 }
 
@@ -52,7 +54,7 @@ func NewFakeCredentialsFileStore(path string, err error) FileStore {
 // that are stored in Secret.
 type SecretStore interface {
 	// Get returns the secret key defined by the given selector
-	Get(selector *corev1api.SecretKeySelector) (string, error)
+	Get(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error)
 }
 
 type fakeCredentialsSecretStore struct {
@@ -61,7 +63,7 @@ type fakeCredentialsSecretStore struct {
 }
 
 // Get returns the secret data.
-func (f *fakeCredentialsSecretStore) Get(*corev1api.SecretKeySelector) (string, error) {
+func (f *fakeCredentialsSecretStore) Get(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error) {
 	return f.data, f.err
 }
 

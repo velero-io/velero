@@ -21,6 +21,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -83,7 +84,7 @@ func TestNewUploaderProvider(t *testing.T) {
 		t.Run(testCase.Description, func(t *testing.T) {
 			if testCase.needFromFile {
 				mockFileGetter := &mocks.FileStore{}
-				mockFileGetter.On("Path", &corev1api.SecretKeySelector{}).Return("", nil)
+				mockFileGetter.On("Path", mock.Anything, &corev1api.SecretKeySelector{}).Return("", nil)
 				credGetter.FromFile = mockFileGetter
 			}
 			_, err := NewUploaderProvider(ctx, client, testCase.UploaderType, testCase.RequestorType, repoIdentifier, bsl, backupRepo, credGetter, repoKeySelector, log)
