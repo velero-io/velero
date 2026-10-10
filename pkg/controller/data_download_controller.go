@@ -691,7 +691,7 @@ func (r *DataDownloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *DataDownloadReconciler) findSnapshotRestoreForPod(ctx context.Context, podObj client.Object) []reconcile.Request {
 	pod := podObj.(*corev1api.Pod)
-	dd, err := findDataDownloadByPod(r.client, *pod)
+	dd, err := findDataDownloadByPod(ctx, r.client, *pod)
 
 	log := r.logger.WithField("pod", pod.Name)
 	if err != nil {
@@ -711,7 +711,7 @@ func (r *DataDownloadReconciler) findSnapshotRestoreForPod(ctx context.Context, 
 
 	if pod.Status.Phase == corev1api.PodRunning {
 		log.Info("Preparing data download")
-		if err = UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log,
+		if err = UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, log,
 			func(dd *velerov2alpha1api.DataDownload) bool {
 				if isDataDownloadInFinalState(dd) {
 					log.Warnf("datadownload %s is terminated, abort setting it to prepared", dd.Name)
@@ -725,7 +725,7 @@ func (r *DataDownloadReconciler) findSnapshotRestoreForPod(ctx context.Context, 
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
-		err := UpdateDataDownloadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownload", dd.Name),
+		err := UpdateDataDownloadWithRetry(ctx, r.client, types.NamespacedName{Namespace: dd.Namespace, Name: dd.Name}, r.logger.WithField("datadownload", dd.Name),
 			func(dataDownload *velerov2alpha1api.DataDownload) bool {
 				if dataDownload.Spec.Cancel {
 					return false
@@ -994,10 +994,10 @@ func getDataDownloadOwnerObject(dd *velerov2alpha1api.DataDownload) corev1api.Ob
 	}
 }
 
-func findDataDownloadByPod(client client.Client, pod corev1api.Pod) (*velerov2alpha1api.DataDownload, error) {
+func findDataDownloadByPod(ctx context.Context, client client.Client, pod corev1api.Pod) (*velerov2alpha1api.DataDownload, error) {
 	if label, exist := pod.Labels[velerov1api.DataDownloadLabel]; exist {
 		dd := &velerov2alpha1api.DataDownload{}
-		err := client.Get(context.Background(), types.NamespacedName{
+		err := client.Get(ctx, types.NamespacedName{
 			Namespace: pod.Namespace,
 			Name:      label,
 		}, dd)
