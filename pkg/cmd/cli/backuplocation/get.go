@@ -29,6 +29,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
+	"github.com/vmware-tanzu/velero/pkg/cmd/util/serverconfig"
 )
 
 func NewGetCommand(f client.Factory, use string) *cobra.Command {
@@ -85,7 +86,12 @@ func NewGetCommand(f client.Factory, use string) *cobra.Command {
 				}
 			}
 
-			_, err = output.PrintWithFormat(c, locations)
+			kubeClient, err := f.KubeClient()
+			cmd.CheckError(err)
+
+			serverValidationFrequency := serverconfig.GetStoreValidationFrequency(context.Background(), kubeClient, f.Namespace())
+
+			_, err = output.PrintWithFormat(c, locations, output.WithServerValidationFrequency(serverValidationFrequency))
 			cmd.CheckError(err)
 		},
 	}
