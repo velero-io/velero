@@ -107,7 +107,6 @@ var testSuitePassed bool
 
 func TestE2e(t *testing.T) {
 	flag.Parse()
-	By("Install test resources before testing TestE2e")
 	// Skip running E2E tests when running only "short" tests because:
 	// 1. E2E tests are long running tests involving installation of Velero and performing backup and restore operations.
 	// 2. E2E tests require a Kubernetes cluster to install and run velero which further requires more configuration. See above referenced command line flags.
