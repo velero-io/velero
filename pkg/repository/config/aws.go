@@ -99,7 +99,7 @@ func GetS3Credentials(config map[string]string) (*aws.Credentials, error) {
 
 		// TODO: Handle expiring tokens
 		if cfg.Credentials.CanExpire {
-			return nil, errors.New("credentials from bsl credential configuration have to be static")
+			return nil, errors.New("credentials from BSL configuration must not expire; use static keys or rely on IAM role assumption via the default credential chain")
 		}
 
 		return &cfg.Credentials, nil
