@@ -77,6 +77,13 @@ linters:
       # switch
       default-signifies-exhaustive: false
 
+    forbidigo:
+      forbid:
+        # context.TODO() defeats cancellation and timeout propagation. Use the
+        # context from the caller, reconcile request, or cobra command instead.
+        - pattern: ^context\.TODO$
+          msg: "do not use context.TODO; propagate a real context so cancellation and timeouts work"
+
     funlen:
       lines: 60
       statements: 40
@@ -316,6 +323,7 @@ linters:
     - errcheck
     - errchkjson
     - exptostd
+    - forbidigo
     - ginkgolinter
     #- goconst # Disable goconst for now, as it reports a lot of false positives. We can enable it later after refactoring the codebase to reduce the number of string literals.
     - goheader
@@ -360,6 +368,7 @@ linters:
       - path: ".*_test.go$"
         linters:
           - errcheck
+          - forbidigo
           - goconst
           - gosec
           - govet
@@ -369,12 +378,58 @@ linters:
       - path: test/
         linters:
           - errcheck
+          - forbidigo
           - goconst
           - gosec
           - nilerr
           - staticcheck
           - unparam
           - unused
+      # These files still call context.TODO(); remove a file from this list
+      # once a caller context is threaded through it.
+      - { path: ^internal/delete/actions/csi/volumesnapshotcontent_action\.go$, linters: [forbidigo] }
+      - { path: ^internal/volume/volumes_information\.go$, linters: [forbidigo] }
+      - { path: ^pkg/backup/actions/csi/pvc_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/backup/actions/csi/volumesnapshot_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/backup/actions/remap_crd_version_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/backup/snapshots\.go$, linters: [forbidigo] }
+      - { path: ^pkg/client/dynamic\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/backup/create\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/backup/delete\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/backup/get\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/debug/debug\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/plugin/add\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/plugin/remove\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/repo/get\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/restore/create\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/restore/delete\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/restore/describe\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/restore/get\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/schedule/create\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/schedule/delete\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/schedule/describe\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/schedule/get\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/schedule/pause\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/snapshotlocation/create\.go$, linters: [forbidigo] }
+      - { path: ^pkg/cmd/cli/snapshotlocation/get\.go$, linters: [forbidigo] }
+      - { path: ^pkg/controller/backup_repository_controller\.go$, linters: [forbidigo] }
+      - { path: ^pkg/controller/pod_volume_restore_controller\.go$, linters: [forbidigo] }
+      - { path: ^pkg/controller/restore_controller\.go$, linters: [forbidigo] }
+      - { path: ^pkg/podvolume/backupper\.go$, linters: [forbidigo] }
+      - { path: ^pkg/podvolume/restorer\.go$, linters: [forbidigo] }
+      - { path: ^pkg/repository/keys/keys\.go$, linters: [forbidigo] }
+      - { path: ^pkg/repository/maintenance/maintenance\.go$, linters: [forbidigo] }
+      - { path: ^pkg/restore/actions/change_image_name_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/restore/actions/change_storageclass_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/restore/actions/csi/pvc_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/restore/actions/pod_volume_restore_action\.go$, linters: [forbidigo] }
+      - { path: ^pkg/restore/restore\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/actionhelpers/rbac\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/csi/volume_snapshot\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/kube/pvc_pv\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/kube/secrets\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/kube/utils\.go$, linters: [forbidigo] }
+      - { path: ^pkg/util/podvolume/pod_volume\.go$, linters: [forbidigo] }
       - path: ".*data_upload_controller_test.go$"
         linters:
           - dupword
