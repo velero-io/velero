@@ -275,6 +275,10 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Infof("%v concurrent backups are already running, leaving %v queued", r.concurrentBackups, backup.Name)
 			return ctrl.Result{}, nil
 		}
+		if r.backupTracker.IsTracked(backup.Namespace, backup.Name) {
+			log.Debugf("Backup %v is already running, skipping", backup.Name)
+			return ctrl.Result{}, nil
+		}
 		earlierBackups := lister.earlierThan(backup.Status.QueuePosition)
 		foundConflict, conflictBackup, clusterNamespaces, err := r.detectNamespaceConflict(ctx, backup, earlierBackups)
 		if err != nil {
@@ -299,7 +303,7 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// (Add then deferred Delete) before this call, leaking a
 		// tracker entry that nothing would ever clean up.
 		r.backupTracker.AddReadyToStart(backup.Namespace, backup.Name)
-		if err := kube.PatchResource(original, backup, r.Client); err != nil {
+		if err := r.Client.Patch(ctx, backup, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
 			r.backupTracker.Delete(backup.Namespace, backup.Name)
 			return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", backup.Status.Phase)
 		}

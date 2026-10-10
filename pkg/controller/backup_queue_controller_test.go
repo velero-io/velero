@@ -321,3 +321,120 @@ func TestBackupQueueReconcilerTrackerRolledBackWhenPatchFails(t *testing.T) {
 	assert.Equal(t, 0, backupTracker.RunningCount(),
 		"tracker entry must be rolled back when the ReadyToStart patch fails")
 }
+
+func staleGetClient(t *testing.T, backup *velerov1api.Backup, stale *bool, frozen **velerov1api.Backup) ctrlClient.Client {
+	t.Helper()
+	return velerotest.NewFakeControllerRuntimeClientBuilder(t).
+		WithObjects(backup).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c ctrlClient.WithWatch, key ctrlClient.ObjectKey, obj ctrlClient.Object, opts ...ctrlClient.GetOption) error {
+				if b, ok := obj.(*velerov1api.Backup); ok && *stale && key.Name == backup.Name {
+					(*frozen).DeepCopyInto(b)
+					return nil
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+}
+
+func setBackupPhase(t *testing.T, c ctrlClient.Client, ns, name string, phase velerov1api.BackupPhase) {
+	t.Helper()
+	b := &velerov1api.Backup{}
+	require.NoError(t, c.Get(t.Context(), types.NamespacedName{Namespace: ns, Name: name}, b))
+	original := b.DeepCopy()
+	b.Status.Phase = phase
+	require.NoError(t, c.Patch(t.Context(), b, ctrlClient.MergeFrom(original)))
+}
+
+func TestBackupQueueReconcilerStaleQueuedBackupIsNotDequeuedTwice(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseQueued).QueuePosition(1).Result()
+
+	stale := false
+	frozen := &velerov1api.Backup{}
+	fakeClient := staleGetClient(t, backup, &stale, &frozen)
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}, frozen))
+
+	backupTracker := NewBackupTracker()
+	r := NewBackupQueueReconciler(fakeClient, scheme, logrus.New().WithField("controller", "backup-queue-test"), 5, backupTracker)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}}
+
+	_, err := r.Reconcile(t.Context(), req)
+	require.NoError(t, err)
+
+	backupTracker.Add(backup.Namespace, backup.Name)
+	setBackupPhase(t, fakeClient, backup.Namespace, backup.Name, velerov1api.BackupPhaseInProgress)
+	setBackupPhase(t, fakeClient, backup.Namespace, backup.Name, velerov1api.BackupPhaseCompleted)
+	backupTracker.Delete(backup.Namespace, backup.Name)
+
+	stale = true
+	_, _ = r.Reconcile(t.Context(), req)
+	stale = false
+
+	got := &velerov1api.Backup{}
+	require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, got))
+	assert.Equal(t, velerov1api.BackupPhaseCompleted, got.Status.Phase)
+	assert.Equal(t, 0, backupTracker.RunningCount())
+}
+
+func TestBackupQueueReconcilerStaleQueuedBackupWhileRunning(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseQueued).QueuePosition(1).Result()
+
+	stale := false
+	frozen := &velerov1api.Backup{}
+	fakeClient := staleGetClient(t, backup, &stale, &frozen)
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}, frozen))
+
+	backupTracker := NewBackupTracker()
+	r := NewBackupQueueReconciler(fakeClient, scheme, logrus.New().WithField("controller", "backup-queue-test"), 5, backupTracker)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}}
+
+	_, err := r.Reconcile(t.Context(), req)
+	require.NoError(t, err)
+
+	setBackupPhase(t, fakeClient, backup.Namespace, backup.Name, velerov1api.BackupPhaseInProgress)
+	backupTracker.Add(backup.Namespace, backup.Name)
+
+	stale = true
+	_, _ = r.Reconcile(t.Context(), req)
+	stale = false
+
+	got := &velerov1api.Backup{}
+	require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, got))
+	assert.Equal(t, velerov1api.BackupPhaseInProgress, got.Status.Phase)
+	assert.True(t, backupTracker.Contains(backup.Namespace, backup.Name))
+	assert.Equal(t, 1, backupTracker.RunningCount())
+}
+
+func TestBackupQueueReconcilerStaleQueuedBackupWhileReadyToStart(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-1").Phase(velerov1api.BackupPhaseQueued).QueuePosition(1).Result()
+
+	stale := false
+	frozen := &velerov1api.Backup{}
+	fakeClient := staleGetClient(t, backup, &stale, &frozen)
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}, frozen))
+
+	backupTracker := NewBackupTracker()
+	r := NewBackupQueueReconciler(fakeClient, scheme, logrus.New().WithField("controller", "backup-queue-test"), 5, backupTracker)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}}
+
+	_, err := r.Reconcile(t.Context(), req)
+	require.NoError(t, err)
+
+	stale = true
+	result, err := r.Reconcile(t.Context(), req)
+	stale = false
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	got := &velerov1api.Backup{}
+	require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, got))
+	assert.Equal(t, velerov1api.BackupPhaseReadyToStart, got.Status.Phase)
+	assert.Equal(t, 1, backupTracker.RunningCount())
+}
