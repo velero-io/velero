@@ -40,7 +40,7 @@ Please provide the output of the following commands (Pasting long output into a 
 
 **Vote on this issue!**
 
-This is an invitation to the Velero community to vote on issues, you can see the project's [top voted issues listed here](https://github.com/vmware-tanzu/velero/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc).  
+This is an invitation to the Velero community to vote on issues, you can see the project's [top voted issues listed here](https://github.com/velero-io/velero/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc).  
 Use the "reaction smiley face" up to the right of this comment to vote.
 
 - :+1: for "I would like to see this bug fixed as soon as possible"
