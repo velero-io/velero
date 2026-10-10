@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-cert-manager
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables cert-manager PKI, ACME protocol state machines, solver Ingresses, and TLS Secrets.
+  inScope: |
+    - group: cert-manager.io
+    - group: acme.cert-manager.io
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+
+  # 2. specRefPaths: cert-manager relies on metadata.ownerReferences and spec.secretName.
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Empty (ACME controllers do not require quiescing).
+  quiesceOnRestore: ""

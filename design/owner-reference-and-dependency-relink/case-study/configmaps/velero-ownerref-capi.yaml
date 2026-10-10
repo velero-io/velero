@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-capi
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Cluster API core, controlplane, bootstrap, infrastructure, ipam, and addons.
+  # PersistentVolumeClaim is not in the CAPI baseline; opt in via a restore-level ConfigMap.
+  inScope: |
+    - group: cluster.x-k8s.io
+    - group: controlplane.cluster.x-k8s.io
+    - group: bootstrap.cluster.x-k8s.io
+    - group: infrastructure.cluster.x-k8s.io
+    - group: ipam.cluster.x-k8s.io
+    - group: addons.cluster.x-k8s.io
+
+  # 2. specRefPaths defines dotted spec.* paths pointing to parent/child resources whose UIDs must be remapped.
+  specRefPaths: |
+    - group: cluster.x-k8s.io
+      kind: Cluster
+      paths:
+        - spec.infrastructureRef
+        - spec.controlPlaneRef
+    - group: cluster.x-k8s.io
+      kind: Machine
+      paths:
+        - spec.infrastructureRef
+        - spec.bootstrap.configRef
+
+  # 3. quiesceOnRestore defines temporary pause annotations injected during Phase 1A create
+  # to silence declarative controllers while dependent children are restored.
+  # Annotations are removed automatically after Phase 1B remapping.
+  quiesceOnRestore: |
+    - group: cluster.x-k8s.io
+      kind: Cluster
+      annotationKey: cluster.x-k8s.io/paused
+      annotationValue: ""
