@@ -162,6 +162,47 @@ func TestCreateOptions_ValidateBackupType(t *testing.T) {
 	})
 }
 
+func TestCreateOptions_ValidateTTL(t *testing.T) {
+	// A zero TTL is valid and means "use the server's default TTL", so only
+	// negative values must be rejected.
+	tests := []struct {
+		name        string
+		ttl         time.Duration
+		expectedErr string
+	}{
+		{
+			name: "zero TTL is allowed and means use the default",
+			ttl:  0,
+		},
+		{
+			name: "positive TTL is allowed",
+			ttl:  time.Hour,
+		},
+		{
+			name:        "negative TTL is rejected",
+			ttl:         -time.Hour,
+			expectedErr: "--ttl must be non-negative",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := &factorymocks.Factory{}
+			cmd := NewCreateCommand(f, "")
+
+			o := NewCreateOptions()
+			o.TTL = test.ttl
+
+			err := o.Validate(cmd, []string{"backup-1"}, f)
+			if test.expectedErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, test.expectedErr)
+		})
+	}
+}
+
 func TestCreateOptions_BuildBackupFromSchedule(t *testing.T) {
 	o := NewCreateOptions()
 	o.FromSchedule = "test"

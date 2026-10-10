@@ -238,6 +238,14 @@ func (o *CreateOptions) Validate(c *cobra.Command, args []string, f client.Facto
 			"They cannot be used together")
 	}
 
+	// A negative TTL is never meaningful: the backup's expiration is computed as
+	// "now + TTL", so it would be in the past and the backup would be eligible for
+	// garbage collection as soon as it is created. Note that a zero TTL is valid and
+	// means "use the server's default TTL".
+	if o.TTL < 0 {
+		return fmt.Errorf("--ttl must be non-negative")
+	}
+
 	if o.StorageLocation != "" {
 		location := &velerov1api.BackupStorageLocation{}
 		if err := o.client.Get(context.Background(), kbclient.ObjectKey{
