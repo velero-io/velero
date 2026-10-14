@@ -19,8 +19,10 @@ package downloadrequest
 import (
 	"compress/gzip"
 	"context"
+	"crypto/md5" //nolint:gosec // G501: Hash is required by S3 SSE-C
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,21 +49,6 @@ var unzipLimit int64 = 1024 * 1024 * 1024 // 1GB limit
 // fallback rather than the usual case.
 var ErrDownloadRequestFailed = errors.New("download request failed, check velero server logs for errors")
 
-func Stream(
-	ctx context.Context,
-	kbClient kbclient.Client,
-	namespace, name string,
-	kind veleroV1api.DownloadTargetKind,
-	w io.Writer,
-	timeout time.Duration,
-	insecureSkipTLSVerify bool,
-	caCertFile string,
-) error {
-	return StreamWithBSLCACert(ctx, kbClient, namespace, name, kind, w, timeout, insecureSkipTLSVerify, caCertFile, "")
-}
-
-// StreamWithBSLCACert is like Stream but accepts an additional bslCACert parameter
-// that contains the cacert from the BackupStorageLocation config
 func StreamWithBSLCACert(
 	ctx context.Context,
 	kbClient kbclient.Client,
@@ -72,6 +59,7 @@ func StreamWithBSLCACert(
 	insecureSkipTLSVerify bool,
 	caCertFile string,
 	bslCACert string,
+	encryptionKey string,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -81,7 +69,7 @@ func StreamWithBSLCACert(
 		return err
 	}
 
-	if err := download(ctx, downloadURL, kind, w, insecureSkipTLSVerify, caCertFile, bslCACert); err != nil {
+	if err := download(ctx, downloadURL, kind, w, insecureSkipTLSVerify, caCertFile, bslCACert, encryptionKey); err != nil {
 		return err
 	}
 
@@ -142,6 +130,7 @@ func download(
 	insecureSkipTLSVerify bool,
 	caCertFile string,
 	caCertByteString string,
+	encryptionKey string,
 ) error {
 	var caPool *x509.CertPool
 	var err error
@@ -192,6 +181,13 @@ func download(
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return err
+	}
+
+	if encryptionKey != "" {
+		httpReq.Header.Set("x-amz-server-side-encryption-customer-algorithm", "AES256")
+		httpReq.Header.Set("x-amz-server-side-encryption-customer-key", base64.StdEncoding.EncodeToString([]byte(encryptionKey)))
+		hash := md5.Sum([]byte(encryptionKey)) //nolint:gosec // G401: Hash is required by S3 SSE-C
+		httpReq.Header.Set("x-amz-server-side-encryption-customer-key-md5", base64.StdEncoding.EncodeToString(hash[:]))
 	}
 
 	resp, err := httpClient.Do(httpReq)

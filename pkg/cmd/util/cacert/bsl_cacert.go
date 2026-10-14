@@ -18,6 +18,7 @@ package cacert
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
@@ -28,52 +29,95 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
-// GetCACertFromBackup fetches the BackupStorageLocation for a backup and returns its cacert
-func GetCACertFromBackup(ctx context.Context, client kbclient.Client, namespace string, backup *velerov1api.Backup) (string, error) {
-	return GetCACertFromBSL(ctx, client, namespace, backup.Spec.StorageLocation)
-}
-
-// GetCACertFromRestore fetches the BackupStorageLocation for a restore's backup and returns its cacert
-func GetCACertFromRestore(ctx context.Context, client kbclient.Client, namespace string, restore *velerov1api.Restore) (string, error) {
-	// First get the backup that this restore references
+func GetBackupFromRestore(ctx context.Context, client kbclient.Client, restore *velerov1api.Restore) (*velerov1api.Backup, error) {
 	backup := &velerov1api.Backup{}
 	key := kbclient.ObjectKey{
-		Namespace: namespace,
+		Namespace: restore.Namespace,
 		Name:      restore.Spec.BackupName,
 	}
-
 	if err := client.Get(ctx, key, backup); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Backup not found is not a fatal error for cacert retrieval
-			return "", nil
+			return nil, nil
 		}
-		return "", errors.Wrapf(err, "error getting backup %s", restore.Spec.BackupName)
-	}
 
-	return GetCACertFromBackup(ctx, client, namespace, backup)
+		return nil, errors.Wrapf(err, "error getting backup %s", restore.Spec.BackupName)
+	}
+	return backup, nil
 }
 
-// GetCACertFromBSL fetches a BackupStorageLocation directly and returns its cacert
-// Priority order: caCertRef (from Secret) > caCert (inline, deprecated)
-func GetCACertFromBSL(ctx context.Context, client kbclient.Client, namespace, bslName string) (string, error) {
-	if bslName == "" {
-		return "", nil
+func GetBSLFromRestore(ctx context.Context, client kbclient.Client, restore *velerov1api.Restore) (*velerov1api.BackupStorageLocation, error) {
+	backup, err := GetBackupFromRestore(ctx, client, restore)
+	if err != nil {
+		return nil, err
 	}
+	if backup == nil {
+		return nil, nil
+	}
+	return GetBSLFromBackup(ctx, client, backup)
+}
 
+func GetBSLFromBackup(ctx context.Context, client kbclient.Client, backup *velerov1api.Backup) (*velerov1api.BackupStorageLocation, error) {
+	return GetBSL(ctx, client, backup.Namespace, backup.Spec.StorageLocation)
+}
+
+func GetBSL(ctx context.Context, client kbclient.Client, namespace string, bslName string) (*velerov1api.BackupStorageLocation, error) {
+	if bslName == "" {
+		return nil, nil
+	}
 	bsl := &velerov1api.BackupStorageLocation{}
 	key := kbclient.ObjectKey{
 		Namespace: namespace,
 		Name:      bslName,
 	}
-
 	if err := client.Get(ctx, key, bsl); err != nil {
 		if apierrors.IsNotFound(err) {
 			// BSL not found is not a fatal error, just means no cacert
-			return "", nil
+			return nil, nil
 		}
-		return "", errors.Wrapf(err, "error getting backup storage location %s", bslName)
+		return nil, errors.Wrapf(err, "error getting backup storage location %s", bslName)
 	}
+	return bsl, nil
+}
 
+func GetSSECKeyFromBSL(ctx context.Context, client kbclient.Client, bsl *velerov1api.BackupStorageLocation) (string, error) {
+	if bsl == nil {
+		return "", nil
+	}
+	secretPath, exists := bsl.Spec.Config["customerKeyEncryptionSecret"]
+	if !exists {
+		return "", nil
+	}
+	secretPathParts := strings.Split(secretPath, "/")
+	if len(secretPathParts) != 2 {
+		return "", errors.Errorf("bsl %s .spec.config.customerKeyEncryptionSecret is malformed", bsl.Name)
+	}
+	secretName, secretKey := secretPathParts[0], secretPathParts[1]
+
+	secret := &corev1api.Secret{}
+	key := kbclient.ObjectKey{
+		Namespace: bsl.Namespace,
+		Name:      secretName,
+	}
+	if err := client.Get(ctx, key, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", errors.Errorf("secret %s not found in namespace %s", key.Name, key.Namespace)
+		}
+		return "", errors.Wrapf(err, "error getting secret %s", secretName)
+	}
+	encryptionKey, exists := secret.Data[secretKey]
+	if !exists {
+		return "", errors.Errorf("key %s not found in secret %s", secretKey, secret.Name)
+	}
+	return string(encryptionKey), nil
+}
+
+// GetCACertFromBSL fetches a BackupStorageLocation directly and returns its cacert
+// Priority order: caCertRef (from Secret) > caCert (inline, deprecated)
+func GetCACertFromBSL(ctx context.Context, client kbclient.Client, bsl *velerov1api.BackupStorageLocation) (string, error) {
+	if bsl == nil {
+		return "", nil
+	}
 	if bsl.Spec.ObjectStorage == nil {
 		return "", nil
 	}
@@ -84,13 +128,13 @@ func GetCACertFromBSL(ctx context.Context, client kbclient.Client, namespace, bs
 		secret := &corev1api.Secret{}
 		secretKey := types.NamespacedName{
 			Name:      bsl.Spec.ObjectStorage.CACertRef.Name,
-			Namespace: namespace,
+			Namespace: bsl.Namespace,
 		}
 
 		if err := client.Get(ctx, secretKey, secret); err != nil {
 			if apierrors.IsNotFound(err) {
 				return "", errors.Errorf("certificate secret %s not found in namespace %s",
-					bsl.Spec.ObjectStorage.CACertRef.Name, namespace)
+					bsl.Spec.ObjectStorage.CACertRef.Name, bsl.Namespace)
 			}
 			return "", errors.Wrapf(err, "error getting certificate secret %s",
 				bsl.Spec.ObjectStorage.CACertRef.Name)

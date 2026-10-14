@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -51,6 +52,20 @@ func DescribeRestore(
 	caCertFile string,
 ) string {
 	return Describe(func(d *Describer) {
+		bsl, err := cacert.GetBSLFromRestore(context.Background(), kbClient, restore)
+		if err != nil {
+			// Log the error but don't fail - we can still try to download without the BSL
+			fmt.Fprintf(os.Stderr, "WARNING: Error getting BSL of restore: %v\n", err)
+		}
+		bslCACert, err := cacert.GetCACertFromBSL(context.Background(), kbClient, bsl)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: Error getting cacert from BSL: %v\n", err)
+		}
+		encryptionKey, err := cacert.GetSSECKeyFromBSL(context.Background(), kbClient, bsl)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: Error getting SSE-C key from BSL: %v\n", err)
+		}
+
 		d.DescribeMetadata(restore.ObjectMeta)
 
 		d.Println()
@@ -110,7 +125,7 @@ func DescribeRestore(
 			}
 		}
 
-		describeRestoreResults(ctx, kbClient, d, restore, insecureSkipTLSVerify, caCertFile)
+		describeRestoreResults(ctx, kbClient, d, restore, insecureSkipTLSVerify, caCertFile, bslCACert, encryptionKey)
 
 		d.Println()
 		d.Printf("Backup:\t%s\n", restore.Spec.BackupName)
@@ -162,17 +177,9 @@ func DescribeRestore(
 			describePodVolumeRestores(d, podVolumeRestores, details)
 		}
 
-		// Get BSL cacert if available
-		bslCACert, err := cacert.GetCACertFromRestore(ctx, kbClient, restore.Namespace, restore)
-		if err != nil {
-			// Log the error but don't fail - we can still try to download without the BSL cacert
-			d.Printf("WARNING: Error getting cacert from BSL: %v\n", err)
-			bslCACert = ""
-		}
-
 		buf := new(bytes.Buffer)
 		if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreVolumeInfo,
-			buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertFile, bslCACert); err == nil {
+			buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertFile, bslCACert, encryptionKey); err == nil {
 			var restoreVolInfo []volume.RestoreVolumeInfo
 			if err := json.NewDecoder(buf).Decode(&restoreVolInfo); err != nil {
 				d.Printf("\t<error reading restore volume info: %v>\n", err)
@@ -218,7 +225,7 @@ func DescribeRestore(
 		describeUploaderConfigForRestore(d, restore.Spec)
 
 		d.Println()
-		describeRestoreItemOperations(ctx, kbClient, d, restore, details, insecureSkipTLSVerify, caCertFile)
+		describeRestoreItemOperations(ctx, kbClient, d, restore, details, insecureSkipTLSVerify, caCertFile, bslCACert, encryptionKey)
 
 		if restore.Status.HookStatus != nil {
 			d.Println()
@@ -228,7 +235,7 @@ func DescribeRestore(
 
 		if details {
 			d.Println()
-			describeRestoreResourceList(ctx, kbClient, d, restore, insecureSkipTLSVerify, caCertFile)
+			describeRestoreResourceList(ctx, kbClient, d, restore, insecureSkipTLSVerify, caCertFile, bslCACert, encryptionKey)
 		}
 	})
 }
@@ -247,7 +254,7 @@ func describeUploaderConfigForRestore(d *Describer, spec velerov1api.RestoreSpec
 	}
 }
 
-func describeRestoreItemOperations(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, details bool, insecureSkipTLSVerify bool, caCertPath string) {
+func describeRestoreItemOperations(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, details bool, insecureSkipTLSVerify bool, caCertPath string, bslCACert string, encryptionKey string) {
 	status := restore.Status
 	if status.RestoreItemOperationsAttempted > 0 {
 		if !details {
@@ -255,16 +262,8 @@ func describeRestoreItemOperations(ctx context.Context, kbClient kbclient.Client
 			return
 		}
 
-		// Get BSL cacert if available
-		bslCACert, err := cacert.GetCACertFromRestore(ctx, kbClient, restore.Namespace, restore)
-		if err != nil {
-			// Log the error but don't fail - we can still try to download without the BSL cacert
-			d.Printf("WARNING: Error getting cacert from BSL: %v\n", err)
-			bslCACert = ""
-		}
-
 		buf := new(bytes.Buffer)
-		if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreItemOperations, buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert); err != nil {
+		if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreItemOperations, buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert, encryptionKey); err != nil {
 			d.Printf("Restore Item Operations:\t<error getting operation info: %v>\n", err)
 			return
 		}
@@ -282,23 +281,15 @@ func describeRestoreItemOperations(ctx context.Context, kbClient kbclient.Client
 	}
 }
 
-func describeRestoreResults(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, insecureSkipTLSVerify bool, caCertPath string) {
+func describeRestoreResults(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, insecureSkipTLSVerify bool, caCertPath string, bslCACert string, encryptionKey string) {
 	if restore.Status.Warnings == 0 && restore.Status.Errors == 0 {
 		return
-	}
-
-	// Get BSL cacert if available
-	bslCACert, err := cacert.GetCACertFromRestore(ctx, kbClient, restore.Namespace, restore)
-	if err != nil {
-		// Log the error but don't fail - we can still try to download without the BSL cacert
-		d.Printf("WARNING: Error getting cacert from BSL: %v\n", err)
-		bslCACert = ""
 	}
 
 	var buf bytes.Buffer
 	var resultMap map[string]results.Result
 
-	if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreResults, &buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert); err != nil {
+	if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreResults, &buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert, encryptionKey); err != nil {
 		d.Printf("Warnings:\t<error getting warnings: %v>\n\nErrors:\t<error getting errors: %v>\n", err, err)
 		return
 	}
@@ -497,17 +488,9 @@ func groupRestoresByPhase(restores []velerov1api.PodVolumeRestore) map[string][]
 	return restoresByPhase
 }
 
-func describeRestoreResourceList(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, insecureSkipTLSVerify bool, caCertPath string) {
-	// Get BSL cacert if available
-	bslCACert, err := cacert.GetCACertFromRestore(ctx, kbClient, restore.Namespace, restore)
-	if err != nil {
-		// Log the error but don't fail - we can still try to download without the BSL cacert
-		d.Printf("WARNING: Error getting cacert from BSL: %v\n", err)
-		bslCACert = ""
-	}
-
+func describeRestoreResourceList(ctx context.Context, kbClient kbclient.Client, d *Describer, restore *velerov1api.Restore, insecureSkipTLSVerify bool, caCertPath string, bslCACert string, encryptionKey string) {
 	buf := new(bytes.Buffer)
-	if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreResourceList, buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert); err != nil {
+	if err := downloadrequest.StreamWithBSLCACert(ctx, kbClient, restore.Namespace, restore.Name, velerov1api.DownloadTargetKindRestoreResourceList, buf, downloadRequestTimeout, insecureSkipTLSVerify, caCertPath, bslCACert, encryptionKey); err != nil {
 		if err == downloadrequest.ErrNotFound {
 			d.Println("Resource List:\t<restore resource list not found>")
 		} else {

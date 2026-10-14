@@ -31,163 +31,6 @@ import (
 	"github.com/velero-io/velero/pkg/util"
 )
 
-func TestGetCACertFromBackup(t *testing.T) {
-	testCases := []struct {
-		name           string
-		backup         *velerov1api.Backup
-		bsl            *velerov1api.BackupStorageLocation
-		expectedCACert string
-		expectedError  bool
-	}{
-		{
-			name: "backup with BSL containing cacert",
-			backup: builder.ForBackup("test-ns", "test-backup").
-				StorageLocation("test-bsl").
-				Result(),
-			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
-				Provider("aws").
-				Bucket("test-bucket").
-				CACert([]byte("test-cacert-content")).
-				Result(),
-			expectedCACert: "test-cacert-content",
-			expectedError:  false,
-		},
-		{
-			name: "backup with BSL without cacert",
-			backup: builder.ForBackup("test-ns", "test-backup").
-				StorageLocation("test-bsl").
-				Result(),
-			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
-				Provider("aws").
-				Bucket("test-bucket").
-				Result(),
-			expectedCACert: "",
-			expectedError:  false,
-		},
-		{
-			name: "backup without storage location",
-			backup: builder.ForBackup("test-ns", "test-backup").
-				Result(),
-			bsl:            nil,
-			expectedCACert: "",
-			expectedError:  false,
-		},
-		{
-			name: "BSL not found",
-			backup: builder.ForBackup("test-ns", "test-backup").
-				StorageLocation("missing-bsl").
-				Result(),
-			bsl:            nil,
-			expectedCACert: "",
-			expectedError:  false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var objs []runtime.Object
-			objs = append(objs, tc.backup)
-			if tc.bsl != nil {
-				objs = append(objs, tc.bsl)
-			}
-
-			fakeClient := fake.NewClientBuilder().
-				WithScheme(util.VeleroScheme).
-				WithRuntimeObjects(objs...).
-				Build()
-
-			cacert, err := GetCACertFromBackup(t.Context(), fakeClient, "test-ns", tc.backup)
-
-			if tc.expectedError {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tc.expectedCACert, cacert)
-			}
-		})
-	}
-}
-
-func TestGetCACertFromRestore(t *testing.T) {
-	testCases := []struct {
-		name           string
-		restore        *velerov1api.Restore
-		backup         *velerov1api.Backup
-		bsl            *velerov1api.BackupStorageLocation
-		expectedCACert string
-		expectedError  bool
-	}{
-		{
-			name: "restore with backup having BSL containing cacert",
-			restore: builder.ForRestore("test-ns", "test-restore").
-				Backup("test-backup").
-				Result(),
-			backup: builder.ForBackup("test-ns", "test-backup").
-				StorageLocation("test-bsl").
-				Result(),
-			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
-				Provider("aws").
-				Bucket("test-bucket").
-				CACert([]byte("test-cacert-content")).
-				Result(),
-			expectedCACert: "test-cacert-content",
-			expectedError:  false,
-		},
-		{
-			name: "restore with backup not found",
-			restore: builder.ForRestore("test-ns", "test-restore").
-				Backup("missing-backup").
-				Result(),
-			backup:         nil,
-			bsl:            nil,
-			expectedCACert: "",
-			expectedError:  false,
-		},
-		{
-			name: "restore with backup having BSL without cacert",
-			restore: builder.ForRestore("test-ns", "test-restore").
-				Backup("test-backup").
-				Result(),
-			backup: builder.ForBackup("test-ns", "test-backup").
-				StorageLocation("test-bsl").
-				Result(),
-			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
-				Provider("aws").
-				Bucket("test-bucket").
-				Result(),
-			expectedCACert: "",
-			expectedError:  false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var objs []runtime.Object
-			objs = append(objs, tc.restore)
-			if tc.backup != nil {
-				objs = append(objs, tc.backup)
-			}
-			if tc.bsl != nil {
-				objs = append(objs, tc.bsl)
-			}
-
-			fakeClient := fake.NewClientBuilder().
-				WithScheme(util.VeleroScheme).
-				WithRuntimeObjects(objs...).
-				Build()
-
-			cacert, err := GetCACertFromRestore(t.Context(), fakeClient, "test-ns", tc.restore)
-
-			if tc.expectedError {
-				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tc.expectedCACert, cacert)
-			}
-		})
-	}
-}
-
 func TestGetCACertFromBSL(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -197,8 +40,7 @@ func TestGetCACertFromBSL(t *testing.T) {
 		expectedError  bool
 	}{
 		{
-			name:    "BSL with cacert",
-			bslName: "test-bsl",
+			name: "BSL with cacert",
 			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
 				Provider("aws").
 				Bucket("test-bucket").
@@ -208,8 +50,7 @@ func TestGetCACertFromBSL(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name:    "BSL without cacert",
-			bslName: "test-bsl",
+			name: "BSL without cacert",
 			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
 				Provider("aws").
 				Bucket("test-bucket").
@@ -218,22 +59,7 @@ func TestGetCACertFromBSL(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name:           "empty BSL name",
-			bslName:        "",
-			bsl:            nil,
-			expectedCACert: "",
-			expectedError:  false,
-		},
-		{
-			name:           "BSL not found",
-			bslName:        "missing-bsl",
-			bsl:            nil,
-			expectedCACert: "",
-			expectedError:  false,
-		},
-		{
-			name:    "BSL with invalid CA cert format",
-			bslName: "test-bsl",
+			name: "BSL with invalid CA cert format",
 			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
 				Provider("aws").
 				Bucket("test-bucket").
@@ -243,8 +69,7 @@ func TestGetCACertFromBSL(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name:    "BSL with malformed PEM certificate",
-			bslName: "test-bsl",
+			name: "BSL with malformed PEM certificate",
 			bsl: builder.ForBackupStorageLocation("test-ns", "test-bsl").
 				Provider("aws").
 				Bucket("test-bucket").
@@ -254,8 +79,7 @@ func TestGetCACertFromBSL(t *testing.T) {
 			expectedError:  false,
 		},
 		{
-			name:    "BSL with nil config",
-			bslName: "test-bsl",
+			name: "BSL with nil config",
 			bsl: &velerov1api.BackupStorageLocation{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "test-ns",
@@ -274,16 +98,13 @@ func TestGetCACertFromBSL(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var objs []runtime.Object
-			if tc.bsl != nil {
-				objs = append(objs, tc.bsl)
-			}
 
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(util.VeleroScheme).
 				WithRuntimeObjects(objs...).
 				Build()
 
-			cacert, err := GetCACertFromBSL(t.Context(), fakeClient, "test-ns", tc.bslName)
+			cacert, err := GetCACertFromBSL(t.Context(), fakeClient, tc.bsl)
 
 			if tc.expectedError {
 				assert.Error(t, err)
@@ -529,9 +350,6 @@ func TestGetCACertFromBSL_WithCACertRef(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var objs []runtime.Object
-			if tc.bsl != nil {
-				objs = append(objs, tc.bsl)
-			}
 			if tc.secret != nil {
 				objs = append(objs, tc.secret)
 			}
@@ -545,7 +363,7 @@ func TestGetCACertFromBSL_WithCACertRef(t *testing.T) {
 				WithRuntimeObjects(objs...).
 				Build()
 
-			cacert, err := GetCACertFromBSL(t.Context(), fakeClient, "test-ns", tc.bslName)
+			cacert, err := GetCACertFromBSL(t.Context(), fakeClient, tc.bsl)
 
 			if tc.expectedError {
 				require.Error(t, err)
@@ -560,8 +378,8 @@ func TestGetCACertFromBSL_WithCACertRef(t *testing.T) {
 	}
 }
 
-// TestGetCACertFromBackup_ClientError tests error scenarios where client.Get returns non-NotFound errors
-func TestGetCACertFromBackup_ClientError(t *testing.T) {
+// TestGetBSL_ClientError tests error scenarios where client.Get returns non-NotFound errors
+func TestGetBSL_ClientError(t *testing.T) {
 	testCases := []struct {
 		name          string
 		backup        *velerov1api.Backup
@@ -596,15 +414,15 @@ func TestGetCACertFromBackup_ClientError(t *testing.T) {
 				Build()
 
 			// Try to get BSL from wrong namespace to simulate error
-			_, err := GetCACertFromBSL(t.Context(), fakeClient, "wrong-ns", tc.backup.Spec.StorageLocation)
+			_, err := GetBSL(t.Context(), fakeClient, "wrong-ns", tc.backup.Spec.StorageLocation)
 
 			require.NoError(t, err) // Not found errors are handled gracefully
 		})
 	}
 }
 
-// TestGetCACertFromRestore_ClientError tests error scenarios for GetCACertFromRestore
-func TestGetCACertFromRestore_ClientError(t *testing.T) {
+// TestGetBackupFromRestore_ClientError tests error scenarios for GetBackupFromRestore
+func TestGetBackupFromRestore_ClientError(t *testing.T) {
 	testCases := []struct {
 		name          string
 		restore       *velerov1api.Restore
@@ -637,7 +455,7 @@ func TestGetCACertFromRestore_ClientError(t *testing.T) {
 				Build()
 
 			// This should not find the backup in the wrong namespace
-			cacert, err := GetCACertFromRestore(t.Context(), fakeClient, "test-ns", tc.restore)
+			cacert, err := GetBackupFromRestore(t.Context(), fakeClient, tc.restore)
 
 			require.NoError(t, err) // Not found errors are handled gracefully, returning empty string
 			assert.Empty(t, cacert)

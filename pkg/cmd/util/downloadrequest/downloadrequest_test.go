@@ -196,7 +196,7 @@ func TestStream(t *testing.T) {
 			var buf bytes.Buffer
 			ctx := t.Context()
 
-			err := Stream(ctx, fakeClient, "test-ns", "test-backup", tc.target, &buf, tc.timeout, false, "")
+			err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", tc.target, &buf, tc.timeout, false, "", "", "")
 
 			if tc.expectedError {
 				require.Error(t, err)
@@ -429,7 +429,7 @@ func TestStreamWithBSLCACert(t *testing.T) {
 			var buf bytes.Buffer
 			ctx := t.Context()
 
-			err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", tc.target, &buf, tc.timeout, false, "", tc.bslCACert)
+			err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", tc.target, &buf, tc.timeout, false, "", tc.bslCACert, "")
 
 			if tc.expectedError {
 				require.Error(t, err)
@@ -460,6 +460,7 @@ func TestDownload(t *testing.T) {
 		insecureSkipTLSVerify bool
 		caCertFile            string
 		bslCACert             string
+		encryptionKey         string
 		expectedContent       string
 		expectedError         bool
 		errorType             error
@@ -535,6 +536,7 @@ func TestDownload(t *testing.T) {
 				tc.insecureSkipTLSVerify,
 				tc.caCertFile,
 				tc.bslCACert,
+				tc.encryptionKey,
 			)
 
 			if tc.expectedError {
@@ -585,15 +587,10 @@ func TestStreamWithBSLCACertEndToEnd(t *testing.T) {
 		CACert(serverCACertPEM).
 		Result()
 
-	// Create backup that references the BSL
-	backup := builder.ForBackup("test-ns", "test-backup").
-		StorageLocation("test-bsl").
-		Result()
-
 	// Setup fake client with BSL and backup
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(util.VeleroScheme).
-		WithRuntimeObjects(bsl, backup).
+		WithRuntimeObjects(bsl).
 		Build()
 
 	// Helper function to simulate controller updating the DownloadRequest
@@ -619,19 +616,19 @@ func TestStreamWithBSLCACertEndToEnd(t *testing.T) {
 	// First, try to download WITHOUT the CA cert - this should fail
 	simulateControllerUpdate()
 	var bufFail bytes.Buffer
-	err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &bufFail, 5*time.Second, false, "", "")
+	err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &bufFail, 5*time.Second, false, "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "x509") // Should fail with certificate validation error
 
 	// Now get CA cert from BSL through backup
-	cacertStr, err := cacert.GetCACertFromBackup(ctx, fakeClient, "test-ns", backup)
+	cacertStr, err := cacert.GetCACertFromBSL(ctx, fakeClient, bsl)
 	require.NoError(t, err)
 	require.Equal(t, string(serverCACertPEM), cacertStr)
 
 	// Try again with the CA cert - this should succeed
 	simulateControllerUpdate()
 	var bufSuccess bytes.Buffer
-	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &bufSuccess, 5*time.Second, false, "", cacertStr)
+	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &bufSuccess, 5*time.Second, false, "", cacertStr, "")
 	require.NoError(t, err)
 
 	// Verify content was downloaded and decompressed correctly
@@ -663,15 +660,10 @@ func TestBackwardCompatibilityWithoutBSLCACert(t *testing.T) {
 		// No CACert() call - simulating pre-CA cert support
 		Result()
 
-	// Create backup that references the BSL
-	backup := builder.ForBackup("test-ns", "test-backup").
-		StorageLocation("test-bsl").
-		Result()
-
 	// Setup fake client with BSL and backup
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(util.VeleroScheme).
-		WithRuntimeObjects(bsl, backup).
+		WithRuntimeObjects(bsl).
 		Build()
 
 	// Simulate controller updating the DownloadRequest with HTTP URL (old behavior)
@@ -693,7 +685,7 @@ func TestBackwardCompatibilityWithoutBSLCACert(t *testing.T) {
 
 	// Test 1: Stream function (without BSL CA cert parameter) should work
 	var buf1 bytes.Buffer
-	err := Stream(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &buf1, 5*time.Second, false, "")
+	err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupLog, &buf1, 5*time.Second, false, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, testContent, buf1.String())
 
@@ -713,12 +705,12 @@ func TestBackwardCompatibilityWithoutBSLCACert(t *testing.T) {
 	}()
 
 	var buf2 bytes.Buffer
-	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupContents, &buf2, 5*time.Second, false, "", "")
+	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "test-backup", velerov1api.DownloadTargetKindBackupContents, &buf2, 5*time.Second, false, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, testContent, buf2.String())
 
 	// Test 3: Getting CA cert from BSL should return empty string (not error)
-	cacert, err := cacert.GetCACertFromBackup(ctx, fakeClient, "test-ns", backup)
+	cacert, err := cacert.GetCACertFromBSL(ctx, fakeClient, bsl)
 	require.NoError(t, err)
 	assert.Empty(t, cacert)
 }
@@ -760,19 +752,10 @@ func TestMixedEnvironmentHTTPAndHTTPS(t *testing.T) {
 		CACert(serverCACertPEM).
 		Result()
 
-	// Create backups for each BSL
-	backupHTTP := builder.ForBackup("test-ns", "backup-http").
-		StorageLocation("bsl-http").
-		Result()
-
-	backupHTTPS := builder.ForBackup("test-ns", "backup-https").
-		StorageLocation("bsl-https").
-		Result()
-
 	// Setup fake client
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(util.VeleroScheme).
-		WithRuntimeObjects(bslHTTP, bslHTTPS, backupHTTP, backupHTTPS).
+		WithRuntimeObjects(bslHTTP, bslHTTPS).
 		Build()
 
 	ctx := t.Context()
@@ -795,7 +778,7 @@ func TestMixedEnvironmentHTTPAndHTTPS(t *testing.T) {
 	}()
 
 	var bufHTTP bytes.Buffer
-	err := Stream(ctx, fakeClient, "test-ns", "backup-http", velerov1api.DownloadTargetKindBackupContents, &bufHTTP, 5*time.Second, false, "")
+	err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "backup-http", velerov1api.DownloadTargetKindBackupContents, &bufHTTP, 5*time.Second, false, "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, testContentHTTP, bufHTTP.String())
 
@@ -818,12 +801,12 @@ func TestMixedEnvironmentHTTPAndHTTPS(t *testing.T) {
 
 	// First try without CA cert - should fail
 	var bufHTTPSFail bytes.Buffer
-	err = Stream(ctx, fakeClient, "test-ns", "backup-https", velerov1api.DownloadTargetKindBackupContents, &bufHTTPSFail, 5*time.Second, false, "")
+	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "backup-https", velerov1api.DownloadTargetKindBackupContents, &bufHTTPSFail, 5*time.Second, false, "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "x509")
 
 	// Get CA cert from HTTPS BSL
-	cacertStr, err := cacert.GetCACertFromBackup(ctx, fakeClient, "test-ns", backupHTTPS)
+	cacertStr, err := cacert.GetCACertFromBSL(ctx, fakeClient, bslHTTPS)
 	require.NoError(t, err)
 	require.Equal(t, string(serverCACertPEM), cacertStr)
 
@@ -845,7 +828,7 @@ func TestMixedEnvironmentHTTPAndHTTPS(t *testing.T) {
 	}()
 
 	var bufHTTPSSuccess bytes.Buffer
-	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "backup-https", velerov1api.DownloadTargetKindBackupContents, &bufHTTPSSuccess, 5*time.Second, false, "", cacertStr)
+	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "backup-https", velerov1api.DownloadTargetKindBackupContents, &bufHTTPSSuccess, 5*time.Second, false, "", cacertStr, "")
 	require.NoError(t, err)
 	assert.Equal(t, testContentHTTPS, bufHTTPSSuccess.String())
 }
@@ -882,15 +865,10 @@ func TestBSLUpgradeScenario(t *testing.T) {
 		// Initially no CA cert
 		Result()
 
-	// Create an old backup that references this BSL
-	oldBackup := builder.ForBackup("test-ns", "old-backup").
-		StorageLocation("test-bsl").
-		Result()
-
 	// Setup fake client
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(util.VeleroScheme).
-		WithRuntimeObjects(bsl, oldBackup).
+		WithRuntimeObjects(bsl).
 		Build()
 
 	ctx := t.Context()
@@ -911,7 +889,7 @@ func TestBSLUpgradeScenario(t *testing.T) {
 	}()
 
 	var bufFail bytes.Buffer
-	err := Stream(ctx, fakeClient, "test-ns", "old-backup", velerov1api.DownloadTargetKindBackupLog, &bufFail, 5*time.Second, false, "")
+	err := StreamWithBSLCACert(ctx, fakeClient, "test-ns", "old-backup", velerov1api.DownloadTargetKindBackupLog, &bufFail, 5*time.Second, false, "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "x509")
 
@@ -931,7 +909,7 @@ func TestBSLUpgradeScenario(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test 2: After BSL upgrade, old backup should work with new CA cert
-	cacertStr, err := cacert.GetCACertFromBackup(ctx, fakeClient, "test-ns", oldBackup)
+	cacertStr, err := cacert.GetCACertFromBSL(ctx, fakeClient, currentBSL)
 	require.NoError(t, err)
 	require.Equal(t, string(serverCACertPEM), cacertStr)
 
@@ -950,21 +928,9 @@ func TestBSLUpgradeScenario(t *testing.T) {
 	}()
 
 	var bufSuccess bytes.Buffer
-	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "old-backup", velerov1api.DownloadTargetKindBackupLog, &bufSuccess, 5*time.Second, false, "", cacertStr)
+	err = StreamWithBSLCACert(ctx, fakeClient, "test-ns", "old-backup", velerov1api.DownloadTargetKindBackupLog, &bufSuccess, 5*time.Second, false, "", cacertStr, "")
 	require.NoError(t, err)
 	assert.Equal(t, testContent, bufSuccess.String())
-
-	// Test 3: New backup created after upgrade should also work
-	newBackup := builder.ForBackup("test-ns", "new-backup").
-		StorageLocation("test-bsl").
-		Result()
-
-	err = fakeClient.Create(ctx, newBackup)
-	require.NoError(t, err)
-
-	cacertStr2, err := cacert.GetCACertFromBackup(ctx, fakeClient, "test-ns", newBackup)
-	require.NoError(t, err)
-	require.Equal(t, string(serverCACertPEM), cacertStr2)
 }
 
 // TestConcurrentDownloadsWithBSLCACert tests multiple concurrent downloads with CA cert
@@ -1003,6 +969,7 @@ func TestConcurrentDownloadsWithBSLCACert(t *testing.T) {
 				false,
 				"",
 				string(serverCACertPEM),
+				"",
 			)
 			if err != nil {
 				errors <- err
@@ -1121,6 +1088,7 @@ func TestDownloadWithBSLCACert(t *testing.T) {
 				tc.insecureSkipTLSVerify,
 				"",
 				tc.bslCACert,
+				"",
 			)
 
 			if tc.expectedError {
@@ -1221,6 +1189,7 @@ func TestCACertFallback(t *testing.T) {
 				false,
 				caCertFile,
 				tc.bslCACert,
+				"",
 			)
 
 			if tc.expectedError {
