@@ -579,6 +579,11 @@ func scopeResourceMapFunc(helper discovery.Helper) func(string, bool) string {
 // ValidateIncludesExcludes checks provided lists of included and excluded
 // items to ensure they are a valid set of IncludesExcludes data.
 func ValidateIncludesExcludes(includesList, excludesList []string) []error {
+	errs := validateIncludesExcludes(includesList, excludesList)
+	return append(errs, validateGlobPatterns(includesList, excludesList)...)
+}
+
+func validateIncludesExcludes(includesList, excludesList []string) []error {
 	// TODO we should not allow an IncludesExcludes object to be created that
 	// does not meet these criteria. Do a more significant refactoring to embed
 	// this logic in object creation/modification.
@@ -608,7 +613,9 @@ func ValidateIncludesExcludes(includesList, excludesList []string) []error {
 // ValidateNamespaceIncludesExcludes checks provided lists of included and
 // excluded namespaces to ensure they are a valid set of IncludesExcludes data.
 func ValidateNamespaceIncludesExcludes(includesList, excludesList []string) []error {
-	errs := ValidateIncludesExcludes(includesList, excludesList)
+	// Namespace names are validated as wildcard patterns by validateNamespaceName,
+	// so skip the generic glob pattern check here.
+	errs := validateIncludesExcludes(includesList, excludesList)
 
 	includes := sets.NewString(includesList...)
 	excludes := sets.NewString(excludesList...)
@@ -650,6 +657,21 @@ func ValidateScopedIncludesExcludes(includesList, excludesList []string) []error
 	for _, itm := range excludes.List() {
 		if includes.Has(itm) {
 			errs = append(errs, errors.Errorf("excludes list cannot contain an item in the includes list: %v", itm))
+		}
+	}
+
+	return append(errs, validateGlobPatterns(includesList, excludesList)...)
+}
+
+// validateGlobPatterns returns an error for each item that is not a valid glob pattern.
+// An invalid pattern can never be matched, so reject it instead of letting the filter
+// silently drop resources.
+func validateGlobPatterns(includesList, excludesList []string) []error {
+	var errs []error
+
+	for _, itm := range sets.NewString(append(includesList, excludesList...)...).List() {
+		if _, err := glob.Compile(itm); err != nil {
+			errs = append(errs, errors.Errorf("invalid glob pattern %q: %v", itm, err))
 		}
 	}
 
