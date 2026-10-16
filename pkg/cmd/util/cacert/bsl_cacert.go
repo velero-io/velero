@@ -72,7 +72,7 @@ func GetBSL(ctx context.Context, client kbclient.Client, namespace string, bslNa
 	}
 	if err := client.Get(ctx, key, bsl); err != nil {
 		if apierrors.IsNotFound(err) {
-			// BSL not found is not a fatal error, just means no cacert
+			// BSL not found is not a fatal error; callers treat a nil BSL as "no cacert, no SSE-C key"
 			return nil, nil
 		}
 		return nil, errors.Wrapf(err, "error getting backup storage location %s", bslName)
