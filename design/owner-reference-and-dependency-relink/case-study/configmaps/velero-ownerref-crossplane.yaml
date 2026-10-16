@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-crossplane
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Crossplane core, composition definitions, cloud provider groups, and connection secrets.
+  inScope: |
+    - group: apiextensions.crossplane.io
+    - group: pkg.crossplane.io
+    - group: database.example.org
+    - group: database.aws.upbound.io
+    - group: ec2.aws.upbound.io
+    - group: s3.aws.upbound.io
+    - group: azure.upbound.io
+    - group: gcp.upbound.io
+    - group: ""
+      kind: Secret
+
+  # 2. specRefPaths: Remaps foreign UIDs inside claimRef and array-based resourceRefs[*].
+  specRefPaths: |
+    - group: database.example.org
+      kind: XPostgreSQLInstance
+      paths:
+        - spec.claimRef
+        - spec.resourceRefs[*]
+    - group: database.aws.upbound.io
+      kind: RDSInstance
+      paths:
+        - spec.writeConnectionSecretToRef
+
+  # 3. quiesceOnRestore: Injects native Crossplane pause annotations during Phase 1A create.
+  quiesceOnRestore: |
+    - group: database.example.org
+      kind: XPostgreSQLInstance
+      annotationKey: crossplane.io/paused
+      annotationValue: "true"
+    - group: database.aws.upbound.io
+      kind: RDSInstance
+      annotationKey: crossplane.io/paused
+      annotationValue: "true"

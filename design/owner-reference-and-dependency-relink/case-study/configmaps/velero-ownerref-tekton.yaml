@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-tekton
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Tekton execution CRDs, resolution CRDs, operator-managed workloads, and dynamic workspace PVCs.
+  inScope: |
+    - group: tekton.dev
+    - group: resolution.tekton.dev
+    - group: triggers.tekton.dev
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+
+  # 2. specRefPaths: Empty (Tekton references resources strictly by string name, not UID).
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Left empty pending upstream Tekton pause annotation adoption.
+  quiesceOnRestore: ""

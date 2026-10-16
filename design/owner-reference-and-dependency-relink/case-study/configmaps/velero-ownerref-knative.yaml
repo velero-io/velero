@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-ownerref-knative
+  namespace: velero
+  labels:
+    velero.io/plugin-config: ""
+data:
+  # 1. inScope defines API groups and kinds eligible for ownerReference remapping.
+  # Enables Knative Serving, Autoscaling, Networking, and operator-managed workloads.
+  inScope: |
+    - group: serving.knative.dev
+    - group: autoscaling.internal.knative.dev
+    - group: networking.internal.knative.dev
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: Endpoints
+
+  # 2. specRefPaths: Knative relies entirely on metadata.ownerReferences and label selectors.
+  specRefPaths: ""
+
+  # 3. quiesceOnRestore: Left empty pending upstream Knative pause annotation adoption.
+  quiesceOnRestore: ""
