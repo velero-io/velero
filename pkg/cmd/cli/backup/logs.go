@@ -79,15 +79,21 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 			"until the backup has a phase of Completed or Failed and try again", l.BackupName)
 	}
 
-	// Get BSL cacert if available
-	bslCACert, err := cacert.GetCACertFromBackup(context.Background(), l.Client, f.Namespace(), backup)
+	bsl, err := cacert.GetBSLFromBackup(context.Background(), l.Client, backup)
 	if err != nil {
-		// Log the error but don't fail - we can still try to download without the BSL cacert
+		// Log the error but don't fail - we can still try to download without the BSL
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting BSL of backup: %v\n", err)
+	}
+	bslCACert, err := cacert.GetCACertFromBSL(context.Background(), l.Client, bsl)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: Error getting cacert from BSL: %v\n", err)
-		bslCACert = ""
+	}
+	encryptionKey, err := cacert.GetSSECKeyFromBSL(context.Background(), l.Client, bsl)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting SSE-C key from BSL: %v\n", err)
 	}
 
-	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, os.Stdout, l.Timeout, l.InsecureSkipTLSVerify, l.CaCertFile, bslCACert)
+	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, os.Stdout, l.Timeout, l.InsecureSkipTLSVerify, l.CaCertFile, bslCACert, encryptionKey)
 	return err
 }
 

@@ -1,0 +1,1 @@
+Fixed S3 SSE-C downloads by sending required headers
