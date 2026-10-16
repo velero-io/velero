@@ -60,6 +60,11 @@ var backupPhaseExpectations = map[velerov1api.BackupPhase]bool{
 	velerov1api.BackupPhasePartiallyFailed:                           false,
 	velerov1api.BackupPhaseFailed:                                    false,
 	velerov1api.BackupPhaseDeleting:                                  false,
+
+	// Canceling can be entered from InProgress, and a Canceled backup keeps
+	// its log and metadata in object storage for diagnosis.
+	velerov1api.BackupPhaseCanceling: false,
+	velerov1api.BackupPhaseCanceled:  false,
 }
 
 var restorePhaseExpectations = map[velerov1api.RestorePhase]bool{

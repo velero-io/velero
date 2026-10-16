@@ -70,6 +70,12 @@ spec:
                 - Full
                 - Incremental
                 type: string
+              cancel:
+                description: |-
+                  Cancel is an internal signal that the backup should be canceled. It is set
+                  by the BackupCancellationRequest controller, not by users directly, and is
+                  observed by whichever controller owns the backup's current phase.
+                type: boolean
               csiSnapshotTimeout:
                 description: |-
                   CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot status turns to
@@ -570,6 +576,58 @@ spec:
                   BackupItemOperationsFailed is the total number of async
                   BackupItemAction operations for this backup which ended with an error.
                 type: integer
+              cancellation:
+                description: |-
+                  Cancellation records the outcome of a cancellation. Set only once accepted
+                  (phase Canceling or Canceled).
+                nullable: true
+                properties:
+                  acceptedAt:
+                    description: AcceptedAt is when the owning controller accepted
+                      cancellation (recorded Canceling).
+                    format: date-time
+                    nullable: true
+                    type: string
+                  acceptedFromPhase:
+                    description: |-
+                      AcceptedFromPhase records the phase the backup was in when cancellation
+                      was accepted.
+                    enum:
+                    - New
+                    - Queued
+                    - ReadyToStart
+                    - FailedValidation
+                    - InProgress
+                    - WaitingForPluginOperations
+                    - WaitingForPluginOperationsPartiallyFailed
+                    - Finalizing
+                    - FinalizingPartiallyFailed
+                    - Completed
+                    - PartiallyFailed
+                    - Failed
+                    - Deleting
+                    - Canceling
+                    - Canceled
+                    type: string
+                  actionsAttempted:
+                    description: ActionsAttempted is how many teardown actions cancellation
+                      tried.
+                    type: integer
+                  actionsConfirmed:
+                    description: ActionsConfirmed is how many of those Velero confirmed
+                      completed.
+                    type: integer
+                  actionsUnconfirmed:
+                    description: |-
+                      ActionsUnconfirmed is how many Velero could not verify actually stopped
+                      the work.
+                    type: integer
+                  reason:
+                    description: |-
+                      Reason is a short, human-readable summary of the outcome (e.g. noting
+                      unconfirmed teardown).
+                    type: string
+                type: object
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a backup was completed.
@@ -640,6 +698,8 @@ spec:
                 - PartiallyFailed
                 - Failed
                 - Deleting
+                - Canceling
+                - Canceled
                 type: string
               progress:
                 description: |-
