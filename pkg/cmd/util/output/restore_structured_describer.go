@@ -70,16 +70,16 @@ func DescribeRestoreInSF(
 			d.Describe("validationErrors", restore.Status.ValidationErrors)
 		}
 
-		bsl, err := cacert.GetBSLFromRestore(context.Background(), kbClient, restore)
+		bsl, err := cacert.GetBSLFromRestore(ctx, kbClient, restore)
 		if err != nil {
 			// Log the error but don't fail - we can still try to download without the BSL
 			fmt.Fprintf(os.Stderr, "WARNING: Error getting BSL of restore: %v\n", err)
 		}
-		bslCACert, err := cacert.GetCACertFromBSL(context.Background(), kbClient, bsl)
+		bslCACert, err := cacert.GetCACertFromBSL(ctx, kbClient, bsl)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: Error getting cacert from BSL: %v\n", err)
 		}
-		encryptionKey, err := cacert.GetSSECKeyFromBSL(context.Background(), kbClient, bsl)
+		encryptionKey, err := cacert.GetSSECKeyFromBSL(ctx, kbClient, bsl)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: Error getting SSE-C key from BSL: %v\n", err)
 		}

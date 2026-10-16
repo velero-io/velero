@@ -292,15 +292,15 @@ func TestBSLCACertBehavior(t *testing.T) {
 		err = l.Complete([]string{backupName}, f)
 		require.NoError(t, err)
 
-		// Verify that the BSL cacert returns empty string when BSL doesn't exist
+		// Verify that the BSL resolves to nil when it doesn't exist
 		fetchedBackup := &velerov1api.Backup{}
 		err = kbClient.Get(t.Context(), kbclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: backupName}, fetchedBackup)
 		require.NoError(t, err)
 
-		// Test the cacert fetching logic directly - should not error when BSL is missing
-		cacertValue, err := cacert.GetBSLFromBackup(t.Context(), kbClient, fetchedBackup)
+		// The BSL lookup should not error when the BSL is missing
+		missingBSL, err := cacert.GetBSLFromBackup(t.Context(), kbClient, fetchedBackup)
 		require.NoError(t, err)
-		assert.Empty(t, cacertValue, "BSL cacert should be empty when BSL doesn't exist")
+		assert.Nil(t, missingBSL, "BSL should be nil when it doesn't exist")
 
 		// The command should still try to run even without BSL
 		l.Timeout = 100 * time.Millisecond

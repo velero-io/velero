@@ -31,6 +31,169 @@ import (
 	"github.com/velero-io/velero/pkg/util"
 )
 
+// TestGetSSECKeyFromBSL tests the SSE-C key fetch
+func TestGetSSECKeyFromBSL(t *testing.T) {
+	testCases := []struct {
+		name                  string
+		bsl                   *velerov1api.BackupStorageLocation
+		secret                *corev1api.Secret
+		expectedEncryptionKey string
+		expectedError         bool
+		errorContains         string
+	}{
+		{
+			name:                  "BSL is nil",
+			bsl:                   nil,
+			secret:                nil,
+			expectedEncryptionKey: "",
+			expectedError:         false,
+		},
+		{
+			name: "customerKeyEncryptionSecret is unset",
+			bsl: &velerov1api.BackupStorageLocation{
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{},
+				},
+			},
+			secret:                nil,
+			expectedEncryptionKey: "",
+			expectedError:         false,
+		},
+		{
+			name: "customerKeyEncryptionSecret contains no slash",
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{
+						"customerKeyEncryptionSecret": "my-secret",
+					},
+				},
+			},
+			secret:                nil,
+			expectedEncryptionKey: "",
+			expectedError:         true,
+			errorContains:         ".spec.config.customerKeyEncryptionSecret is malformed",
+		},
+		{
+			name: "customerKeyEncryptionSecret contains more than one slash",
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{
+						"customerKeyEncryptionSecret": "my/malformed/secret",
+					},
+				},
+			},
+			secret:                nil,
+			expectedEncryptionKey: "",
+			expectedError:         true,
+			errorContains:         ".spec.config.customerKeyEncryptionSecret is malformed",
+		},
+		{
+			name: "customerKeyEncryptionSecret is not found",
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{
+						"customerKeyEncryptionSecret": "missing/secret",
+					},
+				},
+			},
+			secret:                nil,
+			expectedEncryptionKey: "",
+			expectedError:         true,
+			errorContains:         "secret missing not found",
+		},
+		{
+			name: "customerKeyEncryptionSecret key is not found",
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{
+						"customerKeyEncryptionSecret": "test-secret/missing-key",
+					},
+				},
+			},
+			secret: &corev1api.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-secret",
+				},
+				Data: map[string][]byte{},
+			},
+			expectedEncryptionKey: "",
+			expectedError:         true,
+			errorContains:         "key missing-key not found",
+		},
+		{
+			name: "customerKeyEncryptionSecret key is found",
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+				Spec: velerov1api.BackupStorageLocationSpec{
+					Config: map[string]string{
+						"customerKeyEncryptionSecret": "test-secret/test-key",
+					},
+				},
+			},
+			secret: &corev1api.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-secret",
+				},
+				Data: map[string][]byte{
+					"test-key": []byte("test-encryption-key"),
+				},
+			},
+			expectedEncryptionKey: "test-encryption-key",
+			expectedError:         false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.secret != nil {
+				objs = append(objs, tc.secret)
+			}
+
+			scheme := runtime.NewScheme()
+			_ = corev1api.AddToScheme(scheme)
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				Build()
+
+			encryptionKey, err := GetSSECKeyFromBSL(t.Context(), fakeClient, tc.bsl)
+
+			if tc.expectedError {
+				require.Error(t, err)
+				if tc.errorContains != "" {
+					assert.Contains(t, err.Error(), tc.errorContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedEncryptionKey, encryptionKey)
+			}
+		})
+	}
+}
+
 func TestGetCACertFromBSL(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -97,11 +260,8 @@ func TestGetCACertFromBSL(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var objs []runtime.Object
-
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(util.VeleroScheme).
-				WithRuntimeObjects(objs...).
 				Build()
 
 			cacert, err := GetCACertFromBSL(t.Context(), fakeClient, tc.bsl)
@@ -355,7 +515,6 @@ func TestGetCACertFromBSL_WithCACertRef(t *testing.T) {
 			}
 
 			scheme := runtime.NewScheme()
-			_ = velerov1api.AddToScheme(scheme)
 			_ = corev1api.AddToScheme(scheme)
 
 			fakeClient := fake.NewClientBuilder().

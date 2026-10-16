@@ -19,11 +19,13 @@ package downloadrequest
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -448,6 +450,7 @@ func TestStreamWithBSLCACert(t *testing.T) {
 
 func TestDownload(t *testing.T) {
 	testContent := "test content for download"
+	testEncryptionKey := "some-key"
 	compressedContent := new(bytes.Buffer)
 	gzipWriter := gzip.NewWriter(compressedContent)
 	gzipWriter.Write([]byte(testContent))
@@ -513,6 +516,40 @@ func TestDownload(t *testing.T) {
 			},
 			target:        velerov1api.DownloadTargetKindBackupLog,
 			expectedError: true,
+		},
+		{
+			name: "SSE-C headers are set when encryptionKey is provided",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				encryptionKeyHash := md5.Sum([]byte(testEncryptionKey))
+				if r.Header.Get("x-amz-server-side-encryption-customer-algorithm") != "AES256" ||
+					r.Header.Get("x-amz-server-side-encryption-customer-key") != base64.StdEncoding.EncodeToString([]byte(testEncryptionKey)) ||
+					r.Header.Get("x-amz-server-side-encryption-customer-key-md5") != base64.StdEncoding.EncodeToString(encryptionKeyHash[:]) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(testContent))
+			},
+			target:          velerov1api.DownloadTargetKindBackupContents,
+			encryptionKey:   testEncryptionKey,
+			expectedContent: testContent,
+			expectedError:   false,
+		},
+		{
+			name: "SSE-C headers are not set when encryptionKey is not provided",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("x-amz-server-side-encryption-customer-algorithm") != "" ||
+					r.Header.Get("x-amz-server-side-encryption-customer-key") != "" ||
+					r.Header.Get("x-amz-server-side-encryption-customer-key-md5") != "" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(testContent))
+			},
+			target:          velerov1api.DownloadTargetKindBackupContents,
+			expectedContent: testContent,
+			expectedError:   false,
 		},
 	}
 

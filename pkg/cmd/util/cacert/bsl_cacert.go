@@ -29,6 +29,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
+// GetBackupFromRestore returns the backup referenced by the provided restore or nil if it does not exist
 func GetBackupFromRestore(ctx context.Context, client kbclient.Client, restore *velerov1api.Restore) (*velerov1api.Backup, error) {
 	backup := &velerov1api.Backup{}
 	key := kbclient.ObjectKey{
@@ -40,12 +41,12 @@ func GetBackupFromRestore(ctx context.Context, client kbclient.Client, restore *
 			// Backup not found is not a fatal error for cacert retrieval
 			return nil, nil
 		}
-
 		return nil, errors.Wrapf(err, "error getting backup %s", restore.Spec.BackupName)
 	}
 	return backup, nil
 }
 
+// GetBSLFromRestore returns the BSL referenced by the provided restore or nil if it does not exist
 func GetBSLFromRestore(ctx context.Context, client kbclient.Client, restore *velerov1api.Restore) (*velerov1api.BackupStorageLocation, error) {
 	backup, err := GetBackupFromRestore(ctx, client, restore)
 	if err != nil {
@@ -57,14 +58,13 @@ func GetBSLFromRestore(ctx context.Context, client kbclient.Client, restore *vel
 	return GetBSLFromBackup(ctx, client, backup)
 }
 
+// GetBSLFromBackup returns the BSL referenced by the provided backup or nil if it does not exist
 func GetBSLFromBackup(ctx context.Context, client kbclient.Client, backup *velerov1api.Backup) (*velerov1api.BackupStorageLocation, error) {
 	return GetBSL(ctx, client, backup.Namespace, backup.Spec.StorageLocation)
 }
 
+// GetBSL returns the referenced BSL or nil if it does not exist
 func GetBSL(ctx context.Context, client kbclient.Client, namespace string, bslName string) (*velerov1api.BackupStorageLocation, error) {
-	if bslName == "" {
-		return nil, nil
-	}
 	bsl := &velerov1api.BackupStorageLocation{}
 	key := kbclient.ObjectKey{
 		Namespace: namespace,
@@ -80,6 +80,8 @@ func GetBSL(ctx context.Context, client kbclient.Client, namespace string, bslNa
 	return bsl, nil
 }
 
+// GetSSECKeyFromBSL returns the raw S3 SSE-C customer key referenced by the BSL's
+// `customerKeyEncryptionSecret` config entry. Returns "" with no error when the BSL is nil or has no such entry.
 func GetSSECKeyFromBSL(ctx context.Context, client kbclient.Client, bsl *velerov1api.BackupStorageLocation) (string, error) {
 	if bsl == nil {
 		return "", nil
