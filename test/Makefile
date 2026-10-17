@@ -192,6 +192,10 @@ ifneq ($(origin STORAGE_CLASS_FILE_2),undefined)
 COMMON_ARGS += --storage-class-file-2=$(STORAGE_CLASS_FILE_2)
 endif
 
+.PHONY: run-e2e-kind
+run-e2e-kind:  ## Run the e2e tests against a kind cluster and MinIO that this target creates and removes
+	@$(REPO_ROOT)/hack/run-e2e-kind.sh
+
 # Make sure ginkgo is in $GOBIN
 .PHONY:ginkgo
 ginkgo: ${GOBIN}/ginkgo
