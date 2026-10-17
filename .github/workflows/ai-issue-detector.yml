@@ -1,0 +1,132 @@
+name: "Detect AI-Generated Issues"
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  detect-ai-content:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Analyze issue for AI-generated content
+        id: analyze
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const issueBody = issue.body || '';
+            const issueTitle = issue.title || '';
+
+            // AI detection patterns
+            const aiPatterns = {
+              // Overly structured markdown with extensive tables
+              excessiveTables: (issueBody.match(/\|.*\|/g) || []).length > 5,
+
+              // Multiple consecutive headers with consistent formatting
+              excessiveHeaders: (issueBody.match(/^#{1,6}\s+/gm) || []).length > 8,
+
+              // Overly formal language patterns common in AI
+              formalPhrases: [
+                'Root Cause Analysis',
+                'Operational Impact',
+                'Expected Permanent Solution',
+                'Questions for Maintainers',
+                'Labels and Metadata',
+                'Reference Files',
+                'Steps to Reproduce'
+              ].filter(phrase => issueBody.includes(phrase)).length > 4,
+
+              // Excessive use of emojis or special characters
+              excessiveFormatting: issueBody.includes('---\n \n---') ||
+                                   (issueBody.match(/---/g) || []).length > 4,
+
+              // Unrealistic version numbers or dates in the future
+              futureDates: /202[6-9]|203\d/.test(issueBody),
+
+              // Overly detailed technical specs with perfect formatting
+              perfectFormatting: issueBody.includes('| Parameter | Value |') &&
+                                issueBody.includes('| Aspect | Status | Impact |'),
+
+              // Generic AI-style section headers
+              aiSectionHeaders: [
+                '## Description',
+                '## Critical Problem',
+                '## Affected Environment',
+                '## Full Helm Configuration',
+                '## Resolution Attempts',
+                '## Related Information'
+              ].filter(header => issueBody.includes(header)).length > 4,
+
+              // Unusual specificity combined with generic solutions
+              genericSolutions: issueBody.includes('auto-detect') &&
+                               issueBody.includes('configuration:') &&
+                               (issueBody.match(/```yaml/g) || []).length > 2
+            };
+
+            // Calculate AI score
+            let aiScore = 0;
+            let detectedPatterns = [];
+
+            for (const [pattern, detected] of Object.entries(aiPatterns)) {
+              if (detected) {
+                aiScore++;
+                detectedPatterns.push(pattern);
+              }
+            }
+
+            console.log('AI Score: ' + aiScore + '/8');
+            console.log('Detected patterns: ' + detectedPatterns.join(', '));
+
+            // If AI score is high, add label and comment
+            if (aiScore >= 3) {
+              // Add label
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['needs-triage', 'potential-ai-generated']
+                });
+
+                // Add comment
+                const confidence = Math.round(aiScore/8 * 100);
+                const repoPath = context.repo.owner + '/' + context.repo.repo;
+                const comment = '👋 Thank you for opening this issue!\n\n' +
+                  'This issue has been flagged for review as it may contain AI-generated content (confidence: ' + confidence + '%).\n\n' +
+                  '**Detected patterns:** ' + detectedPatterns.join(', ') + '\n\n' +
+                  'If this issue was created with AI assistance, please review our [AI contribution guidelines](https://github.com/' + repoPath + '/blob/main/site/content/docs/main/code-standards.md#ai-generated-content).\n\n' +
+                  '**Important:**\n' +
+                  '- Please verify all technical details are accurate\n' +
+                  '- Ensure version numbers, dates, and configurations reflect your actual environment\n' +
+                  '- Remove any placeholder or example content\n' +
+                  '- Confirm the issue is reproducible in your environment\n\n' +
+                  'A maintainer will review this issue shortly. If this was flagged in error, please let us know!';
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: comment
+                });
+
+                core.setOutput('ai-detected', 'true');
+                core.setOutput('ai-score', aiScore);
+              } catch (error) {
+                console.log('Error adding label or comment:', error);
+              }
+            } else {
+              core.setOutput('ai-detected', 'false');
+              core.setOutput('ai-score', aiScore);
+            }
+
+            return {
+              aiDetected: aiScore >= 3,
+              score: aiScore,
+              patterns: detectedPatterns
+            };
