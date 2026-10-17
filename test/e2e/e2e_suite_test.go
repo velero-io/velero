@@ -823,7 +823,7 @@ var _ = BeforeSuite(func() {
 	By("Install StorageClass for E2E.")
 	Expect(veleroutil.InstallStorageClasses(test.VeleroCfg.CloudProvider)).To(Succeed())
 
-	if strings.EqualFold(test.VeleroCfg.Features, test.FeatureCSI) &&
+	if test.FeatureEnabled(test.VeleroCfg.Features, test.FeatureCSI) &&
 		test.VeleroCfg.UseVolumeSnapshots {
 		By("Install VolumeSnapshotClass for E2E.")
 		Expect(
@@ -881,7 +881,7 @@ var _ = AfterSuite(func() {
 		),
 	).To(Succeed())
 
-	if strings.EqualFold(test.VeleroCfg.Features, test.FeatureCSI) &&
+	if test.FeatureEnabled(test.VeleroCfg.Features, test.FeatureCSI) &&
 		test.VeleroCfg.UseVolumeSnapshots {
 		By("Delete VolumeSnapshotClass created by E2E")
 		Expect(

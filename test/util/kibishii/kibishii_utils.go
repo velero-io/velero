@@ -295,15 +295,15 @@ func installKibishii(
 	workerOS string,
 ) error {
 	if strings.EqualFold(cloudPlatform, Azure) &&
-		strings.EqualFold(veleroFeatures, FeatureCSI) {
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
 		cloudPlatform = AzureCSI
 	}
 	if strings.EqualFold(cloudPlatform, AWS) &&
-		strings.EqualFold(veleroFeatures, FeatureCSI) {
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
 		cloudPlatform = AwsCSI
 	}
 	if strings.EqualFold(cloudPlatform, Kind) &&
-		strings.EqualFold(veleroFeatures, FeatureCSI) {
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
 		cloudPlatform = KindCSI
 	}
 
