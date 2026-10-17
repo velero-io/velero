@@ -58,8 +58,8 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 	less := func(a, b string) bool { return a < b }
 
 	BeforeEach(func() {
-		if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-			Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+		if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 		}
 		var err error
 		flag.Parse()

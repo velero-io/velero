@@ -17,6 +17,7 @@ limitations under the License.
 package test
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,21 @@ var (
 // when it did not.
 func SecondStorageClassInstalled() bool {
 	return !(StorageClassFile2Set && StorageClassFile2 == "")
+}
+
+// KibishiiVolumesAreHostPath reports whether Kibishii's PVs on this cluster are
+// hostPath volumes, which Velero can neither snapshot nor file system back up.
+//
+// Kibishii brings its own StorageClass rather than using the suite's, so
+// --storage-class-file does not reach it. Its kind overlay defines that class
+// on rancher.io/local-path, so the PVs it provisions are hostPath: CSI
+// snapshots skip them because pkg/backup/actions/csi/pvc_action.go requires
+// pv.Spec.CSI, and PodVolumeBackups skip them because isHostPathVolume in
+// pkg/podvolume/backupper.go matches pv.Spec.HostPath. installKibishii swaps in
+// the CSI-backed kind-csi overlay when EnableCSI is set, and then neither
+// applies.
+func KibishiiVolumesAreHostPath(cfg VeleroConfig) bool {
+	return cfg.CloudProvider == Kind && !strings.EqualFold(cfg.Features, FeatureCSI)
 }
 
 const FeatureCSI = "EnableCSI"

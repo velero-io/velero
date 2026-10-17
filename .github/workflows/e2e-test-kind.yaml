@@ -203,10 +203,16 @@ jobs:
           # bare token by exact equality, not as a substring, so CSISnapshot does
           # not select CSIVolumeGroupSnapshot. A new CSI label has to be added
           # here or its cases silently never run.
+          #
+          # The Kibishii-backed Snapshot cases run here rather than in
+          # run-e2e-test because Kibishii brings its own StorageClass, and only
+          # the kind-csi overlay this job reaches defines it on a CSI driver.
           echo "csi-matrix={\
             \"k8s\":${csi_k8s_json},\
             \"labels\":[\
-              \"BackupVolumeInfo && (CSISnapshot || CSIDataMover || CSIVolumeGroupSnapshot)\"\
+              \"BackupVolumeInfo && (CSISnapshot || CSIDataMover || CSIVolumeGroupSnapshot)\", \
+              \"Basic && Snapshot && !RetainPV\", \
+              \"Backups && Deletion && Snapshot\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
@@ -389,7 +395,11 @@ jobs:
           aws_secret_access_key=minio123
           EOF
 
-          # No Kibishii clone: none of the CSI cases this job selects use it.
+          git init -q /tmp/kibishii
+          git -C /tmp/kibishii remote add origin https://github.com/vmware-tanzu-experiments/distributed-data-generator.git
+          git -C /tmp/kibishii fetch --depth 1 origin "${KIBISHII_COMMIT}"
+          git -C /tmp/kibishii checkout -q "${KIBISHII_COMMIT}"
+
           GOPATH=~/go \
               CLOUD_PROVIDER=kind \
               OBJECT_STORE_PROVIDER=aws \
@@ -405,6 +415,7 @@ jobs:
               PLUGINS=velero/velero-plugin-for-aws:latest \
               STORAGE_CLASS_FILE=../testdata/storage-class/kind-csi.yaml \
               GINKGO_LABELS="${{ matrix.labels }}" \
+              KIBISHII_DIRECTORY=/tmp/kibishii/kubernetes/yaml/ \
               make -C test/ run-e2e
         timeout-minutes: 30
       - name: Upload debug bundle

@@ -67,8 +67,8 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 		if (len(veleroCfg.UpgradeFromVeleroVersion)) == 0 {
 			Skip("An original velero version is required to run upgrade test, please run test with upgrade-from-velero-version=<version>")
 		}
-		if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-			Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+		if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 		}
 		if veleroCfg.VeleroCLI == "" {
 			Skip("VeleroCLI should be provide")
