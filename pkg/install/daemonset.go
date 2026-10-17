@@ -39,11 +39,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 		opt(c)
 	}
 
-	pullPolicy := corev1api.PullAlways
-	imageParts := strings.Split(c.image, ":")
-	if len(imageParts) == 2 && imageParts[1] != "latest" {
-		pullPolicy = corev1api.PullIfNotPresent
-	}
+	pullPolicy := resolveImagePullPolicy(c.image, c.imagePullPolicy)
 
 	daemonSetArgs := []string{
 		"node-agent",

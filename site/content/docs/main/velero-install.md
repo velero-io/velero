@@ -33,13 +33,16 @@ velero install \
     [--maintenance-job-cpu-limit <CPU_LIMIT>] \
     [--maintenance-job-mem-limit <MEMORY_LIMIT>] \
     [--server-priority-class-name <PRIORITY_CLASS_NAME>] \
-    [--node-agent-priority-class-name <PRIORITY_CLASS_NAME>]
+    [--node-agent-priority-class-name <PRIORITY_CLASS_NAME>] \
+    [--image-pull-policy <IMAGE_PULL_POLICY>]
 ```
 
 The values for the resource requests and limits flags follow the same format as [Kubernetes resource requirements][3]
 For plugin container images, please refer to our [supported providers][2] page.
 
 The `--server-priority-class-name` and `--node-agent-priority-class-name` flags allow you to set priority classes for the Velero server deployment and node agent daemonset respectively. This can help ensure proper scheduling and eviction behavior in resource-constrained environments. Note that you must create the priority class before installing Velero.
+
+The `--image-pull-policy` flag sets the `imagePullPolicy` for the Velero server, node agent and plugin containers. Valid values are `Always`, `IfNotPresent` and `Never`. When the flag is not set, the policy defaults to `Always` for images tagged `latest` and `IfNotPresent` otherwise. Set it to `Always` if you rebuild a development image under a tag that is not `latest`, otherwise the node reuses the cached image and the new build never runs.
 
 ## Examples
 

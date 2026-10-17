@@ -63,6 +63,9 @@ func TestDaemonSet(t *testing.T) {
 	assert.Equal(t, "velero/velero:v0.11", ds.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, corev1api.PullIfNotPresent, ds.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 
+	ds = DaemonSet("velero", WithImage("velero/velero:v0.11"), WithImagePullPolicy(string(corev1api.PullAlways)))
+	assert.Equal(t, corev1api.PullAlways, ds.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+
 	ds = DaemonSet("velero", WithSecret(true))
 	assert.Len(t, ds.Spec.Template.Spec.Containers[0].Env, 7)
 	assert.Len(t, ds.Spec.Template.Spec.Volumes, 4)

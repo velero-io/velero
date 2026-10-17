@@ -44,6 +44,15 @@ func TestDeployment(t *testing.T) {
 	assert.Equal(t, "velero/velero:v0.11", deploy.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, corev1api.PullIfNotPresent, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 
+	// An explicit policy overrides the tag-based default, including plugin init containers.
+	deploy = Deployment("velero", WithImage("velero/velero:v0.11"), WithImagePullPolicy(string(corev1api.PullAlways)),
+		WithPlugins([]string{"velero/velero-plugin-for-aws:v1.12.0"}))
+	assert.Equal(t, corev1api.PullAlways, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+	assert.Equal(t, corev1api.PullAlways, deploy.Spec.Template.Spec.InitContainers[0].ImagePullPolicy)
+
+	deploy = Deployment("velero", WithImage("velero/velero:latest"), WithImagePullPolicy(string(corev1api.PullNever)))
+	assert.Equal(t, corev1api.PullNever, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+
 	deploy = Deployment("velero", WithSecret(true))
 	assert.Len(t, deploy.Spec.Template.Spec.Containers[0].Env, 7)
 	assert.Len(t, deploy.Spec.Template.Spec.Volumes, 3)
