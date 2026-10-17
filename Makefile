@@ -439,7 +439,7 @@ else
 endif
 
 build-image-hugo: ## Build the hugo image for docs
-	cd site && $(CONTAINER_TOOL) build --pull -t $(HUGO_IMAGE) .
+	cd site && $(CONTAINER_TOOL) buildx build --pull --output=type=docker -t $(HUGO_IMAGE) .
 
 clean: ## Clean up build artifacts and modcache
 # if we have a cached image then use it to run go clean --modcache
@@ -496,7 +496,7 @@ release: ## Build a GitHub release using goreleaser
 serve-docs: build-image-hugo ## Serve the documentation site locally
 	$(CONTAINER_TOOL) run \
 	--rm \
-	-v "$$(pwd)/site:/project" \
+	-v "$$(pwd)/site:/srv/hugo" \
 	-it -p 1313:1313 \
 	$(HUGO_IMAGE) \
 	server --bind=0.0.0.0 --enableGitInfo=false

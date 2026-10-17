@@ -1,0 +1,1 @@
+Makefile: fix make serve-docs on buildx setups
