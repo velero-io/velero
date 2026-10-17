@@ -64,6 +64,7 @@ import (
 	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
 	"github.com/velero-io/velero/pkg/podvolume"
 	"github.com/velero-io/velero/pkg/test"
+	csiutil "github.com/velero-io/velero/pkg/util/csi"
 	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
@@ -1845,6 +1846,20 @@ func TestBackupActionModifications(t *testing.T) {
 		actions      []biav2.BackupItemAction
 		want         map[string]unstructuredObject
 	}{
+		{
+			name:   "PVC archive excludes temporary labels from overlapping VGS backups",
+			backup: defaultBackup().Result(),
+			apiResources: []*test.APIResource{
+				test.PVCs(builder.ForPersistentVolumeClaim("ns-1", "pvc-1").ObjectMeta(builder.WithLabels(
+					"velero.io/volume-group", "database",
+					csiutil.VGSMembershipLabelKey("backup-a"), "database",
+					csiutil.VGSMembershipLabelKey("backup-b"), "database",
+				)).Result()),
+			},
+			want: map[string]unstructuredObject{
+				"resources/persistentvolumeclaims/namespaces/ns-1/pvc-1.json": toUnstructuredOrFail(t, builder.ForPersistentVolumeClaim("ns-1", "pvc-1").ObjectMeta(builder.WithLabels("velero.io/volume-group", "database")).Result()),
+			},
+		},
 		{
 			name:   "action that adds a label to item gets persisted",
 			backup: defaultBackup().Result(),
