@@ -1,0 +1,1 @@
+Add zip archive format alongside tar.gz in releases to enable winget support on Windows.
