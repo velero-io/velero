@@ -706,7 +706,11 @@ func getOrderedResources(resourcePriorities types.Priorities, backupResources ma
 	// alphabetize resources in the backup
 	sort.Strings(orderedBackupResources)
 
-	list := append(resourcePriorities.HighPriorities, orderedBackupResources...)
+	// Build a new slice: appending to HighPriorities can write into a backing
+	// array it shares with LowPriorities (see types.Priorities.Set).
+	list := make([]string, 0, len(resourcePriorities.HighPriorities)+len(orderedBackupResources)+len(resourcePriorities.LowPriorities))
+	list = append(list, resourcePriorities.HighPriorities...)
+	list = append(list, orderedBackupResources...)
 	return append(list, resourcePriorities.LowPriorities...)
 }
 

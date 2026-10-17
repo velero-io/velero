@@ -108,3 +108,18 @@ func TestSetOfPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestSetDoesNotLeaveSpareCapacity(t *testing.T) {
+	for input, wantString := range map[string]string{"p0,p1,-,p8,p9": "p0,p1,-,p8,p9", "p0,-": "p0"} {
+		t.Run(input, func(t *testing.T) {
+			p := Priorities{}
+			require.NoError(t, p.Set(input))
+			assert.Equal(t, len(p.HighPriorities), cap(p.HighPriorities))
+
+			low := append([]string(nil), p.LowPriorities...)
+			_ = append(p.HighPriorities, "x", "y", "z")
+			assert.Equal(t, low, p.LowPriorities, "appending to HighPriorities changed LowPriorities")
+			assert.Equal(t, wantString, p.String())
+		})
+	}
+}
