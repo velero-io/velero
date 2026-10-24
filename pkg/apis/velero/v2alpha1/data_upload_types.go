@@ -210,6 +210,30 @@ type DataUploadStatus struct {
 	// +optional
 	// +nullable
 	Activities []string `json:"activities,omitempty"`
+
+	// RetainedSnapshot records the volume snapshot that is kept in the storage after the
+	// DataUpload completes, because the snapshot's deletion policy is Retain. Backup deletion
+	// uses it to delete the snapshot from the storage.
+	// +optional
+	// +nullable
+	RetainedSnapshot *RetainedSnapshot `json:"retainedSnapshot,omitempty"`
+}
+
+// RetainedSnapshot identifies a volume snapshot retained in the storage by a DataUpload.
+type RetainedSnapshot struct {
+	// SnapshotHandle is the CSI snapshot handle of the retained snapshot.
+	SnapshotHandle string `json:"snapshotHandle"`
+
+	// Driver is the name of the CSI driver that created the snapshot.
+	Driver string `json:"driver"`
+
+	// DeletionSecretName is the name of the secret the CSI driver requires to delete the snapshot.
+	// +optional
+	DeletionSecretName string `json:"deletionSecretName,omitempty"`
+
+	// DeletionSecretNamespace is the namespace of the secret the CSI driver requires to delete the snapshot.
+	// +optional
+	DeletionSecretNamespace string `json:"deletionSecretNamespace,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,

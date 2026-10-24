@@ -262,6 +262,33 @@ spec:
                     format: int64
                     type: integer
                 type: object
+              retainedSnapshot:
+                description: |-
+                  RetainedSnapshot records the volume snapshot that is kept in the storage after the
+                  DataUpload completes, because the snapshot's deletion policy is Retain. Backup deletion
+                  uses it to delete the snapshot from the storage.
+                nullable: true
+                properties:
+                  deletionSecretName:
+                    description: DeletionSecretName is the name of the secret the
+                      CSI driver requires to delete the snapshot.
+                    type: string
+                  deletionSecretNamespace:
+                    description: DeletionSecretNamespace is the namespace of the secret
+                      the CSI driver requires to delete the snapshot.
+                    type: string
+                  driver:
+                    description: Driver is the name of the CSI driver that created
+                      the snapshot.
+                    type: string
+                  snapshotHandle:
+                    description: SnapshotHandle is the CSI snapshot handle of the
+                      retained snapshot.
+                    type: string
+                required:
+                - driver
+                - snapshotHandle
+                type: object
               snapshotID:
                 description: SnapshotID is the identifier for the snapshot in the
                   backup repository.

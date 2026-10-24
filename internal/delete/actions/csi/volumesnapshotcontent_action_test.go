@@ -37,6 +37,7 @@ import (
 	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/csi"
 )
 
 // fakeClientWithErrors wraps a real client and injects errors for specific operations.
@@ -83,7 +84,17 @@ func (c *fakeClientWithErrors) Delete(ctx context.Context, obj crclient.Object, 
 	return c.Client.Delete(ctx, obj, opts...)
 }
 
+// skipTempVSCDeletionWait skips waiting for the CSI snapshotter, which the fake
+// client doesn't run, to remove the temp VSC.
+func skipTempVSCDeletionWait(t *testing.T) {
+	t.Helper()
+	original := csi.WaitTempVSCDeleted
+	t.Cleanup(func() { csi.WaitTempVSCDeleted = original })
+	csi.WaitTempVSCDeleted = func(context.Context, crclient.Client, string, time.Duration, logrus.FieldLogger) error { return nil }
+}
+
 func TestVSCExecute(t *testing.T) {
+	skipTempVSCDeletionWait(t)
 	snapshotHandleStr := "test"
 	tests := []struct {
 		name           string
@@ -422,14 +433,20 @@ func TestVSCExecute_CreateSleepDeleteOrder(t *testing.T) {
 	realClient := velerotest.NewFakeControllerRuntimeClient(t)
 	trackingClient := &fakeClientWithCallTracking{Client: realClient, events: &events}
 
-	originalSleep := sleepBetweenTempVSCCreateAndDelete
+	originalSleep := csi.SleepBetweenTempVSCCreateAndDelete
 	t.Cleanup(func() {
-		sleepBetweenTempVSCCreateAndDelete = originalSleep
+		csi.SleepBetweenTempVSCCreateAndDelete = originalSleep
 	})
 
-	sleepBetweenTempVSCCreateAndDelete = func(d time.Duration) {
-		require.Equal(t, tempVSCCreateDeleteGap, d)
+	csi.SleepBetweenTempVSCCreateAndDelete = func(d time.Duration) {
+		require.Equal(t, csi.TempVSCCreateDeleteGap, d)
 		events = append(events, "sleep")
+	}
+	originalWait := csi.WaitTempVSCDeleted
+	t.Cleanup(func() { csi.WaitTempVSCDeleted = originalWait })
+	csi.WaitTempVSCDeleted = func(context.Context, crclient.Client, string, time.Duration, logrus.FieldLogger) error {
+		events = append(events, "wait")
+		return nil
 	}
 
 	p := volumeSnapshotContentDeleteItemAction{log: logrus.StandardLogger(), crClient: trackingClient}
@@ -438,7 +455,7 @@ func TestVSCExecute_CreateSleepDeleteOrder(t *testing.T) {
 		Backup: builder.ForBackup("velero", "backup").Result(),
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{"create", "sleep", "delete"}, events)
+	require.Equal(t, []string{"create", "sleep", "delete", "wait"}, events)
 }
 
 func boolPtr(b bool) *bool {

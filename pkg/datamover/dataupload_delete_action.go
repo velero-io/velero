@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,6 +19,7 @@ import (
 	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	"github.com/velero-io/velero/pkg/util/csi"
 	datamoverutil "github.com/velero-io/velero/pkg/util/datamover"
 )
 
@@ -75,15 +78,56 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 		)
 		return nil
 	}
-	cm := genConfigmap(input.Backup, *du)
-	if cm == nil {
-		// will not fail the backup deletion
+	// A nil configmap will not fail the backup deletion. The configmap may already
+	// exist from a previous deletion attempt that failed, which must not stop the
+	// retry from deleting the retained snapshot.
+	if cm := genConfigmap(input.Backup, *du); cm != nil {
+		if err := d.client.Create(context.Background(), cm); err != nil && !apierrors.IsAlreadyExists(err) {
+			return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+		}
+	}
+	return d.deleteRetainedSnapshot(context.Background(), du)
+}
+
+// deleteRetainedSnapshot deletes the volume snapshot that the DataUpload retained in the
+// storage. A VolumeSnapshotContent is rebuilt for the retained snapshot handle with
+// DeletionPolicy Delete and then deleted, so that the CSI driver deletes the snapshot.
+func (d *DataUploadDeleteAction) deleteRetainedSnapshot(ctx context.Context, du *velerov2alpha1.DataUpload) error {
+	retained := du.Status.RetainedSnapshot
+	if retained == nil {
 		return nil
 	}
-	err := d.client.Create(context.Background(), cm)
-	if err != nil {
-		return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+	if retained.SnapshotHandle == "" || retained.Driver == "" {
+		return errors.Errorf("invalid retained snapshot of DataUpload %s/%s, handle %q, driver %q",
+			du.Namespace, du.Name, retained.SnapshotHandle, retained.Driver)
 	}
+
+	d.logger.Infof("Deleting retained snapshot %s of DataUpload %s/%s", retained.SnapshotHandle, du.Namespace, du.Name)
+
+	vsc := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				velerov1.BackupNameLabel: du.Labels[velerov1.BackupNameLabel],
+			},
+		},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			Driver: retained.Driver,
+			Source: snapshotv1api.VolumeSnapshotContentSource{
+				SnapshotHandle: &retained.SnapshotHandle,
+			},
+		},
+	}
+	if retained.DeletionSecretName != "" {
+		vsc.Annotations = map[string]string{
+			csi.VSCDeletionSecretNameAnnotation:      retained.DeletionSecretName,
+			csi.VSCDeletionSecretNamespaceAnnotation: retained.DeletionSecretNamespace,
+		}
+	}
+
+	if err := csi.DeleteSnapshotByTempVSC(ctx, d.client, vsc, d.logger); err != nil {
+		return errors.Wrapf(err, "failed to delete retained snapshot %s of DataUpload %s/%s", retained.SnapshotHandle, du.Namespace, du.Name)
+	}
+
 	return nil
 }
 
