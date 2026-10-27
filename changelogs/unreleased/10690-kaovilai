@@ -1,0 +1,1 @@
+Bump paketobuildpacks/run-jammy-tiny to 0.2.190 to fix OpenSSL CVEs in the Velero image
