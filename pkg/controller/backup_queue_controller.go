@@ -129,7 +129,9 @@ func (r *backupQueueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 						newBackup.Status.Phase != velerov1api.BackupPhaseInProgress ||
 						oldBackup.Status.Phase != velerov1api.BackupPhaseQueued &&
 							newBackup.Status.Phase == velerov1api.BackupPhaseQueued &&
-							r.backupTracker.RunningCount() < r.concurrentBackups
+							r.backupTracker.RunningCount() < r.concurrentBackups ||
+						oldBackup.Status.Phase == velerov1api.BackupPhaseQueued &&
+							newBackup.Status.Phase == velerov1api.BackupPhaseReadyToStart
 				},
 				CreateFunc: func(event.CreateEvent) bool {
 					return false
