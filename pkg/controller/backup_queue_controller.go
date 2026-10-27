@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -305,6 +306,9 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.backupTracker.AddReadyToStart(backup.Namespace, backup.Name)
 		if err := r.Client.Patch(ctx, backup, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
 			r.backupTracker.Delete(backup.Namespace, backup.Name)
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
 			return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", backup.Status.Phase)
 		}
 		log.Debug("Updating queuePosition for remaining queued backups")

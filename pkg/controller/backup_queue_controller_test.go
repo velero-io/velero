@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -370,8 +371,10 @@ func TestBackupQueueReconcilerStaleQueuedBackupIsNotDequeuedTwice(t *testing.T) 
 	backupTracker.Delete(backup.Namespace, backup.Name)
 
 	stale = true
-	_, _ = r.Reconcile(t.Context(), req)
+	result, err := r.Reconcile(t.Context(), req)
 	stale = false
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{RequeueAfter: time.Second}, result)
 
 	got := &velerov1api.Backup{}
 	require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, got))
