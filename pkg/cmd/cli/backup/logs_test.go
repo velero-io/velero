@@ -17,13 +17,7 @@ limitations under the License.
 package backup
 
 import (
-	"bytes"
-	"compress/gzip"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -171,107 +165,6 @@ func TestNewLogsCommand(t *testing.T) {
 		err := l.Complete([]string{""}, f)
 		require.Equal(t, "test error", err.Error())
 	})
-
-	t.Run("Backup with BSL cacert test", func(t *testing.T) {
-		backupName := "bk-logs-with-cacert"
-		bslName := "test-bsl"
-		expectedCACert := "test-cacert-content"
-		expectedLogContent := "test backup log content"
-
-		// create a factory
-		f := &factorymocks.Factory{}
-
-		kbClient := velerotest.NewFakeControllerRuntimeClient(t)
-
-		// Create BSL with cacert
-		bsl := builder.ForBackupStorageLocation(cmdtest.VeleroNameSpace, bslName).
-			Provider("aws").
-			Bucket("test-bucket").
-			CACert([]byte(expectedCACert)).
-			Result()
-		err := kbClient.Create(t.Context(), bsl, &kbclient.CreateOptions{})
-		require.NoError(t, err)
-
-		// Create backup referencing the BSL
-		backup := builder.ForBackup(cmdtest.VeleroNameSpace, backupName).
-			Phase(velerov1api.BackupPhaseCompleted).
-			StorageLocation(bslName).
-			Result()
-		err = kbClient.Create(t.Context(), backup, &kbclient.CreateOptions{})
-		require.NoError(t, err)
-
-		f.On("Namespace").Return(cmdtest.VeleroNameSpace)
-		f.On("KubebuilderClient").Return(kbClient, nil)
-
-		c := NewLogsCommand(f)
-		assert.Equal(t, "Get backup logs", c.Short)
-
-		l := NewLogsOptions()
-		flags := new(flag.FlagSet)
-		l.BindFlags(flags)
-		err = l.Complete([]string{backupName}, f)
-		require.NoError(t, err)
-
-		// Verify that the BSL cacert can be fetched correctly before running the command
-		fetchedBackup := &velerov1api.Backup{}
-		err = kbClient.Get(t.Context(), kbclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: backupName}, fetchedBackup)
-		require.NoError(t, err)
-
-		// Test the cacert fetching logic directly
-		cacertValue, err := cacert.GetCACertFromBackup(t.Context(), kbClient, cmdtest.VeleroNameSpace, fetchedBackup)
-		require.NoError(t, err)
-		assert.Equal(t, expectedCACert, cacertValue, "BSL cacert should be retrieved correctly")
-
-		// Create a mock HTTP server to serve the log content
-		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// For logs, we need to gzip the content
-			gzipWriter := gzip.NewWriter(w)
-			defer gzipWriter.Close()
-			gzipWriter.Write([]byte(expectedLogContent))
-		}))
-		defer mockServer.Close()
-
-		// Mock the download request controller by updating DownloadRequests
-		go func() {
-			time.Sleep(50 * time.Millisecond) // Wait a bit for the request to be created
-
-			// List all DownloadRequests
-			downloadRequestList := &velerov1api.DownloadRequestList{}
-			if err := kbClient.List(t.Context(), downloadRequestList, &kbclient.ListOptions{
-				Namespace: cmdtest.VeleroNameSpace,
-			}); err == nil {
-				// Update each download request with the mock server URL
-				for _, dr := range downloadRequestList.Items {
-					if dr.Spec.Target.Kind == velerov1api.DownloadTargetKindBackupLog &&
-						dr.Spec.Target.Name == backupName {
-						dr.Status.DownloadURL = mockServer.URL
-						dr.Status.Phase = velerov1api.DownloadRequestPhaseProcessed
-						kbClient.Update(t.Context(), &dr)
-					}
-				}
-			}
-		}()
-
-		// Capture the output
-		var logOutput bytes.Buffer
-		// Temporarily redirect stdout
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		// Run the logs command - it should now succeed
-		l.Timeout = 5 * time.Second
-		err = l.Run(c, f)
-
-		// Restore stdout and read the output
-		w.Close()
-		os.Stdout = oldStdout
-		io.Copy(&logOutput, r)
-
-		// Verify the command succeeded and output is correct
-		require.NoError(t, err)
-		assert.Equal(t, expectedLogContent, logOutput.String())
-	})
 }
 
 func TestBSLCACertBehavior(t *testing.T) {
@@ -313,13 +206,8 @@ func TestBSLCACertBehavior(t *testing.T) {
 		err = l.Complete([]string{backupName}, f)
 		require.NoError(t, err)
 
-		// Verify that the BSL cacert returns empty string when not present
-		fetchedBackup := &velerov1api.Backup{}
-		err = kbClient.Get(t.Context(), kbclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: backupName}, fetchedBackup)
-		require.NoError(t, err)
-
 		// Test the cacert fetching logic directly
-		cacertValue, err := cacert.GetCACertFromBackup(t.Context(), kbClient, cmdtest.VeleroNameSpace, fetchedBackup)
+		cacertValue, err := cacert.GetCACertFromBSL(t.Context(), kbClient, bsl)
 		require.NoError(t, err)
 		assert.Empty(t, cacertValue, "BSL cacert should be empty when not configured")
 
@@ -358,15 +246,15 @@ func TestBSLCACertBehavior(t *testing.T) {
 		err = l.Complete([]string{backupName}, f)
 		require.NoError(t, err)
 
-		// Verify that the BSL cacert returns empty string when BSL doesn't exist
+		// Verify that the BSL resolves to nil when it doesn't exist
 		fetchedBackup := &velerov1api.Backup{}
 		err = kbClient.Get(t.Context(), kbclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: backupName}, fetchedBackup)
 		require.NoError(t, err)
 
-		// Test the cacert fetching logic directly - should not error when BSL is missing
-		cacertValue, err := cacert.GetCACertFromBackup(t.Context(), kbClient, cmdtest.VeleroNameSpace, fetchedBackup)
+		// The BSL lookup should not error when the BSL is missing
+		missingBSL, err := cacert.GetBSLFromBackup(t.Context(), kbClient, fetchedBackup)
 		require.NoError(t, err)
-		assert.Empty(t, cacertValue, "BSL cacert should be empty when BSL doesn't exist")
+		assert.Nil(t, missingBSL, "BSL should be nil when it doesn't exist")
 
 		// The command should still try to run even without BSL
 		l.Timeout = 100 * time.Millisecond

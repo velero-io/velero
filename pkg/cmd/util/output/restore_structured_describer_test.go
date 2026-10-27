@@ -680,7 +680,7 @@ func TestDescribeRestoreItemOperationsInSF_NoDownload(t *testing.T) {
 			restore.Status = tc.status
 
 			sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-			describeRestoreItemOperationsInSF(context.Background(), kbClient, sd, restore, false, false, "")
+			describeRestoreItemOperationsInSF(context.Background(), kbClient, sd, restore, false, false, "", "", "")
 			assert.Equal(tt, tc.expect, sd.output)
 		})
 	}
@@ -697,7 +697,7 @@ func TestDescribeRestoreItemOperationsInSF_DownloadError(t *testing.T) {
 	cancel()
 
 	sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-	describeRestoreItemOperationsInSF(ctx, kbClient, sd, restore, true, false, "")
+	describeRestoreItemOperationsInSF(ctx, kbClient, sd, restore, true, false, "", "", "")
 
 	ops, ok := sd.output["restoreItemOperations"].(map[string]any)
 	require.True(t, ok)
@@ -856,7 +856,7 @@ func TestDescribeRestoreResultsInSF(t *testing.T) {
 	t.Run("no warnings or errors", func(t *testing.T) {
 		sd := &StructuredDescriber{output: make(map[string]any), format: ""}
 		restore := builder.ForRestore("velero", "r1").Result()
-		describeRestoreResultsInSF(context.Background(), kbClient, sd, restore, false, "")
+		describeRestoreResultsInSF(context.Background(), kbClient, sd, restore, false, "", "", "")
 		assert.Empty(t, sd.output)
 	})
 
@@ -869,7 +869,7 @@ func TestDescribeRestoreResultsInSF(t *testing.T) {
 		cancel()
 
 		sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "")
+		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "", "", "")
 
 		warnings, ok := sd.output["warnings"].(map[string]any)
 		require.True(t, ok)
@@ -889,7 +889,7 @@ func TestDescribeRestoreResultsInSF(t *testing.T) {
 		cancel()
 
 		sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "")
+		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "", "", "")
 		_, hasWarn := sd.output["warnings"]
 		_, hasErr := sd.output["errors"]
 		assert.True(t, hasWarn)
@@ -903,7 +903,7 @@ func TestDescribeRestoreResultsInSF(t *testing.T) {
 		cancel()
 
 		sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "")
+		describeRestoreResultsInSF(ctx, kbClient, sd, restore, false, "", "", "")
 		_, hasWarn := sd.output["warnings"]
 		_, hasErr := sd.output["errors"]
 		assert.False(t, hasWarn)
@@ -937,7 +937,7 @@ func TestDescribeRestoreResourceListInSF_DownloadError(t *testing.T) {
 	cancel()
 
 	sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-	describeRestoreResourceListInSF(ctx, kbClient, sd, restore, false, "")
+	describeRestoreResourceListInSF(ctx, kbClient, sd, restore, false, "", "", "")
 	got, ok := sd.output["resourceList"].(string)
 	require.True(t, ok)
 	assert.Contains(t, got, "<error getting restore resource list:")
@@ -950,7 +950,7 @@ func TestDescribeRestoreCSISnapshotsInSF_DownloadError(t *testing.T) {
 	cancel()
 
 	sd := &StructuredDescriber{output: make(map[string]any), format: ""}
-	describeRestoreCSISnapshotsInSF(ctx, kbClient, sd, restore, false, false, "")
+	describeRestoreCSISnapshotsInSF(ctx, kbClient, sd, restore, false, false, "", "", "")
 	got, ok := sd.output["csiSnapshotRestores"].(string)
 	require.True(t, ok)
 	assert.Contains(t, got, "<error getting restore volume info:")

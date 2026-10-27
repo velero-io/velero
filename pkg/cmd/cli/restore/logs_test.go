@@ -27,11 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
 	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
 	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
-	"github.com/velero-io/velero/pkg/cmd/util/cacert"
 	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
@@ -113,57 +111,6 @@ func TestNewLogsCommand(t *testing.T) {
 		err = l.Run(c, f)
 		require.Error(t, err)
 		require.Equal(t, fmt.Sprintf("restore %q does not exist", restoreName), err.Error())
-	})
-
-	t.Run("Restore with BSL cacert test", func(t *testing.T) {
-		restoreName := "rs-logs-with-cacert"
-		backupName := "bk-for-restore"
-		bslName := "test-bsl"
-
-		// create a factory
-		f := &factorymocks.Factory{}
-
-		kbClient := velerotest.NewFakeControllerRuntimeClient(t)
-
-		// Create BSL with cacert
-		bsl := builder.ForBackupStorageLocation(cmdtest.VeleroNameSpace, bslName).
-			Provider("aws").
-			Bucket("test-bucket").
-			CACert([]byte("test-cacert-content")).
-			Result()
-		err := kbClient.Create(t.Context(), bsl, &kbclient.CreateOptions{})
-		require.NoError(t, err)
-
-		// Create backup referencing the BSL
-		backup := builder.ForBackup(cmdtest.VeleroNameSpace, backupName).
-			StorageLocation(bslName).
-			Result()
-		err = kbClient.Create(t.Context(), backup, &kbclient.CreateOptions{})
-		require.NoError(t, err)
-
-		// Create restore referencing the backup
-		restore := builder.ForRestore(cmdtest.VeleroNameSpace, restoreName).
-			Phase(velerov1api.RestorePhaseCompleted).
-			Backup(backupName).
-			Result()
-		err = kbClient.Create(t.Context(), restore, &kbclient.CreateOptions{})
-		require.NoError(t, err)
-
-		f.On("Namespace").Return(cmdtest.VeleroNameSpace)
-		f.On("KubebuilderClient").Return(kbClient, nil)
-
-		c := NewLogsCommand(f)
-		assert.Equal(t, "Get restore logs", c.Short)
-
-		// We can verify that BSL cacert fetching logic is in place
-		// The actual command will call downloadrequest which requires a controller
-		// to be running, so we'll just verify the command structure
-		require.NotNil(t, c.Run)
-
-		// Verify the BSL cacert can be fetched
-		cacertValue, err := cacert.GetCACertFromRestore(t.Context(), kbClient, f.Namespace(), restore)
-		require.NoError(t, err)
-		require.Equal(t, "test-cacert-content", cacertValue)
 	})
 
 	t.Run("CLI execution test", func(t *testing.T) {

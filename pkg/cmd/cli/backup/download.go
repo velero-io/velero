@@ -127,12 +127,18 @@ func (o *DownloadOptions) Run(c *cobra.Command, f client.Factory) error {
 		return err
 	}
 
-	// Get BSL cacert if available
-	bslCACert, err := cacert.GetCACertFromBackup(context.Background(), kbClient, f.Namespace(), backup)
+	bsl, err := cacert.GetBSLFromBackup(context.Background(), kbClient, backup)
 	if err != nil {
-		// Log the error but don't fail - we can still try to download without the BSL cacert
+		// Log the error but don't fail - we can still try to download without the BSL
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting BSL of backup: %v\n", err)
+	}
+	bslCACert, err := cacert.GetCACertFromBSL(context.Background(), kbClient, bsl)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: Error getting cacert from BSL: %v\n", err)
-		bslCACert = ""
+	}
+	encryptionKey, err := cacert.GetSSECKeyFromBSL(context.Background(), kbClient, bsl)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: Error getting SSE-C key from BSL: %v\n", err)
 	}
 
 	backupDest, err := os.OpenFile(o.Output, o.writeOptions, 0600)
@@ -141,7 +147,7 @@ func (o *DownloadOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 	defer backupDest.Close()
 
-	err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), o.Name, velerov1api.DownloadTargetKindBackupContents, backupDest, o.Timeout, o.InsecureSkipTLSVerify, o.caCertFile, bslCACert)
+	err = downloadrequest.StreamWithBSLCACert(context.Background(), kbClient, f.Namespace(), o.Name, velerov1api.DownloadTargetKindBackupContents, backupDest, o.Timeout, o.InsecureSkipTLSVerify, o.caCertFile, bslCACert, encryptionKey)
 	if err != nil {
 		os.Remove(o.Output)
 		cmd.CheckError(err)
