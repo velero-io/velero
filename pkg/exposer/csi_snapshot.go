@@ -510,6 +510,9 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
+	// Must run before the backup VSC and the source VS are deleted below.
+	sourceVSCName := e.getRetainedSourceVSC(ctx, backupVSCName, vsName, sourceNamespace)
+
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
 
@@ -519,6 +522,63 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	// object under a Retain policy. Deleting a Retain VSC drops only the API
 	// object and leaves the underlying snapshot intact.
 	csi.DeleteVolumeSnapshotContentIfAny(ctx, e.csiSnapshotClient, backupVSCName, e.log)
+
+	if sourceVSCName != "" {
+		csi.DeleteVolumeSnapshotContentIfAny(ctx, e.csiSnapshotClient, sourceVSCName, e.log)
+	}
+}
+
+// getRetainedSourceVSC returns the name of the source VSC if Expose has already
+// set it to Retain but has not deleted it yet, e.g. the node-agent restarted or
+// the prepare timed out in between. Expose deletes the source VS and VSC once the
+// backup VSC holds the snapshot handle, so the source VSC must be deleted here as
+// well, otherwise deleting the source VS leaves it behind with a dangling VS ref.
+// Like in Expose, deleting the Retain VSC drops only the API object.
+func (e *csiSnapshotExposer) getRetainedSourceVSC(ctx context.Context, backupVSCName string, vsName string, vsNamespace string) string {
+	if vsName == "" {
+		return ""
+	}
+
+	vs, err := e.csiSnapshotClient.VolumeSnapshots(vsNamespace).Get(ctx, vsName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			e.log.WithError(err).Warnf("Failed to get source VS %s/%s", vsNamespace, vsName)
+		}
+		return ""
+	}
+
+	// Deletion of VGS member VS/VSC is deferred until VGS cleanup
+	if vs.Status == nil || vs.Status.VolumeGroupSnapshotName != nil ||
+		vs.Status.BoundVolumeSnapshotContentName == nil || *vs.Status.BoundVolumeSnapshotContentName == "" {
+		return ""
+	}
+
+	sourceVSC, err := e.csiSnapshotClient.VolumeSnapshotContents().Get(ctx, *vs.Status.BoundVolumeSnapshotContentName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			e.log.WithError(err).Warnf("Failed to get source VSC %s", *vs.Status.BoundVolumeSnapshotContentName)
+		}
+		return ""
+	}
+
+	if sourceVSC.Spec.DeletionPolicy != snapshotv1api.VolumeSnapshotContentRetain ||
+		sourceVSC.Status == nil || sourceVSC.Status.SnapshotHandle == nil {
+		return ""
+	}
+
+	backupVSC, err := e.csiSnapshotClient.VolumeSnapshotContents().Get(ctx, backupVSCName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			e.log.WithError(err).Warnf("Failed to get backup VSC %s", backupVSCName)
+		}
+		return ""
+	}
+
+	if backupVSC.Spec.Source.SnapshotHandle == nil || *backupVSC.Spec.Source.SnapshotHandle != *sourceVSC.Status.SnapshotHandle {
+		return ""
+	}
+
+	return sourceVSC.Name
 }
 
 func getVolumeModeByAccessMode(accessMode string, dataMover string) (corev1api.PersistentVolumeMode, error) {

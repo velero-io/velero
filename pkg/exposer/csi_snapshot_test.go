@@ -33,6 +33,7 @@ import (
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	storagev1api "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -2623,6 +2624,118 @@ func TestCreateBackupVSCDeletionPolicy(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.expectedPolicy, backupVSC.Spec.DeletionPolicy)
 			assert.Equal(t, handle, *backupVSC.Spec.Source.SnapshotHandle)
+		})
+	}
+}
+
+func TestCleanUp_SourceVSC(t *testing.T) {
+	ownerObject := corev1api.ObjectReference{
+		Kind:       "DataUpload",
+		Namespace:  "velero",
+		Name:       "du-123",
+		UID:        "fake-uid",
+		APIVersion: "v2alpha1",
+	}
+
+	sourceVS := func(vgs *string) *snapshotv1api.VolumeSnapshot {
+		return &snapshotv1api.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: "source-vs", Namespace: "app-ns"},
+			Status: &snapshotv1api.VolumeSnapshotStatus{
+				BoundVolumeSnapshotContentName: ptr.To("source-vsc"),
+				VolumeGroupSnapshotName:        vgs,
+			},
+		}
+	}
+	sourceVSC := func(policy snapshotv1api.DeletionPolicy) *snapshotv1api.VolumeSnapshotContent {
+		return &snapshotv1api.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{Name: "source-vsc"},
+			Spec:       snapshotv1api.VolumeSnapshotContentSpec{DeletionPolicy: policy},
+			Status:     &snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: ptr.To("fake-handle")},
+		}
+	}
+	backupVSC := func(handle string) *snapshotv1api.VolumeSnapshotContent {
+		return &snapshotv1api.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name},
+			Spec: snapshotv1api.VolumeSnapshotContentSpec{
+				DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+				Source:         snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: ptr.To(handle)},
+			},
+		}
+	}
+
+	tests := []struct {
+		name              string
+		vsName            string
+		snapshotObjs      []runtime.Object
+		sourceVSCExpected bool
+		sourceVSExpected  bool
+	}{
+		{
+			name:         "expose interrupted after the source VSC is retained",
+			vsName:       "source-vs",
+			snapshotObjs: []runtime.Object{sourceVS(nil), sourceVSC(snapshotv1api.VolumeSnapshotContentRetain), backupVSC("fake-handle")},
+		},
+		{
+			name:              "source VSC is not retained",
+			vsName:            "source-vs",
+			snapshotObjs:      []runtime.Object{sourceVS(nil), sourceVSC(snapshotv1api.VolumeSnapshotContentDelete), backupVSC("fake-handle")},
+			sourceVSCExpected: true,
+		},
+		{
+			name:              "backup VSC is not created",
+			vsName:            "source-vs",
+			snapshotObjs:      []runtime.Object{sourceVS(nil), sourceVSC(snapshotv1api.VolumeSnapshotContentRetain)},
+			sourceVSCExpected: true,
+		},
+		{
+			name:              "backup VSC has another snapshot handle",
+			vsName:            "source-vs",
+			snapshotObjs:      []runtime.Object{sourceVS(nil), sourceVSC(snapshotv1api.VolumeSnapshotContentRetain), backupVSC("other-handle")},
+			sourceVSCExpected: true,
+		},
+		{
+			name:              "source VS is a VGS member",
+			vsName:            "source-vs",
+			snapshotObjs:      []runtime.Object{sourceVS(ptr.To("fake-vgs")), sourceVSC(snapshotv1api.VolumeSnapshotContentRetain), backupVSC("fake-handle")},
+			sourceVSCExpected: true,
+			sourceVSExpected:  true,
+		},
+		{
+			name:              "no source VS name",
+			snapshotObjs:      []runtime.Object{sourceVS(nil), sourceVSC(snapshotv1api.VolumeSnapshotContentRetain), backupVSC("fake-handle")},
+			sourceVSCExpected: true,
+			sourceVSExpected:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeSnapshotClient := snapshotFake.NewSimpleClientset(test.snapshotObjs...)
+
+			exposer := csiSnapshotExposer{
+				kubeClient:        fake.NewSimpleClientset(),
+				csiSnapshotClient: fakeSnapshotClient.SnapshotV1(),
+				log:               velerotest.NewLogger(),
+			}
+
+			exposer.CleanUp(t.Context(), ownerObject, test.vsName, "app-ns")
+
+			_, err := fakeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Get(t.Context(), ownerObject.Name, metav1.GetOptions{})
+			assert.True(t, apierrors.IsNotFound(err), "backup VSC should be deleted")
+
+			_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Get(t.Context(), "source-vsc", metav1.GetOptions{})
+			if test.sourceVSCExpected {
+				require.NoError(t, err, "source VSC should not be deleted")
+			} else {
+				assert.True(t, apierrors.IsNotFound(err), "source VSC should be deleted")
+			}
+
+			_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshots("app-ns").Get(t.Context(), "source-vs", metav1.GetOptions{})
+			if test.sourceVSExpected {
+				require.NoError(t, err, "source VS should not be deleted")
+			} else {
+				assert.True(t, apierrors.IsNotFound(err), "source VS should be deleted")
+			}
 		})
 	}
 }

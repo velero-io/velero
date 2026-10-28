@@ -1,0 +1,1 @@
+Delete the retained source VolumeSnapshotContent when cleaning up an interrupted CSI snapshot expose
