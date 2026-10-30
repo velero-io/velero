@@ -368,6 +368,11 @@ func (s *server) run() error {
 		return err
 	}
 
+	s.metrics = metrics.NewServerMetrics()
+	s.metrics.RegisterAllMetrics()
+	// Initialize manual backup metrics
+	s.metrics.InitSchedule("")
+
 	if err := s.setupBeforeControllerRun(); err != nil {
 		return err
 	}
@@ -387,7 +392,7 @@ func (s *server) setupBeforeControllerRun() error {
 		return errors.WithStack(err)
 	}
 
-	markInProgressCRsFailed(s.ctx, client, s.namespace, s.logger)
+	markInProgressCRsFailed(s.ctx, client, s.namespace, s.logger, s.metrics)
 
 	if err := setDefaultBackupLocation(s.ctx, client, s.namespace, s.config.DefaultBackupLocation, s.logger); err != nil {
 		return err
@@ -559,10 +564,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.logger.Fatalf("Failed to start metric server at [%s]: %v", s.metricsAddress, err)
 		}
 	}()
-	s.metrics = metrics.NewServerMetrics()
-	s.metrics.RegisterAllMetrics()
-	// Initialize manual backup metrics
-	s.metrics.InitSchedule("")
 
 	newPluginManager := func(logger logrus.FieldLogger) clientmgmt.Manager {
 		return clientmgmt.NewManager(logger, s.logLevel, s.pluginRegistry)
@@ -986,13 +987,13 @@ func (s *server) runProfiler() {
 
 // if there is a restarting during the reconciling of backups/restores/etc, these CRs may be stuck in progress status
 // markInProgressCRsFailed tries to mark the in progress CRs as failed when starting the server to avoid the issue
-func markInProgressCRsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
-	markInProgressBackupsFailed(ctx, client, namespace, log)
+func markInProgressCRsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
+	markInProgressBackupsFailed(ctx, client, namespace, log, m)
 
-	markInProgressRestoresFailed(ctx, client, namespace, log)
+	markInProgressRestoresFailed(ctx, client, namespace, log, m)
 }
 
-func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
+func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
 	backups := &velerov1api.BackupList{}
 	if err := client.List(ctx, backups, &ctrlclient.ListOptions{Namespace: namespace}); err != nil {
 		log.WithError(errors.WithStack(err)).Error("failed to list backups")
@@ -1013,12 +1014,17 @@ func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, 
 			continue
 		}
 		log.WithField("backup", backup.GetName()).Warn(updated.Status.FailureReason)
+		// Metrics are labeled by schedule name (empty for manual backups), matching
+		// the normal completion path in backup_controller.go.
+		backupScheduleName := backup.GetLabels()[velerov1api.ScheduleNameLabel]
+		m.RegisterBackupFailed(backupScheduleName)
+		m.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusFailure)
 		markDataUploadsCancel(ctx, client, backup, log)
 		markPodVolumeBackupsCancel(ctx, client, backup, log)
 	}
 }
 
-func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
+func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
 	restores := &velerov1api.RestoreList{}
 	if err := client.List(ctx, restores, &ctrlclient.ListOptions{Namespace: namespace}); err != nil {
 		log.WithError(errors.WithStack(err)).Error("failed to list restores")
@@ -1037,8 +1043,10 @@ func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client,
 			log.WithError(errors.WithStack(err)).Errorf("failed to patch restore %q", restore.GetName())
 			continue
 		}
-
 		log.WithField("restore", restore.GetName()).Warn(updated.Status.FailureReason)
+		// Metrics are labeled by schedule name (empty for manual restores), matching
+		// the normal completion path in restore_controller.go.
+		m.RegisterRestoreFailed(restore.Spec.ScheduleName)
 		markDataDownloadsCancel(ctx, client, restore, log)
 		markPodVolumeRestoresCancel(ctx, client, restore, log)
 	}
