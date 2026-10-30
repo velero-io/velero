@@ -39,6 +39,7 @@ import (
 	. "github.com/velero-io/velero/test/e2e/basic/backup-volume-info"
 	. "github.com/velero-io/velero/test/e2e/basic/resources-check"
 	. "github.com/velero-io/velero/test/e2e/bsl-mgmt"
+	. "github.com/velero-io/velero/test/e2e/inplacerestore"
 	. "github.com/velero-io/velero/test/e2e/migration"
 	. "github.com/velero-io/velero/test/e2e/nodeagentconfig"
 	. "github.com/velero-io/velero/test/e2e/parallelfilesdownload"
@@ -712,6 +713,18 @@ var _ = Describe(
 	"Test data mover dynamic Cache PVC injection",
 	Label("NodeAgentConfig", "CachePVC"),
 	CachePVCTest,
+)
+
+var _ = Describe(
+	"Volume data in-place restore for CSI",
+	Label("InPlaceRestoreForCSI", "InplaceRestore", "Restore"),
+	CSIInplaceRestoreTest,
+)
+
+var _ = Describe(
+	"Volume data in-place restore for file system backup",
+	Label("InPlaceRestoreForFSB", "InplaceRestore", "Restore"),
+	FileSystemBackupInplaceRestoreTest,
 )
 
 func GetKubeConfigContext() error {
