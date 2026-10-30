@@ -15,6 +15,8 @@ Only specific resources are included, all others are excluded.
 
 Wildcard takes precedence when both a wildcard and specific resource are included.
 
+Resource include and exclude lists accept glob patterns. A malformed pattern (for example `foo[`) is rejected when the backup or restore is validated, rather than silently skipping resources.
+
 ### --include-namespaces
 
 Namespaces to include. Accepts glob patterns (`*`, `?`, `[abc]`). Default is `*`, all namespaces.

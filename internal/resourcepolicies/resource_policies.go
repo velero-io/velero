@@ -421,6 +421,16 @@ func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList
 			return fmt.Errorf("excludes list cannot contain an item in the includes list: %s", itm)
 		}
 	}
+	for _, itm := range includes.List() {
+		if _, err := glob.Compile(itm); err != nil {
+			return fmt.Errorf("invalid glob pattern %q in includes list: %v", itm, err)
+		}
+	}
+	for _, itm := range excludes.List() {
+		if _, err := glob.Compile(itm); err != nil {
+			return fmt.Errorf("invalid glob pattern %q in excludes list: %v", itm, err)
+		}
+	}
 	return nil
 }
 
