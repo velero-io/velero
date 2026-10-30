@@ -27,6 +27,7 @@ import (
 
 	"context"
 
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
@@ -37,12 +38,14 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -91,6 +94,7 @@ func setupBackupDeletionControllerTest(t *testing.T, req *velerov1api.DeleteBack
 		backupStore:       backupStore,
 		controller: NewBackupDeletionReconciler(
 			velerotest.NewLogger(),
+			fakeClient,
 			fakeClient,
 			NewBackupTracker(),
 			nil, // repository manager
@@ -879,6 +883,131 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		assert.Len(t, res.Status.Errors, 1)
 		assert.Equal(t, "backup deletion failed: backup not found", res.Status.Errors[0])
 	})
+
+	t.Run("CSI VolumeSnapshots owned by the backup are cleaned up in workload namespaces when the backup has no tarball", func(t *testing.T) {
+		// A backup that was InProgress when the Velero server restarted is
+		// marked Failed and never uploads a tarball, but the CSI
+		// VolumeSnapshots it created in the workload namespace remain.
+		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").
+			StorageLocation("default").Phase(velerov1api.BackupPhaseFailed).Result()
+		backup.UID = "uid"
+
+		location := &velerov1api.BackupStorageLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      backup.Spec.StorageLocation,
+			},
+			Spec: velerov1api.BackupStorageLocationSpec{
+				Provider: "objStoreProvider",
+				StorageType: velerov1api.StorageType{
+					ObjectStorage: &velerov1api.ObjectStorageLocation{
+						Bucket: "bucket",
+					},
+				},
+			},
+			Status: velerov1api.BackupStorageLocationStatus{
+				Phase: velerov1api.BackupStorageLocationPhaseAvailable,
+			},
+		}
+
+		newVS := func(namespace, name string, labels map[string]string) (*snapshotv1api.VolumeSnapshot, *snapshotv1api.VolumeSnapshotContent) {
+			vs := builder.ForVolumeSnapshot(namespace, name).ObjectMeta(builder.WithLabelsMap(labels)).
+				SourcePVC("some-pvc").Status().BoundVolumeSnapshotContentName(name + "-content").Result()
+			vsc := builder.ForVolumeSnapshotContent(name+"-content").
+				DeletionPolicy(snapshotv1api.VolumeSnapshotContentRetain).
+				VolumeSnapshotRef(namespace, name, "").Result()
+			return vs, vsc
+		}
+		// Owned by this backup.
+		ownedVS, ownedVSC := newVS("user-ns", "vs-owned", map[string]string{
+			velerov1api.BackupNameLabel: "foo",
+			velerov1api.BackupUIDLabel:  "uid",
+		})
+		// Owned by a same-named backup of another Velero installation.
+		otherVS, otherVSC := newVS("user-ns", "vs-other", map[string]string{
+			velerov1api.BackupNameLabel: "foo",
+			velerov1api.BackupUIDLabel:  "other-uid",
+		})
+		// No backup UID label in a workload namespace: ownership can't be proven.
+		legacyVS, legacyVSC := newVS("user-ns", "vs-legacy", map[string]string{
+			velerov1api.BackupNameLabel: "foo",
+		})
+		// No backup UID label in the backup's own namespace: cleaned as before.
+		legacyVeleroNsVS, legacyVeleroNsVSC := newVS(velerov1api.DefaultNamespace, "vs-legacy-velero-ns", map[string]string{
+			velerov1api.BackupNameLabel: "foo",
+		})
+
+		td := setupBackupDeletionControllerTest(t, defaultTestDbr(), backup, location,
+			ownedVS, ownedVSC, otherVS, otherVSC, legacyVS, legacyVSC, legacyVeleroNsVS, legacyVeleroNsVSC)
+		// The controller manager's client only sees the Velero namespace.
+		td.controller.Client = newNamespaceScopedClient(td.fakeClient.(client.WithWatch), velerov1api.DefaultNamespace)
+
+		pluginManager := &pluginmocks.Manager{}
+		pluginManager.On("GetDeleteItemActions").Return([]velero.DeleteItemAction{new(mocks.DeleteItemAction)}, nil)
+		pluginManager.On("CleanupClients")
+		td.controller.newPluginManager = func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager }
+
+		td.backupStore.On("GetBackupVolumeSnapshots", backup.Name).Return(nil, nil)
+		td.backupStore.On("GetBackupContents", backup.Name).Return(nil, fmt.Errorf("key not found"))
+		td.backupStore.On("DeleteBackup", backup.Name).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		for _, tc := range []struct {
+			vs      *snapshotv1api.VolumeSnapshot
+			deleted bool
+		}{
+			{vs: ownedVS, deleted: true},
+			{vs: otherVS, deleted: false},
+			{vs: legacyVS, deleted: false},
+			{vs: legacyVeleroNsVS, deleted: true},
+		} {
+			err = td.fakeClient.Get(t.Context(), types.NamespacedName{Namespace: tc.vs.Namespace, Name: tc.vs.Name}, &snapshotv1api.VolumeSnapshot{})
+			expectedPolicy := snapshotv1api.VolumeSnapshotContentRetain
+			if tc.deleted {
+				assert.True(t, apierrors.IsNotFound(err), "Expected VolumeSnapshot %s/%s to be deleted, but actual error: %v", tc.vs.Namespace, tc.vs.Name, err)
+				expectedPolicy = snapshotv1api.VolumeSnapshotContentDelete
+			} else {
+				require.NoError(t, err, "Expected VolumeSnapshot %s/%s to be kept", tc.vs.Namespace, tc.vs.Name)
+			}
+
+			res := &snapshotv1api.VolumeSnapshotContent{}
+			require.NoError(t, td.fakeClient.Get(t.Context(), types.NamespacedName{Name: tc.vs.Name + "-content"}, res))
+			assert.Equal(t, expectedPolicy, res.Spec.DeletionPolicy, "VolumeSnapshotContent of %s/%s", tc.vs.Namespace, tc.vs.Name)
+		}
+	})
+}
+
+// newNamespaceScopedClient mimics the controller manager's cached client, whose
+// cache only covers the given namespace: namespaced objects in other namespaces
+// are neither listed nor readable, cluster-scoped objects are.
+func newNamespaceScopedClient(c client.WithWatch, namespace string) client.Client {
+	return interceptor.NewClient(c, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if key.Namespace != "" && key.Namespace != namespace {
+				return fmt.Errorf("unable to get: %s because of unknown namespace for the cache", key)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if err := c.List(ctx, list, opts...); err != nil {
+				return err
+			}
+			items, err := meta.ExtractList(list)
+			if err != nil {
+				return err
+			}
+			visible := []runtime.Object{}
+			for _, item := range items {
+				if obj, ok := item.(client.Object); ok && obj.GetNamespace() != "" && obj.GetNamespace() != namespace {
+					continue
+				}
+				visible = append(visible, item)
+			}
+			return meta.SetList(list, visible)
+		},
+	})
 }
 
 func TestGetSnapshotsInBackup(t *testing.T) {
@@ -1181,9 +1310,11 @@ func TestDeleteMovedSnapshots(t *testing.T) {
 			}
 
 			veleroBackup := &velerov1api.Backup{}
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 			controller := NewBackupDeletionReconciler(
 				velerotest.NewLogger(),
-				velerotest.NewFakeControllerRuntimeClient(t, objs...),
+				fakeClient,
+				fakeClient,
 				NewBackupTracker(),
 				test.repoMgr,
 				metrics.NewServerMetrics(),
