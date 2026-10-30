@@ -86,7 +86,7 @@ func WaitForConfigmapDelete(c clientset.Interface, ns, name string) error {
 
 	return waitutil.PollImmediateInfinite(5*time.Second,
 		func() (bool, error) {
-			if _, err := c.CoreV1().ConfigMaps(ns).Get(context.TODO(), ns, metav1.GetOptions{}); err != nil {
+			if _, err := c.CoreV1().ConfigMaps(ns).Get(context.TODO(), name, metav1.GetOptions{}); err != nil {
 				if apierrors.IsNotFound(err) {
 					return true, nil
 				}
