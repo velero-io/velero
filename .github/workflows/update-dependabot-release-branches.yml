@@ -1,0 +1,76 @@
+name: "Update Dependabot release branches"
+# Dependabot cannot compute `target-branch`, so regenerate the docker entries in
+# .github/dependabot.yml for the supported release branches (the two newest
+# minors that have a GA vX.Y.0 tag) whenever a release is published.
+# Re-running is harmless: no pull request is opened when nothing changes.
+on:
+  release:
+    types: [released]
+  schedule:
+    - cron: "0 3 * * 1" # Every Monday at 3:00 UTC, in case a release event was missed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    if: github.repository == 'velero-io/velero'
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: automation/update-dependabot-release-branches
+      # Pull requests opened with the default GITHUB_TOKEN do not trigger other
+      # workflows, so required checks would not run on them. Set the
+      # DEPENDABOT_CONFIG_TOKEN secret (a GitHub App token or PAT that can push
+      # branches and open pull requests) to have CI run on the generated PR.
+      GH_TOKEN: ${{ secrets.DEPENDABOT_CONFIG_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.DEPENDABOT_CONFIG_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate release branch entries
+        run: ./hack/update-dependabot-release-branches.sh
+
+      - name: Open pull request if the config changed
+        run: |
+          if git diff --quiet -- .github/dependabot.yml; then
+            echo "dependabot.yml is up to date"
+            exit 0
+          fi
+
+          open_pr=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[].number')
+
+          # Leave an already pushed branch alone when it has the same content,
+          # so unchanged runs do not retrigger CI or dismiss approvals.
+          if git fetch --quiet origin "${BRANCH}" 2>/dev/null &&
+              git diff --quiet FETCH_HEAD -- .github/dependabot.yml; then
+            if [[ -n "${open_pr}" ]]; then
+              echo "pull request #${open_pr} already has this change"
+              exit 0
+            fi
+            echo "${BRANCH} already has this change but has no open pull request"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -B "${BRANCH}"
+            git commit -s -am "Update Dependabot release branches"
+            git push --force origin "${BRANCH}"
+
+            if [[ -n "${open_pr}" ]]; then
+              echo "pull request #${open_pr} updated"
+              exit 0
+            fi
+          fi
+
+          gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "Update Dependabot release branches" \
+            --label "kind/changelog-not-required" \
+            --body "Regenerated the Dependabot \`target-branch\` entries in \`.github/dependabot.yml\` for the supported release branches (the two newest minors with a GA \`vX.Y.0\` tag) using \`hack/update-dependabot-release-branches.sh\`.
+
+          Triggered by: \`${GITHUB_EVENT_NAME}\`"
