@@ -628,3 +628,35 @@ func getMaintenanceHistogramCount(t *testing.T, vec *prometheus.HistogramVec, re
 	t.Fatalf("Histogram with repository_name label '%s' not found", repositoryName)
 	return 0
 }
+
+func TestRegisterBuildInfo(t *testing.T) {
+	m := NewServerMetrics()
+	m.RegisterBuildInfo("v1.13.0", "abc123", "clean", "go1.22.0", "linux", "amd64")
+
+	ch := make(chan prometheus.Metric, 1)
+	m.metrics[buildInfo].(*prometheus.GaugeVec).Collect(ch)
+	close(ch)
+
+	var found bool
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		require.NoError(t, metric.Write(dtoMetric))
+		if dtoMetric.GetGauge().GetValue() != 1 {
+			continue
+		}
+		labels := map[string]string{}
+		for _, label := range dtoMetric.Label {
+			labels[label.GetName()] = label.GetValue()
+		}
+		assert.Equal(t, map[string]string{
+			"version":        "v1.13.0",
+			"git_commit":     "abc123",
+			"git_tree_state": "clean",
+			"go_version":     "go1.22.0",
+			"goos":           "linux",
+			"goarch":         "amd64",
+		}, labels)
+		found = true
+	}
+	require.True(t, found, "build_info metric not found")
+}

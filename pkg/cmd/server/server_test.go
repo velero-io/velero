@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,10 +36,12 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/buildinfo"
 	"github.com/velero-io/velero/pkg/client/mocks"
 	"github.com/velero-io/velero/pkg/cmd/server/config"
 	"github.com/velero-io/velero/pkg/constant"
 	discovery_mocks "github.com/velero-io/velero/pkg/discovery/mocks"
+	"github.com/velero-io/velero/pkg/metrics"
 	velerotest "github.com/velero-io/velero/pkg/test"
 	"github.com/velero-io/velero/pkg/uploader"
 )
@@ -447,4 +451,32 @@ func Test_setDefaultBackupLocation(t *testing.T) {
 	// no default location created
 	err = setDefaultBackupLocation(t.Context(), c, "velero", "default", logrus.New())
 	assert.NoError(t, err)
+}
+
+func TestRegisterBuildInfo(t *testing.T) {
+	m := metrics.NewServerMetrics()
+	m.RegisterAllMetrics()
+	registerBuildInfo(m)
+
+	ch := make(chan prometheus.Metric, 1)
+	m.Metrics()["build_info"].(*prometheus.GaugeVec).Collect(ch)
+	close(ch)
+
+	var found bool
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		require.NoError(t, metric.Write(dtoMetric))
+		if dtoMetric.GetGauge().GetValue() != 1 {
+			continue
+		}
+		labels := map[string]string{}
+		for _, label := range dtoMetric.Label {
+			labels[label.GetName()] = label.GetValue()
+		}
+		assert.Equal(t, buildinfo.Version, labels["version"])
+		assert.Equal(t, buildinfo.GitSHA, labels["git_commit"])
+		assert.Equal(t, buildinfo.GitTreeState, labels["git_tree_state"])
+		found = true
+	}
+	require.True(t, found, "build_info metric not found")
 }

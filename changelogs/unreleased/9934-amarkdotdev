@@ -1,0 +1,1 @@
+Add velero_build_info metric exposing the Velero version, git SHA, git tree state, and Go runtime details
