@@ -1037,6 +1037,7 @@ func (ctx *restoreContext) processSelectedResource(
 
 				ns := getNamespace(logger, nsPath, targetNS)
 				_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(
+					go_context.Background(),
 					ns,
 					ctx.namespaceClient,
 					ctx.resourceTerminatingTimeout,
@@ -1467,7 +1468,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		}
 
 		nsToEnsure := getNamespace(restoreLogger, nsPath, namespace)
-		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
+		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(go_context.Background(), nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
 		if err != nil {
 			errs.AddVeleroError(err)
 			return warnings, errs, itemExists

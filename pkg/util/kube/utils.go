@@ -81,7 +81,7 @@ func NamespaceAndName(objMeta metav1.Object) string {
 //
 //	namespace already exists and is not ready, this function will return (false, false, nil).
 //	If the namespace exists and is marked for deletion, this function will wait up to the timeout for it to fully delete.
-func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client corev1client.NamespaceInterface, timeout time.Duration, resourceDeletionStatusTracker ResourceDeletionStatusTracker) (ready bool, nsCreated bool, err error) {
+func EnsureNamespaceExistsAndIsReady(ctx context.Context, namespace *corev1api.Namespace, client corev1client.NamespaceInterface, timeout time.Duration, resourceDeletionStatusTracker ResourceDeletionStatusTracker) (ready bool, nsCreated bool, err error) {
 	// nsCreated tells whether the namespace was created by this method
 	// required for keeping track of number of restored items
 	// if namespace is marked for deletion, and we timed out, report an error
@@ -89,7 +89,7 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 
 	var namespaceAlreadyInDeletionTracker bool
 
-	err = wait.PollUntilContextTimeout(context.Background(), time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		clusterNS, err := client.Get(ctx, namespace.Name, metav1.GetOptions{})
 		// if namespace is marked for deletion, and we timed out, report an error
 
@@ -123,6 +123,9 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 
 	// err will be set if we timed out or encountered issues retrieving the namespace,
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, nsCreated, ctx.Err()
+		}
 		if terminatingNamespace {
 			// If the namespace is marked for deletion, and we timed out, adding it in tracker
 			resourceDeletionStatusTracker.Add(namespace.Kind, namespace.Name, namespace.Name)
@@ -139,7 +142,7 @@ func EnsureNamespaceExistsAndIsReady(namespace *corev1api.Namespace, client core
 		return true, nsCreated, nil
 	}
 
-	clusterNS, err := client.Create(context.TODO(), namespace, metav1.CreateOptions{})
+	clusterNS, err := client.Create(ctx, namespace, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		if clusterNS != nil && (clusterNS.GetDeletionTimestamp() != nil || clusterNS.Status.Phase == corev1api.NamespaceTerminating) {
 			// Somehow created after all our polling and marked for deletion, return an error
