@@ -1,0 +1,1 @@
+Honor --resource-timeout in the backup finalizer's status patch retry, so a persistently failing patch gives up instead of retrying with uncapped backoff
