@@ -850,7 +850,7 @@ func TestForget(t *testing.T) {
 					return errors.New("fake-error-2")
 				},
 			},
-			expectedErr: "error to open backup repo: fake-error-2",
+			expectedErr: "error reconnecting to backup repo after open failure: fake-error-2: error to connect backup repo: fake-connect-error",
 		},
 		{
 			name:            "delete fail",
@@ -935,6 +935,8 @@ func TestForget(t *testing.T) {
 
 			if tc.repoService != nil {
 				tc.repoService.On("Open", mock.Anything, mock.Anything).Return(tc.retFuncOpen[0], tc.retFuncOpen[1])
+				// openRepo falls back to a reconnect when Open fails; fail it so error-path cases stay deterministic.
+				tc.repoService.On("Connect", mock.Anything, mock.Anything).Return(errors.New("fake-connect-error"))
 			}
 
 			if tc.backupRepo != nil {
@@ -1000,7 +1002,7 @@ func TestBatchForget(t *testing.T) {
 					return errors.New("fake-error-2")
 				},
 			},
-			expectedErr: []string{"error to open backup repo: fake-error-2"},
+			expectedErr: []string{"error reconnecting to backup repo after open failure: fake-error-2: error to connect backup repo: fake-connect-error"},
 		},
 		{
 			name:            "delete fail",
@@ -1121,6 +1123,8 @@ func TestBatchForget(t *testing.T) {
 
 			if tc.repoService != nil {
 				tc.repoService.On("Open", mock.Anything, mock.Anything).Return(tc.retFuncOpen[0], tc.retFuncOpen[1])
+				// openRepo falls back to a reconnect when Open fails; fail it so error-path cases stay deterministic.
+				tc.repoService.On("Connect", mock.Anything, mock.Anything).Return(errors.New("fake-connect-error"))
 			}
 
 			if tc.backupRepo != nil {
@@ -1628,4 +1632,69 @@ func TestGetStorageType(t *testing.T) {
 			assert.Equal(t, tc.expectedRet, ret)
 		})
 	}
+}
+
+// staleCredFuncTable stubs out the storage variable/credential lookups so the
+// reconnect path can run without real cloud credentials.
+func staleCredFuncTable() localFuncTable {
+	return localFuncTable{
+		getStorageVariables: func(*velerov1api.BackupStorageLocation, string, string, map[string]string, velerocredentials.CredentialGetter) (map[string]string, error) {
+			return map[string]string{}, nil
+		},
+		getStorageCredentials: func(*velerov1api.BackupStorageLocation, velerocredentials.FileStore) (map[string]string, error) {
+			return map[string]string{}, nil
+		},
+	}
+}
+
+func staleCredTestProvider(t *testing.T, repoService *reposervicenmocks.BackupRepoService) (unifiedRepoProvider, *velerov1api.BackupStorageLocation) {
+	t.Helper()
+
+	origFuncTable := funcTable
+	funcTable = staleCredFuncTable()
+	t.Cleanup(func() { funcTable = origFuncTable })
+
+	bsl := &velerov1api.BackupStorageLocation{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "fake-bsl",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+		Spec: velerov1api.BackupStorageLocationSpec{
+			AccessMode: velerov1api.BackupStorageLocationAccessModeReadWrite,
+		},
+	}
+	getter := new(credmock.SecretStore)
+	getter.On("Get", mock.Anything, mock.Anything).Return("fake-password", nil)
+	urp := unifiedRepoProvider{
+		credentialGetter: velerocredentials.CredentialGetter{FromSecret: getter},
+		repoService:      repoService,
+		log:              velerotest.NewLogger(),
+	}
+	return urp, bsl
+}
+
+func TestForgetReconnectsWhenPersistedConfigIsStale(t *testing.T) {
+	repoService := new(reposervicenmocks.BackupRepoService)
+	urp, bsl := staleCredTestProvider(t, repoService)
+
+	bkRepo := new(reposervicenmocks.BackupRepo)
+
+	// Simulate a stale persisted kopia config: the first Open fails with an
+	// expired-credentials error, the reconnect refreshes the config, and the
+	// second Open succeeds (#9949).
+	repoService.On("Open", mock.Anything, mock.Anything).
+		Return(nil, errors.New("cannot open storage: The provided token has expired")).Once()
+	repoService.On("Connect", mock.Anything, mock.Anything).Return(nil).Once()
+	repoService.On("Open", mock.Anything, mock.Anything).Return(bkRepo, nil).Once()
+	bkRepo.On("DeleteManifest", mock.Anything, mock.Anything).Return(nil)
+	bkRepo.On("Flush", mock.Anything).Return(nil)
+	bkRepo.On("Close", mock.Anything).Return(nil)
+
+	err := urp.Forget(t.Context(), "snapshot-1", RepoParam{
+		BackupLocation: bsl,
+		BackupRepo:     &velerov1api.BackupRepository{},
+	})
+	require.NoError(t, err)
+	repoService.AssertExpectations(t)
+	bkRepo.AssertExpectations(t)
 }
