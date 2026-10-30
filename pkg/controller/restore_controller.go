@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -264,8 +265,12 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// patch to update status and persist to API
-	// This is patching from "" or New, no retry needed
-	err = kubeutil.PatchResource(original, restore, r.kbClient)
+	// This is patching from "" or New. A transient error does not tell us whether
+	// the patch was applied; if it was, the restore is already InProgress and a
+	// requeued reconcile would skip it, so retry such errors.
+	err = retry.OnError(startPhasePatchBackoff, isTransientAPIError, func() error {
+		return kubeutil.PatchResource(original, restore, r.kbClient)
+	})
 	if err != nil {
 		// return the error so the restore can be re-processed; it's currently
 		// still in phase = New.

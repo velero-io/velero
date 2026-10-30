@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"time"
@@ -32,8 +33,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -69,6 +72,33 @@ import (
 const (
 	backupResyncPeriod = time.Minute
 )
+
+// startPhasePatchBackoff bounds the retries of the patch that moves a backup or
+// restore out of its initial phase. It is a variable so tests can shorten it.
+var startPhasePatchBackoff = wait.Backoff{
+	Steps:    5,
+	Duration: 100 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0.1,
+}
+
+// isTransientAPIError reports whether err looks like a transient API server or
+// network failure. Such a failure does not tell us whether the request was
+// applied, so it is safe and useful to retry an idempotent patch.
+func isTransientAPIError(err error) bool {
+	// The API server passes etcd errors such as "etcdserver: request timed out"
+	// through as a 500 with an unknown reason, so match on the status code.
+	var status apierrors.APIStatus
+	if errors.As(err, &status) && status.Status().Code >= http.StatusInternalServerError {
+		return true
+	}
+	return apierrors.IsTimeout(err) ||
+		apierrors.IsServerTimeout(err) ||
+		apierrors.IsTooManyRequests(err) ||
+		utilnet.IsConnectionRefused(err) ||
+		utilnet.IsConnectionReset(err) ||
+		utilnet.IsProbableEOF(err)
+}
 
 var autoExcludeNamespaceScopedResources = []string{
 	// CSI VolumeSnapshot and VolumeSnapshotContent are intermediate resources.
@@ -320,8 +350,14 @@ func (b *backupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// update status to
 	// BackupPhaseFailedValidation
 	// BackupPhaseInProgress
-	// if patch fail, backup can reconcile again as phase would still be "" or New
-	if err := kubeutil.PatchResource(original, request.Backup, b.kbClient); err != nil {
+	// if patch fail, backup can reconcile again as phase would still be "" or New.
+	// A transient error (e.g. "etcdserver: request timed out") does not mean the
+	// patch was not applied. If it was, the backup is already InProgress, a
+	// requeued reconcile skips it, and it stays InProgress until the server
+	// restarts. Retry such errors so the patch is confirmed before giving up.
+	if err := retry.OnError(startPhasePatchBackoff, isTransientAPIError, func() error {
+		return kubeutil.PatchResource(original, request.Backup, b.kbClient)
+	}); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", request.Status.Phase)
 	}
 

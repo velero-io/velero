@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"reflect"
 	"slices"
 	"sort"
@@ -38,9 +39,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/utils/clock"
 	testclocks "k8s.io/utils/clock/testing"
@@ -274,6 +277,103 @@ func TestProcessBackupValidationFailures(t *testing.T) {
 			// test hasn't set up the necessary controller dependencies for running backups. So the lack
 			// of segfaults during test execution here imply that backups are not being processed, which
 			// is what we expect.
+		})
+	}
+}
+
+func TestProcessBackupRetriesTransientStartPatchErrors(t *testing.T) {
+	defaultBackupLocation := builder.ForBackupStorageLocation("velero", "loc-1").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+
+	origBackoff := startPhasePatchBackoff
+	startPhasePatchBackoff = wait.Backoff{Steps: 3, Duration: time.Millisecond, Factor: 1}
+	t.Cleanup(func() { startPhasePatchBackoff = origBackoff })
+
+	tests := []struct {
+		name            string
+		patchErr        error
+		applyBeforeErr  bool
+		expectedErr     bool
+		expectedPatches int
+	}{
+		{
+			// The API server applied the patch but the response was a timeout,
+			// as happens with "etcdserver: request timed out".
+			name: "transient error after the patch was applied is retried",
+			patchErr: &apierrors.StatusError{ErrStatus: metav1.Status{
+				Status:  metav1.StatusFailure,
+				Code:    http.StatusInternalServerError,
+				Message: "etcdserver: request timed out",
+			}},
+			applyBeforeErr:  true,
+			expectedPatches: 2,
+		},
+		{
+			name:            "transient error before the patch was applied is retried",
+			patchErr:        apierrors.NewTimeoutError("request timed out", 1),
+			expectedPatches: 2,
+		},
+		{
+			name:            "non-transient error is not retried",
+			patchErr:        apierrors.NewForbidden(velerov1api.Resource("backups"), "backup-1", errors.New("forbidden")),
+			expectedErr:     true,
+			expectedPatches: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logger := logging.DefaultLogger(logrus.DebugLevel, logging.FormatText)
+
+			apiServer := velerotest.NewAPIServer(t)
+			discoveryHelper, err := discovery.NewHelper(apiServer.DiscoveryClient, logger)
+			require.NoError(t, err)
+
+			patches := 0
+			fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+				WithObjects(defaultBackupLocation).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, client kbclient.WithWatch, obj kbclient.Object, patch kbclient.Patch, opts ...kbclient.PatchOption) error {
+						patches++
+						if patches > 1 {
+							return client.Patch(ctx, obj, patch, opts...)
+						}
+						if test.applyBeforeErr {
+							if err := client.Patch(ctx, obj.DeepCopyObject().(kbclient.Object), patch, opts...); err != nil {
+								return err
+							}
+						}
+						return test.patchErr
+					},
+				}).Build()
+
+			c := &backupReconciler{
+				logger:                logger,
+				discoveryHelper:       discoveryHelper,
+				kbClient:              fakeClient,
+				defaultBackupLocation: defaultBackupLocation.Name,
+				clock:                 &clock.RealClock{},
+				formatFlag:            logging.FormatText,
+				metrics:               metrics.NewServerMetrics(),
+				backupTracker:         NewBackupTracker(),
+			}
+
+			// The include/exclude conflict makes the backup fail validation, so
+			// Reconcile stops right after the patch under test.
+			backup := defaultBackup().IncludedResources("foo").ExcludedResources("foo").Result()
+			require.NoError(t, c.kbClient.Create(t.Context(), backup))
+
+			_, err = c.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
+			assert.Equal(t, test.expectedPatches, patches)
+
+			res := &velerov1api.Backup{}
+			require.NoError(t, c.kbClient.Get(t.Context(), kbclient.ObjectKey{Namespace: backup.Namespace, Name: backup.Name}, res))
+			if test.expectedErr {
+				require.Error(t, err)
+				assert.Equal(t, velerov1api.BackupPhaseReadyToStart, res.Status.Phase)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, velerov1api.BackupPhaseFailedValidation, res.Status.Phase)
 		})
 	}
 }

@@ -18,7 +18,9 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -29,11 +31,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	clocktesting "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -299,6 +304,113 @@ func TestRestoreReconcile_CSISnapshotTimeoutDefaulting(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectedCSITimeout, restorer.calledWithArg.Spec.CSISnapshotTimeout.Duration)
+		})
+	}
+}
+
+func TestRestoreReconcile_RetriesTransientStartPatchErrors(t *testing.T) {
+	origBackoff := startPhasePatchBackoff
+	startPhasePatchBackoff = wait.Backoff{Steps: 3, Duration: time.Millisecond, Factor: 1}
+	t.Cleanup(func() { startPhasePatchBackoff = origBackoff })
+
+	tests := []struct {
+		name            string
+		patchErr        error
+		applyBeforeErr  bool
+		expectedErr     bool
+		expectedPatches int
+	}{
+		{
+			// The API server applied the patch but the response was an error,
+			// as happens with "etcdserver: request timed out".
+			name: "transient error after the patch was applied is retried",
+			patchErr: &apierrors.StatusError{ErrStatus: metav1.Status{
+				Status:  metav1.StatusFailure,
+				Code:    http.StatusInternalServerError,
+				Message: "etcdserver: request timed out",
+			}},
+			applyBeforeErr:  true,
+			expectedPatches: 2,
+		},
+		{
+			name:            "transient error before the patch was applied is retried",
+			patchErr:        apierrors.NewTimeoutError("request timed out", 1),
+			expectedPatches: 2,
+		},
+		{
+			name:            "non-transient error is not retried",
+			patchErr:        apierrors.NewForbidden(velerov1api.Resource("restores"), "restore-1", errors.New("forbidden")),
+			expectedErr:     true,
+			expectedPatches: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			patches := 0
+			fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						// Only the patch that moves the restore out of New is
+						// under test, not the one that adds the finalizer.
+						if r, ok := obj.(*velerov1api.Restore); !ok || r.Status.Phase != velerov1api.RestorePhaseFailedValidation {
+							return c.Patch(ctx, obj, patch, opts...)
+						}
+						patches++
+						if patches > 1 {
+							return c.Patch(ctx, obj, patch, opts...)
+						}
+						if tc.applyBeforeErr {
+							if err := c.Patch(ctx, obj.DeepCopyObject().(client.Object), patch, opts...); err != nil {
+								return err
+							}
+						}
+						return tc.patchErr
+					},
+				}).Build()
+
+			r := NewRestoreReconciler(
+				t.Context(),
+				velerov1api.DefaultNamespace,
+				&fakeRestorer{kbClient: fakeClient},
+				fakeClient,
+				velerotest.NewLogger(),
+				logrus.InfoLevel,
+				func(logrus.FieldLogger) clientmgmt.Manager { return &pluginmocks.Manager{} },
+				NewFakeSingleObjectBackupStoreGetter(&persistencemocks.BackupStore{}),
+				metrics.NewServerMetrics(),
+				logging.FormatText,
+				45*time.Minute,
+				60*time.Minute,
+				false,
+				velerotest.NewFakeControllerRuntimeClient(t),
+				10*time.Minute,
+				"",
+			)
+
+			// The backup does not exist, so the restore fails validation and
+			// Reconcile stops right after the patch under test.
+			restore := builder.ForRestore("velero", "restore-1").
+				Phase(velerov1api.RestorePhaseNew).
+				Backup("backup-1").
+				Result()
+			require.NoError(t, fakeClient.Create(t.Context(), restore))
+
+			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{
+				Namespace: "velero",
+				Name:      "restore-1",
+			}})
+			assert.Equal(t, tc.expectedPatches, patches)
+
+			res := &velerov1api.Restore{}
+			require.NoError(t, fakeClient.Get(t.Context(), client.ObjectKey{Namespace: "velero", Name: "restore-1"}, res))
+			if tc.expectedErr {
+				require.Error(t, err)
+				assert.Equal(t, velerov1api.RestorePhaseNew, res.Status.Phase)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, velerov1api.RestorePhaseFailedValidation, res.Status.Phase)
 		})
 	}
 }
