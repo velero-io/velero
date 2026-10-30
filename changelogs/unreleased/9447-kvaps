@@ -1,0 +1,1 @@
+Fix race condition: check concurrent limit before GetExposed
