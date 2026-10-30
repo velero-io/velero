@@ -44,7 +44,10 @@ spec:
         emptyDir: {}
       containers:
       - name: minio
-        image: minio/minio:latest
+        # minio/minio:latest is no longer pullable from Docker Hub, so mirror
+        # through the bitnami legacy namespace, which is what the kind e2e
+        # workflow builds its MinIO from.
+        image: bitnamilegacy/minio:latest
         imagePullPolicy: IfNotPresent
         args:
         - server
@@ -102,7 +105,7 @@ spec:
         emptyDir: {}
       containers:
       - name: mc
-        image: minio/mc:latest
+        image: bitnamilegacy/minio-client:latest
         imagePullPolicy: IfNotPresent
         command:
         - /bin/sh

@@ -52,9 +52,11 @@ spec:
             - containerPort: 2345
               name: delve
           resources:
+            # 3Gi when debugging: delve indexes the DWARF of the unoptimized
+            # binary (-gcflags all=-N -l), which needs far more than 512Mi.
             limits:
               cpu: "1"
-              memory: 512Mi
+              memory: 3Gi
             requests:
               cpu: 500m
               memory: 128Mi
