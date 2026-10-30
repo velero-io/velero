@@ -1,0 +1,1 @@
+Fix the Tilt dev setup: tolerate an empty default_registry, pass GOBIN to hack/build.sh, build for the cluster's architecture instead of assuming amd64, and pin delve

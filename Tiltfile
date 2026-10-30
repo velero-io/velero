@@ -1,20 +1,9 @@
 # -*- mode: Python -*-
 
-k8s_yaml([
-    'config/crd/v1/bases/velero.io_backups.yaml',
-    'config/crd/v1/bases/velero.io_backupstoragelocations.yaml',
-    'config/crd/v1/bases/velero.io_deletebackuprequests.yaml',
-    'config/crd/v1/bases/velero.io_downloadrequests.yaml',
-    'config/crd/v1/bases/velero.io_podvolumebackups.yaml',
-    'config/crd/v1/bases/velero.io_podvolumerestores.yaml',
-    'config/crd/v1/bases/velero.io_backuprepositories.yaml',
-    'config/crd/v1/bases/velero.io_restores.yaml',
-    'config/crd/v1/bases/velero.io_schedules.yaml',
-    'config/crd/v1/bases/velero.io_serverstatusrequests.yaml',
-    'config/crd/v1/bases/velero.io_volumesnapshotlocations.yaml',
-    'config/crd/v2alpha1/bases/velero.io_datauploads.yaml',
-    'config/crd/v2alpha1/bases/velero.io_datadownloads.yaml',    
-])
+# The CRDs are globbed rather than listed, so that a dev branch adding one is
+# picked up without editing this file. Globbing needs a local() call, which Tilt
+# refuses while the current kube context might be a production one, so the
+# k8s_yaml() for it lives below allow_k8s_contexts().
 
 # default values
 settings = {
@@ -24,6 +13,8 @@ settings = {
     "debug_continue_on_start": True,  # Continue the velero process by default when in debug mode
     "create_backup_locations": False,
     "setup-minio": False,
+    # Both are detected when left unset; set them only to override:
+    #   cluster_goarch: "amd64" or "arm64" -- the target cluster's node arch
 }
 
 # global settings
@@ -46,9 +37,53 @@ if settings.get("setup-minio"):
 
 # By default, Tilt automatically allows Minikube, Docker for Desktop, Microk8s, Red Hat CodeReady Containers, Kind, K3D, and Krucible.
 allow_k8s_contexts(settings.get("allowed_contexts"))
-default_registry(settings.get("default_registry"))
+
+# Every CRD under config/crd, so a branch that adds one needs no edit here.
+# Deliberately after allow_k8s_contexts(): see the note at the top of the file.
+k8s_yaml(str(local('ls config/crd/*/bases/*.yaml', quiet = True, echo_off = True)).splitlines())
+
+# An empty registry means "local cluster, don't push" (kind loads the image
+# directly), and Tilt rejects default_registry("") as a missing host.
+if settings.get("default_registry"):
+    default_registry(settings.get("default_registry"))
+
 local_goos = str(local("go env GOOS", quiet = True, echo_off = True)).strip()
+local_goarch = str(local("go env GOARCH", quiet = True, echo_off = True)).strip()
 git_sha = str(local("git rev-parse HEAD", quiet = True, echo_off = True)).strip()
+
+
+def detect_cluster_goarch():
+    """
+    Best-effort node architecture of the target cluster.
+
+    Every binary in the image and the base image must match the node arch, and
+    getting it wrong shows up only later as an "exec format error" in the pod.
+    The cluster usually knows the answer, so ask it. Any failure (no cluster
+    yet, no nodes, kubectl missing) yields "" and the caller falls back to the
+    local architecture, which is correct when the cluster shares the machine
+    (kind, minikube, Docker Desktop).
+    """
+    probe = "kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true"
+    return str(local(probe, quiet = True, echo_off = True)).strip()
+
+
+cluster_goarch = settings.get("cluster_goarch") or detect_cluster_goarch() or local_goarch
+
+
+def get_build_registry():
+    """
+    Value for hack/build.sh's REGISTRY, which refuses an empty one. It is only
+    baked into the binary as the default image prefix; it is not where Tilt
+    pushes. An empty default_registry means "local cluster, don't push", so
+    fall back to the stock prefix for the build.
+    """
+    return settings.get("default_registry") or "docker.io/velero"
+
+
+# Docker's static CLI download archives use their own arch names.
+docker_cli_arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(cluster_goarch, cluster_goarch)
+
+print("Tilt: cluster_goarch={} (local {})".format(cluster_goarch, local_goarch))
 
 tilt_helper_dockerfile_header = """
 # Tilt image
@@ -60,18 +95,30 @@ RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com
     chmod +x /start.sh && chmod +x /restart.sh
 """
 
-additional_docker_helper_commands = """
-# Install delve to allow debugging
-RUN go install github.com/go-delve/delve/cmd/dlv@latest
+# Pinned so the debugger in the image does not change under you between
+# builds; @latest made every rebuild a different dlv.
+#
+# Delve refuses a binary built by a newer Go than it understands ("Version of
+# Delve is too old for Go version go1.x.y"), so this pin has to move together
+# with the golang image below.
+DLV_VERSION = "v1.27.2"
 
-RUN wget -qO- https://dl.k8s.io/v1.25.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
-RUN wget -qO- https://get.docker.com | sh
-"""
+additional_docker_helper_commands = """
+# Install delve to allow debugging. A cross-compiled `go install` places the
+# binary in $GOPATH/bin/linux_<arch>/ rather than $GOPATH/bin/.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=%s go install github.com/go-delve/delve/cmd/dlv@%s && \\
+    if [ -x "$(go env GOPATH)/bin/dlv" ]; then cp "$(go env GOPATH)/bin/dlv" /usr/local/bin/dlv; \\
+    else cp "$(go env GOPATH)/bin/linux_%s/dlv" /usr/local/bin/dlv; fi
+
+RUN wget -qO- https://dl.k8s.io/v1.25.2/kubernetes-client-linux-%s.tar.gz | tar xvz -C /tmp
+RUN wget -qO- https://download.docker.com/linux/static/stable/%s/docker-27.5.1.tgz | tar xvz -C /tmp && \\
+    install -D /tmp/docker/docker /usr/local/bin/docker
+""" % (cluster_goarch, DLV_VERSION, cluster_goarch, cluster_goarch, docker_cli_arch)
 
 additional_docker_build_commands = """
-COPY --from=tilt-helper /go/bin/dlv /usr/bin/dlv
-COPY --from=tilt-helper /usr/bin/docker /usr/bin/docker
-COPY --from=tilt-helper /go/kubernetes/client/bin/kubectl /usr/bin/kubectl
+COPY --from=tilt-helper /usr/local/bin/dlv /usr/bin/dlv
+COPY --from=tilt-helper /usr/local/bin/docker /usr/bin/docker
+COPY --from=tilt-helper /tmp/kubernetes/client/bin/kubectl /usr/bin/kubectl
 """
 
 ##############################
@@ -90,22 +137,26 @@ def get_debug_flag():
 
 
 # Set up a local_resource build of the Velero binary. The binary is written to _tiltbuild/velero.
+# GOBIN is required by hack/build.sh and is not otherwise set in a fresh shell.
 local_resource(
     "velero_server_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOOS=linux GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild;PKG=. BIN=velero GOBIN=$(pwd)/_tiltbuild GOOS=linux GOARCH=' + cluster_goarch + ' GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild ' + get_debug_flag() + ' REGISTRY=' + get_build_registry() + ' ./hack/build.sh',
     deps = ["cmd", "internal", "pkg"],
     ignore = ["pkg/cmd"],
 )
 
 local_resource(
     "velero_local_binary",
-    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOOS=' + local_goos + ' GOARCH=amd64 GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + settings.get("default_registry") + ' ./hack/build.sh',
+    cmd = 'cd ' + '.' + ';mkdir -p _tiltbuild/local;PKG=. BIN=velero GOBIN=$(pwd)/_tiltbuild/local GOOS=' + local_goos + ' GOARCH=' + local_goarch + ' GIT_SHA=' + git_sha + ' VERSION=main GIT_TREE_STATE=dirty OUTPUT_DIR=_tiltbuild/local ' + get_debug_flag() + ' REGISTRY=' + get_build_registry() + ' ./hack/build.sh',
     deps = ["internal", "pkg/cmd"],
 )
 
-# Note: we need a distro with a bash shell to exec into the Velero container
+# Note: we need a distro with a bash shell to exec into the Velero container.
+# The runtime stage is built for the cluster's architecture; its apt-get RUN
+# executes under emulation (Rosetta/qemu) when that differs from the build
+# machine's.
 tilt_dockerfile_header = """
-FROM ubuntu:22.04 as tilt
+FROM --platform=linux/%s ubuntu:22.04 as tilt
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -qq -y ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
@@ -113,7 +164,7 @@ WORKDIR /
 COPY --from=tilt-helper /start.sh .
 COPY --from=tilt-helper /restart.sh .
 COPY velero .
-"""
+""" % cluster_goarch
 
 dockerfile_contents = "\n".join([
     tilt_helper_dockerfile_header,
@@ -153,6 +204,7 @@ docker_build(
     context = "_tiltbuild",
     dockerfile_contents = dockerfile_contents,
     target = "tilt",
+    platform = "linux/" + cluster_goarch,
     entrypoint = get_velero_entrypoint(),
     live_update = [
         sync("./_tiltbuild/velero", "/velero"),
@@ -212,7 +264,7 @@ def enable_provider(provider):
 
     # Note: we need a distro with a shell to do a copy of the plugin binary
     tilt_dockerfile_header = """
-    FROM ubuntu:22.04 as tilt
+    FROM --platform=linux/""" + cluster_goarch + """ ubuntu:22.04 as tilt
     WORKDIR /
     COPY --from=tilt-helper /start.sh .
     COPY --from=tilt-helper /restart.sh .
@@ -236,7 +288,7 @@ def enable_provider(provider):
     # Set up a local_resource build of the plugin binary. The main.go path must be provided via go_main option. The binary is written to _tiltbuild/<NAME>.
     local_resource(
         name + "_plugin",
-        cmd = 'cd ' + context + ';mkdir -p _tiltbuild;PKG=' + context + ' BIN=' + go_main + ' GOOS=linux GOARCH=amd64 OUTPUT_DIR=_tiltbuild ./hack/build.sh',
+        cmd = 'cd ' + context + ';mkdir -p _tiltbuild;PKG=' + context + ' BIN=' + go_main + ' GOOS=linux GOARCH=' + cluster_goarch + ' OUTPUT_DIR=_tiltbuild ./hack/build.sh',
         deps = live_reload_deps,
     )
 

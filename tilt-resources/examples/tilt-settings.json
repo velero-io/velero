@@ -3,8 +3,7 @@
     "enable_providers": [
         "aws",
         "gcp",
-        "azure",
-        "csi"
+        "azure"
     ],
     "providers": { 
         "aws": "../velero-plugin-for-aws",
