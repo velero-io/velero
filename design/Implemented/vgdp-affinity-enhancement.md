@@ -252,6 +252,6 @@ Because the StorageClass volumeBindingMode is `Immediate`, although `ignoreDelay
 
 The restorePod will be assigned to nodes, which instance type is `Standard_B4ms`.
 
-[1]: Implemented/unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md
-[2]: Implemented/volume-snapshot-data-movement/volume-snapshot-data-movement.md
-[3]: Implemented/node-agent-affinity.md
+[1]: ./unified-repo-and-kopia-integration/unified-repo-and-kopia-integration.md
+[2]: ./volume-snapshot-data-movement/volume-snapshot-data-movement.md
+[3]: ./node-agent-affinity.md
