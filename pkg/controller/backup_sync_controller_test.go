@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1137,3 +1140,75 @@ var _ = Describe("Backup Sync Reconciler", func() {
 		Expect(references[0].UID).To(Equal(scheduleUID))
 	})
 })
+
+// TestDeleteOrphanedBackupsNamespaceScope is a regression test for
+// https://github.com/velero-io/velero/issues/10364.
+//
+// Before the fix, deleteOrphanedBackups listed Backup CRs cluster-wide because
+// Namespace was missing from the ListOptions. In clusters with multiple Velero
+// instances sharing the same BSL name, the controller in namespace A could
+// treat backups from namespace B as orphans and delete them.
+func TestDeleteOrphanedBackupsNamespaceScope(t *testing.T) {
+	ctx := context.Background()
+
+	controllerNamespace := "velero-prod"
+	otherNamespace := "velero-test"
+	bslName := "default"
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+
+	r := backupSyncReconciler{
+		client:                  fakeClient,
+		namespace:               controllerNamespace,
+		defaultBackupSyncPeriod: time.Second * 10,
+		newPluginManager:        func(logrus.FieldLogger) clientmgmt.Manager { return &pluginmocks.Manager{} },
+		backupStoreGetter:       NewFakeObjectBackupStoreGetter(make(map[string]*persistencemocks.BackupStore)),
+		logger:                  velerotest.NewLogger(),
+	}
+
+	storageLocationLabel := label.GetValidName(bslName)
+
+	// A completed backup in the controller's namespace that IS in the object store — must be preserved.
+	backupInStore := builder.ForBackup(controllerNamespace, "backup-in-store").
+		ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, storageLocationLabel)).
+		Phase(velerov1api.BackupPhaseCompleted).
+		Result()
+
+	// A completed backup in the controller's namespace that is NOT in the object store — must be deleted.
+	orphanedBackup := builder.ForBackup(controllerNamespace, "orphaned-backup").
+		ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, storageLocationLabel)).
+		Phase(velerov1api.BackupPhaseCompleted).
+		Result()
+
+	// A completed backup in a DIFFERENT namespace with the same BSL label.
+	// Before the fix this would be incorrectly treated as an orphan and deleted.
+	otherNsBackup := builder.ForBackup(otherNamespace, "other-ns-backup").
+		ObjectMeta(builder.WithLabels(velerov1api.StorageLocationLabel, storageLocationLabel)).
+		Phase(velerov1api.BackupPhaseCompleted).
+		Result()
+
+	for _, b := range []*velerov1api.Backup{backupInStore, orphanedBackup, otherNsBackup} {
+		require.NoError(t, fakeClient.Create(ctx, b))
+	}
+
+	// The object store only contains "backup-in-store".
+	cloudBackups := sets.New[string]("backup-in-store")
+	r.deleteOrphanedBackups(ctx, bslName, cloudBackups, velerotest.NewLogger())
+
+	// "backup-in-store" must still exist in the controller namespace.
+	surviving := &velerov1api.Backup{}
+	require.NoError(t, fakeClient.Get(ctx, types.NamespacedName{Namespace: controllerNamespace, Name: "backup-in-store"}, surviving))
+
+	// "orphaned-backup" must have been deleted from the controller namespace.
+	deleted := &velerov1api.Backup{}
+	err := fakeClient.Get(ctx, types.NamespacedName{Namespace: controllerNamespace, Name: "orphaned-backup"}, deleted)
+	assert.True(t, apierrors.IsNotFound(err), "orphaned backup in the controller namespace should have been deleted")
+
+	// "other-ns-backup" must NOT have been deleted — this is the core of the fix.
+	otherSurviving := &velerov1api.Backup{}
+	assert.NoError(
+		t,
+		fakeClient.Get(ctx, types.NamespacedName{Namespace: otherNamespace, Name: "other-ns-backup"}, otherSurviving),
+		"backup from another namespace must not be deleted by deleteOrphanedBackups",
+	)
+}
