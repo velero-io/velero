@@ -33,4 +33,7 @@ const (
 	VSphereCNSFastCloneAnno = "csi.vsphere.volume/fast-provisioning"
 	VSphereCNSSnapshotAnno  = "csi.vsphere.volume/snapshot"
 	VSphereCNSChangeIDAnno  = "csi.vsphere.volume/change-id"
+
+	// VSphereCSIDriverName is the name of the vSphere CSI driver.
+	VSphereCSIDriverName = "csi.vsphere.vmware.com"
 )

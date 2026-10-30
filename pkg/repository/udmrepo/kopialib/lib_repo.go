@@ -704,6 +704,9 @@ func (kr *kopiaRepository) SaveSnapshot(ctx context.Context, snap udmrepo.Snapsh
 func (kr *kopiaRepository) GetSnapshot(ctx context.Context, id udmrepo.ID) (udmrepo.Snapshot, error) {
 	snap, err := snapshot.LoadSnapshot(ctx, kr.rawRepo, manifest.ID(id))
 	if err != nil {
+		if errors.Is(err, snapshot.ErrSnapshotNotFound) {
+			err = udmrepo.SnapshotNotFound(err)
+		}
 		return udmrepo.Snapshot{}, errors.Wrap(err, "error getting snapshot manifest")
 	}
 

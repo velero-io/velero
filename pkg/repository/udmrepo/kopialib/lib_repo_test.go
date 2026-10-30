@@ -1571,6 +1571,20 @@ func TestSaveSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetSnapshotNotFound(t *testing.T) {
+	rawRepo := repomocks.NewMockRepository(t)
+	rawRepo.On("GetManifest", mock.Anything, manifest.ID("fake-id"), mock.Anything).Return(nil, manifest.ErrNotFound).Once()
+	kr := &kopiaRepository{rawRepo: rawRepo}
+
+	_, err := kr.GetSnapshot(t.Context(), udmrepo.ID("fake-id"))
+	require.ErrorIs(t, err, udmrepo.ErrSnapshotNotFound)
+	// The kopia error is kept, so callers checking it still work.
+	require.ErrorIs(t, err, snapshot.ErrSnapshotNotFound)
+	// It still matches after the provider and the manager wrap it.
+	wrapped := errors.WithStack(errors.Wrapf(err, "error to get snapshot %s", "fake-id"))
+	require.True(t, errors.Is(wrapped, udmrepo.ErrSnapshotNotFound))
+}
+
 func TestGetSnapshot(t *testing.T) {
 	expectedTime := time.Now()
 	rawObjID, _ := object.ParseID("I123456")

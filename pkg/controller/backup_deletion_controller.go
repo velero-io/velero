@@ -53,6 +53,8 @@ import (
 	"github.com/velero-io/velero/pkg/repository"
 	repomanager "github.com/velero-io/velero/pkg/repository/manager"
 	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/uploader"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/csi"
 	"github.com/velero-io/velero/pkg/util/filesystem"
@@ -76,6 +78,9 @@ type backupDeletionReconciler struct {
 	backupStoreGetter persistence.ObjectBackupStoreGetter
 	credentialStore   credentials.FileStore
 	repoEnsurer       *repository.Ensurer
+	// apiReader reads from the API server instead of the manager's cache, which
+	// only covers the Velero namespace.
+	apiReader client.Reader
 }
 
 // NewBackupDeletionReconciler creates a new backup deletion reconciler.
@@ -107,6 +112,7 @@ func NewBackupDeletionReconciler(
 }
 
 func (r *backupDeletionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.apiReader = mgr.GetAPIReader()
 	// Make sure the expired requests can be deleted eventually
 	s := kube.NewPeriodicalEnqueueSource(r.logger.WithField("controller", constant.ControllerBackupDeletion), mgr.GetClient(), &velerov1api.DeleteBackupRequestList{}, time.Hour, kube.PeriodicalEnqueueSourceOption{})
 	return ctrl.NewControllerManagedBy(mgr).
@@ -348,10 +354,20 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
-		log.Info("Removing snapshot data by data mover")
-		if deleteErrs := r.deleteMovedSnapshots(ctx, backup); len(deleteErrs) > 0 {
-			for _, err := range deleteErrs {
-				errs = append(errs, errors.Wrap(err, "error deleting moved snapshot data").Error())
+		// The snapshot handle of a retained snapshot that a backup taken before
+		// Velero recorded them kept is only in the repository snapshot, so read it
+		// before the repository snapshot is deleted.
+		if resolveErrs := r.resolveUnrecordedRetainedSnapshots(ctx, backup, log); len(resolveErrs) > 0 {
+			log.Info("Skipping removal of snapshot data by data mover due to previous errors")
+			for _, err := range resolveErrs {
+				errs = append(errs, errors.Wrap(err, "error reading retained volume snapshot from snapshot data").Error())
+			}
+		} else {
+			log.Info("Removing snapshot data by data mover")
+			if deleteErrs := r.deleteMovedSnapshots(ctx, backup); len(deleteErrs) > 0 {
+				for _, err := range deleteErrs {
+					errs = append(errs, errors.Wrap(err, "error deleting moved snapshot data").Error())
+				}
 			}
 		}
 		duList := &velerov2alpha1.DataUploadList{}
@@ -370,6 +386,18 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				if err := r.Delete(ctx, &du); err != nil {
 					errs = append(errs, errors.Wrapf(err, "error deleting dataupload %q", du.Name).Error())
 				}
+			}
+		}
+
+		// Deleting a retained snapshot can't be undone and it is the base of the next
+		// incremental backup, so it is deleted only after the other data of the backup is
+		// deleted. Otherwise the snapshot is kept, and a retry of the deletion deletes it.
+		if len(errs) > 0 {
+			log.Info("Skipping removal of retained volume snapshots due to previous errors")
+		} else {
+			log.Info("Removing retained volume snapshots")
+			for _, err := range r.deleteRetainedSnapshots(ctx, backup, log) {
+				errs = append(errs, errors.Wrap(err, "error deleting retained volume snapshot").Error())
 			}
 		}
 	}
@@ -628,6 +656,160 @@ func (r *backupDeletionReconciler) deleteMovedSnapshots(ctx context.Context, bac
 	return errs
 }
 
+// Lifecycle of the volume snapshot of a CSI DataUpload, by how the DataUpload ends
+// and the deletionPolicy of its backup VolumeSnapshotContent (the VSC the exposer
+// creates for the DataUpload). That VSC inherits the deletionPolicy of the source
+// VSC, which comes from the VolumeSnapshotClass:
+//
+//	DataUpload ends        | Delete                          | Retain
+//	-----------------------+---------------------------------+------------------------------------------
+//	Completed              | the CSI driver deletes it when  | kept in the storage and recorded in
+//	                       | the node-agent cleans up the    | status.retainedSnapshot; deleted here
+//	                       | exposed snapshot                | when the backup is deleted
+//	Failed, Canceled, or   | same as Completed               | the node-agent patches the deletionPolicy
+//	timed out in prepare   |                                 | of the backup VSC (not the class) to
+//	                       |                                 | Delete before the cleanup, so the CSI
+//	                       |                                 | driver deletes it then; nothing recorded
+//
+// When the backup is deleted, a retained snapshot is deleted after the other data
+// of the backup:
+//   - An earlier deletion step fails: the snapshot and its configmap are kept, and a
+//     retry of the backup deletion deletes them.
+//   - The CSI driver reports a failure (SnapshotDeleteError event): the backup
+//     deletion fails and the configmap is kept for a retry.
+//   - The CSI driver is not done within 30 seconds: the backup deletion completes
+//     with a warning, and the temp VSC stays until the driver deletes the snapshot.
+//
+// getRepoSnapshotTagsFunc reads the tags of a repository snapshot. It is a variable
+// so that tests can replace it.
+var getRepoSnapshotTagsFunc = getRepoSnapshotTags
+
+func getRepoSnapshotTags(ctx context.Context, repoEnsurer *repository.Ensurer, repoMgr repomanager.Manager, backup *velerov1api.Backup, snapshot repotypes.SnapshotIdentifier) (map[string]string, error) {
+	repo, err := repoEnsurer.EnsureRepo(ctx, backup.Namespace, snapshot.VolumeNamespace, snapshot.BackupStorageLocation, snapshot.RepositoryType)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error to ensure repo %s-%s-%s", snapshot.BackupStorageLocation, snapshot.VolumeNamespace, snapshot.RepositoryType)
+	}
+	return repoMgr.GetSnapshotTags(ctx, repo, snapshot.SnapshotID)
+}
+
+// resolveUnrecordedRetainedSnapshots fills in the snapshot handle of the retained
+// snapshot configmaps that the DataUpload DeleteItemAction created for backups taken
+// before Velero recorded retained snapshots. The block data mover saved the handle
+// as the CBT change ID tag of the repository snapshot. The handle is written to the
+// configmap, so that it survives the deletion of the repository snapshot.
+func (r *backupDeletionReconciler) resolveUnrecordedRetainedSnapshots(ctx context.Context, backup *velerov1api.Backup, log logrus.FieldLogger) []error {
+	if r.repoMgr == nil {
+		return nil
+	}
+	list := &corev1api.ConfigMapList{}
+	if err := r.Client.List(ctx, list, &client.ListOptions{
+		Namespace: backup.Namespace,
+		LabelSelector: labels.SelectorFromSet(
+			map[string]string{
+				velerov1api.BackupNameLabel:                 label.GetValidName(backup.Name),
+				velerov1api.DataUploadRetainedSnapshotLabel: "true",
+			}),
+	}); err != nil {
+		return []error{errors.Wrapf(err, "failed to retrieve config for retained snapshots")}
+	}
+
+	var errs []error
+	for i := range list.Items {
+		cm := list.Items[i]
+		if cm.Data["snapshotHandle"] != "" {
+			continue
+		}
+
+		b, err := json.Marshal(cm.Data)
+		if err != nil {
+			errs = append(errs, errors.Wrapf(err, "fail to marshal configmap %s into JSON", cm.Name))
+			continue
+		}
+		snapshot := repotypes.SnapshotIdentifier{}
+		if err := json.Unmarshal(b, &snapshot); err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to unmarshal the repository snapshot in configmap %s", cm.Name))
+			continue
+		}
+
+		handle := ""
+		if snapshot.SnapshotID != "" {
+			tags, err := getRepoSnapshotTagsFunc(ctx, r.repoEnsurer, r.repoMgr, backup, snapshot)
+			if err != nil && !errors.Is(err, udmrepo.ErrSnapshotNotFound) {
+				errs = append(errs, errors.Wrapf(err, "failed to read the snapshot handle from repository snapshot %s in configmap %s", snapshot.SnapshotID, cm.Name))
+				continue
+			}
+			handle = tags[uploader.CBTChangeIDTag]
+		}
+		if handle == "" {
+			// The repository snapshot is gone, e.g. deleted by an earlier attempt,
+			// or doesn't have the handle, so there is nothing to delete.
+			log.Warnf("No snapshot handle in repository snapshot %s for configmap %s, a retained snapshot can't be found", snapshot.SnapshotID, cm.Name)
+			if err := r.Client.Delete(ctx, &cm); err != nil && !apierrors.IsNotFound(err) {
+				log.Warnf("Failed to delete retained snapshot configmap %s/%s: %v", cm.Namespace, cm.Name, err)
+			}
+			continue
+		}
+
+		log.Infof("Read retained snapshot %s from repository snapshot %s for configmap %s", handle, snapshot.SnapshotID, cm.Name)
+		cm.Data["snapshotHandle"] = handle
+		if err := r.Client.Update(ctx, &cm); err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to record retained snapshot %s in configmap %s", handle, cm.Name))
+		}
+	}
+
+	return errs
+}
+
+// deleteRetainedSnapshots has the CSI driver delete the volume snapshots that the
+// DataUploads of the backup retained in the storage. The configmaps that pass the
+// snapshots from the DataUpload DeleteItemAction are the only record of the
+// snapshots once the DataUploads are deleted, so a configmap is removed only after
+// its snapshot is deleted.
+func (r *backupDeletionReconciler) deleteRetainedSnapshots(ctx context.Context, backup *velerov1api.Backup, log logrus.FieldLogger) []error {
+	list := &corev1api.ConfigMapList{}
+	if err := r.Client.List(ctx, list, &client.ListOptions{
+		Namespace: backup.Namespace,
+		LabelSelector: labels.SelectorFromSet(
+			map[string]string{
+				velerov1api.BackupNameLabel:                 label.GetValidName(backup.Name),
+				velerov1api.DataUploadRetainedSnapshotLabel: "true",
+			}),
+	}); err != nil {
+		return []error{errors.Wrapf(err, "failed to retrieve config for retained snapshots")}
+	}
+
+	var errs []error
+	for i := range list.Items {
+		cm := list.Items[i]
+		if err := r.deleteRetainedSnapshot(ctx, backup, &cm, log); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := r.Client.Delete(ctx, &cm); err != nil && !apierrors.IsNotFound(err) {
+			log.Warnf("Failed to delete retained snapshot configmap %s/%s: %v", cm.Namespace, cm.Name, err)
+		}
+	}
+
+	return errs
+}
+
+func (r *backupDeletionReconciler) deleteRetainedSnapshot(ctx context.Context, backup *velerov1api.Backup, cm *corev1api.ConfigMap, log logrus.FieldLogger) error {
+	b, err := json.Marshal(cm.Data)
+	if err != nil {
+		return errors.Wrapf(err, "fail to marshal the retained snapshot in configmap %s into JSON", cm.Name)
+	}
+	retained := &velerov2alpha1.RetainedSnapshot{}
+	if err := json.Unmarshal(b, retained); err != nil {
+		return errors.Wrapf(err, "failed to unmarshal the retained snapshot in configmap %s", cm.Name)
+	}
+
+	log.Infof("Deleting retained snapshot %s from configmap %s", retained.SnapshotHandle, cm.Name)
+	if err := csi.DeleteRetainedSnapshot(ctx, r.snapshotDeletionClient(), retained, label.GetValidName(backup.Name), log); err != nil {
+		return errors.Wrapf(err, "failed to delete retained snapshot %s from configmap %s", retained.SnapshotHandle, cm.Name)
+	}
+	return nil
+}
+
 func (r *backupDeletionReconciler) patchDeleteBackupRequest(ctx context.Context, req *velerov1api.DeleteBackupRequest, mutate func(*velerov1api.DeleteBackupRequest)) (*velerov1api.DeleteBackupRequest, error) {
 	original := req.DeepCopy()
 	mutate(req)
@@ -742,4 +924,29 @@ func isTarballNotFoundError(err error) bool {
 		strings.Contains(msg, "blobnotfound") ||
 		strings.Contains(msg, "objectnotexist") ||
 		strings.Contains(msg, "doesn't exist")
+}
+
+// snapshotDeletionClient returns the client to delete retained snapshots with. Its
+// reads go to the API server: the CSI snapshotter records the events of a
+// VolumeSnapshotContent in the default namespace, which the manager's cache doesn't
+// cover, so listing them from the cache fails and a failed deletion goes unnoticed.
+func (r *backupDeletionReconciler) snapshotDeletionClient() client.Client {
+	if r.apiReader == nil {
+		return r.Client
+	}
+	return &apiReadClient{Client: r.Client, reader: r.apiReader}
+}
+
+// apiReadClient reads through reader and writes through Client.
+type apiReadClient struct {
+	client.Client
+	reader client.Reader
+}
+
+func (c *apiReadClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return c.reader.Get(ctx, key, obj, opts...)
+}
+
+func (c *apiReadClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return c.reader.List(ctx, list, opts...)
 }
