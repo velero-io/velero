@@ -44,7 +44,7 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 	groups, err := ListVGS(ctx, client, "", map[string]string{velerov1.BackupUIDLabel: string(backup.UID)})
 	if err != nil {
 		if errors.Is(err, ErrVGSAPINotAvailable) {
-			return nil
+			return cleanupVGSMembershipLabels(ctx, backup, client)
 		}
 		cleanupErrs = append(cleanupErrs, errors.Wrap(err, "listing backup VolumeGroupSnapshots"))
 	}
@@ -140,6 +140,21 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 			if err := DeleteVGS(ctx, client, group.Namespace, group.Name); err != nil && !apierrors.IsNotFound(err) {
 				cleanupErrs = append(cleanupErrs, errors.Wrapf(err, "deleting VolumeGroupSnapshot %s/%s", group.Namespace, group.Name))
 			}
+			// Finalizers may keep a deleted VGS alive. Keep its membership labels
+			// until it is gone so its controller cannot select a different group.
+			if group.Spec.Source.Selector != nil && group.Spec.Source.Selector.MatchLabels[VGSMembershipLabelKey(backup.UID)] != "" {
+				_, err := GetVGS(ctx, client, group.Namespace, group.Name)
+				if err == nil {
+					cleanupErrs = append(cleanupErrs, errors.Errorf("waiting for VolumeGroupSnapshot %s/%s deletion before cleaning membership labels", group.Namespace, group.Name))
+				} else if !apierrors.IsNotFound(err) {
+					cleanupErrs = append(cleanupErrs, err)
+				}
+			}
+		}
+	}
+	if len(cleanupErrs) == 0 {
+		if err := cleanupVGSMembershipLabels(ctx, backup, client); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
 		}
 	}
 	return kubeerrs.NewAggregate(cleanupErrs)
