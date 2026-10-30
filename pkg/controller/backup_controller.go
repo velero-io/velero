@@ -99,6 +99,7 @@ type backupReconciler struct {
 	defaultBackupTTL                   time.Duration
 	defaultVGSLabelKey                 string
 	defaultCSISnapshotTimeout          time.Duration
+	defaultCSISnapshotErrorTimeout     time.Duration
 	resourceTimeout                    time.Duration
 	defaultItemOperationTimeout        time.Duration
 	defaultSnapshotLocations           map[string]string
@@ -129,6 +130,7 @@ func NewBackupReconciler(
 	defaultBackupTTL time.Duration,
 	defaultVGSLabelKey string,
 	defaultCSISnapshotTimeout time.Duration,
+	defaultCSISnapshotErrorTimeout time.Duration,
 	resourceTimeout time.Duration,
 	defaultItemOperationTimeout time.Duration,
 	defaultSnapshotLocations map[string]string,
@@ -144,33 +146,34 @@ func NewBackupReconciler(
 	globalVolumePoliciesConfigMap string,
 ) *backupReconciler {
 	b := &backupReconciler{
-		ctx:                           ctx,
-		discoveryHelper:               discoveryHelper,
-		backupper:                     backupper,
-		clock:                         &clock.RealClock{},
-		logger:                        logger,
-		backupLogLevel:                backupLogLevel,
-		newPluginManager:              newPluginManager,
-		backupTracker:                 backupTracker,
-		kbClient:                      kbClient,
-		defaultBackupLocation:         defaultBackupLocation,
-		defaultVolumesToFsBackup:      defaultVolumesToFsBackup,
-		defaultBackupTTL:              defaultBackupTTL,
-		defaultVGSLabelKey:            defaultVGSLabelKey,
-		defaultCSISnapshotTimeout:     defaultCSISnapshotTimeout,
-		resourceTimeout:               resourceTimeout,
-		defaultItemOperationTimeout:   defaultItemOperationTimeout,
-		defaultSnapshotLocations:      defaultSnapshotLocations,
-		metrics:                       metrics,
-		backupStoreGetter:             backupStoreGetter,
-		formatFlag:                    formatFlag,
-		credentialFileStore:           credentialStore,
-		maxConcurrentK8SConnections:   maxConcurrentK8SConnections,
-		defaultSnapshotMoveData:       defaultSnapshotMoveData,
-		itemBlockWorkerCount:          itemBlockWorkerCount,
-		concurrentBackups:             max(concurrentBackups, 1),
-		globalCRClient:                globalCRClient,
-		globalVolumePoliciesConfigMap: globalVolumePoliciesConfigMap,
+		ctx:                            ctx,
+		discoveryHelper:                discoveryHelper,
+		backupper:                      backupper,
+		clock:                          &clock.RealClock{},
+		logger:                         logger,
+		backupLogLevel:                 backupLogLevel,
+		newPluginManager:               newPluginManager,
+		backupTracker:                  backupTracker,
+		kbClient:                       kbClient,
+		defaultBackupLocation:          defaultBackupLocation,
+		defaultVolumesToFsBackup:       defaultVolumesToFsBackup,
+		defaultBackupTTL:               defaultBackupTTL,
+		defaultVGSLabelKey:             defaultVGSLabelKey,
+		defaultCSISnapshotTimeout:      defaultCSISnapshotTimeout,
+		defaultCSISnapshotErrorTimeout: defaultCSISnapshotErrorTimeout,
+		resourceTimeout:                resourceTimeout,
+		defaultItemOperationTimeout:    defaultItemOperationTimeout,
+		defaultSnapshotLocations:       defaultSnapshotLocations,
+		metrics:                        metrics,
+		backupStoreGetter:              backupStoreGetter,
+		formatFlag:                     formatFlag,
+		credentialFileStore:            credentialStore,
+		maxConcurrentK8SConnections:    maxConcurrentK8SConnections,
+		defaultSnapshotMoveData:        defaultSnapshotMoveData,
+		itemBlockWorkerCount:           itemBlockWorkerCount,
+		concurrentBackups:              max(concurrentBackups, 1),
+		globalCRClient:                 globalCRClient,
+		globalVolumePoliciesConfigMap:  globalVolumePoliciesConfigMap,
 	}
 	b.updateTotalBackupMetric()
 	return b
@@ -421,6 +424,11 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	if request.Spec.CSISnapshotTimeout.Duration == 0 {
 		// set default CSI VolumeSnapshot timeout
 		request.Spec.CSISnapshotTimeout.Duration = b.defaultCSISnapshotTimeout
+	}
+
+	if request.Spec.CSISnapshotErrorTimeout.Duration == 0 {
+		// set default CSI VolumeSnapshot error timeout
+		request.Spec.CSISnapshotErrorTimeout.Duration = b.defaultCSISnapshotErrorTimeout
 	}
 
 	if request.Spec.ItemOperationTimeout.Duration == 0 {

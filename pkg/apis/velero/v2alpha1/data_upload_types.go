@@ -70,6 +70,12 @@ type DataUploadSpec struct {
 	// If its value is "none", the data mover will do a full backup
 	// If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
 	ParentSnapshot string `json:"parentSnapshot,omitempty"`
+
+	// SnapshotErrorTimeout specifies how long to tolerate persistent errors reported
+	// in the source CSI VolumeSnapshot status before failing the data upload, instead
+	// of waiting the full OperationTimeout. A zero value disables the early failure.
+	// +optional
+	SnapshotErrorTimeout metav1.Duration `json:"snapshotErrorTimeout,omitempty"`
 }
 
 type SnapshotType string

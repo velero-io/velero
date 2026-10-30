@@ -45,6 +45,7 @@ const (
 
 	defaultBackupCSISnapshotTimeout  = 10 * time.Minute
 	defaultRestoreCSISnapshotTimeout = 30 * time.Minute
+	defaultCSISnapshotErrorTimeout   = 10 * time.Minute
 	defaultItemOperationTimeout      = 4 * time.Hour
 
 	resourceTimeout = defaultResourceTerminatingTimeout
@@ -162,6 +163,7 @@ type Config struct {
 	StoreValidationFrequency            time.Duration
 	DefaultBackupCSISnapshotTimeout     time.Duration
 	DefaultRestoreCSISnapshotTimeout    time.Duration
+	DefaultCSISnapshotErrorTimeout      time.Duration
 	DefaultItemOperationTimeout         time.Duration
 	ResourceTimeout                     time.Duration
 	RestoreResourcePriorities           types.Priorities
@@ -204,6 +206,7 @@ func GetDefaultConfig() *Config {
 		DefaultVGSLabelKey:               velerov1api.DefaultVGSLabelKey,
 		DefaultBackupCSISnapshotTimeout:  defaultBackupCSISnapshotTimeout,
 		DefaultRestoreCSISnapshotTimeout: defaultRestoreCSISnapshotTimeout,
+		DefaultCSISnapshotErrorTimeout:   defaultCSISnapshotErrorTimeout,
 		DefaultItemOperationTimeout:      defaultItemOperationTimeout,
 		ResourceTimeout:                  resourceTimeout,
 		StoreValidationFrequency:         defaultStoreValidationFrequency,
@@ -255,6 +258,7 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&c.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", c.DefaultVolumesToFsBackup, "Backup all volumes with pod volume file system backup by default.")
 	flags.StringVar(&c.UploaderType, "uploader-type", c.UploaderType, "Type of uploader to handle the transfer of data of pod volumes")
 	flags.DurationVar(&c.DefaultItemOperationTimeout, "default-item-operation-timeout", c.DefaultItemOperationTimeout, "How long to wait on asynchronous BackupItemActions and RestoreItemActions to complete before timing out. Default is 4 hours")
+	flags.DurationVar(&c.DefaultCSISnapshotErrorTimeout, "default-csi-snapshot-error-timeout", c.DefaultCSISnapshotErrorTimeout, "How long to tolerate persistent errors in a CSI VolumeSnapshot or VolumeSnapshotContent status before failing the backup. Default is 10 minutes.")
 	flags.DurationVar(&c.ResourceTimeout, "resource-timeout", c.ResourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters. Default is 10 minutes.")
 	flags.IntVar(&c.MaxConcurrentK8SConnections, "max-concurrent-k8s-connections", c.MaxConcurrentK8SConnections, "Max concurrent connections number that Velero can create with kube-apiserver. Default is 30.")
 	flags.BoolVar(&c.DefaultSnapshotMoveData, "default-snapshot-move-data", c.DefaultSnapshotMoveData, "Move data by default for all snapshots supporting data movement.")
