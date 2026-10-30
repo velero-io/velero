@@ -53,7 +53,7 @@ velero install \
 --plugins velero/velero-plugin-for-microsoft-azure:v1.1.0,velero/velero-plugin-for-csi:v0.1.1 \ 
 --bucket $BLOB_CONTAINER \ 
 --secret-file <PATH_TO_CREDS_FILE>/aks-creds \ 
---backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_ID,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID \ 
+--backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_NAME,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID \ 
 --snapshot-location-config apiTimeout=5m,resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID \ 
 --image velero/velero:v1.4.0 \ 
 --features=EnableCSI 
