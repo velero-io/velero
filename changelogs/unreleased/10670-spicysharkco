@@ -1,0 +1,1 @@
+Fix restore selecting every namespace when an include wildcard matches no namespace in the backup
