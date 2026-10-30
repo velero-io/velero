@@ -215,7 +215,8 @@ jobs:
               \"Backups && Deletion && Snapshot\", \
               \"NamespaceMapping && Snapshot\", \
               \"Basic && FSBackup\", \
-              \"BSL && Deletion && Snapshot\"\
+              \"BSL && Deletion && Snapshot\", \
+              \"Backups && Deletion && FSBackup\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind
