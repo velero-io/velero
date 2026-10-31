@@ -857,6 +857,24 @@ func TestOnDataDownloadProgress(t *testing.T) {
 	}
 }
 
+func TestFindDataDownloadForPod_CanceledContext(t *testing.T) {
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+	r := &DataDownloadReconciler{
+		client: fakeClient,
+		logger: velerotest.NewLogger(),
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	pod := builder.ForPod(velerov1api.DefaultNamespace, "test-pod").
+		Labels(map[string]string{velerov1api.DataDownloadLabel: "test-dd"}).
+		Phase(corev1api.PodRunning).Result()
+
+	requests := r.findSnapshotRestoreForPod(canceledCtx, pod)
+	assert.Empty(t, requests)
+}
+
 func TestFindDataDownloadForPod(t *testing.T) {
 	needErrs := []bool{false, false, false, false}
 	r, err := initDataDownloadReconciler(t, nil, needErrs...)
