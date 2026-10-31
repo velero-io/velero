@@ -8,7 +8,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/velero-io/velero/test"
 	. "github.com/velero-io/velero/test/e2e/test"
 	. "github.com/velero-io/velero/test/util/k8s"
 	. "github.com/velero-io/velero/test/util/kibishii"
@@ -35,7 +34,11 @@ func (n *NamespaceMapping) Init() error {
 	n.VeleroCfg.UseVolumeSnapshots = n.UseVolumeSnapshots
 	n.VeleroCfg.UseNodeAgent = !n.UseVolumeSnapshots
 	n.kibishiiData = &KibishiiData{Levels: 2, DirsPerLevel: 10, FilesPerLevel: 10, FileLength: 1024, BlockSize: 1024, PassNum: 0, ExpectedNodes: 2}
-	if n.VeleroCfg.CloudProvider == test.Kind {
+	if KibishiiVolumesAreHostPath(n.VeleroCfg) {
+		// Nothing written here can survive a backup, since Velero skips hostPath
+		// PVs for both CSI snapshots and PodVolumeBackups. generate.sh and
+		// verify.sh are still run, with every dimension zero, so the case checks
+		// the namespace mapping itself and nothing about the volumes.
 		n.kibishiiData = &KibishiiData{Levels: 0, DirsPerLevel: 0, FilesPerLevel: 0, FileLength: 0, BlockSize: 0, PassNum: 0, ExpectedNodes: 2}
 	}
 	backupType := "fs-backup"
@@ -71,8 +74,10 @@ func (n *NamespaceMapping) Init() error {
 		"create", "--namespace", n.VeleroCfg.VeleroNamespace, "backup", n.BackupName,
 		"--include-namespaces", strings.Join(*n.NSIncluded, ","), "--wait",
 	}
-	if n.VeleroCfg.CloudProvider == test.Kind {
-		// don't test volume snapshotter or file system backup on kind
+	if KibishiiVolumesAreHostPath(n.VeleroCfg) {
+		// Neither a snapshot nor a PodVolumeBackup would pick these volumes up,
+		// so ask for neither rather than asserting on a backup that quietly
+		// contains no volume data.
 		n.BackupArgs = append(n.BackupArgs, "--snapshot-volumes=false")
 		n.UseVolumeSnapshots = false
 	} else if n.UseVolumeSnapshots {

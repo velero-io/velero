@@ -120,7 +120,7 @@ Before using Volume Group Snapshots with Velero, ensure your environment meets t
 
 ### 1. Kubernetes Version
 - Kubernetes 1.20+ (when VolumeGroupSnapshot API was introduced)
-- Check your version: `kubectl version --short`
+- Check your client and server versions: `kubectl version`
 
 ### 2. VolumeGroupSnapshot CRDs
 Check the Volume Group Snapshot CRDs on your cluster:

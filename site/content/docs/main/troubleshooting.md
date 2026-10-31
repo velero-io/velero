@@ -3,7 +3,7 @@ title: "Troubleshooting"
 layout: docs
 ---
 
-These tips can help you troubleshoot known issues. If they don't help, you can [file an issue][4], or talk to us on the [#velero channel][25] on the Kubernetes Slack server.
+These tips can help you troubleshoot known issues. If they don't help, you can [file an issue][4], or talk to us on the [#velero-users channel][25] on the Kubernetes Slack server.
 
 ## Debug installation/ setup issues
 
@@ -280,5 +280,5 @@ See [Write Sparse files](restore-reference.md#write-sparse-files) for more detai
 [10]: locations.md
 [11]: /plugins
 [12]: https://kubernetes.io/docs/concepts/configuration/secret/#editing-a-secret
-[25]: https://kubernetes.slack.com/messages/velero
+[25]: https://kubernetes.slack.com/messages/velero-users
 [26]: contributions/minio.md

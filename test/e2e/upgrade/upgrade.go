@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	. "github.com/velero-io/velero/test"
+	"github.com/velero-io/velero/test/util/common"
 	. "github.com/velero-io/velero/test/util/k8s"
 	. "github.com/velero-io/velero/test/util/kibishii"
 	. "github.com/velero-io/velero/test/util/providers"
@@ -37,16 +38,47 @@ var veleroCfg VeleroConfig
 
 func BackupUpgradeRestoreWithSnapshots() {
 	veleroCfg = VeleroCfg
-	for _, upgradeFromVelero := range GetVersionList(veleroCfg.UpgradeFromVeleroCLI, veleroCfg.UpgradeFromVeleroVersion) {
+	versions, err := getUpgradeVersionList(veleroCfg, true)
+	Expect(err).To(Succeed())
+	for _, upgradeFromVelero := range versions {
 		BackupUpgradeRestoreTest(true, upgradeFromVelero)
 	}
 }
 
 func BackupUpgradeRestoreWithFSBackup() {
 	veleroCfg = VeleroCfg
-	for _, upgradeFromVelero := range GetVersionList(veleroCfg.UpgradeFromVeleroCLI, veleroCfg.UpgradeFromVeleroVersion) {
+	versions, err := getUpgradeVersionList(veleroCfg, false)
+	Expect(err).To(Succeed())
+	for _, upgradeFromVelero := range versions {
 		BackupUpgradeRestoreTest(false, upgradeFromVelero)
 	}
+}
+
+func getUpgradeVersionList(cfg VeleroConfig, useVolumeSnapshots bool) ([]VeleroCLI2Version, error) {
+	versions := GetVersionList(cfg.UpgradeFromVeleroCLI, cfg.UpgradeFromVeleroVersion)
+	if cfg.WorkerOS != common.WorkerOSWindows || cfg.UpgradeFromVeleroVersion == "" {
+		return versions, nil
+	}
+
+	// Windows CSI snapshot data movement requires v1.16; filesystem backup requires v1.17.
+	minimumVersion := "v1.16"
+	if !useVolumeSnapshots {
+		minimumVersion = "v1.17"
+	}
+
+	var supportedVersions []VeleroCLI2Version
+	for _, version := range versions {
+		supported, err := VersionNoOlderThan(version.VeleroVersion, minimumVersion)
+		if err != nil {
+			return nil, err
+		}
+		if !supported {
+			fmt.Printf("Excluding Windows upgrade from %s: this backup method requires Velero %s or later\n", version.VeleroVersion, minimumVersion)
+			continue
+		}
+		supportedVersions = append(supportedVersions, version)
+	}
+	return supportedVersions, nil
 }
 
 func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroCLI2Version) {

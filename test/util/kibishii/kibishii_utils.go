@@ -299,7 +299,7 @@ func RunKibishiiTests(
 // pkg/podvolume/backupper.go matches pv.Spec.HostPath. The kind-csi overlay
 // produces pv.Spec.CSI instead and neither applies.
 func KibishiiVolumesAreHostPath(cfg VeleroConfig) bool {
-	return cfg.CloudProvider == Kind && !strings.EqualFold(cfg.Features, FeatureCSI)
+	return cfg.CloudProvider == Kind && !FeatureEnabled(cfg.Features, FeatureCSI)
 }
 
 func installKibishii(

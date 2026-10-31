@@ -17,7 +17,7 @@ Velero supports a variety of storage providers for different backup and snapshot
 | [VMware vSphere](https://www.vmware.com/ca/products/vsphere.html)              | 🚫                                                                                               | vSphere Volumes                                                                                    | [VMware vSphere](https://github.com/velero-io/velero-plugin-for-vsphere)                    | [vSphere Plugin Setup](https://github.com/velero-io/velero-plugin-for-vsphere#velero-plugin-for-vsphere-installation-and-configuration-details)    | 🚫 |
 {{< /table >}}
 
-Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero), [GitHub Issues](https://github.com/velero-io/velero/issues)
+Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero-dev), [GitHub Issues](https://github.com/velero-io/velero/issues)
 
 ## Provider plugins maintained by the Velero community
 {{< table caption="Community supported providers" >}}

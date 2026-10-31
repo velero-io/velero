@@ -70,7 +70,8 @@ Annotations:  <none>
 Phase:  Enabled
 
 Uploader config:
-  Parallel files upload:  10
+  Parallel files upload:   10
+  Parallel blocks upload:  0
 
 Paused:  false
 

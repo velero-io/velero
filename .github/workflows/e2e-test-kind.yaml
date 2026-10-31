@@ -212,7 +212,10 @@ jobs:
             \"labels\":[\
               \"BackupVolumeInfo && (CSISnapshot || CSIDataMover || CSIVolumeGroupSnapshot)\", \
               \"Basic && Snapshot\", \
-              \"Backups && Deletion && Snapshot\"\
+              \"Backups && Deletion && Snapshot\", \
+              \"NamespaceMapping && Snapshot\", \
+              \"Basic && FSBackup\", \
+              \"BSL && Deletion && Snapshot\"\
             ]}" >> $GITHUB_OUTPUT
 
   # Run E2E test against all Kubernetes versions on kind

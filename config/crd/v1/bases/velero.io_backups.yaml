@@ -536,9 +536,13 @@ spec:
                 description: UploaderConfig specifies the configuration for the uploader.
                 nullable: true
                 properties:
+                  parallelBlocksUpload:
+                    description: ParallelBlocksUpload is the number of blocks parallel
+                      uploads to perform when using Velero block uploader.
+                    type: integer
                   parallelFilesUpload:
                     description: ParallelFilesUpload is the number of files parallel
-                      uploads to perform when using the uploader.
+                      uploads to perform when using the Velero fs uploader.
                     type: integer
                 type: object
               volumeGroupSnapshotLabelKey:

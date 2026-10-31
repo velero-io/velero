@@ -206,6 +206,10 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	if err := podvolume.ValidateBackupUploadersIfAny(ctx, r.Client, backup); err != nil {
+		return ctrl.Result{}, r.patchDeleteBackupRequestWithError(ctx, dbr, err)
+	}
+
 	// if the request object has no labels defined, initialize an empty map since
 	// we will be updating labels
 	if dbr.Labels == nil {
@@ -731,9 +735,11 @@ func isTarballNotFoundError(err error) bool {
 	//   - "nosuchkey":                    AWS S3
 	//   - "blobnotfound":                 Azure Blob Storage
 	//   - "objectnotexist":               GCS
+	//   - "doesn't exist":                GCS
 	return strings.Contains(msg, "not found") ||
 		strings.Contains(msg, "does not exist") ||
 		strings.Contains(msg, "nosuchkey") ||
 		strings.Contains(msg, "blobnotfound") ||
-		strings.Contains(msg, "objectnotexist")
+		strings.Contains(msg, "objectnotexist") ||
+		strings.Contains(msg, "doesn't exist")
 }

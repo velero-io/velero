@@ -72,8 +72,9 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 
 	switch backup.Status.Phase {
-	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed, velerov1api.BackupPhaseWaitingForPluginOperations, velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed:
-		// terminal and waiting for plugin operations phases, do nothing.
+	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed, velerov1api.BackupPhaseWaitingForPluginOperations, velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed, velerov1api.BackupPhaseFinalizing, velerov1api.BackupPhaseFinalizingPartiallyFailed:
+		// terminal, waiting for plugin operations and finalizing phases, do nothing.
+		// The log is uploaded before a backup enters any of the non-terminal ones.
 	default:
 		return fmt.Errorf("logs for backup %q are not available until it's finished processing, please wait "+
 			"until the backup has a phase of Completed or Failed and try again", l.BackupName)

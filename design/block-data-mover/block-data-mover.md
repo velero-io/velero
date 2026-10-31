@@ -360,8 +360,8 @@ That is, `SnapshotHandle` and changeId may be two different values, in this case
 
 #### Volume Snapshot Retention
 Storages/CSI drivers may support the changeId differently based on the storage's capabilities:
-1. In order to calculate the changes, some storages require the parent snapshot mapping to the changeId always exists at the time of `GetMetadataDelta` is called, then the parent snapshot can NOT be deleted as long as there are incremental backups based on it.  
-2. Some storages don't require the parent snapshot itself at the time of calculating changes, then parent snapshot could be deleted immediately after the parent backup completes.  
+1. Some storages don't require the parent snapshot itself at the time of calculating changes, then parent snapshot could be deleted immediately after the parent backup completes.  
+2. In order to calculate the changes, some storages require the parent snapshot mapping to the changeId always exists at the time of `GetMetadataDelta` is called, then the parent snapshot can NOT be deleted as long as there are incremental backups based on it.  
 
 The existing exposer works perfectly with Case 1, that is, the snapshot is always deleted when the backup completes.  
 However, for Case 2, since the snapshot must be retained, the exposer needs changes as below:

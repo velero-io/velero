@@ -1719,14 +1719,25 @@ func TestDeleteSnapshot(t *testing.T) {
 			expectedErr: "error refreshing repo on snapshot not found: fake-refresh-error",
 		},
 		{
-			name:       "snapshot not found in cache, refreshed, but still not found",
+			name:       "snapshot not found in cache, refreshed, but still not found, so it is already deleted",
 			snapshotID: udmrepo.ID("fake-id"),
 			mockRepo: func(r *repomocks.MockRepository) {
 				r.On("GetManifest", mock.Anything, manifest.ID("fake-id"), mock.Anything).Return(nil, manifest.ErrNotFound).Once()
 				r.On("Refresh", mock.Anything).Return(nil).Once()
 				r.On("GetManifest", mock.Anything, manifest.ID("fake-id"), mock.Anything).Return(nil, manifest.ErrNotFound).Once()
 			},
-			expectedErr: "error getting snapshot after repo refresh: error getting snapshot manifest: snapshot not found",
+		},
+		{
+			name:       "snapshot not found in cache, refreshed, then get snapshot fail",
+			snapshotID: udmrepo.ID("fake-id"),
+			mockRepo: func(r *repomocks.MockRepository) {
+				r.On("GetManifest", mock.Anything, manifest.ID("fake-id"), mock.Anything).Return(nil, manifest.ErrNotFound).Once()
+				r.On("Refresh", mock.Anything).Return(nil).Once()
+				r.On("GetManifest", mock.Anything, manifest.ID("fake-id"), mock.Anything).Return(&manifest.EntryMetadata{
+					Labels: map[string]string{manifest.TypeLabelKey: snapshot.ManifestType},
+				}, errors.New("fake-get-error")).Once()
+			},
+			expectedErr: "error getting snapshot after repo refresh: error getting snapshot manifest: unable to find manifest entries: fake-get-error",
 		},
 		{
 			name:       "snapshot not found in cache, refreshed, found, and delete succeed",
@@ -1784,6 +1795,7 @@ func TestDeleteSnapshot(t *testing.T) {
 			kr := &kopiaRepository{
 				rawRepo:   rawRepo,
 				rawWriter: rawWriter,
+				logger:    velerotest.NewLogger(),
 			}
 
 			err := kr.DeleteSnapshot(t.Context(), tc.snapshotID)

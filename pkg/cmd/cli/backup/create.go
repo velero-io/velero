@@ -128,6 +128,7 @@ type CreateOptions struct {
 	ResPoliciesConfigmap            string
 	client                          kbclient.WithWatch
 	ParallelFilesUpload             int
+	ParallelBlocksUpload            int
 	BackupType                      string
 }
 
@@ -176,7 +177,8 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 
 	flags.StringVar(&o.ResPoliciesConfigmap, "resource-policies-configmap", "", "Reference to the resource policies configmap that backup should use")
 	flags.StringVar(&o.DataMover, "data-mover", "", "Specify the data mover to be used by the backup. If the parameter is not set or set as 'velero', the built-in data mover will be used")
-	flags.IntVar(&o.ParallelFilesUpload, "parallel-files-upload", 0, "Number of files uploads simultaneously when running a backup. This is only applicable for the kopia uploader")
+	flags.IntVar(&o.ParallelFilesUpload, "parallel-files-upload", 0, "Number of files uploads simultaneously when running a backup. This is only applicable for Velero fs uploader")
+	flags.IntVar(&o.ParallelBlocksUpload, "parallel-blocks-upload", 0, "Number of block uploads simultaneously when running a backup. This is only applicable for Velero block uploader")
 	flags.StringVar(&o.BackupType, "backup-type", "", "Specify how volume data is backed up, with possible values including Full and Incremental.")
 }
 
@@ -491,6 +493,9 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 		}
 		if o.ParallelFilesUpload > 0 {
 			backupBuilder.ParallelFilesUpload(o.ParallelFilesUpload)
+		}
+		if o.ParallelBlocksUpload > 0 {
+			backupBuilder.ParallelBlocksUpload(o.ParallelBlocksUpload)
 		}
 	}
 

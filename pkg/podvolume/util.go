@@ -17,13 +17,16 @@ limitations under the License.
 package podvolume
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/podvolume/configs"
 	repotypes "github.com/velero-io/velero/pkg/repository/types"
 	"github.com/velero-io/velero/pkg/uploader"
@@ -214,4 +217,30 @@ func getPodSnapshotAnnotations(obj metav1.Object) map[string]string {
 	}
 
 	return res
+}
+
+// ValidateUploaders checks that every PVB uses a supported uploader.
+func ValidateUploaders(pvbs []*velerov1api.PodVolumeBackup) error {
+	for _, pvb := range pvbs {
+		if _, err := uploader.ValidateUploaderType(pvb.Spec.UploaderType); err != nil {
+			return fmt.Errorf("pod volume backup %q: %w", pvb.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// ValidateBackupUploadersIfAny checks the backup's in-cluster PVBs before processing.
+func ValidateBackupUploadersIfAny(ctx context.Context, kbClient client.Client, backup *velerov1api.Backup) error {
+	var pvbList velerov1api.PodVolumeBackupList
+	if err := kbClient.List(ctx, &pvbList, client.InNamespace(backup.Namespace), client.MatchingLabels{velerov1api.BackupNameLabel: label.GetValidName(backup.Name)}); err != nil {
+		return fmt.Errorf("error listing pod volume backups for backup %q: %w", backup.Name, err)
+	}
+
+	pvbs := make([]*velerov1api.PodVolumeBackup, 0, len(pvbList.Items))
+	for i := range pvbList.Items {
+		pvbs = append(pvbs, &pvbList.Items[i])
+	}
+
+	return ValidateUploaders(pvbs)
 }

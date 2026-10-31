@@ -20,10 +20,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestGetVolumeBackupsForPod(t *testing.T) {
@@ -328,6 +330,38 @@ func TestGetRealSource(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := GetRealSource(tc.pvb)
 			assert.Equal(t, tc.expected, actual)
+		})
+	}
+}
+
+func TestValidateBackupUploadersIfAny(t *testing.T) {
+	for _, tc := range []struct {
+		name, uploader     string
+		missing, wantError bool
+	}{
+		{name: "kopia", uploader: "kopia"},
+		{name: "block", uploader: "velero-block"},
+		{name: "unsupported", uploader: "unsupported", wantError: true},
+		{name: "restic", uploader: "restic", wantError: true},
+		{name: "empty", wantError: true},
+		{name: "no PVBs", missing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backup := builder.ForBackup("velero", "backup").Result()
+			c := velerotest.NewFakeControllerRuntimeClient(t)
+			if !tc.missing {
+				pvb := builder.ForPodVolumeBackup("velero", "pvb").UploaderType(tc.uploader).ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backup.Name)).Result()
+				require.NoError(t, c.Create(t.Context(), pvb))
+			}
+			// Unsupported PVBs belonging to another backup or namespace must not interfere.
+			require.NoError(t, c.Create(t.Context(), builder.ForPodVolumeBackup("velero", "other").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "other")).Result()))
+			require.NoError(t, c.Create(t.Context(), builder.ForPodVolumeBackup("other", "pvb").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backup.Name)).Result()))
+			err := ValidateBackupUploadersIfAny(t.Context(), c, backup)
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

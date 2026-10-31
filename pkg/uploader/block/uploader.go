@@ -34,6 +34,7 @@ import (
 	"github.com/velero-io/velero/pkg/repository/udmrepo"
 	"github.com/velero-io/velero/pkg/uploader"
 	cbt "github.com/velero-io/velero/pkg/uploader/cbt/types"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 	"github.com/velero-io/velero/pkg/util/freelist"
 )
 
@@ -97,13 +98,22 @@ func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, b
 		backupMode = udmrepo.ObjectDataBackupModeFull
 	}
 
+	asyncWrite := runtime.GOMAXPROCS(0)
+	if len(configs) > 0 {
+		if parallelUpload, err := uploaderutil.GetParallelBlocksUpload(configs); err != nil {
+			return udmrepo.Snapshot{}, 0, errors.Wrap(err, "failed to get uploader config")
+		} else if parallelUpload > 0 {
+			asyncWrite = parallelUpload
+		}
+	}
+
 	destObj, err := blkup.repoWriter.NewObjectWriter(blkup.ctx, udmrepo.ObjectWriteOptions{
 		Description:  fmt.Sprintf("BDEV:%s-%s", getObjectName(source.realSource), snapStart.Format("2006-01-02-15-04-05")),
 		DataType:     udmrepo.ObjectDataTypeData,
 		AccessMode:   udmrepo.ObjectDataAccessModeBlock,
 		ParentObject: parentObject,
 		BackupMode:   backupMode,
-		AsyncWrites:  runtime.NumCPU(),
+		AsyncWrites:  asyncWrite,
 	})
 	if err != nil {
 		return udmrepo.Snapshot{}, 0, errors.Wrap(err, "error creating object writer")

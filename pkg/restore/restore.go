@@ -56,7 +56,6 @@ import (
 
 	"github.com/velero-io/velero/internal/credentials"
 	"github.com/velero-io/velero/internal/hook"
-	"github.com/velero-io/velero/internal/resourcemodifiers"
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -74,6 +73,7 @@ import (
 	"github.com/velero-io/velero/pkg/podexec"
 	"github.com/velero-io/velero/pkg/podvolume"
 	"github.com/velero-io/velero/pkg/podvolume/configs"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
 	"github.com/velero-io/velero/pkg/types"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/collections"

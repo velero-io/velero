@@ -1222,7 +1222,7 @@ func TestExpose(t *testing.T) {
 
 				assert.Equal(t, anno, backupVSC.Annotations)
 				assert.Equal(t, vscObj.Labels, backupVSC.Labels)
-				assert.Equal(t, vscObj.Spec.DeletionPolicy, backupVSC.Spec.DeletionPolicy)
+				assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, backupVSC.Spec.DeletionPolicy)
 				assert.Equal(t, vscObj.Spec.Driver, backupVSC.Spec.Driver)
 				assert.Equal(t, *vscObj.Spec.VolumeSnapshotClassName, *backupVSC.Spec.VolumeSnapshotClassName)
 
@@ -2575,17 +2575,16 @@ func TestCreateBackupVSCDeletionPolicy(t *testing.T) {
 		expectedPolicy snapshotv1api.DeletionPolicy
 	}{
 		{
-			name:           "Delete policy is inherited",
+			name:           "Delete source policy uses Delete",
 			sourcePolicy:   snapshotv1api.VolumeSnapshotContentDelete,
 			expectedPolicy: snapshotv1api.VolumeSnapshotContentDelete,
 		},
 		{
-			// The backup VSC points at the same snapshot handle as the source
-			// VSC, so forcing Delete here would destroy a snapshot the user
-			// asked to keep.
-			name:           "Retain policy is inherited",
+			// Data mover cleanup must delete the underlying snapshot even when
+			// the source SnapshotClass uses Retain.
+			name:           "Retain source policy is overridden with Delete",
 			sourcePolicy:   snapshotv1api.VolumeSnapshotContentRetain,
-			expectedPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+			expectedPolicy: snapshotv1api.VolumeSnapshotContentDelete,
 		},
 	}
 

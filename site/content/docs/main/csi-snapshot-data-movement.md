@@ -113,6 +113,12 @@ Even in environments where CSI Changed Block Tracking (CBT) is unavailable (e.g.
     - Linux cluster nodes: Block data mover pods mount raw block devices. In heterogeneous clusters with both Linux and Windows nodes, block data mover pods must run on Linux nodes. (Windows workloads backed by block storage can still be protected and restored from Linux nodes).
     - CBT Service Account (if required): If the CSI SnapshotMetadataService requires authentication via a specific ServiceAccount, configure `csiSnapshotMetadataServiceConfigs` in the `node-agent-config` ConfigMap.
 
+### VolumeSnapshotClass
+
+Use a `VolumeSnapshotClass` with `deletionPolicy: Delete` for Velero built-in data movers (`velero-fs` and `velero-block`). After successful data movement, Velero deletes the underlying snapshot regardless of the SnapshotClass deletion policy. Setting `deletionPolicy: Retain` does not preserve the snapshot after a successful backup.  
+
+Velero first creates a `VolumeSnapshot` in the workload namespace, then creates a static `VolumeSnapshot` and `VolumeSnapshotContent` in the Velero namespace referencing the same underlying snapshot.  
+If you use `deletionPolicy: Retain` and the operation fails or is canceled before the handoff completes, the source `VolumeSnapshotContent` and underlying snapshot may remain. These resources require manual cleanup.  
 
 ### Install Velero Node Agent
 
@@ -345,6 +351,10 @@ To restore from your Velero backup:
 velero restore create --from-backup BACKUP_NAME OPTIONS...
 ```
 
+To restore data directly into an existing, bound PVC instead of provisioning a new volume, specify `--existing-volume-data-policy=full` or `--existing-volume-data-policy=incremental`.
+
+Before restoring, you must stop consuming workloads (for example, by scaling Deployments and StatefulSets to zero replicas) and ensure all consuming Pods have completely terminated. For more information, including pre-flight checks, volume identity verification, and cross-namespace workflows, see [Volume Data In-place Restore](volume-data-inplace-restore.md).
+
 When the restore starts, you will see one or more `DataDownload` CRs created.  
 You may also see some intermediate objects (i.e., pods, PVCs, PVs) created in Velero namespace or the cluster scope, they are to help data movers to move data. And they will be removed after the restore completes.  
 The phase of a `DataDownload` CR changes several times during the restore process and finally goes to one of the terminal status, `Completed`, `Failed` or `Cancelled`. You can see the phase changes as well as the data download progress by watching the DataDownload CRs:  
@@ -547,11 +557,14 @@ kubectl -n velero get datauploads -l velero.io/backup-name=YOUR_BACKUP_NAME -w
 kubectl -n velero get datadownloads -l velero.io/restore-name=YOUR_RESTORE_NAME -w
 ```
 
-For each individual volume, parallelism operates as follows:  
-- **File System Data Mover**: Files within the volume are processed in parallel. You can control concurrency using the `--parallel-files-upload` backup flag or `--parallel-files-download` restore flag. If omitted, Velero defaults to the number of CPU cores in the node hosting the data mover pod.  
-- **Block Data Mover**: Block data is processed sequentially with a dedicated reader and writer running asynchronously connected by an internal ring buffer. Sequential I/O provides optimal throughput for block devices. Concurrency across different volumes is handled via node-agent load concurrency.  
+For each individual volume, backup parallelism is controlled by the data mover:
 
-Notice that Golang 1.25 and later respects the CPU limit set to the pods to decide the physical threads provisioned to the pod processes (see [Container-aware GOMAXPROCS][22] for more details), so for Velero 1.18 (which consumes Golang 1.25) and later, if you set a CPU limit to the data mover pods, you may not get the expected performance (e.g., backup/restore throughput) with the default parallelism. The outcome may or may not be obvious varying on your volume data. If it is required, you could customize `--parallel-files-upload` or `--parallel-files-download` according to the CPU limit set to the data mover pods.  
+- **File System Data Mover**: `--parallel-files-upload` controls how many files are processed concurrently.
+- **Block Data Mover**: `--parallel-blocks-upload` controls how many block writes are processed concurrently.
+
+Both backup flags default to `runtime.GOMAXPROCS(0)` in the data mover process when omitted or set to `0`. The Go runtime can take the pod CPU limit into account when selecting this value (see [Container-aware GOMAXPROCS][22]). Explicit positive values override the default. Higher concurrency can improve throughput but increases buffered data and memory usage, particularly when backup storage is slow. These settings apply per volume and do not change node-agent load concurrency. See [backup upload concurrency](backup-reference.md#parallel-files-upload) for examples and Backup/Schedule configuration, and [Memory usage and upload concurrency](data-movement-pod-resource-configuration.md#memory-usage-and-upload-concurrency) for tuning guidance.  
+
+For restore, the file system data mover uses `--parallel-files-download`, which defaults to `runtime.GOMAXPROCS(0)` in the data mover process when omitted or set to `0`. An explicit positive value overrides this default. The upload flags do not affect restore.  
 
 ### Restart and resume
 When Velero server is restarted, if the resource backup/restore has completed, so the backup/restore has excceded `InProgress` status and is waiting for the completion of the data movements, Velero will recapture the status of the running data movements and resume the execution.  

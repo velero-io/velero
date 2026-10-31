@@ -2331,7 +2331,7 @@ func TestNewDataUpload(t *testing.T) {
 			vsClassName:          ptr.To("test-vs-class"),
 			uploaderConfig:       &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
 			expectedParentSnap:   "",
-			expectedDataMoverCfg: nil,
+			expectedDataMoverCfg: map[string]string{},
 		},
 		{
 			name:                      "Default backup type, uploader config with 0 parallel files",
@@ -2340,7 +2340,20 @@ func TestNewDataUpload(t *testing.T) {
 			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 0},
 			dataMoverFromVolumePolicy: "velero-block",
 			expectedParentSnap:        "",
-			expectedDataMoverCfg:      nil,
+			expectedDataMoverCfg:      map[string]string{},
+		},
+		{
+			name:                      "block concurrency",
+			vsClassName:               ptr.To("test-vs-class"),
+			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelBlocksUpload: 7},
+			dataMoverFromVolumePolicy: "velero-block",
+			expectedDataMoverCfg:      map[string]string{uploaderUtil.ParallelBlocksUpload: "7"},
+		},
+		{
+			name:                 "both uploader concurrency settings",
+			vsClassName:          ptr.To("test-vs-class"),
+			uploaderConfig:       &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 3, ParallelBlocksUpload: 7},
+			expectedDataMoverCfg: map[string]string{uploaderUtil.ParallelFilesUpload: "3", uploaderUtil.ParallelBlocksUpload: "7"},
 		},
 	}
 
