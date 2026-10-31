@@ -1,0 +1,1 @@
+Recognize the GCS object-not-found error (storage: object doesn't exist) as a permanent not-found condition during backup deletion, so the Backup no longer stays stuck in Deleting when the tarball is already gone

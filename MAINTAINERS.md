@@ -20,7 +20,7 @@ All maintainers share collective responsibility for the entire Velero project. T
 ## Contacting the maintainers
 
 * **GitHub:** open an issue or pull request in the relevant [velero-io](https://github.com/velero-io) repository, or @mention a maintainer by their GitHub ID.
-* **Slack:** [#velero](https://kubernetes.slack.com/messages/velero) on the Kubernetes Slack.
+* **Slack:** [#velero-dev](https://kubernetes.slack.com/messages/velero-dev) on the Kubernetes Slack.
 * **Mailing list:** [Velero Google Group](https://groups.google.com/forum/#!forum/projectvelero).
 * **Security issues:** follow the private disclosure process in [SECURITY.md](https://github.com/velero-io/.github/blob/main/SECURITY.md) (cncf-velero-security@lists.cncf.io). Do not report vulnerabilities through public channels.
 

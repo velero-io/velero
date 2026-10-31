@@ -179,6 +179,31 @@ var _ = Describe("Backup Sync Reconciler", func() {
 			longLocationNameEnabled  bool
 		}{
 			{
+				name:      "unsupported uploaders are not synced",
+				namespace: "ns-1",
+				location:  defaultLocation("ns-1"),
+				cloudBackups: []*cloudBackupData{
+					{
+						backup: builder.ForBackup("ns-1", "unsupported").Phase(velerov1api.BackupPhaseCompleted).Result(),
+						podVolumeBackups: []*velerov1api.PodVolumeBackup{
+							builder.ForPodVolumeBackup("ns-1", "valid").UploaderType("kopia").Result(),
+							builder.ForPodVolumeBackup("ns-1", "invalid").UploaderType("unsupported").Result(),
+						},
+						backupShouldSkipSync: true,
+					},
+					{
+						backup:               builder.ForBackup("ns-1", "restic").Phase(velerov1api.BackupPhaseCompleted).Result(),
+						podVolumeBackups:     []*velerov1api.PodVolumeBackup{builder.ForPodVolumeBackup("ns-1", "restic").UploaderType("restic").Result()},
+						backupShouldSkipSync: true,
+					},
+					{
+						backup:               builder.ForBackup("ns-1", "empty").Phase(velerov1api.BackupPhaseCompleted).Result(),
+						podVolumeBackups:     []*velerov1api.PodVolumeBackup{builder.ForPodVolumeBackup("ns-1", "empty").Result()},
+						backupShouldSkipSync: true,
+					},
+				},
+			},
+			{
 				name:      "no cloud backups",
 				namespace: "ns-1",
 				location:  defaultLocation("ns-1"),
@@ -230,7 +255,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 						backup: builder.ForBackup("ns-1", "backup-3").
 							Phase(velerov1api.BackupPhaseWaitingForPluginOperations).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-1").UploaderType("kopia").Result(),
 						},
 						backupShouldSkipSync: true,
 					},
@@ -248,7 +273,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 						backup: builder.ForBackup("ns-1", "backup-6").
 							Phase(velerov1api.BackupPhaseFinalizing).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-2").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-2").UploaderType("kopia").Result(),
 						},
 						backupShouldSkipSync: true,
 					},
@@ -276,7 +301,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 							Phase(velerov1api.BackupPhaseWaitingForPluginOperations).
 							Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-1").UploaderType("kopia").Result(),
 						},
 						backupShouldSkipSync: true,
 					},
@@ -297,7 +322,7 @@ var _ = Describe("Backup Sync Reconciler", func() {
 							Phase(velerov1api.BackupPhaseFinalizing).
 							Expiration(fakeClock.Now().Add(-time.Hour)).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-2").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-2").UploaderType("kopia").Result(),
 						},
 						backupShouldSkipSync: true,
 					},
@@ -385,13 +410,13 @@ var _ = Describe("Backup Sync Reconciler", func() {
 					{
 						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-1").UploaderType("kopia").Result(),
 						},
 					},
 					{
 						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-2").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-2").UploaderType("kopia").Result(),
 						},
 					},
 				},
@@ -404,19 +429,19 @@ var _ = Describe("Backup Sync Reconciler", func() {
 					{
 						backup: builder.ForBackup("ns-1", "backup-1").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-1").UploaderType("kopia").Result(),
 						},
 					},
 					{
 						backup: builder.ForBackup("ns-1", "backup-2").Phase(velerov1api.BackupPhaseCompleted).Result(),
 						podVolumeBackups: []*velerov1api.PodVolumeBackup{
-							builder.ForPodVolumeBackup("ns-1", "pvb-3").Result(),
+							builder.ForPodVolumeBackup("ns-1", "pvb-3").UploaderType("kopia").Result(),
 						},
 					},
 				},
 				existingPodVolumeBackups: []*velerov1api.PodVolumeBackup{
-					builder.ForPodVolumeBackup("ns-1", "pvb-1").Result(),
-					builder.ForPodVolumeBackup("ns-1", "pvb-2").Result(),
+					builder.ForPodVolumeBackup("ns-1", "pvb-1").UploaderType("kopia").Result(),
+					builder.ForPodVolumeBackup("ns-1", "pvb-2").UploaderType("kopia").Result(),
 				},
 			},
 		}

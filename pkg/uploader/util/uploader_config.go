@@ -25,15 +25,17 @@ import (
 )
 
 const (
-	ParallelFilesUpload = "ParallelFilesUpload"
-	WriteSparseFiles    = "WriteSparseFiles"
-	RestoreConcurrency  = "ParallelFilesDownload"
-	DeleteExtraFiles    = "DeleteExtraFiles"
+	ParallelFilesUpload  = "ParallelFilesUpload"
+	ParallelBlocksUpload = "ParallelBlocksUpload"
+	WriteSparseFiles     = "WriteSparseFiles"
+	RestoreConcurrency   = "ParallelFilesDownload"
+	DeleteExtraFiles     = "DeleteExtraFiles"
 )
 
 func StoreBackupConfig(config *velerov1api.UploaderConfigForBackup) map[string]string {
 	data := make(map[string]string)
 	data[ParallelFilesUpload] = strconv.Itoa(config.ParallelFilesUpload)
+	data[ParallelBlocksUpload] = strconv.Itoa(config.ParallelBlocksUpload)
 	return data
 }
 
@@ -66,6 +68,18 @@ func GetParallelFilesUpload(uploaderCfg map[string]string) (int, error) {
 			return 0, errors.Wrap(err, "failed to parse ParallelFilesUpload config")
 		}
 		return parallelFilesUploadInt, nil
+	}
+	return 0, nil
+}
+
+func GetParallelBlocksUpload(uploaderCfg map[string]string) (int, error) {
+	parallelBlocksUpload, ok := uploaderCfg[ParallelBlocksUpload]
+	if ok {
+		parallelBlocksUploadInt, err := strconv.Atoi(parallelBlocksUpload)
+		if err != nil {
+			return 0, errors.Wrap(err, "failed to parse parallelBlocksUpload config")
+		}
+		return parallelBlocksUploadInt, nil
 	}
 	return 0, nil
 }

@@ -31,7 +31,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/velero-io/velero/internal/resourcemodifiers"
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/client"
@@ -39,6 +38,7 @@ import (
 	"github.com/velero-io/velero/pkg/cmd/cli"
 	"github.com/velero-io/velero/pkg/cmd/util/flag"
 	"github.com/velero-io/velero/pkg/cmd/util/output"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/kube"
 	"github.com/velero-io/velero/pkg/util/velero/restore"

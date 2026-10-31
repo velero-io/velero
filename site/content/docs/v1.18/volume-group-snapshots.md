@@ -120,7 +120,7 @@ Before using Volume Group Snapshots with Velero, ensure your environment meets t
 
 ### 1. Kubernetes Version
 - Kubernetes 1.20+ (when VolumeGroupSnapshot API was introduced)
-- Check your version: `kubectl version --short`
+- Check your client and server versions: `kubectl version`
 
 ### 2. External-Snapshotter Version
 Velero 1.18.1+ uses the VolumeGroupSnapshot v1beta2 API. This requires external-snapshotter v8.2.0 or later, which introduced v1beta2 support. Older versions of external-snapshotter only ship v1beta1 CRDs and are not compatible with VGS in Velero 1.18.1+.

@@ -16,7 +16,46 @@ limitations under the License.
 
 package kibishii
 
-import "testing"
+import (
+	"testing"
+
+	. "github.com/velero-io/velero/test"
+)
+
+// KibishiiVolumesAreHostPath and the Kind branch of installKibishii are
+// inverses, so a --features value that one treats as enabling CSI and the
+// other does not leaves the suite installing a CSI-backed overlay and then
+// skipping the cases that would use it. --features takes a list, which is
+// where they drifted apart once.
+func TestKibishiiVolumesAreHostPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		features string
+		want     bool
+	}{
+		{"kind without CSI", Kind, "", true},
+		{"kind with CSI", Kind, FeatureCSI, false},
+		{"kind with CSI in a list", Kind, "EnableCSI,EnableAPIGroupVersions", false},
+		{"kind with CSI last in a list", Kind, "EnableAPIGroupVersions,EnableCSI", false},
+		{"kind with CSI in a spaced list", Kind, "EnableAPIGroupVersions, EnableCSI", false},
+		{"kind with CSI in a different case", Kind, "enablecsi", false},
+		{"kind with another feature only", Kind, "EnableAPIGroupVersions", true},
+		{"a cloud provider without CSI", AWS, "", false},
+		{"a cloud provider with CSI", AWS, FeatureCSI, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := VeleroConfig{}
+			cfg.CloudProvider = tc.provider
+			cfg.Features = tc.features
+			if got := KibishiiVolumesAreHostPath(cfg); got != tc.want {
+				t.Errorf("KibishiiVolumesAreHostPath(provider=%q, features=%q) = %v, want %v",
+					tc.provider, tc.features, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestResolveBasePath(t *testing.T) {
 	tests := []struct {

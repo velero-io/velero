@@ -1,0 +1,1 @@
+Treat a kopia snapshot not found after a repo refresh as deleted, so an interrupted backup deletion can be retried

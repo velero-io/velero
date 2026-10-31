@@ -78,7 +78,7 @@ func (v *BackupVolumeInfo) Init() error {
 }
 
 func (v *BackupVolumeInfo) Start() error {
-	if strings.Contains(v.VeleroCfg.Features, FeatureCSI) {
+	if FeatureEnabled(v.VeleroCfg.Features, FeatureCSI) {
 		if strings.Contains(v.CaseBaseName, "native-snapshot") {
 			fmt.Printf("Skip native snapshot case %s when the CSI feature is enabled.\n", v.CaseBaseName)
 			Skip("Skip native snapshot case due to CSI feature is enabled.")

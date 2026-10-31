@@ -24,6 +24,13 @@ export CGO_ENABLED=0
 TARGETS=($(go list ./pkg/... ./internal/...| grep -vE "/pkg/builder|pkg/apis|pkg/test|pkg/generated|pkg/plugin/generated|mocks|internal/restartabletest"))
 TARGETS+=(
   ./cmd/...
+  # The unit-testable packages under test/. The e2e and perf suites are
+  # deliberately absent: they call RunSpecs and need a cluster, where these
+  # four hold the suite's shared helpers and test them in isolation.
+  ./test
+  ./test/pkg/client
+  ./test/util/kibishii
+  ./test/util/velero
 )
 
 if [[ ${#@} -ne 0 ]]; then

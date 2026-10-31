@@ -27,11 +27,13 @@ import (
 
 func TestStoreBackupConfig(t *testing.T) {
 	config := &velerov1api.UploaderConfigForBackup{
-		ParallelFilesUpload: 3,
+		ParallelFilesUpload:  3,
+		ParallelBlocksUpload: 7,
 	}
 
 	expectedData := map[string]string{
-		ParallelFilesUpload: "3",
+		ParallelFilesUpload:  "3",
+		ParallelBlocksUpload: "7",
 	}
 
 	result := StoreBackupConfig(config)

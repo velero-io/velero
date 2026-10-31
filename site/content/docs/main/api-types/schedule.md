@@ -153,8 +153,12 @@ spec:
     datamover: velero
     # UploaderConfig specifies the configuration for the uploader
     uploaderConfig:
-        # ParallelFilesUpload is the number of files parallel uploads to perform when using the uploader.
+        # Concurrent file uploads per volume for the Kopia filesystem uploader.
+        # Omitted or 0 uses GOMAXPROCS in the data mover process.
         parallelFilesUpload: 10
+        # Concurrent 1 MiB block writes per volume for Velero block uploader.
+        # Omitted or 0 uses GOMAXPROCS in the data mover process.
+        parallelBlocksUpload: 10
     # The labels/annotations you want on backup objects, created from this schedule (instead of copying the labels/annotations you have on schedule object itself).
     # When this field is set, the labels/annotations from the Schedule resource are not copied to the Backup resource.
     metadata:

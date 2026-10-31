@@ -56,7 +56,6 @@ import (
 
 	"github.com/velero-io/velero/internal/credentials"
 	"github.com/velero-io/velero/internal/hook"
-	"github.com/velero-io/velero/internal/resourcemodifiers"
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -74,6 +73,7 @@ import (
 	"github.com/velero-io/velero/pkg/podexec"
 	"github.com/velero-io/velero/pkg/podvolume"
 	"github.com/velero-io/velero/pkg/podvolume/configs"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
 	"github.com/velero-io/velero/pkg/types"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/collections"
@@ -706,7 +706,11 @@ func getOrderedResources(resourcePriorities types.Priorities, backupResources ma
 	// alphabetize resources in the backup
 	sort.Strings(orderedBackupResources)
 
-	list := append(resourcePriorities.HighPriorities, orderedBackupResources...)
+	// Build a new slice: appending to HighPriorities can write into a backing
+	// array it shares with LowPriorities (see types.Priorities.Set).
+	list := make([]string, 0, len(resourcePriorities.HighPriorities)+len(orderedBackupResources)+len(resourcePriorities.LowPriorities))
+	list = append(list, resourcePriorities.HighPriorities...)
+	list = append(list, orderedBackupResources...)
 	return append(list, resourcePriorities.LowPriorities...)
 }
 

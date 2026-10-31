@@ -1,0 +1,1 @@
+Add a make target that runs the e2e tests against a kind cluster and MinIO it creates itself

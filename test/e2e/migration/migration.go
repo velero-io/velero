@@ -285,7 +285,7 @@ func (m *migrationE2E) Backup() error {
 			// the snapshots of AWS may be still in pending status when do the restore.
 			// wait for a while to avoid this https://github.com/velero-io/velero/issues/1799
 			if OriginVeleroCfg.CloudProvider == test.Azure &&
-				strings.EqualFold(OriginVeleroCfg.Features, test.FeatureCSI) ||
+				test.FeatureEnabled(OriginVeleroCfg.Features, test.FeatureCSI) ||
 				OriginVeleroCfg.CloudProvider == test.AWS {
 				By("Sleep 5 minutes to avoid snapshot recreated by unknown reason ", func() {
 					time.Sleep(5 * time.Minute)
@@ -355,7 +355,7 @@ func (m *migrationE2E) Restore() error {
 			test.VeleroCfg.StandbyClient.Kubebuilder,
 		)).To(Succeed())
 
-		if strings.EqualFold(m.VeleroCfg.Features, test.FeatureCSI) &&
+		if test.FeatureEnabled(m.VeleroCfg.Features, test.FeatureCSI) &&
 			m.VeleroCfg.UseVolumeSnapshots {
 			By("Install VolumeSnapshotClass for E2E.")
 			Expect(
@@ -488,7 +488,7 @@ func (m *migrationE2E) Clean() error {
 			m.VeleroCfg.ClientToInstallVelero.Kubebuilder,
 		)).To(Succeed())
 
-		if strings.EqualFold(m.VeleroCfg.Features, test.FeatureCSI) &&
+		if test.FeatureEnabled(m.VeleroCfg.Features, test.FeatureCSI) &&
 			m.VeleroCfg.UseVolumeSnapshots {
 			By("Delete VolumeSnapshotClass created by E2E")
 			if err := k8sutil.KubectlDeleteByFile(

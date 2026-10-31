@@ -17,6 +17,7 @@ limitations under the License.
 package test
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,20 @@ var (
 // when it did not.
 func SecondStorageClassInstalled() bool {
 	return !(StorageClassFile2Set && StorageClassFile2 == "")
+}
+
+// FeatureEnabled reports whether name is one of the features in a --features
+// value. The flag takes a comma-separated list, so comparing the whole value
+// against a single feature name stops matching as soon as a second feature is
+// enabled, and comparing with strings.Contains matches any feature whose name
+// merely starts with this one.
+func FeatureEnabled(features, name string) bool {
+	for _, f := range strings.Split(features, ",") {
+		if strings.EqualFold(strings.TrimSpace(f), name) {
+			return true
+		}
+	}
+	return false
 }
 
 const FeatureCSI = "EnableCSI"

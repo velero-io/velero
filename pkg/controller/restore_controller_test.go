@@ -35,7 +35,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/velero-io/velero/internal/resourcemodifiers"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
@@ -45,6 +44,7 @@ import (
 	"github.com/velero-io/velero/pkg/plugin/framework"
 	pluginmocks "github.com/velero-io/velero/pkg/plugin/mocks"
 	riav2 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
 	pkgrestore "github.com/velero-io/velero/pkg/restore"
 	velerotest "github.com/velero-io/velero/pkg/test"
 	"github.com/velero-io/velero/pkg/util/logging"
@@ -487,13 +487,24 @@ func TestRestoreReconcile(t *testing.T) {
 			expectedRestorerCall:  NewRestore("foo", "bar", "backup-1", "ns-1", "", velerov1api.RestorePhaseInProgress).Result(),
 		},
 		{
+			name:     "restore with Restic pod volume backup fails validation",
+			location: defaultStorageLocation,
+			restore:  NewRestore(velerov1api.DefaultNamespace, "bar", "backup-1", "ns-1", "", velerov1api.RestorePhaseNew).Result(),
+			backup:   defaultBackup().StorageLocation("default").Phase(velerov1api.BackupPhaseCompleted).Result(),
+			podVolumeBackups: []*velerov1api.PodVolumeBackup{
+				builder.ForPodVolumeBackup(velerov1api.DefaultNamespace, "pvb-restic").UploaderType("restic").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "backup-1")).Result(),
+			},
+			expectedPhase:            string(velerov1api.RestorePhaseFailedValidation),
+			expectedValidationErrors: []string{`Cannot restore backup "backup-1": pod volume backup "pvb-restic": invalid uploader type 'restic', valid types: 'kopia', 'velero-block'`},
+		},
+		{
 			name:     "valid restore gets executed and only includes pod volume backups from restore namespace",
 			location: defaultStorageLocation,
 			restore:  NewRestore("foo", "bar2", "backup-1", "ns-1", "", velerov1api.RestorePhaseNew).Result(),
 			backup:   defaultBackup().StorageLocation("default").Phase(velerov1api.BackupPhaseCompleted).Result(),
 			podVolumeBackups: []*velerov1api.PodVolumeBackup{
-				builder.ForPodVolumeBackup("foo", "pvb-1").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "backup-1")).Result(),
-				builder.ForPodVolumeBackup("other-ns", "pvb-2").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "backup-1")).Result(),
+				builder.ForPodVolumeBackup("foo", "pvb-1").UploaderType("kopia").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "backup-1")).Result(),
+				builder.ForPodVolumeBackup("other-ns", "pvb-2").UploaderType("kopia").ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, "backup-1")).Result(),
 			},
 			expectedPVBCount:      1,
 			expectedErr:           false,

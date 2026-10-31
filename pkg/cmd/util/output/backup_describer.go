@@ -96,7 +96,7 @@ func DescribeBackup(
 
 		DescribeGlobalVolumePolicy(d, backup)
 
-		if backup.Spec.UploaderConfig != nil && backup.Spec.UploaderConfig.ParallelFilesUpload > 0 {
+		if backup.Spec.UploaderConfig != nil {
 			d.Println()
 			DescribeUploaderConfigForBackup(d, backup.Spec)
 		}
@@ -150,6 +150,7 @@ func DescribeGlobalVolumePolicy(d *Describer, backup *velerov1api.Backup) {
 func DescribeUploaderConfigForBackup(d *Describer, spec velerov1api.BackupSpec) {
 	d.Printf("Uploader config:\n")
 	d.Printf("\tParallel files upload:\t%d\n", spec.UploaderConfig.ParallelFilesUpload)
+	d.Printf("\tParallel blocks upload:\t%d\n", spec.UploaderConfig.ParallelBlocksUpload)
 }
 
 // DescribeBackupSpec describes a backup spec in human-readable format.

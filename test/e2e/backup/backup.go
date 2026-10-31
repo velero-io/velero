@@ -74,18 +74,10 @@ func BackupRestoreTest(backupRestoreTestConfig BackupRestoreTestConfig) {
 		veleroCfg.KibishiiDirectory = veleroCfg.KibishiiDirectory + backupRestoreTestConfig.kibishiiPatchSubDir
 		veleroCfg.UseVolumeSnapshots = useVolumeSnapshots
 		veleroCfg.UseNodeAgent = !useVolumeSnapshots
-		if veleroCfg.CloudProvider == Kind {
-			Skip("Volume snapshots plugin and File System Backups are not supported on kind")
-			// Both halves of this are about the StorageClass, not about kind itself.
-			// Kibishii's PVCs use kibishii-storage-class, which the kind overlay
-			// defines on rancher.io/local-path, so the PVs are hostPath volumes:
-			// CSI snapshots skip them because pkg/backup/actions/csi/pvc_action.go
-			// requires pv.Spec.CSI, and PodVolumeBackups skip them because
-			// isHostPathVolume in pkg/podvolume/backupper.go matches pv.Spec.HostPath.
-			// A CSI-backed class produces pv.Spec.CSI instead and neither applies,
-			// but Kibishii brings its own class, so unskipping these needs a CSI
-			// overlay in vmware-tanzu-experiments/distributed-data-generator.
-			// This test suite checks for volume snapshots and PVBs generated from FileSystemBackups, so skip it on kind clusters
+		// This suite asserts on volume snapshots and on PVBs from file system
+		// backups, so it needs PVs that Velero will act on at all.
+		if KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot or file system back up")
 		}
 
 		// [SKIP]: Static provisioning for vSphere CSI driver works differently from other drivers.

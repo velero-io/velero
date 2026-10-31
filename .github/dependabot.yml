@@ -18,6 +18,11 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    groups:
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     labels:
       - "Dependencies"
       - "go"
@@ -30,6 +35,11 @@ updates:
     directory: "/pkg/apis" # Location of package manifests
     schedule:
       interval: "weekly"
+    groups:
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     labels:
       - "Dependencies"
       - "go"

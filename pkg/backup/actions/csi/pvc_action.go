@@ -615,10 +615,16 @@ func newDataUpload(
 		dataUpload.Spec.CSISnapshot.SnapshotClass = *vs.Spec.VolumeSnapshotClassName
 	}
 
-	if backup.Spec.UploaderConfig != nil &&
-		backup.Spec.UploaderConfig.ParallelFilesUpload > 0 {
+	if backup.Spec.UploaderConfig != nil {
 		dataUpload.Spec.DataMoverConfig = make(map[string]string)
-		dataUpload.Spec.DataMoverConfig[uploaderUtil.ParallelFilesUpload] = strconv.Itoa(backup.Spec.UploaderConfig.ParallelFilesUpload)
+
+		if backup.Spec.UploaderConfig.ParallelFilesUpload > 0 {
+			dataUpload.Spec.DataMoverConfig[uploaderUtil.ParallelFilesUpload] = strconv.Itoa(backup.Spec.UploaderConfig.ParallelFilesUpload)
+		}
+
+		if backup.Spec.UploaderConfig.ParallelBlocksUpload > 0 {
+			dataUpload.Spec.DataMoverConfig[uploaderUtil.ParallelBlocksUpload] = strconv.Itoa(backup.Spec.UploaderConfig.ParallelBlocksUpload)
+		}
 	}
 
 	return dataUpload

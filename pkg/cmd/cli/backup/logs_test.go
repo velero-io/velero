@@ -38,6 +38,7 @@ import (
 	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
 	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
 	"github.com/velero-io/velero/pkg/cmd/util/cacert"
+	"github.com/velero-io/velero/pkg/cmd/util/downloadrequest"
 	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
@@ -272,6 +273,51 @@ func TestNewLogsCommand(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, expectedLogContent, logOutput.String())
 	})
+}
+
+func TestLogsAvailabilityByPhase(t *testing.T) {
+	tests := []struct {
+		phase     velerov1api.BackupPhase
+		available bool
+	}{
+		{phase: velerov1api.BackupPhaseNew, available: false},
+		{phase: velerov1api.BackupPhaseInProgress, available: false},
+		{phase: velerov1api.BackupPhaseFailedValidation, available: false},
+		{phase: velerov1api.BackupPhaseWaitingForPluginOperations, available: true},
+		{phase: velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed, available: true},
+		{phase: velerov1api.BackupPhaseFinalizing, available: true},
+		{phase: velerov1api.BackupPhaseFinalizingPartiallyFailed, available: true},
+		{phase: velerov1api.BackupPhaseCompleted, available: true},
+		{phase: velerov1api.BackupPhasePartiallyFailed, available: true},
+		{phase: velerov1api.BackupPhaseFailed, available: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.phase), func(t *testing.T) {
+			backupName := "bk-logs-phase"
+
+			kbClient := velerotest.NewFakeControllerRuntimeClient(t)
+			backup := builder.ForBackup(cmdtest.VeleroNameSpace, backupName).Phase(tc.phase).Result()
+			require.NoError(t, kbClient.Create(t.Context(), backup, &kbclient.CreateOptions{}))
+
+			f := &factorymocks.Factory{}
+			f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+			f.On("KubebuilderClient").Return(kbClient, nil)
+
+			l := NewLogsOptions()
+			require.NoError(t, l.Complete([]string{backupName}, f))
+			// Nothing processes the DownloadRequest here, so a phase that passes the
+			// check ends in the download URL timeout instead of the phase error.
+			l.Timeout = 100 * time.Millisecond
+
+			err := l.Run(NewLogsCommand(f), f)
+			if tc.available {
+				require.ErrorIs(t, err, downloadrequest.ErrDownloadRequestDownloadURLTimeout)
+			} else {
+				require.ErrorContains(t, err, fmt.Sprintf("logs for backup %q are not available until it's finished processing", backupName))
+			}
+		})
+	}
 }
 
 func TestBSLCACertBehavior(t *testing.T) {

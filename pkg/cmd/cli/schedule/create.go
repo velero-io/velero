@@ -177,9 +177,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		schedule.Spec.Template.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: resourcepolicies.ConfigmapRefType, Name: o.BackupOptions.ResPoliciesConfigmap}
 	}
 
-	if o.BackupOptions.ParallelFilesUpload > 0 {
+	if o.BackupOptions.ParallelFilesUpload > 0 || o.BackupOptions.ParallelBlocksUpload > 0 {
 		schedule.Spec.Template.UploaderConfig = &api.UploaderConfigForBackup{
-			ParallelFilesUpload: o.BackupOptions.ParallelFilesUpload,
+			ParallelFilesUpload:  o.BackupOptions.ParallelFilesUpload,
+			ParallelBlocksUpload: o.BackupOptions.ParallelBlocksUpload,
 		}
 	}
 

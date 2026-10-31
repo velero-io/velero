@@ -47,8 +47,8 @@ func backup_deletion_test(useVolumeSnapshots bool) {
 	veleroCfg.UseNodeAgent = !useVolumeSnapshots
 
 	BeforeEach(func() {
-		if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-			Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+		if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 		}
 		var err error
 		flag.Parse()
@@ -88,8 +88,8 @@ func runBackupDeletionTests(client TestClient, veleroCfg VeleroConfig, backupLoc
 	nsCount := len(workloadNamespaceList)
 	workloadNamespaces := strings.Join(workloadNamespaceList[:], ",")
 
-	if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-		Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+	if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+		Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 	}
 	oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 	defer ctxCancel()

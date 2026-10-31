@@ -332,7 +332,11 @@ Instructions to back up using this approach are as follows:
 
 ## To restore
 
-Regardless of how volumes are discovered for backup using FSB, the process of restoring remains the same.  
+Regardless of how volumes are discovered for backup using FSB, the process of restoring remains the same.
+
+To restore data directly into an existing, bound PVC instead of provisioning a new volume, specify `--existing-volume-data-policy=full` or `--existing-volume-data-policy=incremental`.
+
+Before starting an in-place restore with File System Backup, you must delete the workload controllers (such as Deployments or StatefulSets) while retaining the target PVCs and PVs. Do not merely scale controllers to zero replicas: a controller scaled to zero immediately terminates the restored Pod that contains Velero's `restore-wait` init container, which prevents data restoration. Include the workload controllers in the restore so Velero recreates them with the required init container. For more information, see [Volume Data In-place Restore](volume-data-inplace-restore.md).
 
 1. Restore from your Velero backup:
 
@@ -727,9 +731,11 @@ However, if you run a backup which aborts halfway(some internal snapshots are th
 By default, one `PodVolumeBackup`/`PodVolumeRestore` request is handled in a node at a time. You can configure more parallelism per node by [node-agent Concurrency Configuration][19].  
 By the meantime, one data mover pod is created for each volume to be backed up/restored, if there is no available concurrency quota, the data mover pod has to wait there. To make a control of the data mover pods, you can configure the [node-agent Prepare Queue Length][20].  
 
-For each volume, files in the volume are processed in parallel. You can use `--parallel-files-upload` backup flag or `--parallel-files-download` restore flag to control how many files are processed in parallel. Otherwise, if they are not set, Velero by default refers to the number of CPU cores in the node (where the backup/restore is running) for the parallelism. That is to say, the parallelism is not affected by the CPU request/limit set to the data mover pods.  
+For each volume, files are processed in parallel. Set `--parallel-files-upload` to a positive integer to choose the number of concurrent file uploads. When omitted or set to `0`, the default is `runtime.GOMAXPROCS(0)` in the data mover process when backup processing starts. The Go runtime can take the pod CPU limit into account when selecting this value (see [Container-aware GOMAXPROCS][23]). An explicit positive value overrides this default.  
 
-Notice that Golang 1.25 and later respects the CPU limit set to the pods to decide the physical threads provisioned to the pod processes (see [Container-aware GOMAXPROCS][23] for more details), so for Velero 1.18 (which consumes Golang 1.25) and later, if you set a CPU limit to the data mover pods, you may not get the expected performance (e.g., backup/restore throughput) with the default parallelism. The outcome may or may not be obvious varying on your volume data. If it is required, you could customize `--parallel-files-upload` or `--parallel-files-download` according to the CPU limit set to the data mover pods.  
+Higher upload concurrency can improve throughput but increases buffering and memory usage, especially when backup storage is slow. The setting applies independently to each volume uploader; it does not change the number of concurrent data mover pods. See [backup upload concurrency](backup-reference.md#parallel-files-upload) for usage examples and schedule configuration, and [Memory usage and upload concurrency](data-movement-pod-resource-configuration.md#memory-usage-and-upload-concurrency) for tuning guidance.  
+
+For restores, use `--parallel-files-download` to control parallel file processing. When omitted or set to `0`, it defaults to `runtime.GOMAXPROCS(0)` in the data mover process. An explicit positive value overrides this default. The upload settings do not affect restore concurrency.  
 
 ### Restart and resume
 When Velero server is restarted, the running backups/restores will be marked as `Failed`. The corresponding `PodVolumeBackup`/`PodVolumeRestore` will be canceled.   

@@ -1,0 +1,1 @@
+Let velero backup logs and velero restore logs fetch logs while the backup or restore is Finalizing or FinalizingPartiallyFailed

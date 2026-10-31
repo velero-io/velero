@@ -74,8 +74,9 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 
 	switch restore.Status.Phase {
-	case velerov1api.RestorePhaseCompleted, velerov1api.RestorePhaseFailed, velerov1api.RestorePhasePartiallyFailed, velerov1api.RestorePhaseWaitingForPluginOperations, velerov1api.RestorePhaseWaitingForPluginOperationsPartiallyFailed:
-		// terminal and waiting for plugin operations phases, do nothing.
+	case velerov1api.RestorePhaseCompleted, velerov1api.RestorePhaseFailed, velerov1api.RestorePhasePartiallyFailed, velerov1api.RestorePhaseWaitingForPluginOperations, velerov1api.RestorePhaseWaitingForPluginOperationsPartiallyFailed, velerov1api.RestorePhaseFinalizing, velerov1api.RestorePhaseFinalizingPartiallyFailed:
+		// terminal, waiting for plugin operations and finalizing phases, do nothing.
+		// The log is uploaded before a restore enters any of the non-terminal ones.
 	default:
 		return fmt.Errorf("logs for restore %q are not available until it's finished processing, please wait "+
 			"until the restore has a phase of Completed or Failed and try again", l.RestoreName)

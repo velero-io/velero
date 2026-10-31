@@ -1318,7 +1318,7 @@ func BuildSnapshotCheckPointFromVolumeInfo(
 	snapshotCheckPoint.PodName = KibishiiPVCNameList
 
 	if (veleroCfg.CloudProvider == Azure || veleroCfg.CloudProvider == AWS ||
-		veleroCfg.CloudProvider == Kind) && strings.EqualFold(veleroCfg.Features, FeatureCSI) {
+		veleroCfg.CloudProvider == Kind) && FeatureEnabled(veleroCfg.Features, FeatureCSI) {
 		snapshotCheckPoint.EnableCSI = true
 
 		var VscCount = 0

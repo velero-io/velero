@@ -45,7 +45,8 @@ func TestDescribeUploaderConfig(t *testing.T) {
 	DescribeUploaderConfigForBackup(d, input)
 	d.out.Flush()
 	expect := `Uploader config:
-  Parallel files upload:  10
+  Parallel files upload:   10
+  Parallel blocks upload:  0
 `
 	assert.Equal(t, expect, d.buf.String())
 }

@@ -1214,3 +1214,57 @@ func TestDeleteMovedSnapshots(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTarballNotFoundError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"generic not found", errors.New("not found"), true},
+		{"generic does not exist", errors.New("does not exist"), true},
+		{"aws s3 nosuchkey", errors.New("nosuchkey"), true},
+		{"azure blobnotfound", errors.New("blobnotfound"), true},
+		{"gcs objectnotexist", errors.New("objectnotexist"), true},
+		{"gcs object doesn't exist", errors.New("storage: object doesn't exist"), true},
+		{
+			"gcs object doesn't exist in wrapped error",
+			errors.New("error downloading backup tarball, CSI snapshot cleanup was skipped: rpc error: code = Unknown desc = storage: object doesn't exist"),
+			true,
+		},
+		{"transient network error", errors.New("connection refused"), false},
+		{"auth failure", errors.New("access denied"), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isTarballNotFoundError(tc.err))
+		})
+	}
+}
+
+func TestDeletionRejectsUnsupportedUploaderBeforeMutation(t *testing.T) {
+	for _, uploaderType := range []string{"unsupported", "restic", ""} {
+		t.Run(fmt.Sprintf("uploader=%q", uploaderType), func(t *testing.T) {
+			dbr := defaultTestDbr()
+			backup := builder.ForBackup(dbr.Namespace, dbr.Spec.BackupName).
+				StorageLocation("location-1").Phase(velerov1api.BackupPhaseCompleted).Result()
+			pvb := builder.ForPodVolumeBackup(dbr.Namespace, "pvb").
+				UploaderType(uploaderType).
+				ObjectMeta(builder.WithLabels(velerov1api.BackupNameLabel, backup.Name)).Result()
+			td := setupBackupDeletionControllerTest(t, dbr, backup, defaultLocation(dbr.Namespace), pvb)
+
+			_, err := td.controller.Reconcile(t.Context(), td.req)
+			require.NoError(t, err)
+			require.NoError(t, td.fakeClient.Get(t.Context(), client.ObjectKeyFromObject(dbr), dbr))
+			require.Equal(t, velerov1api.DeleteBackupRequestPhaseProcessed, dbr.Status.Phase)
+			require.Len(t, dbr.Status.Errors, 1)
+			require.Contains(t, dbr.Status.Errors[0], "invalid uploader type")
+			require.NoError(t, td.fakeClient.Get(t.Context(), client.ObjectKeyFromObject(backup), backup))
+			require.Equal(t, velerov1api.BackupPhaseCompleted, backup.Status.Phase)
+			require.NoError(t, td.fakeClient.Get(t.Context(), client.ObjectKeyFromObject(pvb), pvb))
+			require.Empty(t, td.backupStore.Calls)
+		})
+	}
+}
