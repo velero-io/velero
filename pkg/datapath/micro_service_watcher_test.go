@@ -180,6 +180,7 @@ func TestStartWatch(t *testing.T) {
 		expectFail           bool
 		expectFailMsg        string
 		expectProgress       int
+		expectNoEventWait    bool
 	}{
 		{
 			name:          "exit from ctx",
@@ -395,6 +396,41 @@ func TestStartWatch(t *testing.T) {
 			expectFail:           true,
 			expectFailMsg:        "data path pod was evicted, message: fake-evicted-message",
 		},
+		{
+			name:          "oom killed",
+			thisPod:       "fak-pod-1",
+			thisContainer: "fake-container-1",
+			insertPod: builder.ForPod("velero", "fake-pod-1").Phase(corev1api.PodFailed).ContainerStatuses(
+				&corev1api.ContainerStatus{
+					Name: "fake-container-1",
+					State: corev1api.ContainerState{
+						Terminated: &corev1api.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137},
+					},
+				},
+			).Result(),
+			expectFail:        true,
+			expectFailMsg:     "container fake-container-1 terminated with reason OOMKilled, exit code 137",
+			expectNoEventWait: true,
+		},
+		{
+			name:          "pod message is preferred over container termination state",
+			thisPod:       "fak-pod-1",
+			thisContainer: "fake-container-1",
+			insertPod: builder.ForPod("velero", "fake-pod-1").Status(corev1api.PodStatus{
+				Phase:   corev1api.PodFailed,
+				Message: "fake-pod-message",
+				ContainerStatuses: []corev1api.ContainerStatus{
+					{
+						Name: "fake-container-1",
+						State: corev1api.ContainerState{
+							Terminated: &corev1api.ContainerStateTerminated{Reason: "Error", ExitCode: 1},
+						},
+					},
+				},
+			}).Result(),
+			expectFail:    true,
+			expectFailMsg: "fake-pod-message",
+		},
 	}
 
 	for _, test := range tests {
@@ -426,6 +462,7 @@ func TestStartWatch(t *testing.T) {
 				},
 			}
 
+			begin := time.Now()
 			ms.startWatch()
 
 			if test.ctxCancel {
@@ -461,6 +498,10 @@ func TestStartWatch(t *testing.T) {
 			}
 
 			ms.wgWatcher.Wait()
+
+			if test.expectNoEventWait {
+				assert.Less(t, time.Since(begin), eventWaitTimeout)
+			}
 
 			assert.Equal(t, test.expectStartEvent, ms.startedFromEvent.Load())
 			assert.Equal(t, test.expectTerminateEvent, ms.terminatedFromEvent.Load())

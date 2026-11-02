@@ -257,6 +257,8 @@ var funcGetProgressFromMessage = getProgressFromMessage
 
 var eventWaitTimeout = time.Minute
 
+const reasonOOMKilled = "OOMKilled"
+
 func (ms *microServiceBRWatcher) startWatch() {
 	ms.wgWatcher.Add(1)
 
@@ -288,8 +290,13 @@ func (ms *microServiceBRWatcher) startWatch() {
 			return
 		}
 
+		terminated := kube.GetPodContainerTerminatedState(lastPod, ms.thisContainer)
+
+		// an OOM killed data path cannot send its final events, so don't wait for them
+		oomKilled := terminated != nil && terminated.Reason == reasonOOMKilled
+
 	epilogLoop:
-		for !ms.startedFromEvent.Load() || !ms.terminatedFromEvent.Load() {
+		for !oomKilled && (!ms.startedFromEvent.Load() || !ms.terminatedFromEvent.Load()) {
 			select {
 			case <-ms.ctx.Done():
 				ms.log.Warn("Watch loop is canceled on waiting final event")
@@ -334,6 +341,9 @@ func (ms *microServiceBRWatcher) startWatch() {
 				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(terminateMessage))
 			} else if msg, evicted := ms.eventMessages.Load(EventReasonEvicted); evicted {
 				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(msg.(string)))
+			} else if lastPod.Status.Message == "" && terminated != nil {
+				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName,
+					errors.Errorf("container %s terminated with reason %s, exit code %d", ms.thisContainer, terminated.Reason, terminated.ExitCode))
 			} else {
 				ms.callbacks.OnFailed(ms.ctx, ms.namespace, ms.taskName, errors.New(lastPod.Status.Message))
 			}

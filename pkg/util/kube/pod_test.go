@@ -627,6 +627,44 @@ func TestGetPodContainerTerminateMessage(t *testing.T) {
 	}
 }
 
+func TestGetPodContainerTerminatedState(t *testing.T) {
+	terminated := &corev1api.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}
+	pod := &corev1api.Pod{
+		Status: corev1api.PodStatus{
+			ContainerStatuses: []corev1api.ContainerStatus{
+				{Name: "container-1", State: corev1api.ContainerState{Terminated: terminated}},
+				{Name: "container-2", State: corev1api.ContainerState{Waiting: &corev1api.ContainerStateWaiting{Reason: "ImagePullBackOff"}}},
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		container string
+		expected  *corev1api.ContainerStateTerminated
+	}{
+		{
+			name:      "container terminated",
+			container: "container-1",
+			expected:  terminated,
+		},
+		{
+			name:      "container not terminated",
+			container: "container-2",
+		},
+		{
+			name:      "container not found",
+			container: "container-3",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, GetPodContainerTerminatedState(pod, test.container))
+		})
+	}
+}
+
 type fakePodLog struct {
 	getError        error
 	readError       error
