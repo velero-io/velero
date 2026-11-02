@@ -42,9 +42,10 @@ backups/app-mongo-persistent/
   app-mongo-persistent-volumeinfo.json.gz      429B   PVC/PV, method, skipped reason
 ```
 
-None of them answers the question users ask after a partial failure: *which top-level object is broken, and which of its children caused it?*
+On a `PartiallyFailed`, none of the above outputs answer the question: *which top-level object is broken, and which of its children caused it?*
 
-This design adds one opt-in, versioned artifact per operation. It records, for every item Velero processed, a verdict, the messages behind it, the item's identity, and the item that owns it. A read side rolls a child's trouble up to the object a human names, so a failed disk is reported against its virtual machine rather than against a generated pod.
+We aim to add one opt-in, versioned artifact per operation. 
+It records, for every item Velero processed, a verdict, the messages behind it, the item's identity, and the item that owns it. A read side rolls a child's trouble up to the object a human names, so a failed disk is reported against its virtual machine rather than against a generated pod.
 
 ## Background
 
