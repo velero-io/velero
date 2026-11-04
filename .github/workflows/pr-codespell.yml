@@ -19,7 +19,7 @@ jobs:
       uses: codespell-project/actions-codespell@master
       with:
         skip: .git,*.png,*.jpg,*.woff,*.ttf,*.gif,*.ico,./go.sum,./LICENSE
-        ignore_words_list: iam,aks,ist,bridget,ue,shouldnot,atleast,notin,sme,optin,sie
+        ignore_words_list: iam,aks,ist,bridget,tupe,ue,shouldnot,atleast,notin,sme,optin,sie
         check_filenames: true
         check_hidden: true
 
