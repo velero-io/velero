@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -37,6 +36,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/util"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 )
 
 var (
@@ -376,12 +376,11 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
-
-			// Create existing VGSC if provided
+			var seed []runtime.Object
 			if tc.existingVGSC != nil {
-				require.NoError(t, crClient.Create(context.Background(), tc.existingVGSC))
+				seed = append(seed, tc.existingVGSC)
 			}
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
 			p := &volumeSnapshotRestoreItemAction{
 				log:      logrus.StandardLogger(),
@@ -398,8 +397,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 
 			// Check if VGSC was created/updated
 			vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(tc.restore.UID), tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation])
-			vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-			getErr := crClient.Get(context.Background(), crclient.ObjectKey{Name: vgscName}, vgsc)
+			vgsc, getErr := csiutil.GetVGSC(context.Background(), crClient, vgscName)
 
 			if tc.expectVGSC {
 				require.NoError(t, getErr)
@@ -454,8 +452,6 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t)
-
 			var source volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource
 			if tc.nilGroupSnapshotHandles {
 				source = volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentSource{}
@@ -478,23 +474,20 @@ func TestAddSnapshotHandleToVGSC(t *testing.T) {
 					Source:         source,
 				},
 			}
-			require.NoError(t, crClient.Create(context.Background(), existingVGSC))
 
-			// Re-fetch to get the created object with proper metadata
-			fetchedVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, fetchedVGSC))
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, existingVGSC)
 
 			p := &volumeSnapshotRestoreItemAction{
 				log:      logrus.StandardLogger(),
 				crClient: crClient,
 			}
 
-			err := p.addSnapshotHandleToVGSC(context.Background(), fetchedVGSC, tc.newHandle)
+			err := p.addSnapshotHandleToVGSC(context.Background(), existingVGSC, tc.newHandle)
 			require.NoError(t, err)
 
 			// Verify the VGSC has expected handles
-			updatedVGSC := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
-			require.NoError(t, crClient.Get(context.Background(), crclient.ObjectKey{Name: "test-vgsc"}, updatedVGSC))
+			updatedVGSC, err := csiutil.GetVGSC(context.Background(), crClient, "test-vgsc")
+			require.NoError(t, err)
 			require.ElementsMatch(t, tc.expectedHandles, updatedVGSC.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 		})
 	}
