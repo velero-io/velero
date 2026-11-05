@@ -60,6 +60,10 @@ type Manager interface {
 	// available snapshots in a repo.
 	BatchForget(context.Context, *velerov1api.BackupRepository, []string) []error
 
+	// GetSnapshotTags returns the tags of a snapshot in a repo, or an error that
+	// matches udmrepo.ErrSnapshotNotFound if the snapshot doesn't exist.
+	GetSnapshotTags(context.Context, *velerov1api.BackupRepository, string) (map[string]string, error)
+
 	// DefaultMaintenanceFrequency returns the default maintenance frequency from the specific repo
 	DefaultMaintenanceFrequency(*velerov1api.BackupRepository) (time.Duration, error)
 
@@ -236,6 +240,26 @@ func (m *manager) Forget(ctx context.Context, repo *velerov1api.BackupRepository
 	}
 
 	return prd.Forget(ctx, snapshot, param)
+}
+
+func (m *manager) GetSnapshotTags(ctx context.Context, repo *velerov1api.BackupRepository, snapshot string) (map[string]string, error) {
+	m.repoLocker.Lock(repo.Name)
+	defer m.repoLocker.Unlock(repo.Name)
+
+	prd, err := m.getRepositoryProvider(repo)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	param, err := m.assembleRepoParam(repo)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	if err := prd.BoostRepoConnect(ctx, param); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return prd.GetSnapshotTags(ctx, snapshot, param)
 }
 
 func (m *manager) BatchForget(ctx context.Context, repo *velerov1api.BackupRepository, snapshots []string) []error {

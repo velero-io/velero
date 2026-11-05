@@ -71,6 +71,7 @@ var funcTable = localFuncTable{
 const (
 	repoOpDescMaintain = "repo maintenance"
 	repoOpDescForget   = "forget"
+	repoOpDescGetTags  = "get-snapshot-tags"
 
 	repoConnectDesc = "unified repo"
 )
@@ -340,6 +341,35 @@ func (urp *unifiedRepoProvider) Forget(ctx context.Context, snapshotID string, p
 	log.Debug("Forget snapshot complete")
 
 	return nil
+}
+
+func (urp *unifiedRepoProvider) GetSnapshotTags(ctx context.Context, snapshotID string, param RepoParam) (map[string]string, error) {
+	repoOption, err := udmrepo.NewRepoOptions(
+		udmrepo.WithPassword(urp, param),
+		udmrepo.WithConfigFile(urp.workPath, string(param.BackupRepo.UID)),
+		udmrepo.WithDescription(repoOpDescGetTags),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "error to get repo options")
+	}
+
+	bkRepo, err := urp.repoService.Open(ctx, *repoOption)
+	if err != nil {
+		return nil, errors.Wrap(err, "error to open backup repo")
+	}
+
+	defer func() {
+		if c := bkRepo.Close(ctx); c != nil {
+			urp.log.WithError(c).Error("Failed to close repo")
+		}
+	}()
+
+	snapshot, err := bkRepo.GetSnapshot(ctx, udmrepo.ID(snapshotID))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error to get snapshot %s", snapshotID)
+	}
+
+	return snapshot.Tags, nil
 }
 
 func (urp *unifiedRepoProvider) BatchForget(ctx context.Context, snapshotIDs []string, param RepoParam) []error {

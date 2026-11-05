@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strings"
 
 	"github.com/cockroachdb/errors"
+	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,6 +21,7 @@ import (
 	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	"github.com/velero-io/velero/pkg/util"
 	datamoverutil "github.com/velero-io/velero/pkg/util/datamover"
 )
 
@@ -75,16 +80,151 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 		)
 		return nil
 	}
-	cm := genConfigmap(input.Backup, *du)
-	if cm == nil {
-		// will not fail the backup deletion
-		return nil
+	// A nil configmap will not fail the backup deletion. The configmap may already
+	// exist from a previous deletion attempt that failed, which must not stop the
+	// retry from deleting the retained snapshot.
+	if cm := genConfigmap(input.Backup, *du); cm != nil {
+		if err := d.client.Create(context.Background(), cm); err != nil && !apierrors.IsAlreadyExists(err) {
+			return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+		}
 	}
-	err := d.client.Create(context.Background(), cm)
+	// The retained snapshot is deleted by the backup deletion controller only after the other
+	// data of the backup is deleted, so that a failed deletion leaves the base of the next
+	// incremental backup in place.
+	cm, err := genRetainedSnapshotConfigmap(input.Backup, *du)
 	if err != nil {
-		return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+		return err
+	}
+	if cm == nil {
+		cm = d.genUnrecordedRetainedSnapshotConfigmap(context.Background(), input.Backup, *du)
+	}
+	if cm != nil {
+		if err := d.client.Create(context.Background(), cm); err != nil && !apierrors.IsAlreadyExists(err) {
+			return errors.WithStack(errors.Wrapf(err, "failed to create the retained snapshot configmap for DataUpload %s/%s", du.Namespace, du.Name))
+		}
 	}
 	return nil
+}
+
+// genRetainedSnapshotConfigmap generates the configmap which is used to pass the snapshot the
+// DataUpload retained in the storage to the backup deletion controller.
+func genRetainedSnapshotConfigmap(bak *velerov1.Backup, du velerov2alpha1.DataUpload) (*corev1api.ConfigMap, error) {
+	retained := du.Status.RetainedSnapshot
+	if retained == nil {
+		return nil, nil
+	}
+	if retained.SnapshotHandle == "" || retained.Driver == "" {
+		return nil, errors.Errorf("invalid retained snapshot of DataUpload %s/%s, handle %q, driver %q",
+			du.Namespace, du.Name, retained.SnapshotHandle, retained.Driver)
+	}
+	b, err := json.Marshal(retained)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to marshal the retained snapshot of DataUpload %s/%s", du.Namespace, du.Name)
+	}
+	data := make(map[string]string)
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal the retained snapshot of DataUpload %s/%s", du.Namespace, du.Name)
+	}
+	return &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: bak.Namespace,
+			Name:      fmt.Sprintf("%s-retained-snapshot", du.Name),
+			Labels: map[string]string{
+				velerov1.BackupNameLabel:                 label.GetValidName(bak.Name),
+				velerov1.DataUploadRetainedSnapshotLabel: "true",
+			},
+		},
+		Data: data,
+	}, nil
+}
+
+// genUnrecordedRetainedSnapshotConfigmap generates the retained snapshot configmap
+// for a DataUpload of a backup taken before Velero recorded retained snapshots. The
+// block data mover saves the CSI snapshot handle as the CBT change ID tag of the
+// repository snapshot, so the configmap identifies the repository snapshot instead,
+// and the backup deletion controller reads the handle from it before it deletes the
+// repository snapshot. It returns nil if the snapshot was not retained or can't be
+// found that way.
+func (d *DataUploadDeleteAction) genUnrecordedRetainedSnapshotConfigmap(ctx context.Context, bak *velerov1.Backup, du velerov2alpha1.DataUpload) *corev1api.ConfigMap {
+	if du.Spec.SnapshotType != velerov2alpha1.SnapshotTypeCSI || du.Spec.CSISnapshot == nil ||
+		!datamoverutil.IsVeleroBlockDataMover(du.Spec.DataMover) ||
+		du.Status.Phase != velerov2alpha1.DataUploadPhaseCompleted || du.Status.SnapshotID == "" {
+		return nil
+	}
+
+	log := d.logger.WithField("dataupload", du.Namespace+"/"+du.Name)
+	driver := du.Spec.CSISnapshot.Driver
+	if driver == "" || driver == util.VSphereCSIDriverName {
+		// The vSphere change ID is not the snapshot handle.
+		return nil
+	}
+	if du.Spec.CSISnapshot.SnapshotClass == "" {
+		return nil
+	}
+
+	// The backup kept the snapshot if the VolumeSnapshotClass has deletionPolicy Retain.
+	class := &snapshotv1api.VolumeSnapshotClass{}
+	if err := d.client.Get(ctx, client.ObjectKey{Name: du.Spec.CSISnapshot.SnapshotClass}, class); err != nil {
+		log.WithError(err).Warnf("Failed to get VolumeSnapshotClass %s, a snapshot it retained is not deleted", du.Spec.CSISnapshot.SnapshotClass)
+		return nil
+	}
+	if class.DeletionPolicy != snapshotv1api.VolumeSnapshotContentRetain {
+		return nil
+	}
+
+	retained := velerov2alpha1.RetainedSnapshot{
+		Driver:                  driver,
+		DeletionSecretName:      class.Parameters[velerov1.PrefixedSecretNameAnnotation],
+		DeletionSecretNamespace: class.Parameters[velerov1.PrefixedSecretNamespaceAnnotation],
+	}
+	if strings.Contains(retained.DeletionSecretName, "${") || strings.Contains(retained.DeletionSecretNamespace, "${") {
+		log.Warnf("VolumeSnapshotClass %s names the deletion secret with a template, a snapshot it retained is not deleted", class.Name)
+		return nil
+	}
+
+	data, err := toStringMap(retained)
+	if err != nil {
+		log.WithError(err).Warn("Failed to generate the retained snapshot configmap")
+		return nil
+	}
+	repoSnapshot, err := toStringMap(repotypes.SnapshotIdentifier{
+		VolumeNamespace:       du.Spec.SourceNamespace,
+		BackupStorageLocation: bak.Spec.StorageLocation,
+		SnapshotID:            du.Status.SnapshotID,
+		RepositoryType:        velerov1.BackupRepositoryTypeKopia,
+		UploaderType:          GetUploaderType(du.Spec.DataMover),
+		Source:                GetRealSource(du.Spec.SourceNamespace, du.Spec.SourcePVC),
+	})
+	if err != nil {
+		log.WithError(err).Warn("Failed to generate the retained snapshot configmap")
+		return nil
+	}
+	maps.Copy(data, repoSnapshot)
+
+	log.Infof("DataUpload has no retained snapshot record, the snapshot handle is read from repository snapshot %s", du.Status.SnapshotID)
+	return &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: bak.Namespace,
+			Name:      fmt.Sprintf("%s-retained-snapshot", du.Name),
+			Labels: map[string]string{
+				velerov1.BackupNameLabel:                 label.GetValidName(bak.Name),
+				velerov1.DataUploadRetainedSnapshotLabel: "true",
+			},
+		},
+		Data: data,
+	}
+}
+
+func toStringMap(v any) (map[string]string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	data := make(map[string]string)
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // generate the configmap which is to be created and used as a way to communicate the snapshot info to the backup deletion controller
