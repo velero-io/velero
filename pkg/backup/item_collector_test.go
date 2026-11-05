@@ -196,7 +196,7 @@ func TestItemCollectorBackupNamespaces(t *testing.T) {
 			expectedTrackedNS: []string{"ns1"},
 		},
 		{
-			name: "ns not included by IE filter, but included by labelSelector",
+			name: "ns excluded by IE filter is not tracked even though it matches labelSelector",
 			backup: builder.ForBackup("velero", "backup").LabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{"name": "ns1"},
 			}).Result(),
@@ -205,10 +205,10 @@ func TestItemCollectorBackupNamespaces(t *testing.T) {
 				builder.ForNamespace("ns1").ObjectMeta(builder.WithLabels("name", "ns1")).Phase(corev1api.NamespaceActive).Result(),
 				builder.ForNamespace("ns2").Phase(corev1api.NamespaceActive).Result(),
 			},
-			expectedTrackedNS: []string{"ns1"},
+			expectedTrackedNS: []string{"ns2"},
 		},
 		{
-			name: "ns not included by IE filter, but included by orLabelSelector",
+			name: "ns excluded by IE filter is not tracked even though it matches orLabelSelector",
 			backup: builder.ForBackup("velero", "backup").OrLabelSelector([]*metav1.LabelSelector{
 				{MatchLabels: map[string]string{"name": "ns1"}},
 			}).Result(),
@@ -218,7 +218,7 @@ func TestItemCollectorBackupNamespaces(t *testing.T) {
 				builder.ForNamespace("ns2").Phase(corev1api.NamespaceActive).Result(),
 				builder.ForNamespace("ns3").Phase(corev1api.NamespaceActive).Result(),
 			},
-			expectedTrackedNS: []string{"ns1", "ns3"},
+			expectedTrackedNS: []string{"ns3"},
 		},
 		{
 			name:   "No ns filters",
