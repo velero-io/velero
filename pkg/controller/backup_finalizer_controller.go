@@ -95,6 +95,7 @@ func NewBackupFinalizerReconciler(
 		backupStoreGetter: backupStoreGetter,
 		log:               log,
 		metrics:           metrics,
+		resourceTimeout:   resourceTimeout,
 	}
 }
 

@@ -499,3 +499,8 @@ func TestBackupFinalizerReconcile_PutBackupContentsFail(t *testing.T) {
 		})
 	}
 }
+
+func TestNewBackupFinalizerReconcilerSetsResourceTimeout(t *testing.T) {
+	reconciler := NewBackupFinalizerReconciler(nil, nil, nil, nil, nil, nil, nil, logrus.StandardLogger(), nil, 7*time.Minute)
+	assert.Equal(t, 7*time.Minute, reconciler.resourceTimeout)
+}
