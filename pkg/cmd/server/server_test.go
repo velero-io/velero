@@ -20,6 +20,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -38,6 +39,7 @@ import (
 	"github.com/velero-io/velero/pkg/cmd/server/config"
 	"github.com/velero-io/velero/pkg/constant"
 	discovery_mocks "github.com/velero-io/velero/pkg/discovery/mocks"
+	"github.com/velero-io/velero/pkg/metrics"
 	velerotest "github.com/velero-io/velero/pkg/test"
 	"github.com/velero-io/velero/pkg/uploader"
 )
@@ -355,7 +357,8 @@ func Test_markInProgressBackupsFailed(t *testing.T) {
 			},
 		}).
 		Build()
-	markInProgressBackupsFailed(t.Context(), c, "velero", logrus.New())
+	m := metrics.NewServerMetrics()
+	markInProgressBackupsFailed(t.Context(), c, "velero", logrus.New(), m)
 
 	backup01 := &velerov1api.Backup{}
 	require.NoError(t, c.Get(t.Context(), client.ObjectKey{Namespace: "velero", Name: "backup01"}, backup01))
@@ -364,6 +367,9 @@ func Test_markInProgressBackupsFailed(t *testing.T) {
 	backup02 := &velerov1api.Backup{}
 	require.NoError(t, c.Get(t.Context(), client.ObjectKey{Namespace: "velero", Name: "backup02"}, backup02))
 	assert.Equal(t, velerov1api.BackupPhaseCompleted, backup02.Status.Phase)
+
+	// Only the in-progress backup should be counted as failed.
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.GetBackupFailureTotal()))
 }
 
 func Test_markInProgressRestoresFailed(t *testing.T) {
@@ -395,7 +401,8 @@ func Test_markInProgressRestoresFailed(t *testing.T) {
 			},
 		}).
 		Build()
-	markInProgressRestoresFailed(t.Context(), c, "velero", logrus.New())
+	m := metrics.NewServerMetrics()
+	markInProgressRestoresFailed(t.Context(), c, "velero", logrus.New(), m)
 
 	restore01 := &velerov1api.Restore{}
 	require.NoError(t, c.Get(t.Context(), client.ObjectKey{Namespace: "velero", Name: "restore01"}, restore01))
@@ -404,6 +411,9 @@ func Test_markInProgressRestoresFailed(t *testing.T) {
 	restore02 := &velerov1api.Restore{}
 	require.NoError(t, c.Get(t.Context(), client.ObjectKey{Namespace: "velero", Name: "restore02"}, restore02))
 	assert.Equal(t, velerov1api.RestorePhaseCompleted, restore02.Status.Phase)
+
+	// Only the in-progress restore should be counted as failed.
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.GetRestoreFailedTotal()))
 }
 
 func Test_setDefaultBackupLocation(t *testing.T) {
