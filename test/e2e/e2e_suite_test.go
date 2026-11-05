@@ -543,6 +543,11 @@ var _ = Describe(
 	Label("ResourceFiltering", "ResourcePolicies"),
 	NamespaceLabelSelectorTest,
 )
+var _ = Describe(
+	"Velero test on fine-grained resource and restore filters via resource policies",
+	Label("ResourceFiltering", "ResourcePolicies"),
+	FineGrainedResourceFilterTest,
+)
 
 // backup VolumeInfo test
 var _ = Describe(
