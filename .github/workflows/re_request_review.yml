@@ -1,0 +1,120 @@
+---
+name: "Re-request Maintainer Review"
+
+# This workflow runs with a write token even for fork-originated PRs.
+# It is triggered by the completion of the unprivileged "Auto Assign Author"
+# workflow (see auto_assign_prs.yml), which only records the PR number as an
+# artifact to avoid executing any PR-controlled code in a privileged context.
+#
+# Security boundary: artifact content is treated as untrusted input and
+# validated strictly before being used. No PR code is checked out or executed.
+on:
+  workflow_run:
+    workflows: ["Auto Assign Author"]
+    types: [completed]
+
+# Least-privilege: only the permissions needed to download the triggering
+# run's artifact, read PR/review data, and request reviewers.
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  re-request-review:
+    # Only run when the triggering workflow succeeded on a pull_request_review
+    # event (recorded by the record-pr-number job).
+    if: >
+      github.event.workflow_run.event == 'pull_request_review' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download PR number artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-number
+          path: ${{ runner.temp }}/pr
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Re-request review from maintainers if more approvals are needed
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const requiredApprovals = 2;
+            const maintainerTeam = 'maintainer';
+            const { owner, repo } = context.repo;
+
+            // Read and strictly validate the artifact content.
+            // Treat the artifact as untrusted: accept only a plain integer.
+            const artifactPath = path.join(process.env.RUNNER_TEMP, 'pr', 'number');
+            const raw = fs.readFileSync(artifactPath, 'utf8').trim();
+            if (!/^\d+$/.test(raw)) {
+              core.setFailed(`Artifact contained an invalid PR number: ${JSON.stringify(raw)}`);
+              return;
+            }
+            const pull_number = parseInt(raw, 10);
+            console.log(`Processing PR #${pull_number}`);
+
+            // Fetch current PR state to confirm it still exists and is open.
+            let pr;
+            try {
+              ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number }));
+            } catch (error) {
+              core.setFailed(`Failed to fetch PR #${pull_number}: ${error.message}`);
+              return;
+            }
+            if (pr.state !== 'open') {
+              console.log(`PR #${pull_number} is ${pr.state}, skipping.`);
+              return;
+            }
+
+            // Fetch all reviews with pagination.
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            // Count distinct users whose most recent review is an approval.
+            // The Reviews API does not guarantee chronological order, so
+            // sort by submission time before folding into the map.
+            const sortedReviews = [...reviews].sort(
+              (a, b) => new Date(a.submitted_at) - new Date(b.submitted_at)
+            );
+            const latestReviewByUser = new Map();
+            for (const review of sortedReviews) {
+              latestReviewByUser.set(review.user.login, review.state);
+            }
+            const approvedReviewers = [...latestReviewByUser.entries()].filter(
+              ([, state]) => state === 'APPROVED'
+            );
+
+            if (approvedReviewers.length >= requiredApprovals) {
+              console.log(
+                `PR #${pull_number} already has ${approvedReviewers.length} approvals, no need to re-request review.`
+              );
+              return;
+            }
+
+            console.log(
+              `PR #${pull_number} has ${approvedReviewers.length}/${requiredApprovals} approvals, re-requesting review from @${owner}/${maintainerTeam}.`
+            );
+
+            // This call requires pull-requests: write, which is available here
+            // even for fork-originated PRs because workflow_run always runs in
+            // the context of the base repository with the repository's token.
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number,
+                team_reviewers: [maintainerTeam],
+              });
+              console.log(`Successfully requested review from @${owner}/${maintainerTeam}.`);
+            } catch (error) {
+              core.setFailed(`Failed to re-request review from maintainers: ${error.message}`);
+            }
