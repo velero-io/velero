@@ -396,6 +396,52 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			},
 		},
 		{
+			name:    "included namespaces wildcard only restores resources in the matching namespaces",
+			restore: defaultRestore().IncludedNamespaces("*-1").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").Result(),
+					builder.ForPersistentVolume("pv-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {"ns-1/pod-1"},
+				test.PVs():  {},
+			},
+		},
+		{
+			name:    "included namespaces wildcard that matches no namespace in the backup restores nothing",
+			restore: defaultRestore().IncludedNamespaces("missing-*").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("pods",
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				).
+				AddItems("persistentvolumes",
+					builder.ForPersistentVolume("pv-1").Result(),
+					builder.ForPersistentVolume("pv-2").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.Pods(),
+				test.PVs(),
+			},
+			want: map[*test.APIResource][]string{
+				test.Pods(): {},
+				test.PVs():  {},
+			},
+		},
+		{
 			name:    "IncludeClusterResources=false only restores namespaced resources",
 			restore: defaultRestore().IncludeClusterResources(false).Result(),
 			backup:  defaultBackup().Result(),

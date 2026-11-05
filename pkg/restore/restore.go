@@ -3023,6 +3023,13 @@ func (ctx *restoreContext) expandNamespaceWildcards(backupResources map[string]*
 		return errors.Wrap(err, "error expanding wildcard patterns in namespace includes/excludes")
 	}
 
+	// An empty includes list means "all namespaces", so when the include patterns match no
+	// namespace in the backup, keep the patterns: they select nothing.
+	if len(expandedIncludes) == 0 {
+		ctx.log.Warnf("No namespace in the backup matched the namespace includes %v", ctx.restore.Spec.IncludedNamespaces)
+		return nil
+	}
+
 	// Update namespace includes/excludes with expanded patterns
 	ctx.namespaceIncludesExcludes = collections.NewIncludesExcludes().
 		Includes(expandedIncludes...).
