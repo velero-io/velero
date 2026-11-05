@@ -188,6 +188,18 @@ func GetPodContainerTerminateMessage(pod *corev1api.Pod, container string) strin
 	return message
 }
 
+// GetPodContainerTerminatedState returns the terminated state of a specific container of a pod,
+// or nil if the container is not found or has not terminated
+func GetPodContainerTerminatedState(pod *corev1api.Pod, container string) *corev1api.ContainerStateTerminated {
+	for _, containerStatus := range pod.Status.ContainerStatuses {
+		if containerStatus.Name == container {
+			return containerStatus.State.Terminated
+		}
+	}
+
+	return nil
+}
+
 // GetPodTerminateMessage returns the terminate message for all containers of a pod
 func GetPodTerminateMessage(pod *corev1api.Pod) string {
 	var message strings.Builder
