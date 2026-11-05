@@ -106,6 +106,7 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `PLUGINS `: the `-plugins`. Optional.
 1. `BSL_PREFIX`: `-prefix`. Optional.
 1. `BSL_CONFIG`: `-bsl-config`. Optional. Example: BSL_CONFIG="region=us-east-1". May be required for some object store provider
+1. `BSL_CA_CERT_FILE`: `-bsl-ca-cert-file`. Optional. Certificate bundle used to verify TLS connections to the object store, e.g. when MinIO serves HTTPS with a self-signed certificate
 1. `VSL_CONFIG`: `-vsl-config`. Optional.
 1. `UPGRADE_FROM_VELERO_CLI `: `-upgrade-from-velero-cli`. Optional.
 1. `UPGRADE_FROM_VELERO_VERSION `: `-upgrade-from-velero-version`. Optional.
@@ -117,6 +118,7 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-bucket`. Optional.
 1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-prefix`. Optional.
 1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-config`. Optional.
+1. `ADDITIONAL_BSL_CA_CERT_FILE`: `-additional-bsl-ca-cert-file`. Optional. Certificate bundle used to verify TLS connections to the additional backup storage location's object store
 1. `FEATURES`: `-features`. Optional.
 1. `REGISTRY_CREDENTIAL_FILE`: `-registry-credential-file`. Optional.
 1. `KIBISHII_DIRECTORY`: `-kibishii-directory`. Optional.
