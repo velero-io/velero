@@ -718,7 +718,7 @@ func (r *DataUploadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj client.Object) []reconcile.Request {
 	pod := podObj.(*corev1api.Pod)
-	du, err := findDataUploadByPod(r.client, *pod)
+	du, err := findDataUploadByPod(ctx, r.client, *pod)
 	log := r.logger.WithFields(logrus.Fields{
 		"Backup pod": pod.Name,
 	})
@@ -740,7 +740,7 @@ func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj 
 
 	if pod.Status.Phase == corev1api.PodRunning {
 		log.Info("Preparing dataupload")
-		if err = UpdateDataUploadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log,
+		if err = UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log,
 			func(du *velerov2alpha1api.DataUpload) bool {
 				if isDataUploadInFinalState(du) {
 					log.Warnf("dataupload %s is terminated, abort setting it to prepared", du.Name)
@@ -754,7 +754,7 @@ func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj 
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable { // let the abnormal backup pod failed early
-		err := UpdateDataUploadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, r.logger.WithField("dataupload", du.Name),
+		err := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, r.logger.WithField("dataupload", du.Name),
 			func(dataUpload *velerov2alpha1api.DataUpload) bool {
 				if dataUpload.Spec.Cancel {
 					return false
@@ -1063,10 +1063,10 @@ func getOwnerObject(du *velerov2alpha1api.DataUpload) corev1api.ObjectReference 
 	}
 }
 
-func findDataUploadByPod(client client.Client, pod corev1api.Pod) (*velerov2alpha1api.DataUpload, error) {
+func findDataUploadByPod(ctx context.Context, client client.Client, pod corev1api.Pod) (*velerov2alpha1api.DataUpload, error) {
 	if label, exist := pod.Labels[velerov1api.DataUploadLabel]; exist {
 		du := &velerov2alpha1api.DataUpload{}
-		err := client.Get(context.Background(), types.NamespacedName{
+		err := client.Get(ctx, types.NamespacedName{
 			Namespace: pod.Namespace,
 			Name:      label,
 		}, du)

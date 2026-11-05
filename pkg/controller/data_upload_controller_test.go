@@ -926,6 +926,24 @@ func TestOnDataUploadCompleted(t *testing.T) {
 	assert.Equal(t, "fake-path", updatedDu.Status.Path)
 }
 
+func TestFindDataUploadForPod_CanceledContext(t *testing.T) {
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+	r := &DataUploadReconciler{
+		client: fakeClient,
+		logger: velerotest.NewLogger(),
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	pod := builder.ForPod(velerov1api.DefaultNamespace, "test-pod").
+		Labels(map[string]string{velerov1api.DataUploadLabel: "test-du"}).
+		Phase(corev1api.PodRunning).Result()
+
+	requests := r.findDataUploadForPod(canceledCtx, pod)
+	assert.Empty(t, requests)
+}
+
 func TestFindDataUploadForPod(t *testing.T) {
 	r, err := initDataUploaderReconciler()
 	require.NoError(t, err)
