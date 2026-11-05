@@ -356,6 +356,7 @@ Before starting an in-place restore with File System Backup, you must delete the
 ## Limitations
 
 - `hostPath` volumes are not supported. [Local persistent volumes][5] are supported.
+- Raw block volumes (`volumeMode: Block`, attached to the pod through `volumeDevices`) are backed up with [CSI Snapshot Data Movement][13], not FSB. To back them up, enable it for them with a [volume policy][24] that has the `pvcVolumeMode: Block` condition and the `snapshot` action; add the `dataMover: velero-block` parameter to use the block data mover. Without such a policy, the opt-out approach (`defaultVolumesToFsBackup: true`) skips them with a warning and their data is not backed up.
 - At present, Velero uses a static, common encryption key for all backup repositories it creates. **This means 
 that anyone who has access to your backup storage can decrypt your backup data**. Make sure that you limit access 
 to the backup storage appropriately.
@@ -832,3 +833,4 @@ For Kopia repository, by default, the cache is stored in the data mover pod's ro
 [21]: data-movement-pod-resource-configuration.md
 [22]: data-movement-cache-volume.md
 [23]: https://tip.golang.org/doc/go1.25#container-aware-gomaxprocs:~:text=Runtime%C2%B6-,Container%2Daware%20GOMAXPROCS,-%C2%B6
+[24]: resource-filtering.md
