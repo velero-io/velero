@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	testclocks "k8s.io/utils/clock/testing"
@@ -48,6 +49,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 	pkgUtilKubeMocks "github.com/vmware-tanzu/velero/pkg/util/kube/mocks"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -1053,21 +1055,25 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).Build()
 			logger := velerotest.NewLogger()
+
+			// One VGS-capable client holds both the stub VGSCs (deleted via the csi
+			// helpers, which route through the RESTMapper) and the VSCs (read directly
+			// by cleanupStubVGSC's readiness wait).
+			var seed []runtime.Object
+			for _, vgsc := range tc.existingVGSCs {
+				seed = append(seed, vgsc)
+			}
+			for _, vsc := range tc.existingVSCs {
+				seed = append(seed, vsc)
+			}
+			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
 			ctx := &finalizerContext{
 				logger:          logger,
-				crClient:        fakeClient,
+				crClient:        crClient,
 				restore:         tc.restore,
 				resourceTimeout: 10 * time.Second,
-			}
-
-			for _, vgsc := range tc.existingVGSCs {
-				require.NoError(t, fakeClient.Create(t.Context(), vgsc))
-			}
-			for _, vsc := range tc.existingVSCs {
-				require.NoError(t, fakeClient.Create(t.Context(), vsc))
 			}
 
 			warnings := ctx.cleanupStubVGSC()
@@ -1078,8 +1084,8 @@ func TestCleanupStubVGSC(t *testing.T) {
 				assert.True(t, warnings.IsEmpty(), "expected no warnings")
 			}
 
-			remainingList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
-			require.NoError(t, fakeClient.List(t.Context(), remainingList))
+			remainingList, err := csiutil.ListVGSC(t.Context(), crClient, nil)
+			require.NoError(t, err)
 			assert.Len(t, remainingList.Items, tc.expectedRemaining)
 
 			// Verify remaining VGSCs don't belong to this restore

@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
@@ -35,6 +37,28 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
+
+func TestVSExecutePreservesGroupMembersDuringFinalization(t *testing.T) {
+	for _, phase := range []velerov1api.BackupPhase{velerov1api.BackupPhaseFinalizing, velerov1api.BackupPhaseFinalizingPartiallyFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			backup := builder.ForBackup("velero", "backup").ObjectMeta(builder.WithUID("backup-uid")).Phase(phase).Result()
+			vs := builder.ForVolumeSnapshot("app", "vs").ObjectMeta(builder.WithLabels(velerov1api.BackupUIDLabel, "backup-uid")).Status().BoundVolumeSnapshotContentName("vsc").Result()
+			vs.Status.VolumeGroupSnapshotName = ptr.To("group")
+			vsc := builder.ForVolumeSnapshotContent("vsc").Result()
+			client := velerotest.NewFakeControllerRuntimeClient(t, vs, vsc)
+			action := &volumeSnapshotBackupItemAction{log: velerotest.NewLogger(), crClient: client}
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vs)
+			require.NoError(t, err)
+			result, additionalItems, operation, updates, err := action.Execute(&unstructured.Unstructured{Object: obj}, backup)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Empty(t, additionalItems)
+			require.Empty(t, operation)
+			require.Empty(t, updates)
+			require.NoError(t, client.Get(t.Context(), crclient.ObjectKeyFromObject(vs), &snapshotv1api.VolumeSnapshot{}))
+		})
+	}
+}
 
 func TestVSExecute(t *testing.T) {
 	snapshotHandle := "handle"
@@ -51,6 +75,7 @@ func TestVSExecute(t *testing.T) {
 		{
 			name: "Normal case",
 			backup: builder.ForBackup("velero", "backup").
+				ObjectMeta(builder.WithUID("backup-uid")).
 				Phase(velerov1api.BackupPhaseInProgress).Result(),
 			vs: builder.ForVolumeSnapshot("velero", "vs").
 				ObjectMeta(builder.WithLabels(
@@ -149,7 +174,7 @@ func TestVSExecute(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(*testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			vsBIA := volumeSnapshotBackupItemAction{
 				log:      logrus.New(),
 				crClient: velerotest.NewFakeControllerRuntimeClient(t, tc.vs),
@@ -171,6 +196,11 @@ func TestVSExecute(t *testing.T) {
 
 			require.ElementsMatch(t, tc.expectedAdditionalItems, additionalItems)
 			require.ElementsMatch(t, tc.expectedItemToUpdate, itemToUpdate)
+			if tc.name == "Normal case" {
+				updatedVSC := &snapshotv1api.VolumeSnapshotContent{}
+				require.NoError(t, vsBIA.crClient.Get(t.Context(), crclient.ObjectKey{Name: "vsc"}, updatedVSC))
+				require.Equal(t, "backup-uid", updatedVSC.Labels[velerov1api.BackupUIDLabel])
+			}
 		})
 	}
 }

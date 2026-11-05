@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -47,6 +46,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/util/results"
 )
@@ -469,15 +469,19 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
-	err := ctx.crClient.List(
+	vgscList, err := csiutil.ListVGSC(
 		context.Background(),
-		vgscList,
-		client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name},
+		ctx.crClient,
+		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
 	)
 	if err != nil {
-		// If the CRD is not installed, listing will fail. This is expected
-		// on clusters without VolumeGroupSnapshot support, so treat as warning.
+		if errors.Is(err, csiutil.ErrVGSAPINotAvailable) {
+			// Cluster does not serve the VolumeGroupSnapshot API, so there is
+			// nothing to clean up.
+			ctx.logger.Info("VolumeGroupSnapshot API not available, skipping stub VGSC cleanup")
+			return warnings
+		}
+		// Any other listing failure is unexpected; treat as warning.
 		ctx.logger.WithError(err).Warn("failed to list stub VolumeGroupSnapshotContents, skipping cleanup")
 		warnings.Add("cluster", errors.Wrap(err, "failed to list stub VolumeGroupSnapshotContents"))
 		return warnings
@@ -533,7 +537,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
-		if err := ctx.crClient.Delete(context.Background(), vgsc); err != nil {
+		if err := csiutil.DeleteVGSC(context.Background(), ctx.crClient, vgsc.Name); err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("stub VolumeGroupSnapshotContent already deleted")
 				continue
