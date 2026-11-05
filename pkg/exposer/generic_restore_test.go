@@ -2252,6 +2252,7 @@ func TestCreateRestorePod(t *testing.T) {
 }
 
 func TestGenericRestoreCleanUp(t *testing.T) {
+	boundVSCName := "test-vsc"
 	ownerObject := corev1api.ObjectReference{
 		Kind:       "Restore",
 		Namespace:  "velero",
@@ -2261,10 +2262,11 @@ func TestGenericRestoreCleanUp(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                 string
-		param                *GenericRestoreCleanUpParam
-		ctrlClientObjects    []crclient.Object
-		expectSnapshotExists bool
+		name                  string
+		param                 *GenericRestoreCleanUpParam
+		ctrlClientObjects     []crclient.Object
+		expectSnapshotExists  bool
+		expectVSCDeletePolicy bool
 	}{
 		{
 			name: "param has nil snapshot: pod, pvcs, pvs, secrets, cms cleaned up",
@@ -2309,6 +2311,37 @@ func TestGenericRestoreCleanUp(t *testing.T) {
 				},
 			},
 			expectSnapshotExists: false,
+		},
+		{
+			name: "param snapshot with CleanUp true: retained VolumeSnapshotContent is set to Delete",
+			param: &GenericRestoreCleanUpParam{
+				Snapshot: &velerov2alpha1api.CSISnapshotSpec{
+					VolumeSnapshot:          "test-vs",
+					VolumeSnapshotNamespace: "velero",
+					CleanUp:                 true,
+				},
+			},
+			ctrlClientObjects: []crclient.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs",
+						Namespace: "velero",
+					},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						BoundVolumeSnapshotContentName: &boundVSCName,
+					},
+				},
+				&snapshotv1api.VolumeSnapshotContent{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc",
+					},
+					Spec: snapshotv1api.VolumeSnapshotContentSpec{
+						DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+					},
+				},
+			},
+			expectSnapshotExists:  false,
+			expectVSCDeletePolicy: true,
 		},
 	}
 
@@ -2438,6 +2471,11 @@ func TestGenericRestoreCleanUp(t *testing.T) {
 				} else {
 					require.True(t, apierrors.IsNotFound(err), "VolumeSnapshot should be deleted")
 				}
+			}
+			if tc.expectVSCDeletePolicy {
+				vsc := &snapshotv1api.VolumeSnapshotContent{}
+				require.NoError(t, fakeCtrlClient.Get(t.Context(), crclient.ObjectKey{Name: "test-vsc"}, vsc))
+				assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, vsc.Spec.DeletionPolicy)
 			}
 		})
 	}
