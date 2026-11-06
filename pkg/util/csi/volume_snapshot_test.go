@@ -202,7 +202,7 @@ func TestWaitVolumeSnapshotReady(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeClient := snapshotFake.NewSimpleClientset(test.clientObj...)
 
-			vs, err := WaitVolumeSnapshotReady(t.Context(), fakeClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond, velerotest.NewLogger())
+			vs, err := WaitVolumeSnapshotReady(t.Context(), fakeClient.SnapshotV1(), test.vsName, test.namespace, time.Millisecond, 0, velerotest.NewLogger())
 			if test.err != "" {
 				require.EqualError(t, err, test.err)
 			} else {

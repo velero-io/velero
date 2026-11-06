@@ -742,7 +742,7 @@ func (p *pvcRestoreItemAction) createVolumeSnapshot(ctx context.Context, logger 
 	}
 
 	var updatedVS *snapshotv1api.VolumeSnapshot
-	updatedVS, err = csi.WaitVolumeSnapshotReady(ctx, p.csiSnapshotClient, vs.Name, vs.Namespace, timeout, logger)
+	updatedVS, err = csi.WaitVolumeSnapshotReady(ctx, p.csiSnapshotClient, vs.Name, vs.Namespace, timeout, 0, logger)
 	if err != nil {
 		csi.CleanupVolumeSnapshot(ctx, vs, p.crClient, logger)
 		return nil, errors.Wrapf(err, "failed to wait for VolumeSnapshot %s/%s to become Ready within timeout %v",

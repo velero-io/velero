@@ -608,6 +608,7 @@ func newDataUpload(
 			OperationTimeout:      backup.Spec.CSISnapshotTimeout,
 			SourceFSType:          fsType,
 			ParentSnapshot:        parentSnapshot,
+			SnapshotErrorTimeout:  backup.Spec.CSISnapshotErrorTimeout,
 		},
 	}
 
