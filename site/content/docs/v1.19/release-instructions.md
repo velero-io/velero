@@ -101,6 +101,40 @@ https://github.com/velero-io/velero/blob/release-1.7/Dockerfile#L53-L54
 
 #### Steps
 1. Manually create the release branch on Github, in the form like `release-$major.$minor`
+### Release timeout and remote sessions
+
+Run `tag-release.sh` on the host; it starts the build container through `make release`.
+Set `RELEASE_TIMEOUT` to configure the timeout for the entire GoReleaser process,
+including builds, archives, and publishing. The default is `60m`; Go durations
+such as `90m` or `2h` are supported. This applies to both dry-run and publish mode:
+
+```bash
+export RELEASE_TIMEOUT=90m
+# Set VELERO_VERSION, REMOTE, GITHUB_TOKEN, and ON_RELEASE_BRANCH as described below.
+./hack/release-tools/tag-release.sh publish
+```
+
+On a Linux server, use `tmux` to keep the interactive release running after SSH
+disconnects. Start the session before setting the release environment variables
+and running the script:
+
+```bash
+tmux new -s velero-release
+# Inside tmux: change to the Velero checkout, set the release variables, then run:
+export RELEASE_TIMEOUT=90m
+./hack/release-tools/tag-release.sh publish
+```
+
+Confirm the script's prompt, then detach with `Ctrl-b`, followed by `d`.
+After reconnecting over SSH, run `tmux attach -t velero-release` to view progress.
+Configure Git authentication beforehand so tag pushes can complete.
+
+Bare `nohup` is insufficient because the script requires interactive confirmation
+and Git may prompt for credentials. It also creates `nohup.out` in the working
+directory, which can fail the clean-tree checks. If capturing logs, write them
+outside the checkout, for example `/var/tmp/velero-release.log`, rather than into
+the repository. A tmux session does not create `nohup.out`.
+
 1. Create a tagged release in dry-run mode
 	- This won't push anything to GitHub.
 	- Run `VELERO_VERSION=v1.9.0-rc.1 REMOTE=<upstream-remote> GITHUB_TOKEN=REDACTED ON_RELEASE_BRANCH=TRUE ./hack/release-tools/tag-release.sh`.

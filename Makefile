@@ -485,11 +485,14 @@ changelog: ## Generate changelog
 #		RELEASE_NOTES_FILE=changelogs/CHANGELOG-1.2.md \
 #		PUBLISH=true \
 #		make release
+RELEASE_TIMEOUT ?= 60m
+
 release: ## Build a GitHub release using goreleaser
 	$(MAKE) shell CMD="-c '\
 		GITHUB_TOKEN=$(GITHUB_TOKEN) \
 		RELEASE_NOTES_FILE=$(RELEASE_NOTES_FILE) \
 		PUBLISH=$(PUBLISH) \
+		RELEASE_TIMEOUT=$(RELEASE_TIMEOUT) \
 		REGISTRY=$(REGISTRY) \
 		./hack/release-tools/goreleaser.sh'"
 
