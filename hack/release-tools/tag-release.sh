@@ -26,6 +26,7 @@
 
 # - $VELERO_VERSION: defines the tag of Velero that any https://github.com/velero-io/velero/...
 #   links in the docs should redirect to.
+# - $RELEASE_TIMEOUT: GoReleaser timeout as a Go duration, such as 60m or 2h. Defaults to 60m.
 # - $REMOTE: defines the remote that should be used when pushing tags and branches. Defaults to "upstream"
 # - $publish: TRUE/FALSE value where FALSE (or not including it) will indicate a dry-run, and TRUE, or simply adding 'publish',
 #   will tag the release with the $VELERO_VERSION and push the tag to a remote named 'upstream'.
@@ -46,6 +47,9 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Default to using upstream as the remote
 remote=${REMOTE:-upstream}
+
+# Pass the configured timeout through make to the build container.
+export RELEASE_TIMEOUT=${RELEASE_TIMEOUT:-60m}
 
 # Parse out the branch we're on so we can switch back to it at the end of a dry-run, where we delete the tag. Requires git v1.8.1+
 upstream_branch=$(git symbolic-ref --short HEAD)
@@ -91,6 +95,8 @@ if ! go run $DIR/chk_version.go --verify;  then
 fi
 # Since we're past the validation of the VELERO_VERSION, parse the version's individual components.
 eval $(go run $DIR/chk_version.go)
+
+printf "GoReleaser timeout: %s\n" "$RELEASE_TIMEOUT"
 
 printf "To clarify, you've provided a version string of $VELERO_VERSION.\n"
 printf "Based on this, the following assumptions have been made: \n"

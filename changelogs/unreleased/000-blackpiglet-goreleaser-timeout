@@ -1,0 +1,1 @@
+Make the GoReleaser timeout configurable through RELEASE_TIMEOUT at the tag-release.sh entry point, defaulting to 60 minutes, and document remote release sessions.
