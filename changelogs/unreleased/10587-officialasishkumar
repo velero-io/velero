@@ -1,0 +1,1 @@
+Complete the DataDownload with a warning instead of leaving it in InProgress when rebinding the restored volume fails
