@@ -1,0 +1,1 @@
+Add a velero_backup_active_total metric reporting the number of backups that are ready to start or in progress
