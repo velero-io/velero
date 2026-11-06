@@ -570,7 +570,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 
 	backupStoreGetter := persistence.NewObjectBackupStoreGetterWithSecretStore(s.credentialFileStore, s.credentialSecretStore)
 
-	backupTracker := controller.NewBackupTracker()
+	backupTracker := controller.NewBackupTrackerWithMetrics(s.metrics)
 
 	// By far, PodVolumeBackup, PodVolumeRestore, BackupStorageLocation controllers
 	// are not included in --disable-controllers list.

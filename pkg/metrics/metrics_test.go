@@ -628,3 +628,22 @@ func getMaintenanceHistogramCount(t *testing.T, vec *prometheus.HistogramVec, re
 	t.Fatalf("Histogram with repository_name label '%s' not found", repositoryName)
 	return 0
 }
+
+// TestSetBackupActiveTotal verifies the backup_active_total gauge is registered
+// and that it tracks the value it is given, including back down to zero.
+func TestSetBackupActiveTotal(t *testing.T) {
+	m := NewServerMetrics()
+
+	gauge, ok := m.Metrics()[backupActiveTotal].(prometheus.Gauge)
+	require.True(t, ok, "backup_active_total should be registered as a Gauge")
+
+	// A gauge with no backups running must report 0 rather than be absent, so
+	// that an alert on "no backup has been active" can fire on a fresh server.
+	assert.Equal(t, float64(0), testutil.ToFloat64(gauge))
+
+	m.SetBackupActiveTotal(3)
+	assert.Equal(t, float64(3), testutil.ToFloat64(gauge))
+
+	m.SetBackupActiveTotal(0)
+	assert.Equal(t, float64(0), testutil.ToFloat64(gauge))
+}

@@ -21,6 +21,8 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/velero-io/velero/pkg/metrics"
 )
 
 // BackupTracker keeps track of in-progress backups.
@@ -44,15 +46,33 @@ type backupTracker struct {
 	readyToStartBackups sets.Set[string]
 	inProgressBackups   sets.Set[string]
 	postProgressBackups sets.Set[string]
+	metrics             *metrics.ServerMetrics
 }
 
 // NewBackupTracker returns a new BackupTracker.
 func NewBackupTracker() BackupTracker {
+	return NewBackupTrackerWithMetrics(nil)
+}
+
+// NewBackupTrackerWithMetrics returns a new BackupTracker that keeps the
+// backup_active_total metric in step with the backups it is tracking. The
+// metrics argument may be nil, in which case no metric is recorded.
+func NewBackupTrackerWithMetrics(serverMetrics *metrics.ServerMetrics) BackupTracker {
 	return &backupTracker{
 		readyToStartBackups: sets.New[string](),
 		inProgressBackups:   sets.New[string](),
 		postProgressBackups: sets.New[string](),
+		metrics:             serverMetrics,
 	}
+}
+
+// recordRunningCount publishes the current running count. Callers must hold
+// the write lock.
+func (bt *backupTracker) recordRunningCount() {
+	if bt.metrics == nil {
+		return
+	}
+	bt.metrics.SetBackupActiveTotal(int64(bt.inProgressBackups.Len() + bt.readyToStartBackups.Len()))
 }
 
 func (bt *backupTracker) AddReadyToStart(ns, name string) {
@@ -60,6 +80,7 @@ func (bt *backupTracker) AddReadyToStart(ns, name string) {
 	defer bt.lock.Unlock()
 
 	bt.readyToStartBackups.Insert(backupTrackerKey(ns, name))
+	bt.recordRunningCount()
 }
 
 func (bt *backupTracker) Add(ns, name string) {
@@ -69,6 +90,7 @@ func (bt *backupTracker) Add(ns, name string) {
 	key := backupTrackerKey(ns, name)
 	bt.readyToStartBackups.Delete(key)
 	bt.inProgressBackups.Insert(key)
+	bt.recordRunningCount()
 }
 
 func (bt *backupTracker) AddPostProcessing(ns, name string) {
@@ -79,6 +101,7 @@ func (bt *backupTracker) AddPostProcessing(ns, name string) {
 	bt.readyToStartBackups.Delete(key)
 	bt.inProgressBackups.Delete(key)
 	bt.postProgressBackups.Insert(key)
+	bt.recordRunningCount()
 }
 
 func (bt *backupTracker) Delete(ns, name string) {
@@ -89,6 +112,7 @@ func (bt *backupTracker) Delete(ns, name string) {
 	bt.readyToStartBackups.Delete(key)
 	bt.inProgressBackups.Delete(key)
 	bt.postProgressBackups.Delete(key)
+	bt.recordRunningCount()
 }
 
 // Contains returns true if backup is InProgress or post-InProgress

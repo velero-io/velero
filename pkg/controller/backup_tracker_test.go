@@ -19,7 +19,12 @@ package controller
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/velero-io/velero/pkg/metrics"
 )
 
 func TestBackupTracker(t *testing.T) {
@@ -40,4 +45,51 @@ func TestBackupTracker(t *testing.T) {
 
 	bt.Delete("ns2", "name2")
 	assert.False(t, bt.Contains("ns2", "name2"))
+}
+
+func TestBackupTrackerRecordsActiveTotal(t *testing.T) {
+	m := metrics.NewServerMetrics()
+	bt := NewBackupTrackerWithMetrics(m)
+
+	activeTotal := func() float64 {
+		g, ok := m.Metrics()["backup_active_total"].(prometheus.Gauge)
+		require.True(t, ok, "backup_active_total gauge is not registered")
+		return testutil.ToFloat64(g)
+	}
+
+	assert.Equal(t, float64(0), activeTotal())
+
+	// ReadyToStart and InProgress both count as active, because together they
+	// are what the queue controller limits concurrency on.
+	bt.AddReadyToStart("ns", "name")
+	assert.Equal(t, float64(1), activeTotal())
+
+	bt.Add("ns", "name")
+	assert.Equal(t, float64(1), activeTotal(), "moving ReadyToStart to InProgress must not double count")
+
+	bt.AddReadyToStart("ns", "queued")
+	assert.Equal(t, float64(2), activeTotal())
+
+	// Post-processing backups are no longer occupying a slot.
+	bt.AddPostProcessing("ns", "name")
+	assert.Equal(t, float64(1), activeTotal())
+
+	bt.Delete("ns", "queued")
+	assert.Equal(t, float64(0), activeTotal())
+
+	// Deleting a backup that is still post-processing leaves the count at zero
+	// rather than going negative.
+	bt.Delete("ns", "name")
+	assert.Equal(t, float64(0), activeTotal())
+}
+
+func TestBackupTrackerWithoutMetricsDoesNotPanic(t *testing.T) {
+	bt := NewBackupTracker()
+
+	assert.NotPanics(t, func() {
+		bt.AddReadyToStart("ns", "name")
+		bt.Add("ns", "name")
+		bt.AddPostProcessing("ns", "name")
+		bt.Delete("ns", "name")
+	})
 }
