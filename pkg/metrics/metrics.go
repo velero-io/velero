@@ -38,6 +38,7 @@ const (
 	//Velero metrics
 	backupTarballSizeBytesGauge   = "backup_tarball_size_bytes"
 	backupTotal                   = "backup_total"
+	backupActiveTotal             = "backup_active_total"
 	backupAttemptTotal            = "backup_attempt_total"
 	backupSuccessTotal            = "backup_success_total"
 	backupPartialFailureTotal     = "backup_partial_failure_total"
@@ -130,6 +131,13 @@ func NewServerMetrics() *ServerMetrics {
 					Namespace: metricNamespace,
 					Name:      backupTotal,
 					Help:      "Current number of existent backups",
+				},
+			),
+			backupActiveTotal: prometheus.NewGauge(
+				prometheus.GaugeOpts{
+					Namespace: metricNamespace,
+					Name:      backupActiveTotal,
+					Help:      "Current number of backups that are ready to start or in progress",
 				},
 			),
 			backupAttemptTotal: prometheus.NewCounterVec(
@@ -791,6 +799,14 @@ func (m *ServerMetrics) SetScheduleExpectedIntervalSeconds(scheduleName string, 
 // SetBackupTotal records the current number of existent backups.
 func (m *ServerMetrics) SetBackupTotal(numberOfBackups int64) {
 	if g, ok := m.metrics[backupTotal].(prometheus.Gauge); ok {
+		g.Set(float64(numberOfBackups))
+	}
+}
+
+// SetBackupActiveTotal records the current number of backups that are ready to
+// start or in progress.
+func (m *ServerMetrics) SetBackupActiveTotal(numberOfBackups int64) {
+	if g, ok := m.metrics[backupActiveTotal].(prometheus.Gauge); ok {
 		g.Set(float64(numberOfBackups))
 	}
 }
