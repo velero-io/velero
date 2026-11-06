@@ -71,7 +71,7 @@ func TestResources(t *testing.T) {
 
 func TestAllCRDs(t *testing.T) {
 	list := AllCRDs()
-	assert.Len(t, list.Items, 13)
+	assert.Len(t, list.Items, 14)
 	assert.Equal(t, Labels(), list.Items[0].GetLabels())
 }
 

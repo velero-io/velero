@@ -313,6 +313,7 @@ func Test_veleroResourcesExist(t *testing.T) {
 				{Kind: "BackupStorageLocation"},
 				{Kind: "VolumeSnapshotLocation"},
 				{Kind: "ServerStatusRequest"},
+				{Kind: "BackupCancellationRequest"},
 			},
 		},
 		{
