@@ -27,6 +27,8 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -93,6 +95,15 @@ func newRestorer(
 		log:     log,
 	}
 
+	// terminalPVRs tracks the UIDs of PodVolumeRestores whose terminal result
+	// has already been sent, so a later terminal transition for the same PVR
+	// (e.g. a manual CR edit) cannot take a channel slot that belongs to
+	// another PVR's result. Keyed by UID rather than removing the pod-keyed
+	// results entry, because all PVRs of one pod share that entry's channel.
+	// The informer's event handler runs on a single goroutine, so this set
+	// needs no lock.
+	terminalPVRs := sets.New[types.UID]()
+
 	_, _ = pvrInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			UpdateFunc: func(oldObj, newObj any) {
@@ -108,6 +119,11 @@ func newRestorer(
 				}
 
 				if pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseCompleted || pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseFailed || pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseCanceled {
+					if terminalPVRs.Has(pvr.UID) {
+						log.Debugf("Ignoring the terminal phase %s of pod volume restore %s/%s: its result has already been sent", pvr.Status.Phase, pvr.Namespace, pvr.Name)
+						return
+					}
+
 					r.resultsLock.Lock()
 					resChan, ok := r.results[resultsKey(pvr.Spec.Pod.Namespace, pvr.Spec.Pod.Name)]
 					r.resultsLock.Unlock()
@@ -117,6 +133,7 @@ func newRestorer(
 						return
 					}
 					resChan <- pvr
+					terminalPVRs.Insert(pvr.UID)
 				}
 			},
 		},
