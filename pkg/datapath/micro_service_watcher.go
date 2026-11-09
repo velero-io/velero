@@ -75,6 +75,7 @@ type microServiceBRWatcher struct {
 	associatedObject    string
 	eventCh             chan *corev1api.Event
 	podCh               chan *corev1api.Pod
+	podChSync           sync.Once
 	startedFromEvent    atomic.Bool
 	terminatedFromEvent atomic.Bool
 	wgWatcher           sync.WaitGroup
@@ -119,6 +120,8 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 		return errors.Wrap(err, "error getting pod informer")
 	}
 
+	ms.ctx, ms.cancel = context.WithCancel(ctx)
+
 	eventHandler, err := eventInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj any) {
@@ -127,7 +130,10 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 					return
 				}
 
-				ms.eventCh <- evt
+				select {
+				case ms.eventCh <- evt:
+				case <-ms.ctx.Done():
+				}
 			},
 			UpdateFunc: func(_, obj any) {
 				evt := obj.(*corev1api.Event)
@@ -135,13 +141,19 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 					return
 				}
 
-				ms.eventCh <- evt
+				select {
+				case ms.eventCh <- evt:
+				case <-ms.ctx.Done():
+				}
 			},
 		},
 	)
 	if err != nil {
 		return errors.Wrap(err, "error registering event handler")
 	}
+
+	ms.eventInformer = eventInformer
+	ms.eventHandler = eventHandler
 
 	podHandler, err := podInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
@@ -152,8 +164,32 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 				}
 
 				if pod.Status.Phase == corev1api.PodSucceeded || pod.Status.Phase == corev1api.PodFailed {
-					ms.podCh <- pod
+					ms.podChSync.Do(func() {
+						ms.podCh <- pod
+					})
 				}
+			},
+			DeleteFunc: func(obj any) {
+				if deleted, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+					obj = deleted.Obj
+				}
+
+				pod, ok := obj.(*corev1api.Pod)
+				if !ok || pod.Namespace != ms.namespace || pod.Name != ms.thisPod {
+					return
+				}
+
+				if pod.Status.Phase == corev1api.PodSucceeded || pod.Status.Phase == corev1api.PodFailed {
+					return
+				}
+
+				pod = pod.DeepCopy()
+				pod.Status.Phase = corev1api.PodFailed
+				pod.Status.Message = "data path pod was deleted before completion"
+
+				ms.podChSync.Do(func() {
+					ms.podCh <- pod
+				})
 			},
 		},
 	)
@@ -161,16 +197,12 @@ func (ms *microServiceBRWatcher) Init(ctx context.Context, param any) error {
 		return errors.Wrap(err, "error registering pod handler")
 	}
 
+	ms.podInformer = podInformer
+	ms.podHandler = podHandler
+
 	if err := ms.reEnsureThisPod(ctx); err != nil {
 		return err
 	}
-
-	ms.eventInformer = eventInformer
-	ms.podInformer = podInformer
-	ms.eventHandler = eventHandler
-	ms.podHandler = podHandler
-
-	ms.ctx, ms.cancel = context.WithCancel(ctx)
 
 	ms.log.WithFields(
 		logrus.Fields{
@@ -243,7 +275,9 @@ func (ms *microServiceBRWatcher) reEnsureThisPod(ctx context.Context) error {
 	}
 
 	if thisPod.Status.Phase == corev1api.PodSucceeded || thisPod.Status.Phase == corev1api.PodFailed {
-		ms.podCh <- thisPod
+		ms.podChSync.Do(func() {
+			ms.podCh <- thisPod
+		})
 		ms.log.WithField("this pod", ms.thisPod).Infof("This pod comes to terminital status %s before watch start", thisPod.Status.Phase)
 	}
 

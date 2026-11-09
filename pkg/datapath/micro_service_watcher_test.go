@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,8 +35,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	kubeclientfake "k8s.io/client-go/kubernetes/fake"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/velero-io/velero/pkg/builder"
 	velerotest "github.com/velero-io/velero/pkg/test"
@@ -107,9 +112,9 @@ func TestReEnsureThisPod(t *testing.T) {
 				assert.EqualError(t, err, test.expectErr)
 			} else {
 				if test.expectChan {
-					assert.Len(t, ms.podCh, 1)
+					require.Len(t, ms.podCh, 1)
 					pod := <-ms.podCh
-					assert.Equal(t, pod.Name, test.thisPod)
+					assert.Equal(t, test.thisPod, pod.Name)
 				}
 			}
 		})
@@ -162,6 +167,16 @@ type insertEvent struct {
 }
 
 func TestStartWatch(t *testing.T) {
+	originalTerminationMessage := funcGetPodTerminationMessage
+	originalRedirectLog := funcRedirectLog
+	originalResult := funcGetResultFromMessage
+	originalTimeout := eventWaitTimeout
+	t.Cleanup(func() {
+		funcGetPodTerminationMessage = originalTerminationMessage
+		funcRedirectLog = originalRedirectLog
+		funcGetResultFromMessage = originalResult
+		eventWaitTimeout = originalTimeout
+	})
 	tests := []struct {
 		name                 string
 		namespace            string
@@ -688,5 +703,226 @@ func TestRedirectDataMoverLogs(t *testing.T) {
 				assert.Contains(t, buffer, test.logMessage)
 			}
 		})
+	}
+}
+
+func TestWatcherPodDeletion(t *testing.T) {
+	for _, tombstone := range []bool{false, true} {
+		t.Run(fmt.Sprint(tombstone), func(t *testing.T) {
+			ms, handler := newPodHandlerTestWatcher(t)
+			pod := builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result()
+			var obj any = pod
+			if tombstone {
+				obj = cache.DeletedFinalStateUnknown{Obj: pod}
+			}
+			handler.OnDelete("invalid deletion object")
+			handler.OnDelete(cache.DeletedFinalStateUnknown{Obj: "invalid tombstone"})
+			handler.OnDelete(builder.ForPod("other", "pod").Result())
+			handler.OnDelete(builder.ForPod("velero", "other").Result())
+			for _, phase := range []corev1api.PodPhase{corev1api.PodSucceeded, corev1api.PodFailed} {
+				terminalPod := builder.ForPod("velero", "pod").Phase(phase).Result()
+				var terminalObj any = terminalPod
+				if tombstone {
+					terminalObj = cache.DeletedFinalStateUnknown{Obj: terminalPod}
+				}
+				handler.OnDelete(terminalObj)
+			}
+			handler.OnUpdate(pod, pod)
+			require.Empty(t, ms.podCh)
+			handler.OnDelete(obj)
+			got := <-ms.podCh
+			assert.Equal(t, corev1api.PodFailed, got.Status.Phase)
+			assert.Equal(t, "data path pod was deleted before completion", got.Status.Message)
+			assert.Equal(t, corev1api.PodRunning, pod.Status.Phase)
+		})
+	}
+}
+
+func TestWatcherPodNotificationOnce(t *testing.T) {
+	for _, first := range []string{"initial check", "update", "delete", "concurrent"} {
+		t.Run(first, func(t *testing.T) {
+			ms, handler := newPodHandlerTestWatcher(t)
+			pod := builder.ForPod("velero", "pod").Phase(corev1api.PodSucceeded).Result()
+			require.NoError(t, ms.client.Status().Update(t.Context(), pod))
+			switch first {
+			case "initial check":
+				require.NoError(t, ms.reEnsureThisPod(t.Context()))
+			case "update":
+				handler.OnUpdate(pod, pod)
+			case "delete":
+				handler.OnDelete(cache.DeletedFinalStateUnknown{Obj: builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result()})
+			}
+			var wg sync.WaitGroup
+			errs := make(chan error, 20)
+			for i := 0; i < 20; i++ {
+				wg.Add(3)
+				go func() { defer wg.Done(); handler.OnUpdate(pod, pod) }()
+				go func() {
+					defer wg.Done()
+					handler.OnDelete(builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result())
+				}()
+				go func() { defer wg.Done(); errs <- ms.reEnsureThisPod(t.Context()) }()
+			}
+			done := make(chan struct{})
+			go func() { wg.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("duplicate pod observations blocked before watcher start")
+			}
+			close(errs)
+			for err := range errs {
+				require.NoError(t, err)
+			}
+			require.Len(t, ms.podCh, 1)
+			got := <-ms.podCh
+			if first == "concurrent" {
+				assert.Contains(t, []corev1api.PodPhase{corev1api.PodSucceeded, corev1api.PodFailed}, got.Status.Phase)
+			} else if first == "delete" {
+				assert.Equal(t, corev1api.PodFailed, got.Status.Phase)
+			} else {
+				assert.Equal(t, corev1api.PodSucceeded, got.Status.Phase)
+			}
+			// Consuming the notification must not allow later duplicates through.
+			handler.OnUpdate(pod, pod)
+			handler.OnDelete(pod)
+			require.NoError(t, ms.reEnsureThisPod(t.Context()))
+			assert.Empty(t, ms.podCh)
+		})
+	}
+}
+
+// Capture the handlers registered by Init so tests exercise informer callbacks.
+type watcherTestInformer struct {
+	ctrlcache.Informer
+	handler cache.ResourceEventHandler
+}
+
+func (i *watcherTestInformer) AddEventHandler(h cache.ResourceEventHandler) (cache.ResourceEventHandlerRegistration, error) {
+	i.handler = h
+	return nil, nil
+}
+
+type watcherTestCache struct {
+	ctrlcache.Cache
+	events, pods *watcherTestInformer
+}
+
+func (c *watcherTestCache) GetInformer(_ context.Context, obj client.Object, _ ...ctrlcache.InformerGetOption) (ctrlcache.Informer, error) {
+	if _, ok := obj.(*corev1api.Pod); ok {
+		return c.pods, nil
+	}
+	return c.events, nil
+}
+
+type watcherTestManager struct {
+	manager.Manager
+	cache ctrlcache.Cache
+}
+
+func (m *watcherTestManager) GetCache() ctrlcache.Cache { return m.cache }
+func newPodHandlerTestWatcher(t *testing.T) (*microServiceBRWatcher, cache.ResourceEventHandler) {
+	t.Helper()
+	c := &watcherTestCache{events: &watcherTestInformer{}, pods: &watcherTestInformer{}}
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1api.AddToScheme(scheme))
+	pod := builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+	ms := newMicroServiceBRWatcher(cl, nil, &watcherTestManager{cache: c}, TaskTypeBackup, "task", "velero", "pod", "container", "task", Callbacks{}, velerotest.NewLogger()).(*microServiceBRWatcher)
+	require.NoError(t, ms.Init(t.Context(), nil))
+	t.Cleanup(func() { ms.Close(context.Background()) })
+	return ms, c.pods.handler
+}
+
+func TestWatcherInitialPodMissing(t *testing.T) {
+	c := &watcherTestCache{events: &watcherTestInformer{}, pods: &watcherTestInformer{}}
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1api.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ms := newMicroServiceBRWatcher(cl, nil, &watcherTestManager{cache: c}, TaskTypeBackup, "task", "velero", "pod", "container", "task", Callbacks{}, velerotest.NewLogger()).(*microServiceBRWatcher)
+	defer ms.Close(t.Context())
+	require.EqualError(t, ms.Init(t.Context(), nil), "error getting this pod pod: pods \"pod\" not found")
+	assert.Empty(t, ms.podCh)
+}
+
+func TestWatcherEventSendUnblockedByClose(t *testing.T) {
+	for _, update := range []bool{false, true} {
+		t.Run(fmt.Sprintf("update=%t", update), func(t *testing.T) {
+			ms, _ := newPodHandlerTestWatcher(t)
+			handler := ms.eventInformer.(*watcherTestInformer).handler
+			evt := &corev1api.Event{InvolvedObject: corev1api.ObjectReference{Namespace: "velero", Name: "task"}}
+			for i := 0; i < cap(ms.eventCh); i++ {
+				handler.OnAdd(evt, false)
+			}
+			done := make(chan struct{})
+			go func() {
+				if update {
+					handler.OnUpdate(evt, evt)
+				} else {
+					handler.OnAdd(evt, false)
+				}
+				close(done)
+			}()
+			ms.Close(t.Context())
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("event handler remained blocked after Close")
+			}
+			assert.Len(t, ms.eventCh, cap(ms.eventCh))
+		})
+	}
+}
+
+func TestWatcherPodDeletionCallsOnFailed(t *testing.T) {
+	originalRedirectLog := funcRedirectLog
+	originalTerminationMessage := funcGetPodTerminationMessage
+	originalTimeout := eventWaitTimeout
+	t.Cleanup(func() {
+		funcRedirectLog = originalRedirectLog
+		funcGetPodTerminationMessage = originalTerminationMessage
+		eventWaitTimeout = originalTimeout
+	})
+	stub := &startWatchFake{}
+	funcRedirectLog = stub.redirectDataMoverLogs
+	funcGetPodTerminationMessage = stub.getPodContainerTerminateMessage
+	eventWaitTimeout = 10 * time.Millisecond
+	for _, tombstone := range []bool{false, true} {
+		for _, stoppedEvent := range []bool{false, true} {
+			t.Run(fmt.Sprintf("tombstone=%t/stopped=%t", tombstone, stoppedEvent), func(t *testing.T) {
+				ms, handler := newPodHandlerTestWatcher(t)
+				calls := 0
+				ms.callbacks.OnFailed = func(ctx context.Context, namespace, task string, err error) {
+					assert.NoError(t, ctx.Err())
+					assert.Equal(t, "velero", namespace)
+					assert.Equal(t, "task", task)
+					assert.EqualError(t, err, "data path pod was deleted before completion")
+					calls++
+				}
+				ms.callbacks.OnCompleted = func(context.Context, string, string, Result) { t.Error("unexpected completion") }
+				ms.callbacks.OnCancelled = func(context.Context, string, string) { t.Error("unexpected cancellation") }
+				ms.callbacks.OnProgress = func(context.Context, string, string, *uploader.Progress) { t.Error("unexpected progress") }
+				ms.eventCh <- &corev1api.Event{Reason: EventReasonStarted}
+				if stoppedEvent {
+					ms.eventCh <- &corev1api.Event{Reason: EventReasonStopped}
+				}
+				ms.startWatch()
+				pod := builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result()
+				var obj any = pod
+				if tombstone {
+					obj = cache.DeletedFinalStateUnknown{Obj: pod}
+				}
+				handler.OnDelete(obj)
+				handler.OnDelete(obj)
+				done := make(chan struct{})
+				go func() { ms.wgWatcher.Wait(); close(done) }()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("watcher did not exit after deletion")
+				}
+				assert.Equal(t, 1, calls)
+			})
+		}
 	}
 }
