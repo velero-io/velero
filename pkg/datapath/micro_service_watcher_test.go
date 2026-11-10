@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -708,7 +709,7 @@ func TestRedirectDataMoverLogs(t *testing.T) {
 
 func TestWatcherPodDeletion(t *testing.T) {
 	for _, tombstone := range []bool{false, true} {
-		t.Run(fmt.Sprint(tombstone), func(t *testing.T) {
+		t.Run(strconv.FormatBool(tombstone), func(t *testing.T) {
 			ms, handler := newPodHandlerTestWatcher(t)
 			pod := builder.ForPod("velero", "pod").Phase(corev1api.PodRunning).Result()
 			var obj any = pod
@@ -892,8 +893,9 @@ func TestWatcherPodDeletionCallsOnFailed(t *testing.T) {
 			t.Run(fmt.Sprintf("tombstone=%t/stopped=%t", tombstone, stoppedEvent), func(t *testing.T) {
 				ms, handler := newPodHandlerTestWatcher(t)
 				calls := 0
+				var callbackContextErr error
 				ms.callbacks.OnFailed = func(ctx context.Context, namespace, task string, err error) {
-					assert.NoError(t, ctx.Err())
+					callbackContextErr = ctx.Err()
 					assert.Equal(t, "velero", namespace)
 					assert.Equal(t, "task", task)
 					assert.EqualError(t, err, "data path pod was deleted before completion")
@@ -922,6 +924,7 @@ func TestWatcherPodDeletionCallsOnFailed(t *testing.T) {
 					t.Fatal("watcher did not exit after deletion")
 				}
 				assert.Equal(t, 1, calls)
+				require.NoError(t, callbackContextErr)
 			})
 		}
 	}
