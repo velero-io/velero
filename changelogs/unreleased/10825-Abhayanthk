@@ -1,0 +1,1 @@
+Stop backing up all cluster-scoped resources when a namespace wildcard matches nothing
