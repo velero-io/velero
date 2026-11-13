@@ -592,6 +592,7 @@ func TestClusterScopedShouldInclude(t *testing.T) {
 		clusterScopedIncludes []string
 		clusterScopedExcludes []string
 		nsIncludes            []string
+		activeNamespaces      []string
 		item                  string
 		want                  bool
 		apiResources          []*test.APIResource
@@ -735,6 +736,17 @@ func TestClusterScopedShouldInclude(t *testing.T) {
 			},
 		},
 		{
+			name:                  "When the namespace include wildcard matches no namespace, cluster resource should not be included.",
+			clusterScopedIncludes: []string{},
+			nsIncludes:            []string{"nonexistent-*"},
+			activeNamespaces:      []string{"default", "kube-system"},
+			item:                  "persistentvolumes",
+			want:                  false,
+			apiResources: []*test.APIResource{
+				test.PVs(),
+			},
+		},
+		{
 			name:                  "When all namespaces and namespace scope resources are included, but cluster resource is excluded.",
 			clusterScopedIncludes: []string{},
 			clusterScopedExcludes: []string{"persistentvolumes"},
@@ -750,7 +762,8 @@ func TestClusterScopedShouldInclude(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			discoveryHelper := setupDiscoveryClientWithResources(tc.apiResources)
 			logger := logrus.StandardLogger()
-			nsIncludeExclude := NewNamespaceIncludesExcludes().Includes(tc.nsIncludes...)
+			nsIncludeExclude := NewNamespaceIncludesExcludes().ActiveNamespaces(tc.activeNamespaces).Includes(tc.nsIncludes...)
+			require.NoError(t, nsIncludeExclude.ExpandIncludesExcludes())
 			scopeIncludesExcludes := GetScopeResourceIncludesExcludes(discoveryHelper, logger, []string{}, []string{}, tc.clusterScopedIncludes, tc.clusterScopedExcludes, *nsIncludeExclude)
 
 			if got := scopeIncludesExcludes.ShouldInclude((tc.item)); got != tc.want {
@@ -1419,6 +1432,62 @@ func TestNamespaceIncludesExcludesShouldIncludeAfterWildcardExpansion(t *testing
 
 			result := nie.ShouldInclude(tc.testNamespace)
 			assert.Equal(t, tc.expectedResult, result)
+		})
+	}
+}
+
+func TestNamespaceIncludesExcludesIncludeEverythingAfterWildcardExpansion(t *testing.T) {
+	tests := []struct {
+		name             string
+		includes         []string
+		excludes         []string
+		activeNamespaces []string
+		expectedResult   bool
+	}{
+		{
+			name:             "wildcard expanded to empty includes - should not include everything",
+			includes:         []string{"nonexistent-*"},
+			activeNamespaces: []string{"default", "kube-system"},
+			expectedResult:   false,
+		},
+		{
+			name:             "wildcard expanded with matches - should not include everything",
+			includes:         []string{"kube-*"},
+			activeNamespaces: []string{"default", "kube-system", "kube-public"},
+			expectedResult:   false,
+		},
+		{
+			name:             "wildcard expanded to empty includes with excludes - should not include everything",
+			includes:         []string{"nonexistent-*"},
+			excludes:         []string{"default"},
+			activeNamespaces: []string{"default", "kube-system"},
+			expectedResult:   false,
+		},
+		{
+			name:             "no wildcard expansion - empty includes means include everything",
+			includes:         []string{},
+			activeNamespaces: []string{"default", "kube-system"},
+			expectedResult:   true,
+		},
+		{
+			name:             "no wildcard expansion - * means include everything",
+			includes:         []string{"*"},
+			activeNamespaces: []string{"default", "kube-system"},
+			expectedResult:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nie := NewNamespaceIncludesExcludes().
+				ActiveNamespaces(tc.activeNamespaces).
+				Includes(tc.includes...).
+				Excludes(tc.excludes...)
+
+			err := nie.ExpandIncludesExcludes()
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedResult, nie.IncludeEverything())
 		})
 	}
 }
