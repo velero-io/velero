@@ -233,6 +233,7 @@ Instructions to back up using this approach are as follows:
         persistentVolumeClaim:
           claimName: pvc1
       - name: pvc2-vm
+        persistentVolumeClaim:
           claimName: pvc2
     ```
     to exclude FSB of volume `pvc1-vm`, you would run:
@@ -515,13 +516,13 @@ data:
   memLimit: 128Mi
 
   # "secCtxRunAsUser" sets the securityContext.runAsUser value on the restore init containers during restore.
-  secCtxRunAsUser: 1001
+  secCtxRunAsUser: "1001"
 
   # "secCtxRunAsGroup" sets the securityContext.runAsGroup value on the restore init containers during restore.
-  secCtxRunAsGroup: 999
+  secCtxRunAsGroup: "999"
 
   # "secCtxAllowPrivilegeEscalation" sets the securityContext.allowPrivilegeEscalation value on the restore init containers during restore.
-  secCtxAllowPrivilegeEscalation: false
+  secCtxAllowPrivilegeEscalation: "false"
 
   # "secCtx" sets the securityContext object value on the restore init containers during restore.
   # This key override  `secCtxRunAsUser`, `secCtxRunAsGroup`, `secCtxAllowPrivilegeEscalation` if `secCtx.runAsUser`, `secCtx.runAsGroup` or `secCtx.allowPrivilegeEscalation` are set.
