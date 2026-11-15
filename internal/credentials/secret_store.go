@@ -17,6 +17,8 @@ limitations under the License.
 package credentials
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 	corev1api "k8s.io/api/core/v1"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,7 +30,7 @@ import (
 // that are stored in Secret.
 type SecretStore interface {
 	// Get returns the secret key defined by the given selector
-	Get(selector *corev1api.SecretKeySelector) (string, error)
+	Get(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error)
 }
 
 type namespacedSecretStore struct {
@@ -45,9 +47,9 @@ func NewNamespacedSecretStore(client kbclient.Client, namespace string) (SecretS
 	}, nil
 }
 
-// Buffer returns the secret key defined by the given selector.
-func (n *namespacedSecretStore) Get(selector *corev1api.SecretKeySelector) (string, error) {
-	creds, err := kube.GetSecretKey(n.client, n.namespace, selector)
+// Get returns the secret key defined by the given selector.
+func (n *namespacedSecretStore) Get(ctx context.Context, selector *corev1api.SecretKeySelector) (string, error) {
+	creds, err := kube.GetSecretKey(ctx, n.client, n.namespace, selector)
 	if err != nil {
 		return "", errors.Wrap(err, "unable to get key for secret")
 	}
