@@ -35,7 +35,7 @@ func TestInstall(t *testing.T) {
 	c := fake.NewClientBuilder().WithObjects(
 		&apiextv1.CustomResourceDefinition{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "backuprepositories.velero.io",
+				Name: v1crds.CRDs[0].Name,
 			},
 
 			Status: apiextv1.CustomResourceDefinitionStatus{
