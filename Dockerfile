@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Velero binary build section
-FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS velero-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie AS velero-builder
 
 ARG GOPROXY
 ARG BIN
