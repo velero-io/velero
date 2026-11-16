@@ -40,16 +40,6 @@ type LoadAffinity struct {
 	StorageClass string `json:"storageClass"`
 }
 
-// String implements fmt.Stringer so that logging a *LoadAffinity (or a slice of them)
-// prints the values rather than the pointer address.
-func (a *LoadAffinity) String() string {
-	if a == nil {
-		return "<nil>"
-	}
-
-	return fmt.Sprintf("{nodeSelector: %s, storageClass: %q}", metav1.FormatLabelSelector(&a.NodeSelector), a.StorageClass)
-}
-
 type PodResources struct {
 	CPURequest              string `json:"cpuRequest,omitempty"`
 	CPULimit                string `json:"cpuLimit,omitempty"`

@@ -1647,39 +1647,3 @@ func TestGetLoadAffinityByStorageClassReturnsCopy(t *testing.T) {
 		})
 	}
 }
-
-func TestLoadAffinityString(t *testing.T) {
-	tests := []struct {
-		name     string
-		affinity *LoadAffinity
-		expected string
-	}{
-		{
-			name:     "nil receiver",
-			affinity: nil,
-			expected: "<nil>",
-		},
-		{
-			name:     "empty",
-			affinity: &LoadAffinity{},
-			expected: `{nodeSelector: <none>, storageClass: ""}`,
-		},
-		{
-			name: "match labels and storage class",
-			affinity: &LoadAffinity{
-				NodeSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"disktype": "ssd"},
-				},
-				StorageClass: "fast",
-			},
-			expected: `{nodeSelector: disktype=ssd, storageClass: "fast"}`,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected, tc.affinity.String())
-			assert.Equal(t, tc.expected, fmt.Sprintf("%v", tc.affinity))
-		})
-	}
-}
