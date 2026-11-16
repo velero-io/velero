@@ -164,6 +164,16 @@ func isAvailable(c appsv1api.DeploymentCondition) bool {
 	return false
 }
 
+func isFailing(c appsv1api.DeploymentCondition) bool {
+	if c.Type == appsv1api.DeploymentReplicaFailure && c.Status == corev1api.ConditionTrue {
+		return true
+	}
+	if c.Type == appsv1api.DeploymentProgressing && c.Status == corev1api.ConditionFalse {
+		return true
+	}
+	return false
+}
+
 // DeploymentIsReady will poll the Kubernetes API server to see if the velero deployment is ready to service user requests.
 func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, error) {
 	gvk := schema.FromAPIVersionAndKind(appsv1api.SchemeGroupVersion.String(), "Deployment")
@@ -194,6 +204,9 @@ func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, e
 		for _, cond := range deploy.Status.Conditions {
 			if isAvailable(cond) {
 				readyObservations++
+			}
+			if isFailing(cond) {
+				return false, errors.Errorf("deployment is failing: %s", cond.Message)
 			}
 		}
 		// Make sure we query the deployment enough times to see the state change, provided there is one.
