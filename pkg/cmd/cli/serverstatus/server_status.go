@@ -45,35 +45,20 @@ func (g *DefaultServerStatusGetter) GetServerStatus(kbClient kbclient.Client) (*
 		return nil, errors.WithStack(err)
 	}
 
-	ctx, cancel := context.WithCancel(g.Context)
-	defer cancel()
-
 	key := kbclient.ObjectKey{Name: created.Name, Namespace: g.Namespace}
-	checkFunc := func() {
+	err := wait.PollUntilContextCancel(g.Context, 250*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		updated := &velerov1api.ServerStatusRequest{}
 		if err := kbClient.Get(ctx, key, updated); err != nil {
-			return
-		}
-
-		// TODO: once the minimum supported Kubernetes version is v1.9.0, remove the following check.
-		// See http://issue.k8s.io/51046 for details.
-		if updated.Name != created.Name {
-			return
+			return false, kbclient.IgnoreNotFound(err)
 		}
 
 		if updated.Status.Phase == velerov1api.ServerStatusRequestPhaseProcessed {
 			created = updated
-			cancel()
+			return true, nil
 		}
-	}
 
-	wait.Until(checkFunc, 250*time.Millisecond, ctx.Done())
-
-	err := ctx.Err()
-	// context.Canceled error means we have received a processed ServerStatusRequest
-	if err == context.Canceled {
-		err = nil
-	}
+		return false, nil
+	})
 
 	return created, err
 }
