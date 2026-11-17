@@ -81,6 +81,8 @@ For security compliance, Velero 1.19 ignores user-provided `spec.config.credenti
 
 ### All Changes
 
+  * Fix cross-namespace data mover restore regressed by #10333 (#10841, @Abhayanthk)
+  * Make the GoReleaser timeout configurable through RELEASE_TIMEOUT at the tag-release.sh entry point, defaulting to 60 minutes, and document remote release sessions. (#10799, @blackpiglet)
   * Remove the possible nil object from object list retrieved from BSL (#10771, @Lyndon-Li)
   * Revert #9943: include pkg/apis in the root Velero Go module again. (#10770, @blackpiglet)
   * Ignore incomplete PVB for backup sync to avoid unexpected execution from tampered data from BSL (#10769, @Lyndon-Li)
@@ -92,8 +94,10 @@ For security compliance, Velero 1.19 ignores user-provided `spec.config.credenti
   * Rollback creating retain snapshot according to snapshotClass for data movers and add the doc for snapshotClass selection (#10753, @Lyndon-Li)
   * Run the BSL deletion snapshot case on kind in CI when CSI is enabled (#10747, @krishhna24)
   * Fix issue #10724, add parallel upload/download control for Velero fs and block data mover (#10740, @Lyndon-Li)
+  * Fix the Tilt dev setup: tolerate an empty default_registry, pass GOBIN to hack/build.sh, build for the cluster's architecture instead of assuming amd64, and pin delve (#10739, @jvaikath) 
   * Treat a kopia snapshot not found after a repo refresh as deleted, so an interrupted backup deletion can be retried (#10700, @kaovilai)
   * Fix block data mover restore not zeroing unallocated ranges, BLKZEROOUT ioctl used the wrong request number (BLKPBSZGET) (#10698, @kaovilai)
+  * Add a workflow that keeps the Dependabot release branch entries for the runtime base image up to date (#10692, @kaovilai)
   * Let velero backup logs and velero restore logs fetch logs while the backup or restore is Finalizing or FinalizingPartiallyFailed (#10684, @MaxFreedomPollard)
   * Run the Kibishii file system backup cases on kind in CI when CSI is enabled (#10680, @krishhna24)
   * Run the namespace-mapping cases with real volumes on kind when CSI is enabled (#10679, @krishhna24)
