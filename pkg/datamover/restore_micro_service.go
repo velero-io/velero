@@ -112,6 +112,7 @@ func (r *RestoreMicroService) Init() error {
 					r.cancelDataDownload(newDd)
 				}
 			},
+			DeleteFunc: r.handleDataDownloadDelete,
 		},
 	)
 
@@ -293,6 +294,46 @@ func (r *RestoreMicroService) closeDataPath(ctx context.Context, ddName string) 
 	}
 
 	r.dataPathMgr.RemoveAsyncBR(ddName)
+}
+
+// handleDataDownloadDelete reacts to the DataDownload being deleted directly (e.g. its finalizer
+// was force-removed) instead of going through the normal Spec.Cancel flow, so the running data
+// path is still canceled and the pod doesn't keep running orphaned from its CR.
+//
+// Known trade-off: this adds a second, independent trigger for cancelDataDownload alongside the
+// existing Spec.Cancel-driven UpdateFunc. In the narrow case where both fire for the same
+// DataDownload before its data path was ever created (dataPathMgr never got an entry, so
+// cancelDataDownload takes its fsBackup==nil branch both times), the second call's blocking send
+// on resultSignal will have no reader left and block until this pod process exits, which happens
+// within moments via Shutdown()/funcExitWithMessage regardless. This is a same-process,
+// sub-second goroutine leak with no effect on the operation's outcome or on node-agent's own
+// cleanup (which watches the actual pod's phase, not this channel) - not worth guarding against
+// given the complexity a guard would add versus this bounded, effectively unobservable impact.
+func (r *RestoreMicroService) handleDataDownloadDelete(obj any) {
+	dd, ok := obj.(*velerov2alpha1api.DataDownload)
+	if !ok {
+		tombstone, ok := obj.(cachetool.DeletedFinalStateUnknown)
+		if !ok {
+			return
+		}
+
+		dd, ok = tombstone.Obj.(*velerov2alpha1api.DataDownload)
+		if !ok {
+			return
+		}
+	}
+
+	if dd.Name != r.dataDownloadName {
+		return
+	}
+
+	if dd.Status.Phase != velerov2alpha1api.DataDownloadPhaseInProgress {
+		return
+	}
+
+	r.logger.WithField("datadownload", dd.Name).Warn("DataDownload is deleted before its data path completed, canceling")
+
+	r.cancelDataDownload(dd)
 }
 
 func (r *RestoreMicroService) cancelDataDownload(dd *velerov2alpha1api.DataDownload) {

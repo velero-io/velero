@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
+	cachetool "k8s.io/client-go/tools/cache"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -231,6 +232,71 @@ func TestCancelDataDownload(t *testing.T) {
 			assert.True(t, bt.withEvent)
 			assert.Equal(t, test.expectedEventReason, bt.EventReason())
 			assert.Equal(t, test.expectedEventMsg, bt.EventMessage())
+		})
+	}
+}
+
+func TestHandleDataDownloadDelete(t *testing.T) {
+	dataDownloadName := "fake-data-download"
+	ddInProgress := builder.ForDataDownload(velerov1api.DefaultNamespace, dataDownloadName).Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
+	ddCompleted := builder.ForDataDownload(velerov1api.DefaultNamespace, dataDownloadName).Phase(velerov2alpha1api.DataDownloadPhaseCompleted).Result()
+	ddOther := builder.ForDataDownload(velerov1api.DefaultNamespace, "other-data-download").Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
+
+	tests := []struct {
+		name         string
+		obj          any
+		expectCancel bool
+	}{
+		{
+			name:         "in progress dd deleted directly, cancel is triggered",
+			obj:          ddInProgress,
+			expectCancel: true,
+		},
+		{
+			name:         "in progress dd deleted via tombstone, cancel is triggered",
+			obj:          cachetool.DeletedFinalStateUnknown{Key: dataDownloadName, Obj: ddInProgress},
+			expectCancel: true,
+		},
+		{
+			name: "already terminal dd deleted, cancel is not triggered",
+			obj:  ddCompleted,
+		},
+		{
+			name: "dd of another name deleted, cancel is not triggered",
+			obj:  ddOther,
+		},
+		{
+			name: "tombstone with unexpected object, cancel is not triggered",
+			obj:  cachetool.DeletedFinalStateUnknown{Key: dataDownloadName, Obj: "not-a-dd"},
+		},
+		{
+			name: "unexpected object type, cancel is not triggered",
+			obj:  "not-a-dd",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bt := &backupMsTestHelper{}
+
+			bs := &RestoreMicroService{
+				dataDownloadName: dataDownloadName,
+				dataPathMgr:      datapath.NewManager(1),
+				eventRecorder:    bt,
+				resultSignal:     make(chan dataPathResult),
+				logger:           velerotest.NewLogger(),
+			}
+
+			if test.expectCancel {
+				go bs.handleDataDownloadDelete(test.obj)
+
+				result := <-bs.resultSignal
+				require.EqualError(t, result.err, datapath.ErrCancelled)
+				assert.True(t, bt.withEvent)
+			} else {
+				bs.handleDataDownloadDelete(test.obj)
+				assert.False(t, bt.withEvent)
+			}
 		})
 	}
 }
