@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Velero binary build section
-FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie AS velero-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS velero-builder
 
 ARG GOPROXY
 ARG BIN
@@ -49,7 +49,7 @@ RUN mkdir -p /output/usr/bin && \
     go clean -modcache -cache
 
 # Velero image packing section
-FROM paketobuildpacks/ubuntu-noble-run-tiny:0.0.156
+FROM paketobuildpacks/ubuntu-noble-run-tiny:0.0.160
 
 LABEL maintainer="Xun Jiang <xun.jiang@broadcom.com>"
 
