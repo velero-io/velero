@@ -1131,7 +1131,7 @@ func (p *pvcBackupItemAction) updateVGSCreatedVS(
 			if latestVS.Labels == nil {
 				latestVS.Labels = make(map[string]string)
 			}
-			latestVS.Labels[velerov1api.BackupNameLabel] = backup.Name
+			latestVS.Labels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
 			latestVS.Labels[velerov1api.BackupUIDLabel] = string(backup.UID)
 
 			// Attempt to update
