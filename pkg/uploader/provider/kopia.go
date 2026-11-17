@@ -175,10 +175,10 @@ func (kp *kopiaProvider) RunBackup(
 			log.Infof("Kopia backup failed with %v and get empty snapshot ID", err)
 		}
 
-		if kpUploader.IsCanceled() {
-			log.Warn("Kopia backup is canceled")
+		if ctx.Err() != nil {
 			return snapshotID, false, 0, 0, 0, snapshotInfo.Fallback, ErrorCanceled
 		}
+
 		return snapshotID, false, 0, 0, 0, snapshotInfo.Fallback, errors.Wrapf(err, "Failed to run kopia backup")
 	}
 
