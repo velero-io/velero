@@ -55,6 +55,7 @@ func TestPrintVersion(t *testing.T) {
 		name                string
 		clientOnly          bool
 		serverStatusRequest *velerov1.ServerStatusRequest
+		kbClientError       error
 		getterError         error
 		clientVersion       string
 		want                string
@@ -63,6 +64,12 @@ func TestPrintVersion(t *testing.T) {
 			name:       "client-only",
 			clientOnly: true,
 			want:       clientVersion,
+		},
+		{
+			name:          "kubebuilder client error still prints client version",
+			clientOnly:    false,
+			kbClientError: errors.New("error finding Kubernetes API server config"),
+			want:          clientVersion + "<error getting server version: error finding Kubernetes API server config>\n",
 		},
 		{
 			name:                "server status getter error",
@@ -105,11 +112,12 @@ func TestPrintVersion(t *testing.T) {
 			defer serverStatusGetter.AssertExpectations(t)
 
 			// GetServerStatus should only be called when clientOnly = false
-			if !tc.clientOnly {
+			// and the kubebuilder client was created successfully
+			if !tc.clientOnly && tc.kbClientError == nil {
 				serverStatusGetter.On("GetServerStatus", kbClient).Return(tc.serverStatusRequest, tc.getterError)
 			}
 
-			printVersion(buf, tc.clientOnly, kbClient, serverStatusGetter)
+			printVersion(buf, tc.clientOnly, kbClient, tc.kbClientError, serverStatusGetter)
 
 			assert.Equal(t, tc.want, buf.String())
 		})

@@ -1,0 +1,1 @@
+Show the client version in velero version when the kubeconfig is unavailable
