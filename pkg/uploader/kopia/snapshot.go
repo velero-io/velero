@@ -301,6 +301,14 @@ func SnapshotSource(
 		return "", 0, fallback, errors.Wrapf(err, "failed to upload the kopia snapshot for si %v", sourceInfo)
 	}
 
+	if manifest.IncompleteReason != "" {
+		if _, _, _, err := reportSnapshotStatus(manifest, policyTree, fallback); err != nil {
+			return "", 0, fallback, err
+		}
+
+		return "", 0, fallback, errors.Errorf("kopia upload incomplete: %s", manifest.IncompleteReason)
+	}
+
 	manifest.Tags = snapshotTags
 
 	manifest.Description = description
