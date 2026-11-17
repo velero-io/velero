@@ -87,7 +87,7 @@ print("Tilt: cluster_goarch={} (local {})".format(cluster_goarch, local_goarch))
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.27.3-trixie as tilt-helper
+FROM golang:1.27.4-trixie as tilt-helper
 
 # Support live reloading with Tilt
 RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
