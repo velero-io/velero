@@ -1,0 +1,1 @@
+Fix issue #10839, remove the pod name when PVB is for a PVC
