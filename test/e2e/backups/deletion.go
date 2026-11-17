@@ -261,8 +261,11 @@ func runBackupDeletionTests(client TestClient, veleroCfg VeleroConfig, backupLoc
 	}
 
 	// Hit issue: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#:~:text=SnapshotCreationPerVolumeRateExceeded
-	// Sleep for more than 15 seconds to avoid this issue.
-	time.Sleep(1 * time.Minute)
+	// Sleep for more than 15 seconds to avoid this issue. Only providers whose
+	// snapshot API is rate limited need it; kind takes CSI snapshots locally.
+	if SnapshotsAreRemote(veleroCfg.CloudProvider) {
+		time.Sleep(1 * time.Minute)
+	}
 
 	backupName = "backup-1-" + UUIDgen.String()
 	BackupCfg.BackupName = backupName

@@ -67,6 +67,20 @@ func FeatureEnabled(features, name string) bool {
 	return false
 }
 
+// SnapshotsAreRemote reports whether the provider's snapshots are taken by a
+// remote cloud service, rather than locally in the cluster.
+//
+// The suite has a few fixed waits that exist only because of those services: a
+// snapshot that is still pending once the backup reports it done
+// (velero-io/velero#1799), and a snapshot creation API that is rate limited.
+// Neither applies to kind, which takes CSI snapshots locally through
+// csi-driver-host-path, and where the backup already waits for the
+// VolumeSnapshot to become ReadyToUse before completing
+// (pkg/backup/actions/csi/pvc_action.go). Those waits are dead time there.
+func SnapshotsAreRemote(cloudProvider string) bool {
+	return cloudProvider != Kind && cloudProvider != KindCSI
+}
+
 const FeatureCSI = "EnableCSI"
 const VanillaZFS = "vanilla-zfs"
 const Kind = "kind"
