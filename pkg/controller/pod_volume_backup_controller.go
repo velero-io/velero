@@ -713,7 +713,7 @@ func (r *PodVolumeBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *PodVolumeBackupReconciler) findPVBForPod(ctx context.Context, podObj client.Object) []reconcile.Request {
 	pod := podObj.(*corev1api.Pod)
-	pvb, err := findPVBByPod(r.client, *pod)
+	pvb, err := findPVBByPod(ctx, r.client, *pod)
 
 	log := r.logger.WithField("pod", pod.Name)
 	if err != nil {
@@ -734,7 +734,7 @@ func (r *PodVolumeBackupReconciler) findPVBForPod(ctx context.Context, podObj cl
 	if pod.Status.Phase == corev1api.PodRunning {
 		log.Info("Preparing PVB")
 
-		if err = UpdatePVBWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
+		if err = UpdatePVBWithRetry(ctx, r.client, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
 			func(pvb *velerov1api.PodVolumeBackup) bool {
 				if isPVBInFinalState(pvb) {
 					log.Warnf("PVB %s is terminated, abort setting it to prepared", pvb.Name)
@@ -748,7 +748,7 @@ func (r *PodVolumeBackupReconciler) findPVBForPod(ctx context.Context, podObj cl
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
-		err := UpdatePVBWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
+		err := UpdatePVBWithRetry(ctx, r.client, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
 			func(pvb *velerov1api.PodVolumeBackup) bool {
 				if pvb.Spec.Cancel {
 					return false
@@ -900,10 +900,10 @@ func getPVBOwnerObject(pvb *velerov1api.PodVolumeBackup) corev1api.ObjectReferen
 	}
 }
 
-func findPVBByPod(client client.Client, pod corev1api.Pod) (*velerov1api.PodVolumeBackup, error) {
+func findPVBByPod(ctx context.Context, client client.Client, pod corev1api.Pod) (*velerov1api.PodVolumeBackup, error) {
 	if label, exist := pod.Labels[velerov1api.PVBLabel]; exist {
 		pvb := &velerov1api.PodVolumeBackup{}
-		err := client.Get(context.Background(), types.NamespacedName{
+		err := client.Get(ctx, types.NamespacedName{
 			Namespace: pod.Namespace,
 			Name:      label,
 		}, pvb)
