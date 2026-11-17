@@ -1,0 +1,1 @@
+Sanitize the backup name label on VolumeSnapshots created by a VolumeGroupSnapshot so backups with names longer than 63 characters succeed
