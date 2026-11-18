@@ -3389,6 +3389,45 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 		},
 	}
 
+	// renameOperationAction is a *pluggableAction that renames the item it
+	// backs up and starts an operation, so the operation must be recorded for
+	// the identity the item was given, not the one it was selected with.
+	renameOperationAction := &pluggableAction{
+		executeFunc: func(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
+			obj, ok := item.(*unstructured.Unstructured)
+			if !ok {
+				return nil, nil, "", nil, errors.Errorf("unexpected type %T", item)
+			}
+
+			renamed := obj.DeepCopy()
+			renamed.SetName(obj.GetName() + "-renamed")
+			renamed.SetNamespace(obj.GetNamespace() + "-renamed")
+			return renamed, nil, obj.GetName() + "-1", nil, nil
+		},
+		progressFunc: func(operationID string, backup *velerov1.Backup) (velero.OperationProgress, error) {
+			return velero.OperationProgress{
+				Completed:   true,
+				Description: "Done!",
+			}, nil
+		},
+	}
+
+	// renameOnlyAction renames the item but does not start an operation, so an
+	// operation started by a later action must pick up the renamed identity.
+	renameOnlyAction := &pluggableAction{
+		executeFunc: func(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
+			obj, ok := item.(*unstructured.Unstructured)
+			if !ok {
+				return nil, nil, "", nil, errors.Errorf("unexpected type %T", item)
+			}
+
+			renamed := obj.DeepCopy()
+			renamed.SetName(obj.GetName() + "-renamed")
+			renamed.SetNamespace(obj.GetNamespace() + "-renamed")
+			return renamed, nil, "", nil, nil
+		},
+	}
+
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
 	defer itemBlockPool.Stop()
 	tests := []struct {
@@ -3397,6 +3436,7 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 		apiResources []*test.APIResource
 		actions      []biav2.BackupItemAction
 		want         []*itemoperation.BackupOperation
+		wantTarFiles map[string]unstructuredObject
 	}{
 		{
 			name: "action that starts a short-running process records operation",
@@ -3480,6 +3520,77 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 			},
 			want: []*itemoperation.BackupOperation{},
 		},
+		{
+			name: "action that renames the item records the post-action identity",
+			req: &Request{
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
+			},
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-4").Result(),
+				),
+			},
+			actions: []biav2.BackupItemAction{
+				renameOperationAction,
+			},
+			want: []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						BackupName: "backup-1",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.Pods,
+							Namespace:     "ns-1-renamed",
+							Name:          "pod-4-renamed"},
+						OperationID: "pod-4-1",
+					},
+					Status: itemoperation.OperationStatus{
+						Phase: "New",
+					},
+				},
+			},
+			wantTarFiles: map[string]unstructuredObject{
+				"resources/pods/namespaces/ns-1-renamed/pod-4-renamed.json": toUnstructuredOrFail(t, builder.ForPod("ns-1-renamed", "pod-4-renamed").Result()),
+			},
+		},
+		{
+			name: "operation started by a later action uses the identity from an earlier rename",
+			req: &Request{
+				Backup:               defaultBackup().Result(),
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
+			},
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-5").Result(),
+				),
+			},
+			actions: []biav2.BackupItemAction{
+				renameOnlyAction,
+				completedOperationAction,
+			},
+			want: []*itemoperation.BackupOperation{
+				{
+					Spec: itemoperation.BackupOperationSpec{
+						BackupName: "backup-1",
+						ResourceIdentifier: velero.ResourceIdentifier{
+							GroupResource: kuberesource.Pods,
+							Namespace:     "ns-1-renamed",
+							Name:          "pod-5-renamed"},
+						OperationID: "pod-5-renamed-1",
+					},
+					Status: itemoperation.OperationStatus{
+						Phase: "New",
+					},
+				},
+			},
+			wantTarFiles: map[string]unstructuredObject{
+				"resources/pods/namespaces/ns-1-renamed/pod-5-renamed.json": toUnstructuredOrFail(t, builder.ForPod("ns-1-renamed", "pod-5-renamed").Result()),
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -3497,11 +3608,18 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 			require.NoError(t, err)
 
 			resultOper := *tc.req.GetItemOperationsList()
+			require.Len(t, resultOper, len(tc.want), "unexpected number of item operations")
 			// set want Created times so it won't fail the assert.Equal test
 			for i, wantOper := range tc.want {
 				wantOper.Status.Created = resultOper[i].Status.Created
 			}
 			assert.Equal(t, tc.want, *tc.req.GetItemOperationsList())
+
+			// Confirm the archive entry uses the same post-action identity as
+			// the operation.
+			if tc.wantTarFiles != nil {
+				assertTarballFileContents(t, backupFile, tc.wantTarFiles)
+			}
 		})
 	}
 }
