@@ -344,6 +344,9 @@ func (ib *itemBackupper) backupItemInternal(logger logrus.FieldLogger, obj runti
 		return false, itemFiles, kubeerrs.NewAggregate(backupErrs)
 	}
 
+	if groupResource == kuberesource.PersistentVolumeClaims {
+		csiutil.RemoveVGSMembershipLabels(metadata)
+	}
 	itemBytes, err := json.Marshal(obj.UnstructuredContent())
 	if err != nil {
 		return false, itemFiles, errors.WithStack(err)

@@ -18,6 +18,7 @@ package csi
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"time"
@@ -793,7 +794,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 		}
 
 		// Create the VGS object
-		newVGS, err := p.createVolumeGroupSnapshot(ctx, backup, pvc, vgsLabelKey, group, vgsClass)
+		newVGS, err := p.createVolumeGroupSnapshot(ctx, backup, pvc, filteredPVCs, vgsLabelKey, group, vgsClass)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create VolumeGroupSnapshot for PVC %s/%s", pvc.Namespace, pvc.Name)
 		}
@@ -995,8 +996,23 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 	ctx context.Context,
 	backup *velerov1api.Backup,
 	pvc corev1api.PersistentVolumeClaim,
+	filteredPVCs []corev1api.PersistentVolumeClaim,
 	vgsLabelKey, vgsLabelValue, vgsClassName string,
 ) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
+	if backup.UID == "" || len(filteredPVCs) == 0 {
+		return nil, errors.New("backup UID and eligible PVCs are required to create a VolumeGroupSnapshot")
+	}
+	// Give each backup/group/class a stable name. Processing a second PVC after
+	// a timeout must reuse the same VGS when its grouping and class are unchanged.
+	groupID := sha256.Sum256([]byte(string(backup.UID) + "/" + vgsLabelKey + "/" + vgsLabelValue + "/" + vgsClassName))
+	vgsName := fmt.Sprintf("velero-vgs-%x", groupID[:16])
+	existing, err := csi.GetVGS(ctx, p.crClient, pvc.Namespace, vgsName)
+	if err == nil {
+		return existing, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, errors.Wrap(err, "failed to find existing VolumeGroupSnapshot")
+	}
 	currentBackup := &velerov1api.Backup{}
 	if err := p.crClient.Get(ctx, crclient.ObjectKeyFromObject(backup), currentBackup); err != nil {
 		return nil, errors.Wrap(err, "failed to mark Backup for VolumeGroupSnapshot cleanup")
@@ -1010,6 +1026,9 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 			return nil, errors.Wrap(err, "failed to mark Backup for VolumeGroupSnapshot cleanup")
 		}
 	}
+	if err := csi.MarkVGSMembers(ctx, p.crClient, backup.UID, vgsLabelValue, filteredPVCs); err != nil {
+		return nil, err
+	}
 	vgsLabels := map[string]string{
 		velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
 		velerov1api.BackupUIDLabel:  string(backup.UID),
@@ -1018,35 +1037,34 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 
 	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("velero-%s-", vgsLabelValue),
-			Namespace:    pvc.Namespace,
-			Labels:       vgsLabels,
+			Name:      vgsName,
+			Namespace: pvc.Namespace,
+			Labels:    vgsLabels,
 		},
 		Spec: volumegroupsnapshotv1.VolumeGroupSnapshotSpec{
 			VolumeGroupSnapshotClassName: &vgsClassName,
 			Source: volumegroupsnapshotv1.VolumeGroupSnapshotSource{
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						vgsLabelKey: vgsLabelValue,
+						csi.VGSMembershipLabelKey(backup.UID): vgsLabelValue,
 					},
 				},
 			},
 		},
 	}
 
-	if _, err := csi.CreateVGS(ctx, p.crClient, vgs); err != nil {
+	createdVGS, err := csi.CreateVGS(ctx, p.crClient, vgs)
+	if apierrors.IsAlreadyExists(err) {
+		return csi.GetVGS(ctx, p.crClient, pvc.Namespace, vgsName)
+	}
+	if err != nil {
 		return nil, errors.Wrap(err, "failed to create VolumeGroupSnapshot")
 	}
 
-	refetchedVGS, err := p.getVGSByLabels(ctx, pvc.Namespace, vgsLabels)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to re-fetch VGS after creation")
-	}
+	p.log.Infof("Created VolumeGroupSnapshot %s/%s for PVC group label %s=%s",
+		createdVGS.Namespace, createdVGS.Name, vgsLabelKey, vgsLabelValue)
 
-	p.log.Infof("Re-fetched Created VolumeGroupSnapshot %s/%s for PVC group label %s=%s",
-		refetchedVGS.Namespace, refetchedVGS.Name, vgsLabelKey, vgsLabelValue)
-
-	return refetchedVGS, nil
+	return createdVGS, nil
 }
 
 func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
@@ -1194,22 +1212,6 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 
 		return false, nil
 	})
-}
-
-func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1.VolumeGroupSnapshot, error) {
-	vgsList, err := csi.ListVGS(ctx, p.crClient, namespace, labels)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list VolumeGroupSnapshots by labels")
-	}
-
-	if len(vgsList.Items) == 0 {
-		return nil, errors.New("no VolumeGroupSnapshot found matching labels")
-	}
-	if len(vgsList.Items) > 1 {
-		return nil, errors.New("multiple VolumeGroupSnapshots found matching labels")
-	}
-
-	return &vgsList.Items[0], nil
 }
 
 func setPVCRequestSizeToVSRestoreSize(
