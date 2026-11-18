@@ -377,7 +377,7 @@ func (p *pvcBackupItemAction) Execute(
 
 	labels := map[string]string{
 		velerov1api.VolumeSnapshotLabel: vs.Name,
-		velerov1api.BackupNameLabel:     backup.Name,
+		velerov1api.BackupNameLabel:     label.GetValidName(backup.Name),
 	}
 
 	annotations := map[string]string{
