@@ -55,7 +55,9 @@ spec:
   # Schedule is a Cron expression defining when to run the Backup
   schedule: 0 7 * * *
   # Specifies whether to use OwnerReferences on backups created by this Schedule. 
-  # Notice: if set to true, when schedule is deleted, backups will be deleted too. Optional.
+  # Notice: if set to true, when the schedule is deleted, Kubernetes garbage collects the Backup CRs it created.
+  # Backup data and snapshots are not deleted, and the backups are synced back from the backup storage location.
+  # Use `velero backup delete` to delete backups. Optional.
   useOwnerReferencesInBackup: false
   # Template is the spec that should be used for each backup triggered by this schedule.
   template:

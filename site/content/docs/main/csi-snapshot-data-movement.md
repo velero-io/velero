@@ -32,7 +32,7 @@ Velero Built-in Data Mover (VBDM) provides two data movers:
    - Provides significant performance and efficiency advantages:
      - **Higher throughput and lower resource usage**: Avoids file system scanning overhead, particularly beneficial for large volumes or file systems with millions of small files.
      - **True incremental backups via CBT**: Only transfers changed blocks since the previous snapshot, substantially minimizing network transfer, backup storage footprint, and backup duration (lowering TCO).
-     - **Volume mode flexibility**: Backs up both `FileSystem` and `Block` volumeMode volumes (as long as backed by block storage). On restore, writes raw block data and can rebind to either `FileSystem` or `Block` mode target PVCs.
+     - **Volume mode flexibility**: Works at the block level for both `FileSystem` and `Block` mode volumes (as long as they are backed by block storage), so `FileSystem` mode volumes also get block-level throughput and CBT incremental backups. On restore, it writes the raw block data to a `Block` mode volume and then rebinds that volume to the target PVC in the backed-up volume's mode. Changing the volume mode on restore (for example from `Block` to `FileSystem` with resource modifiers) has not been validated.
      - **OS independence**: Does not require host filesystem drivers for the volume's filesystem format.
    - For more technical details, see the [Block Data Mover Design][24].
 

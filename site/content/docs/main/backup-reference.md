@@ -131,7 +131,7 @@ velero schedule create --use-owner-references-in-backup <backup-name>
 ```
 By this way, schedule is the owner of it created backups. This is useful for some GitOps scenarios, or the resource tree of k8s synchronized from other places.
 
-Please do notice there is also side effect that may not be expected. Because schedule is the owner, when the schedule is deleted, the related backups CR (Just backup CR is deleted. Backup data still exists in object store and snapshots) will be deleted by k8s GC controller, too, but Velero controller will sync these backups from object store's metadata into k8s. Then k8s GC controller and Velero controller will fight over whether these backups should exist all through.
+Please do notice there is also side effect that may not be expected. Because schedule is the owner, when the schedule is deleted, the related Backup CRs are deleted by the k8s GC controller. This is not a Velero backup deletion: no DeleteBackupRequest is created, and the backup data in the object store and the volume snapshots are kept. The backup sync controller then syncs these backups from the object store's metadata back into k8s, without the owner reference to the deleted schedule. To delete the backups and their data, use `velero backup delete` (for example `velero backup delete --selector velero.io/schedule-name=<schedule-name>`) before or after deleting the schedule.
 
 If there is possibility the schedule will be disable to not create backup anymore, and the created backups are still useful. Please do not enable this option. For detail, please reference to [Backups created by a schedule with useOwnerReferenceInBackup set do not get synced properly](https://github.com/velero-io/velero/issues/4093).
 
