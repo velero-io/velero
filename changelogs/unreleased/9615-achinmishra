@@ -1,0 +1,1 @@
+Add the velero.io/exclude-from-backup=true label to the Velero namespace created by velero install so it is excluded from backups by default

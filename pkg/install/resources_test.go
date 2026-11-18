@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func TestResources(t *testing.T) {
@@ -51,6 +53,8 @@ func TestResources(t *testing.T) {
 	assert.Equal(t, "latest", ns.Labels["pod-security.kubernetes.io/audit-version"])
 	assert.Equal(t, "privileged", ns.Labels["pod-security.kubernetes.io/warn"])
 	assert.Equal(t, "latest", ns.Labels["pod-security.kubernetes.io/warn-version"])
+	// The Velero namespace is excluded from backups by default.
+	assert.Equal(t, "true", ns.Labels[velerov1api.ExcludeFromBackupLabel])
 
 	crb := ClusterRoleBinding(DefaultVeleroNamespace)
 	// The CRB is a cluster-scoped resource

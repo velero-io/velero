@@ -223,6 +223,12 @@ Kubernetes resources to exclude, formatted as resource.group, such as storagecla
 ### velero.io/exclude-from-backup=true
 
 * Resources with the label `velero.io/exclude-from-backup=true` are not included in backup, even if it contains a matching selector label.
+* Namespaces with this label are excluded from backup entirely.
+* Velero does not support backing up its own namespace. `velero install` adds this label to the Velero namespace it creates. For existing installations, or installations that use other methods (such as Helm), add the label manually:
+
+  ```bash
+  kubectl label namespace <velero-namespace> velero.io/exclude-from-backup=true
+  ```
 
 ### --exclude-cluster-scoped-resources
 Kubernetes cluster-scoped resources to exclude from the backup, formatted as resource.group, such as `storageclasses.storage.k8s.io`(use '*' for all resources). Cannot work with `--include-resources`, `--exclude-resources` and `--include-cluster-resources`. This parameter only works for backup, not for restore.

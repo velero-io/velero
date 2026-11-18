@@ -167,6 +167,9 @@ func Namespace(namespace string) *corev1api.Namespace {
 	ns.Labels["pod-security.kubernetes.io/warn"] = podSecurityLevel
 	ns.Labels["pod-security.kubernetes.io/warn-version"] = podSecurityVersion
 
+	// Velero does not support backing up its own namespace, so exclude it from backups by default.
+	ns.Labels[velerov1api.ExcludeFromBackupLabel] = "true"
+
 	return ns
 }
 
