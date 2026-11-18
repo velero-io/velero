@@ -157,7 +157,7 @@ func GetRealSource(pvb *velerov1api.PodVolumeBackup) string {
 	}
 
 	if pvcName != "" {
-		return fmt.Sprintf("%s/%s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvcName)
+		return fmt.Sprintf("%s/%s", pvb.Spec.Pod.Namespace, pvcName)
 	} else {
 		return fmt.Sprintf("%s/%s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Spec.Volume)
 	}
