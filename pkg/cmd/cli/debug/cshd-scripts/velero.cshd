@@ -3,14 +3,14 @@ def capture_backup_logs(cmd, namespace):
         log("Collecting log and information for backup: {}".format(args.backup))
         backupDescCmd = "{} --namespace={} backup describe {} --details".format(cmd, namespace, args.backup)
         capture_local(cmd=backupDescCmd, file_name="backup_describe_{}.txt".format(args.backup))
-        backupLogsCmd = "{} --namespace={} backup logs {}".format(cmd, namespace, args.backup)
+        backupLogsCmd = "{} --colorized=false --namespace={} backup logs {}".format(cmd, namespace, args.backup)
         capture_local(cmd=backupLogsCmd, file_name="backup_{}.log".format(args.backup))
 def capture_restore_logs(cmd, namespace):
     if args.restore:
         log("Collecting log and information for restore: {}".format(args.restore))
         restoreDescCmd = "{} --namespace={} restore describe {} --details".format(cmd, namespace, args.restore)
         capture_local(cmd=restoreDescCmd, file_name="restore_describe_{}.txt".format(args.restore))
-        restoreLogsCmd = "{} --namespace={} restore logs {}".format(cmd, namespace, args.restore)
+        restoreLogsCmd = "{} --colorized=false --namespace={} restore logs {}".format(cmd, namespace, args.restore)
         capture_local(cmd=restoreLogsCmd, file_name="restore_{}.log".format(args.restore))
 
 ns = args.namespace if args.namespace else "velero"

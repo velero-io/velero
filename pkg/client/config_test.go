@@ -34,7 +34,7 @@ func TestVeleroConfig(t *testing.T) {
 
 	assert.Equal(t, "foo", c.Namespace())
 	assert.Equal(t, []string{"feature1", "feature2"}, c.Features())
-	assert.True(t, c.Colorized())
+	assert.Nil(t, c.Colorized())
 }
 
 func removeConfigfileName() error {
@@ -79,7 +79,7 @@ func TestConfigOperations(t *testing.T) {
 	expectedCACert := "ca-cert"
 
 	config[ConfigKeyFeatures] = expectedFeature
-	config[ConfigKeyColorized] = expectedColorized
+	config[ConfigKeyColorized] = "true"
 	config[ConfigKeyNamespace] = expectedNamespace
 	config[ConfigKeyCACert] = expectedCACert
 
@@ -96,7 +96,8 @@ func TestConfigOperations(t *testing.T) {
 
 	// Test Colorized
 	colorized := savedConfig.Colorized()
-	assert.Equal(t, expectedColorized, colorized)
+	require.NotNil(t, colorized)
+	assert.Equal(t, expectedColorized, *colorized)
 
 	// Test Namespace
 	namespace := savedConfig.Namespace()

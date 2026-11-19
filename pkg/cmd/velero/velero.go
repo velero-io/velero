@@ -66,7 +66,7 @@ func NewCommand(name string) *cobra.Command {
 	// Declare cmdFeatures and cmdColorzied here so we can access them in the PreRun hooks
 	// without doing a chain of calls into the command's FlagSet
 	var cmdFeatures veleroflag.StringArray
-	var cmdColorzied veleroflag.OptionalBool
+	var cmdColorized veleroflag.OptionalBool
 
 	c := &cobra.Command{
 		Use:   name,
@@ -85,11 +85,11 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 			features.Enable(config.Features()...)
 			features.Enable(cmdFeatures...)
 
-			switch {
-			case cmdColorzied.Value != nil:
-				color.NoColor = !*cmdColorzied.Value
-			default:
-				color.NoColor = !config.Colorized()
+			// explicitly set NoColor if user asked for it
+			if cmdColorized.Value != nil {
+				color.NoColor = !*cmdColorized.Value
+			} else if colorized := config.Colorized(); colorized != nil {
+				color.NoColor = !*colorized
 			}
 		},
 	}
@@ -101,7 +101,7 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 	c.PersistentFlags().Var(&cmdFeatures, "features", "Comma-separated list of features to enable for this Velero process. Combines with values from $HOME/.config/velero/config.json if present")
 
 	// Color will be enabled or disabled for all subcommands
-	c.PersistentFlags().Var(&cmdColorzied, "colorized", "Show colored output in TTY. Overrides 'colorized' value from $HOME/.config/velero/config.json if present. Enabled by default")
+	c.PersistentFlags().Var(&cmdColorized, "colorized", "Force or disable colored output. Overrides 'colorized' value from $HOME/.config/velero/config.json if present. Auto-detected by default")
 
 	c.AddCommand(
 		backup.NewCommand(f),
