@@ -716,7 +716,7 @@ end diagnose pod volume exposer`,
 			expected: `begin diagnose pod volume exposer
 Pod velero/fake-backup, phase Pending, node name fake-node, message 
 Pod condition Initialized, status True, reason , message fake-pod-message
-node-agent is not running in node fake-node, err: daemonset pod not found in running state in node fake-node
+node-agent is not running in node fake-node, err: daemonset pod not found in node fake-node
 end diagnose pod volume exposer`,
 		},
 		{

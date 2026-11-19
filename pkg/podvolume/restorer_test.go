@@ -333,7 +333,7 @@ func TestRestorePodVolumes(t *testing.T) {
 			runtimeScheme:   scheme,
 			errs: []expectError{
 				{
-					err: "node-agent pod is not running in node fake-node-name: daemonset pod not found in running state in node fake-node-name",
+					err: "node-agent pod is not running in node fake-node-name: daemonset pod not found in node fake-node-name",
 				},
 			},
 		},
