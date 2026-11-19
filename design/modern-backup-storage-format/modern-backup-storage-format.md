@@ -94,30 +94,31 @@ For long-term, Format 1.x may be deprecated when Format 2.0 is mostly adopted.
 Below are the backup storage file layout before and after the change:
 
 ```text
-Format 1.x (Legacy)                                Format 2.0 (Modernized & Encrypted)
-<bucket>/[<prefix>/]                              <bucket>/[<prefix>/]
-├── backups/                                      ├── velero-storage.json                             [ENCRYPTED]
-│   └── <backup-name>/                            ├── backups/
-│       ├── velero-backup.json (Plaintext)        │   └── <backup-name>/
-│       ├── <name>.tar.gz     (Plaintext)         │       ├── velero-backup.json                      [ENCRYPTED]
-│       ├── <name>-logs.gz    (Plaintext)         │       ├── <name>.tar.zst                          [ENCRYPTED]
-│       ├── <name>-results.gz (Plaintext)         │       ├── <name>-results.json.zst                 [ENCRYPTED]
-│       ├── <name>-volumeinfo.json.gz             │       ├── <name>-volumeinfo.json.zst              [ENCRYPTED]
-│       ├── <name>-volumesnapshots.json.gz        │       ├── <name>-volumesnapshots.json.zst         [ENCRYPTED]
-│       ├── <name>-podvolumebackups.json.gz       │       ├── <name>-podvolumebackups.json.zst        [ENCRYPTED]
-│       ├── <name>-itemoperations.json.gz         │       ├── <name>-itemoperations.json.zst          [ENCRYPTED]
-│       ├── <name>-resource-list.json.gz          │       ├── <name>-public.json                      [PLAINTEXT]
-│       └──                                       │       ├── <name>-logs.zst                         [CONFIGURABLY ENCRYPTED]
-│                                                 │       └── <name>-resource-list.json.zst           [CONFIGURABLY ENCRYPTED]
-├── restores/                                     ├── restores/
-│   └── <restore-name>/                           │   └── <restore-name>/
-│       ├── restore-<name>-logs.gz                │       ├── restore-<name>-results.json.zst         [ENCRYPTED]
-│       ├── restore-<name>-results.gz             │       ├── restore-<name>-volumeinfo.json.zst      [ENCRYPTED]
-│       ├── <name>-volumeinfo.json.gz             │       ├── restore-<name>-itemoperations.json.zst  [ENCRYPTED]
-│       ├── restore-<name>-itemoperations.json.gz │       ├── restore-<name>-public.json              [PLAINTEXT]
-│       └── restore-<name>-resource-list.json.gz  │       ├── restore-<name>-logs.zst                 [CONFIGURABLY ENCRYPTED]
-│                                                 │       └── restore-<name>-resource-list.json.zst   [CONFIGURABLY ENCRYPTED]
-└── kopia/ (Encrypted repo data)                  └── kopia/ (Encrypted repo data)
+Format 1.x (Legacy)                                  Format 2.0 (Modernized & Encrypted)
+<bucket>/[<prefix>/]                                 <bucket>/[<prefix>/]
+├── backups/                                         └── v2/
+│   └── <backup-name>/                                   ├── velero-storage.json [ENCRYPTED]
+│       ├── velero-backup.json (Plaintext)               ├── backups/
+│       ├── <name>.tar.gz (Plaintext)                    │   └── <backup-name>/
+│       ├── <name>-logs.gz (Plaintext)                   │       ├── velero-backup.json [ENCRYPTED]
+│       ├── <name>-results.gz (Plaintext)                │       ├── <name>.tar.zst [ENCRYPTED]
+│       ├── <name>-volumeinfo.json.gz                    │       ├── <name>-results.json.zst [ENCRYPTED]
+│       ├── <name>-volumesnapshots.json.gz               │       ├── <name>-volumeinfo.json.zst [ENCRYPTED]
+│       ├── <name>-podvolumebackups.json.gz              │       ├── <name>-volumesnapshots.json.zst [ENCRYPTED]
+│       ├── <name>-itemoperations.json.gz                │       ├── <name>-podvolumebackups.json.zst [ENCRYPTED]
+│       └── <name>-resource-list.json.gz                 │       ├── <name>-itemoperations.json.zst [ENCRYPTED]
+│                                                        │       ├── <name>-public.json [PLAINTEXT]
+├── restores/                                            │       ├── <name>-logs.zst [CONFIGURABLY ENCRYPTED]
+│   └── <restore-name>/                                  │       └── <name>-resource-list.json.zst [CONFIGURABLY ENCRYPTED]
+│       ├── restore-<name>-logs.gz                       ├── restores/
+│       ├── restore-<name>-results.gz                    │   └── <restore-name>/
+│       ├── <name>-volumeinfo.json.gz                    │       ├── restore-<name>-results.json.zst [ENCRYPTED]
+│       ├── restore-<name>-itemoperations.json.gz        │       ├── restore-<name>-volumeinfo.json.zst [ENCRYPTED]
+│       └── restore-<name>-resource-list.json.gz         │       ├── restore-<name>-itemoperations.json.zst [ENCRYPTED]
+└── kopia/ (Encrypted repo data)                         │       ├── restore-<name>-public.json [PLAINTEXT]
+                                                         │       ├── restore-<name>-logs.zst [CONFIGURABLY ENCRYPTED]
+                                                         │       └── restore-<name>-resource-list.json.zst [CONFIGURABLY ENCRYPTED]
+                                                         └── kopia/ (Encrypted repo data)
 ```
 
 Except encryption and compression, logical contents in files are mostly not changed. Some duplication and merge are made to make sure this rule -- a file is either used by Velero Core workflow or for Auxiliary purposes.  
@@ -152,6 +153,9 @@ Below lists the Auxiliary files:
 - `<restore-name>/<name>-resource-list.json.zst`
 
 `<name>-results.json.zst` files (backup and restore) are for a single purpose -- composing Public Data Interface. However, they are not Auxiliary files, client or 3rd tools should not read this file directly.  
+
+A `v2` folder/prefix is added specifically for Format 2.0. When a BSL of Format 1.x connects to the backup storage, it sees nothing from the Format 2.0 data; but since Velero doesn't allow to initialize a BSL under a non-empty storage location, the BSL validation will fail and BSL stays in `unavailable` state.  
+For 1.20 and higher, this case is specifically validated, so the BSL will be with a clear message.  
 
 
 ### Root Storage Descriptor (RSD)
