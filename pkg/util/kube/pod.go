@@ -173,13 +173,22 @@ func IsPodUnrecoverable(pod *corev1api.Pod, log logrus.FieldLogger) (bool, strin
 	return false, ""
 }
 
-// GetPodContainerTerminateMessage returns the terminate message for a specific container of a pod
+// GetPodContainerTerminateMessage returns the terminate message for a specific container of a pod.
+// If the container is terminated without a terminate message (e.g., it is OOMKilled) and the pod
+// has no status message either, it returns a message with the termination reason and exit code.
 func GetPodContainerTerminateMessage(pod *corev1api.Pod, container string) string {
 	message := ""
 	for _, containerStatus := range pod.Status.ContainerStatuses {
 		if containerStatus.Name == container {
 			if containerStatus.State.Terminated != nil {
 				message = containerStatus.State.Terminated.Message
+
+				// A pod status message (e.g., set on eviction or pod deletion) explains the termination
+				// better, so only fall back to the reason and exit code when there is none.
+				if message == "" && pod.Status.Message == "" {
+					message = fmt.Sprintf("pod is terminated unexpectedly, reason %s, exit code %d",
+						containerStatus.State.Terminated.Reason, containerStatus.State.Terminated.ExitCode)
+				}
 			}
 			break
 		}

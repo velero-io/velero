@@ -1,0 +1,1 @@
+Include the container's termination reason and exit code in the failure message when a data mover pod exits without a termination message, for example when it is OOMKilled
