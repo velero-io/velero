@@ -18,8 +18,10 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +39,7 @@ import (
 	testclocks "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
@@ -323,6 +326,56 @@ func TestBackupFinalizerReconcile(t *testing.T) {
 			assert.Equal(t, test.expectPhase, backupAfter.Status.Phase)
 			assert.Equal(t, test.expectedCompletedVS, backupAfter.Status.CSIVolumeSnapshotsCompleted)
 		})
+	}
+}
+
+// The deferred status patch in Reconcile retries for at most resourceTimeout.
+// If the timeout is not stored on the reconciler, the backoff has no cap and a
+// patch that keeps failing blocks the finalizer worker for hours.
+func TestBackupFinalizerReconcileStatusPatchRetryBoundedByResourceTimeout(t *testing.T) {
+	resourceTimeout := 100 * time.Millisecond
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "backup-patch-fail").
+		StorageLocation("missing").
+		Phase(velerov1api.BackupPhaseFinalizing).Result()
+
+	var patchAttempts atomic.Int32
+	fakeClient := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+		WithObjects(backup).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(context.Context, kbclient.WithWatch, kbclient.Object, kbclient.Patch, ...kbclient.PatchOption) error {
+				patchAttempts.Add(1)
+				return fmt.Errorf("patch rejected")
+			},
+		}).Build()
+
+	reconciler := NewBackupFinalizerReconciler(
+		fakeClient,
+		fakeClient,
+		testclocks.NewFakeClock(time.Now()),
+		new(fakeBackupper),
+		func(logrus.FieldLogger) clientmgmt.Manager { return &pluginmocks.Manager{} },
+		NewBackupTracker(),
+		NewFakeSingleObjectBackupStoreGetter(&persistencemocks.BackupStore{}),
+		logrus.StandardLogger(),
+		metrics.NewServerMetrics(),
+		resourceTimeout,
+	)
+	require.Equal(t, resourceTimeout, reconciler.resourceTimeout)
+
+	done := make(chan error, 1)
+	go func() {
+		// The backup storage location doesn't exist, so Reconcile returns
+		// early and only the deferred status patch runs.
+		_, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: backup.Namespace, Name: backup.Name}})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.Greater(t, patchAttempts.Load(), int32(1), "status patch should be retried before giving up")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Reconcile did not return: status patch retry is not bounded by resourceTimeout")
 	}
 }
 
