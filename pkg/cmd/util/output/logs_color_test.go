@@ -91,6 +91,9 @@ func TestProcessAndPrintLogsPreservesRawLines(t *testing.T) {
 		"  at main.main (file.go:12)\n" +
 		"\t \n" +
 		"level=info msg=\"unterminated\n" +
+		"level 2 completed\n" +
+		"level=  msg=empty\n" +
+		"  level=INVALID  msg=\"unknown level\"\n" +
 		"  msg=without-level\n" +
 		"status=ok plain text\n"
 	var out bytes.Buffer

@@ -39,7 +39,7 @@ func getLevelColor(level string) *color.Color {
 	case "debug":
 		return color.New(color.FgBlue)
 	default:
-		return color.New()
+		return nil
 	}
 }
 
@@ -74,7 +74,7 @@ func processAndPrintLogs(r io.Reader, w io.Writer) error {
 			}
 		}
 
-		// If no "level" key was found, assume the line is not in logfmt format, and print it raw
+		// Preserve the original line if it cannot be parsed or has no supported level color.
 		if d.Err() != nil || lineColor == nil {
 			if _, err := io.WriteString(w, raw); err != nil {
 				return err
