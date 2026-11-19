@@ -259,11 +259,46 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
+      # v1.15.2: curl downloads fail on HTTP error responses and sha256
+      # checksums are validated (https://github.com/helm/kind-action/pull/171),
+      # on top of the retry flags from https://github.com/helm/kind-action/pull/165
+      # carried since v1.15.0. Without these, a transient error page from
+      # GitHub's release CDN was saved as the kind binary/checksum file and
+      # failed the job unrelated to the PR under test.
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: "kind"
           version: "v0.32.0"
           node_image: "kindest/node:v${{ matrix.k8s }}"
+      # The e2e install code sets ImagePullPolicy: IfNotPresent for the plugin
+      # container whenever VELERO_IMAGE isn't tagged "latest" (which it never is
+      # here), so kubelet skips the network pull once the image is already
+      # loaded onto the node. velero/velero-plugin-for-aws:latest is otherwise
+      # left to be pulled live from Docker Hub inside the kind node at pod
+      # start, which intermittently failed ("trying and failing to pull image")
+      # and made BeforeSuite abort before any test ran, unrelated to the PR
+      # under test.
+      - name: Preload AWS plugin image into kind (avoid in-cluster pull flakiness)
+        run: |
+          set -euo pipefail
+          image=velero/velero-plugin-for-aws:latest
+          for attempt in 1 2 3 4 5; do
+            docker pull "$image" && break
+            echo "docker pull attempt ${attempt} failed" >&2
+            if [ "$attempt" = 5 ]; then
+              echo "::error::failed to pull ${image} after 5 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+          # Not `kind load docker-image`: that imports with ctr
+          # --all-platforms, which fails on multi-arch images whose index
+          # carries attestation/other-platform manifests whose blobs were
+          # never pulled to the runner ("ctr: content digest ...: not
+          # found"). Import the docker-saved image without --all-platforms
+          # so only the pulled platform's blobs are required.
+          node="$(kind get nodes --name kind | head -n 1)"
+          docker save "$image" | docker exec -i "$node" ctr --namespace=k8s.io images import --digests -
       - name: Fetch built CLI
         id: cli-cache
         uses: actions/cache/restore@v6
@@ -361,7 +396,7 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: "kind"
           version: "v0.32.0"
