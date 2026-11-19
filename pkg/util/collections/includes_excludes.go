@@ -66,6 +66,9 @@ type NamespaceIncludesExcludes struct {
 	includesExcludes *IncludesExcludes
 	wildcardExpanded bool
 	wildcardResult   []string
+	// excludedByLabel holds the namespaces labeled velero.io/exclude-from-backup=true.
+	// Excluding them doesn't make a backup any less of an "all namespaces" backup.
+	excludedByLabel sets.Set[string]
 }
 
 func NewNamespaceIncludesExcludes() *NamespaceIncludesExcludes {
@@ -77,6 +80,13 @@ func NewNamespaceIncludesExcludes() *NamespaceIncludesExcludes {
 
 func (nie *NamespaceIncludesExcludes) ActiveNamespaces(activeNamespaces []string) *NamespaceIncludesExcludes {
 	nie.activeNamespaces = activeNamespaces
+	return nie
+}
+
+// ExcludedByLabel records the namespaces labeled velero.io/exclude-from-backup=true.
+// IncludeEverything ignores excludes of these namespaces.
+func (nie *NamespaceIncludesExcludes) ExcludedByLabel(namespaces ...string) *NamespaceIncludesExcludes {
+	nie.excludedByLabel = sets.New(namespaces...)
 	return nie
 }
 
@@ -147,9 +157,31 @@ func (nie *NamespaceIncludesExcludes) ShouldInclude(s string) bool {
 }
 
 // IncludeEverything returns true if the includes list is empty or '*'
-// and the excludes list is empty, or false otherwise.
+// and the excludes list is empty, or false otherwise. Excludes of namespaces
+// labeled velero.io/exclude-from-backup=true are ignored, so that labeling a
+// namespace (such as Velero's own) doesn't stop a backup of all namespaces
+// from including cluster-scoped resources.
 func (nie *NamespaceIncludesExcludes) IncludeEverything() bool {
-	return nie.includesExcludes.IncludeEverything()
+	if nie.includesExcludes.IncludeEverything() {
+		return true
+	}
+
+	if nie.wildcardExpanded || nie.excludedByLabel.Len() == 0 {
+		return false
+	}
+
+	includes := nie.includesExcludes.includes
+	if includes.Len() > 1 || (includes.Len() == 1 && !includes.Has("*")) {
+		return false
+	}
+
+	for _, exclude := range nie.includesExcludes.excludes.List() {
+		if !nie.excludedByLabel.Has(exclude) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Attempts to expand wildcard patterns, if any, in the includes and excludes lists.

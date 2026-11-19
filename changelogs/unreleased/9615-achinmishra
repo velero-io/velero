@@ -1,1 +1,1 @@
-Add the velero.io/exclude-from-backup=true label to the Velero namespace created by velero install so it is excluded from backups by default
+Add the velero.io/exclude-from-backup=true label to the Velero namespace created by velero install so it is excluded from backups by default, and don't let namespaces excluded by this label stop a backup of all namespaces from including cluster-scoped resources

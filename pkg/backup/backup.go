@@ -180,13 +180,18 @@ func getNamespaceIncludesExcludes(backup *velerov1api.Backup, kbClient kbclient.
 	}
 
 	activeNamespaces := []string{}
+	excludedByLabel := []string{}
 	for _, ns := range nsList.Items {
 		activeNamespaces = append(activeNamespaces, ns.Name)
+		if ns.Labels[velerov1api.ExcludeFromBackupLabel] == "true" {
+			excludedByLabel = append(excludedByLabel, ns.Name)
+		}
 	}
 
 	// Set ActiveNamespaces first, then set includes/excludes
 	includesExcludes := collections.NewNamespaceIncludesExcludes().
 		ActiveNamespaces(activeNamespaces).
+		ExcludedByLabel(excludedByLabel...).
 		Includes(backup.Spec.IncludedNamespaces...).
 		Excludes(backup.Spec.ExcludedNamespaces...)
 
