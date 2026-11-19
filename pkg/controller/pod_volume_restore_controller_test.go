@@ -1868,6 +1868,78 @@ func TestFindPVRForRestorePod_ContextPropagation(t *testing.T) {
 	}
 }
 
+// pvrConflictingClient fails every Update with a conflict, which makes
+// UpdatePVRWithRetry keep retrying until its context is done.
+type pvrConflictingClient struct {
+	client.Client
+}
+
+func (c *pvrConflictingClient) Update(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+	return apierrors.NewConflict(velerov1api.Resource("podvolumerestores"), obj.GetName(), errors.New("conflict"))
+}
+
+func TestUpdatePVRStatusToFailed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvr := pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result()
+	pvr.Labels = map[string]string{exposer.ExposeOnGoingLabel: "true"}
+
+	trackingClient := &contextTrackingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvr).Build(),
+	}
+
+	type ctxKeyType string
+	key := ctxKeyType("test-context-key")
+	sentinel := "sentinel-status-failed"
+	ctx := context.WithValue(t.Context(), key, sentinel)
+	now := time.Now().Truncate(time.Second)
+	errOut := errors.New("data path error")
+
+	err := UpdatePVRStatusToFailed(ctx, trackingClient, pvr, errOut, "data path restore failed", now, logrus.New())
+	assert.Equal(t, errOut, err)
+
+	require.NotNil(t, trackingClient.gotGetCtx)
+	assert.Equal(t, sentinel, trackingClient.gotGetCtx.Value(key))
+	require.NotNil(t, trackingClient.gotUpdateCtx)
+	assert.Equal(t, sentinel, trackingClient.gotUpdateCtx.Value(key))
+
+	updated := &velerov1api.PodVolumeRestore{}
+	require.NoError(t, trackingClient.Client.Get(t.Context(), types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, updated))
+	assert.Equal(t, velerov1api.PodVolumeRestorePhaseFailed, updated.Status.Phase)
+	assert.Contains(t, updated.Status.Message, "data path restore failed")
+	assert.Contains(t, updated.Status.Message, "data path error")
+	require.NotNil(t, updated.Status.CompletionTimestamp)
+	assert.True(t, updated.Status.CompletionTimestamp.Time.Equal(now))
+	assert.NotContains(t, updated.Labels, exposer.ExposeOnGoingLabel)
+}
+
+func TestUpdatePVRStatusToFailed_CanceledContextStopsRetry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvr := pvrBuilder().Phase(velerov1api.PodVolumeRestorePhaseInProgress).Result()
+	c := &pvrConflictingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvr).Build(),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	errOut := errors.New("data path error")
+	done := make(chan error, 1)
+	go func() {
+		done <- UpdatePVRStatusToFailed(ctx, c, pvr, errOut, "data path restore failed", time.Now(), logrus.New())
+	}()
+
+	select {
+	case err := <-done:
+		assert.Equal(t, errOut, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("UpdatePVRStatusToFailed kept retrying the PVR update after its context was canceled")
+	}
+}
+
 func TestOnPVRPrepareTimeout(t *testing.T) {
 	tests := []struct {
 		name     string

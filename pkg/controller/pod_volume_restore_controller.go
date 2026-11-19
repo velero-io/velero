@@ -550,7 +550,7 @@ func (r *PodVolumeRestoreReconciler) errorOut(ctx context.Context, pvr *velerov1
 func UpdatePVRStatusToFailed(ctx context.Context, c client.Client, pvr *velerov1api.PodVolumeRestore, err error, msg string, time time.Time, log logrus.FieldLogger) error {
 	log.Info("update PVR status to Failed")
 
-	if patchErr := UpdatePVRWithRetry(context.Background(), c, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
+	if patchErr := UpdatePVRWithRetry(ctx, c, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
 		func(pvr *velerov1api.PodVolumeRestore) bool {
 			if isPVRInFinalState(pvr) {
 				return false
