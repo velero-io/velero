@@ -4075,6 +4075,55 @@ func TestBackupWithHooks(t *testing.T) {
 				"resources/pods/v1-preferredversion/namespaces/ns-2/pod-2.json",
 			},
 		},
+		{
+			name: "item is not backed up if hook returns an error and OnError is omitted",
+			backup: defaultBackup().
+				Hooks(velerov1.BackupHooks{
+					Resources: []velerov1.BackupResourceHookSpec{
+						{
+							Name: "hook-1",
+							PreHooks: []velerov1.BackupResourceHook{
+								{
+									Exec: &velerov1.ExecHook{
+										Command: []string{"ls", "/tmp"},
+									},
+								},
+							},
+						},
+					},
+				}).
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-1").Result(),
+					builder.ForPod("ns-2", "pod-2").Result(),
+				),
+			},
+			wantExecutePodCommandCalls: []*expectedCall{
+				{
+					podNamespace: "ns-1",
+					podName:      "pod-1",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"ls", "/tmp"},
+					},
+					err: errors.New("exec hook error"),
+				},
+				{
+					podNamespace: "ns-2",
+					podName:      "pod-2",
+					hookName:     "hook-1",
+					hook: &velerov1.ExecHook{
+						Command: []string{"ls", "/tmp"},
+					},
+					err: nil,
+				},
+			},
+			wantBackedUp: []string{
+				"resources/pods/namespaces/ns-2/pod-2.json",
+				"resources/pods/v1-preferredversion/namespaces/ns-2/pod-2.json",
+			},
+		},
 	}
 
 	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())

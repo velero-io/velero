@@ -391,6 +391,80 @@ func TestHandleHooks(t *testing.T) {
 			expectedError:        nil,
 		},
 		{
+			name:          "pod, annotation, onError omitted = defaults to fail",
+			phase:         PhasePre,
+			groupResource: "pods",
+			item: velerotest.UnstructuredOrDie(`
+		{
+			"apiVersion": "v1",
+			"kind": "Pod",
+			"metadata": {
+				"namespace": "ns",
+				"name": "name",
+				"annotations": {
+					"pre.hook.backup.velero.io/container": "c",
+					"pre.hook.backup.velero.io/command": "/bin/ls"
+				}
+			}
+		}`),
+			expectedPodHook: &velerov1api.ExecHook{
+				Container: "c",
+				Command:   []string{"/bin/ls"},
+			},
+			expectedPodHookError: errors.New("pod hook error"),
+			expectedError:        errors.New("pod hook error"),
+		},
+		{
+			name:          "pod, post annotation, onError omitted = defaults to fail",
+			phase:         PhasePost,
+			groupResource: "pods",
+			item: velerotest.UnstructuredOrDie(`
+		{
+			"apiVersion": "v1",
+			"kind": "Pod",
+			"metadata": {
+				"namespace": "ns",
+				"name": "name",
+				"annotations": {
+					"post.hook.backup.velero.io/container": "c",
+					"post.hook.backup.velero.io/command": "/bin/ls"
+				}
+			}
+		}`),
+			expectedPodHook: &velerov1api.ExecHook{
+				Container: "c",
+				Command:   []string{"/bin/ls"},
+			},
+			expectedPodHookError: errors.New("pod hook error"),
+			expectedError:        errors.New("pod hook error"),
+		},
+		{
+			name:          "pod, annotation, invalid onError = keeps legacy continue behavior",
+			phase:         PhasePre,
+			groupResource: "pods",
+			item: velerotest.UnstructuredOrDie(`
+		{
+			"apiVersion": "v1",
+			"kind": "Pod",
+			"metadata": {
+				"namespace": "ns",
+				"name": "name",
+				"annotations": {
+					"pre.hook.backup.velero.io/container": "c",
+					"pre.hook.backup.velero.io/command": "/bin/ls",
+					"pre.hook.backup.velero.io/on-error": "NotAMode"
+				}
+			}
+		}`),
+			expectedPodHook: &velerov1api.ExecHook{
+				Container: "c",
+				Command:   []string{"/bin/ls"},
+				OnError:   velerov1api.HookErrorModeContinue,
+			},
+			expectedPodHookError: errors.New("pod hook error"),
+			expectedError:        nil,
+		},
+		{
 			name:          "pod, spec, onError=fail = don't run other hooks",
 			phase:         PhasePre,
 			groupResource: "pods",
@@ -452,6 +526,80 @@ func TestHandleHooks(t *testing.T) {
 			},
 			expectedError: errors.New("2 error, fail"),
 		},
+		{
+			name:          "pod, spec, onError omitted = defaults to fail and doesn't run other hooks",
+			phase:         PhasePre,
+			groupResource: "pods",
+			item: velerotest.UnstructuredOrDie(`
+		{
+			"apiVersion": "v1",
+			"kind": "Pod",
+			"metadata": {
+				"namespace": "ns",
+				"name": "name"
+			}
+		}`),
+			hooks: []ResourceHook{
+				{
+					Name: "hook1",
+					Pre: []velerov1api.BackupResourceHook{
+						{
+							Exec: &velerov1api.ExecHook{
+								Container: "1a",
+								Command:   []string{"1a"},
+							},
+						},
+						{
+							Exec: &velerov1api.ExecHook{
+								Container: "1b",
+								Command:   []string{"1b"},
+							},
+						},
+					},
+				},
+			},
+			hookErrorsByContainer: map[string]error{
+				"1a": errors.New("1a error, fail by default"),
+			},
+			expectedError: errors.New("1a error, fail by default"),
+		},
+		{
+			name:          "pod, post spec, onError omitted = defaults to fail and doesn't run other hooks",
+			phase:         PhasePost,
+			groupResource: "pods",
+			item: velerotest.UnstructuredOrDie(`
+		{
+			"apiVersion": "v1",
+			"kind": "Pod",
+			"metadata": {
+				"namespace": "ns",
+				"name": "name"
+			}
+		}`),
+			hooks: []ResourceHook{
+				{
+					Name: "hook1",
+					Post: []velerov1api.BackupResourceHook{
+						{
+							Exec: &velerov1api.ExecHook{
+								Container: "1a",
+								Command:   []string{"1a"},
+							},
+						},
+						{
+							Exec: &velerov1api.ExecHook{
+								Container: "1b",
+								Command:   []string{"1b"},
+							},
+						},
+					},
+				},
+			},
+			hookErrorsByContainer: map[string]error{
+				"1a": errors.New("1a error, fail by default"),
+			},
+			expectedError: errors.New("1a error, fail by default"),
+		},
 	}
 
 	for _, test := range tests {
@@ -471,14 +619,14 @@ func TestHandleHooks(t *testing.T) {
 					for _, hook := range resourceHook.Pre {
 						hookError := test.hookErrorsByContainer[hook.Exec.Container]
 						podCommandExecutor.On("ExecutePodCommand", mock.Anything, test.item.UnstructuredContent(), "ns", "name", resourceHook.Name, hook.Exec).Return(hookError)
-						if hookError != nil && hook.Exec.OnError == velerov1api.HookErrorModeFail {
+						if hookError != nil && effectiveBackupHookErrorMode(hook.Exec.OnError) == velerov1api.HookErrorModeFail {
 							break hookLoop
 						}
 					}
 					for _, hook := range resourceHook.Post {
 						hookError := test.hookErrorsByContainer[hook.Exec.Container]
 						podCommandExecutor.On("ExecutePodCommand", mock.Anything, test.item.UnstructuredContent(), "ns", "name", resourceHook.Name, hook.Exec).Return(hookError)
-						if hookError != nil && hook.Exec.OnError == velerov1api.HookErrorModeFail {
+						if hookError != nil && effectiveBackupHookErrorMode(hook.Exec.OnError) == velerov1api.HookErrorModeFail {
 							break hookLoop
 						}
 					}
@@ -495,6 +643,40 @@ func TestHandleHooks(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestEffectiveBackupHookErrorMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     velerov1api.HookErrorMode
+		expected velerov1api.HookErrorMode
+	}{
+		{
+			name:     "omitted mode defaults to fail",
+			expected: velerov1api.HookErrorModeFail,
+		},
+		{
+			name:     "continue is preserved",
+			mode:     velerov1api.HookErrorModeContinue,
+			expected: velerov1api.HookErrorModeContinue,
+		},
+		{
+			name:     "fail is preserved",
+			mode:     velerov1api.HookErrorModeFail,
+			expected: velerov1api.HookErrorModeFail,
+		},
+		{
+			name:     "unrecognized mode is returned unchanged",
+			mode:     velerov1api.HookErrorMode("NotAMode"),
+			expected: velerov1api.HookErrorMode("NotAMode"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, effectiveBackupHookErrorMode(test.mode))
 		})
 	}
 }
@@ -558,6 +740,17 @@ func TestGetPodExecHookFromAnnotations(t *testing.T) {
 				expectedHook: &velerov1api.ExecHook{
 					Command: []string{"/usr/bin/foo"},
 					OnError: velerov1api.HookErrorModeFail,
+				},
+			},
+			{
+				name: "invalid hook mode is treated as continue",
+				annotations: map[string]string{
+					phasedKey(phase, podBackupHookCommandAnnotationKey): "/usr/bin/foo",
+					phasedKey(phase, podBackupHookOnErrorAnnotationKey): "continue",
+				},
+				expectedHook: &velerov1api.ExecHook{
+					Command: []string{"/usr/bin/foo"},
+					OnError: velerov1api.HookErrorModeContinue,
 				},
 			},
 			{
@@ -2360,14 +2553,14 @@ func TestBackupHookTracker(t *testing.T) {
 						for _, hook := range resourceHook.Pre {
 							hookError := pod.hookErrorsByContainer[hook.Exec.Container]
 							podCommandExecutor.On("ExecutePodCommand", mock.Anything, pod.item.UnstructuredContent(), "ns", "name", resourceHook.Name, hook.Exec).Return(hookError)
-							if hookError != nil && hook.Exec.OnError == velerov1api.HookErrorModeFail {
+							if hookError != nil && effectiveBackupHookErrorMode(hook.Exec.OnError) == velerov1api.HookErrorModeFail {
 								break hookLoop
 							}
 						}
 						for _, hook := range resourceHook.Post {
 							hookError := pod.hookErrorsByContainer[hook.Exec.Container]
 							podCommandExecutor.On("ExecutePodCommand", mock.Anything, pod.item.UnstructuredContent(), "ns", "name", resourceHook.Name, hook.Exec).Return(hookError)
-							if hookError != nil && hook.Exec.OnError == velerov1api.HookErrorModeFail {
+							if hookError != nil && effectiveBackupHookErrorMode(hook.Exec.OnError) == velerov1api.HookErrorModeFail {
 								break hookLoop
 							}
 						}
