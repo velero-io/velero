@@ -75,10 +75,6 @@ flowchart TD
     H --> I["velero restore describe<br>--details"]
 ```
 
-To make sure a dry run cannot change anything, Velero gives the restore engine read-only versions of the clients it writes through, once, when the restore starts, see [Write paths](#write-paths).
-Velero also remembers the namespaces and CRDs that the dry run would have created, so that the items inside them are not reported as failures.
-The results are stored like those of any restore, and `velero restore describe --details` shows them, marked as a dry run.
-
 ## Detailed Design
 
 ### API
@@ -101,21 +97,9 @@ func (r *Restore) IsDryRun() bool {
 }
 ```
 
-```yaml
-apiVersion: velero.io/v1
-kind: Restore
-metadata:
-  name: nightly-check
-  namespace: velero
-spec:
-  backupName: nightly-20261114
-  includedNamespaces: ["shop"]
-  existingResourcePolicy: update
-  dryRun: true
-```
-
 A label `velero.io/dry-run: "true"` marks the `Restore`, so dry runs can be selected and excluded with a label selector.
 The Velero CLI sets it when it creates the restore, and the controller sets it during validation for restores created by other clients.
+A `Restore` that has the label but not `spec.dryRun` fails validation, see [Version skew](#version-skew).
 
 ### Rule for side effects
 
@@ -163,13 +147,8 @@ Each dry-run version holds the real write path as a named field instead of embed
 A client that is added to the engine later needs a dry-run version of its own.
 **One switch was chosen over a check before each write**, because a forgotten check is a silent write, while new code that uses an existing write path is covered without knowing about dry runs.
 
-Four dry-run checks remain inside the engine.
-They only shape the report, and none of them is needed for safety.
-
-- The namespace step plans missing namespaces, see [Planned state](#planned-state).
-- `restoreItem` returns after the create step, because restoring status and managed fields, pod volume restores, exec hooks and the CRD wait all act on an object that was not created.
-- The wait for additional items that an action asked for is skipped, because those items were not created either.
-- The cleanup of temporary DataUploadResult `ConfigMap`s at the end of the restore is skipped, because a dry run creates none.
+Four small dry-run checks remain inside the engine, and none of them is needed for safety.
+They plan missing namespaces, see [Planned state](#planned-state), and skip the steps that act on objects a dry run never created.
 
 ### Writers outside the engine
 
@@ -244,6 +223,8 @@ The recorded action for an item follows the same rules as a real restore.
 | Object exists and is equal | `update` | `updated` when the restore labels differ, otherwise `skipped` | none |
 | Excluded by filters, completed job or pod, mirror pod, or skipped by a plugin | any | `skipped` | none |
 | A plugin returns an error, or the item cannot be decoded | any | `failed` | the existing error |
+
+As in a real restore, an item that exists and equals the backup copy is recorded `failed` instead of `skipped` when it gets a warning, for example the warning that its volume data will not be restored.
 
 **Six cases are known to differ from a real restore.**
 Each is tested on its own against the outcome defined here.
@@ -357,12 +338,14 @@ It moves through `New`, `InProgress` and `Finalizing` to `Completed`, `Partially
 A dry-run restore is not counted in the existing restore metrics (`restore_total`, `restore_attempt_total`, `restore_success_total`, `restore_partial_failure_total`, `restore_failed_total` and `restore_validation_failed_total`), so that dashboards and alerts built on them keep describing real restores.
 `kubectl get restores` gets an additional printer column `Dry Run` that shows `spec.dryRun`.
 
-The restore controller handles one restore at a time, so a large dry run that is already running delays a real restore created after it, for the time of the download and one read per item, and the documentation states this.
+The restore controller handles one restore at a time, so a large dry run that is already running delays a real restore created after it, and the documentation states this.
+A dry run sends as many requests to the API server as a real restore of the same backup, with reads in place of writes.
+With 1,000 items, half of them already in the cluster, both sent 1,503 requests with the informer cache and 2,501 without it.
 Dry-run `Restore` objects are kept and deleted like any other restore.
 
 ### Restore artifacts and CLI
 
-The restored resource list (`restore-<name>-resource-list.json.gz`) keeps its format and its four action values, which for a dry run mean "would be created", "would be updated", and so on.
+The restored resource list (`restore-<name>-resource-list.json.gz`) keeps its format and its four action values, which for a dry run mean "would be created", "would be updated", and so on, so tools that read it need no change.
 The `Restore` object and its label mark the run as a dry run.
 Per-item outcome artifacts are being designed for backups in [#10616](https://github.com/velero-io/velero/pull/10616), and if that design is extended to restores, the dry-run report should use it.
 
@@ -384,18 +367,10 @@ Dry run:      true (no resources or volume data were changed; actions below are 
 
 Phase:  Completed
 
-Warnings:
-  Namespaces:
-    shop:  could not restore, ConfigMap "settings" already exists. Warning: the in-cluster version is different than the backed-up version
-
 Resource List:
   apps/v1/Deployment:
     - shop/cart(created)
     - shop/web(skipped)
-  v1/ConfigMap:
-    - shop/settings(skipped)
-  v1/PersistentVolumeClaim:
-    - shop/cart-data(created)
 ```
 
 `velero restore get` shows a dry-run marker next to the phase.
@@ -405,34 +380,33 @@ Unlike `kubectl --dry-run=client` and `velero install --dry-run`, which only pri
 
 A structural CRD schema prunes fields it does not know, so two mixes of versions can turn a dry run into a real restore.
 
-| Mix of versions | Without a guard | Guard in the Velero CLI |
+| Mix of versions | Without a guard | Guard |
 |---|---|---|
-| A `Restore` CRD older than this feature | the CRD drops `spec.dryRun`, and the server performs a real restore | create with strict field validation (`client.FieldValidation("Strict")`), then read the `Restore` back |
-| A CRD that knows the field and a Velero server older than this feature, after a rollback or during an upgrade | the old server ignores the field and performs a real restore | check the server version with a `ServerStatusRequest`, as `velero version` does |
+| A `Restore` CRD older than this feature | the CRD drops `spec.dryRun`, and the server performs a real restore | the server refuses a `Restore` that has the dry-run label but no `spec.dryRun` |
+| A CRD that knows the field and a Velero server older than this feature, after a rollback or during an upgrade | the old server ignores the field and performs a real restore | the Velero CLI checks the server version with a `ServerStatusRequest` before it creates the `Restore`, as `velero version` does |
 
-Strict field validation was checked on Kubernetes v1.33 with the current `Restore` CRD and an unknown spec field.
+**The label check is what stops a real restore when the CRD is old.**
+A CRD drops the spec fields it does not know but keeps the labels, so the `Restore` reaches the server with `velero.io/dry-run: "true"` and without `spec.dryRun`.
+The server fails it in validation, so nothing is restored.
+Strict field validation alone is not enough, because API servers enforce it by default only from Kubernetes v1.25, and Velero supports older versions.
+The Velero CLI still creates with strict field validation (`client.FieldValidation("Strict")`), so that a newer API server refuses the request before a `Restore` exists.
 
-| Request | Result |
-|---|---|
-| `kubectl create` (strict field validation, the kubectl default) | rejected with `unknown field "spec.notARealField"` |
-| API request with `fieldValidation=Strict` | rejected with the same error |
-| Server-side apply | rejected with `field not declared in schema` |
-| `kubectl create --validate=ignore` | accepted, and the field is silently removed |
+On Kubernetes v1.33 with the current `Restore` CRD, a strict create was rejected, and a create without strict validation dropped `spec.dryRun` and kept the label.
 
 ```mermaid
 flowchart TD
     A["velero restore create<br>--dry-run"] --> B{"Server version<br>supports dry run?"}
-    B -- "older, or no answer" --> X["refuse"]
-    B -- "yes" --> C{"Create with<br>strict field validation"}
-    C -- "CRD does not know the field" --> X
-    C -- "created" --> D{"Read back<br>is spec.dryRun still set?"}
-    D -- "no" --> X
-    D -- "yes" --> OK["dry run starts"]
+    B -- "older, or no answer" --> X["refused,<br>no Restore is created"]
+    B -- "yes" --> C["Create with the dry-run label<br>and strict field validation"]
+    C -- "the API server rejects<br>the unknown field" --> X
+    C -- "created" --> D{"Server validation<br>label without spec.dryRun?"}
+    D -- "yes, the CRD dropped the field" --> F["Restore fails validation,<br>nothing is restored"]
+    D -- "no" --> OK["dry run starts"]
 ```
 
 > [!WARNING]
 > Only the Velero CLI is protected in both cases.
-> Other clients are protected against an old CRD only if they validate fields strictly, as `kubectl create`, `kubectl apply` and server-side apply do by default, and never against an old server, because the old server is the one that acts.
+> Other clients are protected against an old CRD if they set the dry-run label or validate fields strictly, as `kubectl create`, `kubectl apply` and server-side apply do by default, and never against an old server, because the old server is the one that acts.
 > The user documentation therefore says that the Velero CLI is the safe way to create a dry run, and names both cases in which another client can turn a dry run into a real restore.
 
 ### Feature flag and order of work
@@ -466,7 +440,7 @@ flowchart TD
 
 - A no-write guard runs the existing restore test tables a second time with `dryRun` set to true, against fake clients that fail the test on any write except a patch of the `Restore` being run.
 - Parity tests check that the dry run's resource list, warnings and errors equal those of the real restore of the same input, except the six known differences in [Item outcomes](#item-outcomes), which are tested on their own.
-- Unit tests cover each dry-run write path, an empty-cluster restore with a CRD and its custom resource, the read-only clients for every kind of request, every built-in action through its real constructor with and without them, the scan for client configurations that bypass them, the plugin manager starting no action from outside the repository, the finalizing phase, and the CLI version check.
+- Unit tests cover each dry-run write path, an empty-cluster restore with a CRD and its custom resource, the read-only clients for every kind of request, every built-in action through its real constructor with and without them, the scan for client configurations that bypass them, the plugin manager starting no action from outside the repository, the finalizing phase, the label check, and the CLI version check.
 - An end-to-end test on kind checks that a dry run leaves every resource version unchanged, and that its resource list equals that of the real restore that follows.
 
 ## Alternatives Considered
@@ -495,12 +469,7 @@ This design keeps one engine and puts the dry-run behaviour in the dry-run write
 
 A new kind, for example `RestorePlan`, would keep dry runs out of the list of restores, and it is safe for every client and both directions of version skew, because an old CRD rejects the unknown kind and an old server ignores it.
 It would also duplicate the `Restore` spec, the controller and the CLI commands.
-The spec field is still proposed, because it is the approach discussed in #448, it reuses everything, and the Velero CLI can be made safe with strict field validation and the server version check.
-
-### New action values
-
-The resource list could use `would-create`, `would-update` and so on for a dry run.
-This makes the artifact self-describing, but every consumer of the resource list would need to know the new values, so the existing values are kept for compatibility.
+The spec field is still proposed, because it is the approach discussed in #448, it reuses everything, and the Velero CLI can be made safe with the label check and the server version check.
 
 ## Security Considerations
 
@@ -515,7 +484,7 @@ The dry-run write paths, the no-write guard in tests, the feature flag, the [ver
 
 - The field is optional and defaults to a real restore, so existing `Restore` objects and clients are not affected.
 - For mixed versions, see [Version skew](#version-skew).
-  The one unprotected case is a client other than the Velero CLI with a new CRD and an old server.
+  A client other than the Velero CLI is not protected against an old server, and is protected against an old CRD only if it sets the dry-run label or validates fields strictly.
 - Plugins from outside the Velero repository keep working for real restores, and their restore item actions are not started during a dry run.
 - Tools that watch for `Restore` objects reaching `Completed` also see dry runs, and can exclude them with the `velero.io/dry-run` label.
 - The printer column is additive, and the restore artifacts keep their names and formats.
