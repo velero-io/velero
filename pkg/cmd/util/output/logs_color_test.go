@@ -81,6 +81,27 @@ func TestMultipleColoredLogs(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%v\n%v\n%v\n", LOG_LINE, LOG_LINE_2, LOG_LINE_3), outputBuf.String())
 }
 
+// Raw lines keep their exact bytes and do not prevent later records from being colored.
+func TestProcessAndPrintLogsPreservesRawLines(t *testing.T) {
+	noColor := color.NoColor
+	color.NoColor = false
+	t.Cleanup(func() { color.NoColor = noColor })
+
+	raw := "this is hook output\r\n" +
+		"  at main.main (file.go:12)\n" +
+		"\t \n" +
+		"level=info msg=\"unterminated\n" +
+		"  msg=without-level\n" +
+		"status=ok plain text\n"
+	var out bytes.Buffer
+	require.NoError(t, processAndPrintLogs(strings.NewReader(raw+"level=info\nlast raw line \t"), &out))
+
+	green := color.New(color.FgGreen)
+	boldGreen := color.New(color.FgGreen, color.Bold)
+	want := raw + green.Sprint("level") + "=" + boldGreen.Sprint("info") + "\nlast raw line \t"
+	assert.Equal(t, want, out.String())
+}
+
 // Test that a stdout failure reaches the downloader or the result channel, depending on when it occurs.
 func TestPrintLogsWithColorWriteError(t *testing.T) {
 	stdout, noColor := os.Stdout, color.NoColor

@@ -17,6 +17,7 @@ limitations under the License.
 package output
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -49,9 +50,21 @@ func needsQuotedValueRune(r rune) bool {
 
 // Process logs (by adding color) before printing them
 func processAndPrintLogs(r io.Reader, w io.Writer) error {
-	d := logfmt.NewDecoder(r)
-	for d.ScanRecord() { // get record (line)
-		// Scan fields and get color
+	reader := bufio.NewReader(r)
+	var readErr error
+	for readErr == nil {
+		// Keep the original line so it can be printed unchanged if it cannot be colored.
+		var raw string
+		raw, readErr = reader.ReadString('\n')
+		if raw == "" {
+			break
+		}
+
+		// Parse the line
+		d := logfmt.NewDecoder(strings.NewReader(raw))
+		d.ScanRecord()
+
+		// Scan fields and get color.
 		var fields [][2][]byte
 		var lineColor *color.Color
 		for d.ScanKeyval() {
@@ -61,7 +74,15 @@ func processAndPrintLogs(r io.Reader, w io.Writer) error {
 			}
 		}
 
-		// Re-encode with color. We do not use logfmt Encoder because it does not support color
+		// If no "level" key was found, assume the line is not in logfmt format, and print it raw
+		if d.Err() != nil || lineColor == nil {
+			if _, err := io.WriteString(w, raw); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Re-encode with color. We do not use logfmt Encoder because it does not support color.
 		for i, field := range fields {
 			key := string(field[0])
 			value := string(field[1])
@@ -71,14 +92,12 @@ func processAndPrintLogs(r io.Reader, w io.Writer) error {
 				value = fmt.Sprintf("%q", value)
 			}
 
-			// Add color
-			if lineColor != nil { // handle case where no color (log level) was found
-				if key == "level" {
-					colorCopy := *lineColor
-					value = colorCopy.Add(color.Bold).Sprintf("%s", value)
-				}
-				key = lineColor.Sprintf("%s", field[0])
+			if key == "level" {
+				colorCopy := *lineColor
+				value = colorCopy.Add(color.Bold).Sprintf("%s", value)
 			}
+			key = lineColor.Sprintf("%s", field[0])
+
 			if i != 0 {
 				if _, err := fmt.Fprint(w, " "); err != nil {
 					return err
@@ -88,12 +107,13 @@ func processAndPrintLogs(r io.Reader, w io.Writer) error {
 				return err
 			}
 		}
+
 		if _, err := fmt.Fprintln(w); err != nil {
 			return err
 		}
 	}
-	if err := d.Err(); err != nil {
-		return fmt.Errorf("error processing logs: %v", err)
+	if readErr != io.EOF {
+		return fmt.Errorf("error processing logs: %w", readErr)
 	}
 	return nil
 }
