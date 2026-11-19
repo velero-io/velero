@@ -513,8 +513,15 @@ func (e *genericRestoreExposer) CleanUp(ctx context.Context, ownerObject corev1a
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
 	if param.Snapshot != nil && param.Snapshot.CleanUp {
-		kube.EnsureDeleteVolumeSnapshotIfAny(ctx, e.ctrlClient, param.Snapshot.VolumeSnapshotNamespace,
-			param.Snapshot.VolumeSnapshot, 0, e.log)
+		// The snapshot is taken with the VolumeSnapshotClass of the backup, which may have
+		// deletionPolicy Retain, so its VolumeSnapshotContent is set to Delete first to make
+		// the CSI driver delete the snapshot from the storage.
+		csi.CleanupVolumeSnapshot(ctx, &snapshotv1api.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      param.Snapshot.VolumeSnapshot,
+				Namespace: param.Snapshot.VolumeSnapshotNamespace,
+			},
+		}, e.ctrlClient, e.log)
 	}
 }
 
