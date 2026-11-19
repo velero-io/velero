@@ -25,6 +25,8 @@ Before upgrading, check the [Velero compatibility matrix](https://github.com/vel
 
 Restic path for fs-backup is completely removed in 1.19. Therefore, Velero 1.19 marks restores from backups with Restic path as FailedValidation; backup sync ignores backups with Restic path, so they won't appear in the cluster even though they are kept as is in the backup storage; if there are existing backups with Restic path in the cluster, after upgrade to 1.19, deletion request of these backups will fail.
 
+If you use File System Backup, verify that your node-agent Pod template has `role: node-agent`. If this was missed during the upgrade to v1.16, see the [node-agent Pod label instructions](../../v1.16/upgrade-to-1.16/#node-agent-pod-label).
+
 ## Instructions
 
 ### Upgrade from v1.18

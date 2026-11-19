@@ -21,6 +21,8 @@ If you're not yet running at least Velero v1.16, see the following:
 
 Before upgrading, check the [Velero compatibility matrix](https://github.com/velero-io/velero#velero-compatibility-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
+If you use File System Backup, verify that your node-agent Pod template has `role: node-agent`. If this was missed during the upgrade to v1.16, see the [node-agent Pod label instructions](../../v1.16/upgrade-to-1.16/#node-agent-pod-label).
+
 ## Instructions
 
 ### Upgrade from v1.16
