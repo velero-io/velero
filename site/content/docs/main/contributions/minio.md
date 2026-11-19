@@ -108,16 +108,16 @@ These instructions start the Velero server and a Minio instance that is accessib
 
 ## Back up
 
-1. Create a backup for any object that matches the `app=nginx` label selector:
+1. Create a backup of objects that match the `app=nginx` label selector and wait for it to finish.
 
     ```
-    velero backup create nginx-backup --selector app=nginx
+    velero backup create nginx-backup --selector app=nginx --wait
     ```
 
     Alternatively if you want to backup all objects *except* those matching the label `backup=ignore`:
 
     ```
-    velero backup create nginx-backup --selector 'backup notin (ignore)'
+    velero backup create nginx-backup --selector 'backup notin (ignore)' --wait
     ```
 
 1. (Optional) Create regularly scheduled backups based on a cron expression using the `app=nginx` label selector:
@@ -134,7 +134,7 @@ These instructions start the Velero server and a Minio instance that is accessib
 
     See the [cron package's documentation][30] for more usage examples.
 
-1. Simulate a disaster:
+1. Simulate a disaster by deleting the namespace only if the backup phase is `Completed`.
 
     ```
     kubectl delete namespace nginx-example

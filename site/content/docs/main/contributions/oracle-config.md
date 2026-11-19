@@ -156,17 +156,19 @@ After creating the Velero server in your cluster, try this example:
    replicaset.apps/nginx-deployment-67594d6bf6   2         2         2       21s
    ```
 
-2. Create a backup: `velero backup create nginx-backup --include-namespaces nginx-example`
+2. Create a backup and wait for it to finish.
 
    ```
-   $ velero backup create nginx-backup --include-namespaces nginx-example
+   $ velero backup create nginx-backup --include-namespaces nginx-example --wait
    Backup request "nginx-backup" submitted successfully.
-   Run `velero backup describe nginx-backup` or `velero backup logs nginx-backup` for more details.
+   Waiting for backup to complete. You may safely press ctrl-c to stop waiting - your backup will continue in the background.
+   .
+   Backup completed with status: Completed. You may check for more information using the commands `velero backup describe nginx-backup` and `velero backup logs nginx-backup`.
    ```
 
    At this point you can navigate to appropriate bucket, called `velero`, in the Oracle Cloud Object Storage console to see the resources backed up using Velero.
 
-3. Simulate a disaster by deleting the `nginx-example` namespace: `kubectl delete namespaces nginx-example`
+3. Simulate a disaster by deleting the `nginx-example` namespace only if the backup phase is `Completed`.
 
    ```
    $ kubectl delete namespaces nginx-example

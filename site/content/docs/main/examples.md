@@ -17,13 +17,13 @@ cd velero
     kubectl apply -f examples/nginx-app/base.yaml
     ```
 
-1. Create a backup:
+1. Create a backup and wait for it to finish.
 
     ```bash
-    velero backup create nginx-backup --include-namespaces nginx-example
+    velero backup create nginx-backup --include-namespaces nginx-example --wait
     ```
 
-1. Simulate a disaster:
+1. Simulate a disaster by deleting the namespace only if the backup phase is `Completed`.
 
     ```bash
     kubectl delete namespaces nginx-example
@@ -47,13 +47,13 @@ cd velero
     kubectl apply -f examples/nginx-app/with-pv.yaml
     ```
 
-1. Create a backup with PV snapshotting. `--csi-snapshot-timeout` is used to setup time to wait before CSI snapshot creation timeout. The default value is 10 minutes:
+1. Create a backup with PV snapshotting and wait for it to finish. The `--csi-snapshot-timeout` flag sets the timeout for creating a CSI snapshot. The default is 10 minutes.
 
     ```bash
-    velero backup create nginx-backup --include-namespaces nginx-example --csi-snapshot-timeout=20m
+    velero backup create nginx-pv-backup --include-namespaces nginx-example --csi-snapshot-timeout=20m --wait
     ```
 
-1. Simulate a disaster:
+1. Simulate a disaster by deleting the namespace only if the backup phase is `Completed`.
 
     ```bash
     kubectl delete namespaces nginx-example
@@ -64,7 +64,7 @@ cd velero
 1. Restore your lost resources:
 
     ```bash
-    velero restore create --from-backup nginx-backup
+    velero restore create --from-backup nginx-pv-backup
     ```
 
 [1]: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaiming
