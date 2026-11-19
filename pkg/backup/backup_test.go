@@ -901,6 +901,65 @@ func TestBackupOldResourceFiltering(t *testing.T) {
 	}
 }
 
+// TestBackupClusterScopedResourcesWithNamespaceExcludedByLabel verifies that excluding
+// namespaces labeled velero.io/exclude-from-backup=true (which the backup controller adds to
+// spec.excludedNamespaces) doesn't stop a backup of all namespaces from including
+// cluster-scoped resources, while excluding other namespaces still does.
+func TestBackupClusterScopedResourcesWithNamespaceExcludedByLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		backup *velerov1.Backup
+		want   []string
+	}{
+		{
+			name:   "excluding only the labeled namespace still includes cluster-scoped resources",
+			backup: defaultBackup().ExcludedNamespaces("velero").Result(),
+			want: []string{
+				"resources/pods/namespaces/ns-1/pod-1.json",
+				"resources/pods/v1-preferredversion/namespaces/ns-1/pod-1.json",
+				"resources/persistentvolumes/cluster/pv-1.json",
+				"resources/persistentvolumes/v1-preferredversion/cluster/pv-1.json",
+			},
+		},
+		{
+			name:   "excluding an unlabeled namespace does not include cluster-scoped resources",
+			backup: defaultBackup().ExcludedNamespaces("velero", "ns-1").Result(),
+			want:   []string{},
+		},
+	}
+
+	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
+	defer itemBlockPool.Stop()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				h   = newHarness(t, itemBlockPool)
+				req = &Request{
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
+				}
+				backupFile = bytes.NewBuffer([]byte{})
+			)
+
+			require.NoError(t, h.backupper.kbClient.Create(t.Context(), builder.ForNamespace("ns-1").Result()))
+			require.NoError(t, h.backupper.kbClient.Create(t.Context(),
+				builder.ForNamespace("velero").ObjectMeta(builder.WithLabels(velerov1.ExcludeFromBackupLabel, "true")).Result()))
+
+			h.addItems(t, test.Pods(
+				builder.ForPod("ns-1", "pod-1").Result(),
+				builder.ForPod("velero", "velero-pod").Result(),
+			))
+			h.addItems(t, test.PVs(builder.ForPersistentVolume("pv-1").Result()))
+
+			h.backupper.Backup(h.log, req, backupFile, nil, nil, nil)
+
+			assertTarballContents(t, backupFile, append(tc.want, "metadata/version")...)
+		})
+	}
+}
+
 // TestCRDInclusion tests whether related CRDs are included, based on
 // backed-up resources and "include cluster resources" flag, and
 // verifies that the set of items written to the backup tarball are

@@ -11,6 +11,10 @@ During install, Velero requires that at least one plugin is added (with the `--p
 
 Velero is installed in the `velero` namespace by default. However, you can install Velero in any namespace. See [run in custom namespace][2] for details.
 
+## Exclude the Velero namespace from backups
+
+Velero does not support backing up its own namespace, so `velero install` adds the `velero.io/exclude-from-backup=true` label to the Velero namespace. To opt out, use `--exclude-namespace-from-backup=false`. See [velero.io/exclude-from-backup=true](resource-filtering.md#veleroioexclude-from-backuptrue) for details.
+
 ## Use non-file-based identity mechanisms
 
 By default, `velero install` expects a credentials file for your `velero` IAM account to be provided via the `--secret-file` flag.

@@ -223,6 +223,27 @@ Kubernetes resources to exclude, formatted as resource.group, such as storagecla
 ### velero.io/exclude-from-backup=true
 
 * Resources with the label `velero.io/exclude-from-backup=true` are not included in backup, even if it contains a matching selector label.
+* Namespaces with this label are excluded from backup entirely. Excluding them doesn't count as filtering namespaces, so a backup of all namespaces still includes cluster-scoped resources.
+
+#### Velero's own namespace
+
+Velero does not support backing up its own namespace, so `velero install` adds this label to the Velero namespace.
+
+* **Existing installations:** re-run `velero install --apply` with your usual options to add the label, or add it manually:
+
+  ```bash
+  kubectl label namespace <velero-namespace> velero.io/exclude-from-backup=true
+  ```
+
+  Installations that use other methods (such as Helm) also need to add the label themselves.
+* **Opting out:** install with `--exclude-namespace-from-backup=false` so the label isn't added. If the label is already there, remove it:
+
+  ```bash
+  kubectl label namespace <velero-namespace> velero.io/exclude-from-backup-
+  ```
+
+  `velero install --apply` adds the label back unless you also pass `--exclude-namespace-from-backup=false`.
+* **Multiple Velero instances:** the label isn't tied to a Velero instance. Every Velero instance in the cluster skips every namespace with this label, so by default one instance doesn't back up another instance's namespace. To back up another instance's namespace, remove the label from that namespace, and add `--exclude-namespaces <namespace>` to that instance's own backups and schedules so it doesn't back up its own namespace. Because an explicit `--exclude-namespaces` counts as filtering namespaces, also set `--include-cluster-resources=true` on those backups if they should include cluster-scoped resources.
 
 ### --exclude-cluster-scoped-resources
 Kubernetes cluster-scoped resources to exclude from the backup, formatted as resource.group, such as `storageclasses.storage.k8s.io`(use '*' for all resources). Cannot work with `--include-resources`, `--exclude-resources` and `--include-cluster-resources`. This parameter only works for backup, not for restore.
