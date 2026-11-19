@@ -21,7 +21,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/fatih/color"
@@ -81,11 +80,17 @@ func processAndPrintLogs(r io.Reader, w io.Writer) error {
 				key = lineColor.Sprintf("%s", field[0])
 			}
 			if i != 0 {
-				fmt.Fprint(w, " ")
+				if _, err := fmt.Fprint(w, " "); err != nil {
+					return err
+				}
 			}
-			fmt.Fprintf(w, "%s=%s", key, value)
+			if _, err := fmt.Fprintf(w, "%s=%s", key, value); err != nil {
+				return err
+			}
 		}
-		fmt.Fprintln(w)
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
 	}
 	if err := d.Err(); err != nil {
 		return fmt.Errorf("error processing logs: %v", err)
@@ -99,29 +104,23 @@ type nopCloser struct {
 
 func (nopCloser) Close() error { return nil }
 
-// Print logfmt-formatted logs to stdout with color based on log level
-// if color.NoColor is set, logs will be directly piped to stdout without processing
-// Returns the writer to write logs to, and a waitgroup to wait for processing to finish
-// Writer must be closed once all logs have been written
-// Note: this function is a wrapper around processAndPrintLogs to avoid always creating a goroutine
-func PrintLogsWithColor() (io.WriteCloser, *sync.WaitGroup) {
-	// If NoColor, do not parse logs and directly fall back to stdout
-	var wg sync.WaitGroup
+// PrintLogsWithColor streams logs to stdout, coloring logfmt records unless color is disabled.
+// Close the writer before receiving the result to signal that no more logs will be written.
+func PrintLogsWithColor() (io.WriteCloser, <-chan error) {
+	result := make(chan error, 1)
 	if color.NoColor {
-		return nopCloser{os.Stdout}, &wg
-	} else {
-		// Else, create a goroutine to process logs.
-		wg.Add(1)
-		pr, pw := io.Pipe()
-
-		// Create coroutine to process logs
-		go func(pr *io.PipeReader) {
-			defer wg.Done()
-			err := processAndPrintLogs(pr, os.Stdout)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error processing logs: %v\n", err)
-			}
-		}(pr)
-		return pw, &wg
+		result <- nil
+		close(result)
+		return nopCloser{os.Stdout}, result
 	}
+
+	pr, pw := io.Pipe()
+	stdout := os.Stdout
+	go func() {
+		defer close(result)
+		err := processAndPrintLogs(pr, stdout)
+		pr.CloseWithError(err)
+		result <- err
+	}()
+	return pw, result
 }
