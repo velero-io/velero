@@ -1,0 +1,88 @@
+# Runs the Go fuzz targets (FuzzXxx functions in *_test.go files) against code that parses
+# untrusted input, starting with the backup archive extractor in pkg/archive.
+#
+# Why this exists: Velero is preparing its CNCF incubation application, and fuzzing is part of
+# the security work tracked in https://github.com/velero-io/velero/issues/10383. The OpenSSF
+# Scorecard "Fuzzing" check, which CNCF reviewers and CLOMonitor look at, passes when a project
+# has fuzz targets that run in CI. Running them here is how Velero satisfies that incubation
+# criterion.
+#
+# Scope: in-repo fuzz targets only. Enrolling in OSS-Fuzz needs a maintainer discussion and is
+# deferred. To cover more code, add FuzzXxx functions and extend the matrix below.
+name: Fuzz
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "pkg/archive/**"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: '50 5 * * 0'
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    # Skip on forks; scheduled runs are only useful on the canonical repo.
+    if: github.repository == 'velero-io/velero'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./pkg/archive/
+            target: FuzzSanitizeArchivePath
+          - package: ./pkg/archive/
+            target: FuzzUnzipAndExtractBackup
+    env:
+      # Short on pull requests, longer on the weekly schedule.
+      FUZZ_TIME: ${{ github.event_name == 'schedule' && '5m' || '30s' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run fuzz target
+        run: go test ${{ matrix.package }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime "$FUZZ_TIME"
+
+      # When a target fails, Go writes the input that triggered the failure to
+      # pkg/archive/testdata/fuzz/<FuzzTarget>/<id>. The next two steps publish that input as an
+      # artifact and print the follow-up steps in the job summary:
+      #   1. Download the artifact and copy the file to the same path in your checkout.
+      #   2. Reproduce: go test ./pkg/archive/ -run '<FuzzTarget>/<id>'
+      #   3. Fix the bug, then commit the input file so it stays as a regression test.
+      #   4. If the input crashes or escapes the extractor on attacker-controlled archive data, it
+      #      may be a vulnerability: report it privately following SECURITY.md before discussing
+      #      it publicly, because artifacts of public runs can be downloaded by anyone signed in.
+      - name: Explain how to handle the failure
+        if: failure()
+        run: |
+          {
+            echo "### Fuzz target \`${{ matrix.target }}\` failed"
+            echo
+            echo "The failing input is attached as the \`fuzz-failures-${{ matrix.target }}\` artifact."
+            echo
+            echo "1. Download the artifact and copy the file to \`pkg/archive/testdata/fuzz/${{ matrix.target }}/\`."
+            echo "2. Reproduce: \`go test ./pkg/archive/ -run '${{ matrix.target }}/<file name>'\`."
+            echo "3. Fix the bug and commit the input file as a regression test."
+            echo "4. If it looks exploitable, report it privately per SECURITY.md before discussing it publicly."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-failures-${{ matrix.target }}
+          path: pkg/archive/testdata/fuzz/
+          if-no-files-found: ignore
