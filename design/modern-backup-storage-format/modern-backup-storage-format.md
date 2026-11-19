@@ -1019,14 +1019,14 @@ The SDK is in auto-fit mode, which works for both encrypted data and unencrypted
 Below are the definition for the SDK:
 ```go
 type AuxiliaryDataDownload interface {
-	DownloadBackupLog(ctx context.Context, bsl *velerov1api.BackupStorageLocation, backupName string, w io.Writer, timeout time.Duration) error
-	DownloadRestoreLog(ctx context.Context, bsl *velerov1api.BackupStorageLocation, restoreName string, w io.Writer, timeout time.Duration) error
-	DownloadBackupResourceList(ctx context.Context, bsl *velerov1api.BackupStorageLocation, backupName string, w io.Writer, timeout time.Duration) error
-	DownloadRestoreResourceList(ctx context.Context, bsl *velerov1api.BackupStorageLocation, restoreName string, w io.Writer, timeout time.Duration) error
+	DownloadBackupLog(ctx context.Context, kubeClient client.Client, namespace string, bslName string, backupName string, w io.Writer, timeout time.Duration) error
+	DownloadRestoreLog(ctx context.Context, kubeClient client.Client, namespace string, bslName string, restoreName string, w io.Writer, timeout time.Duration) error
+	DownloadBackupResourceList(ctx context.Context, kubeClient client.Client, namespace string, bslName string, backupName string, w io.Writer, timeout time.Duration) error
+	DownloadRestoreResourceList(ctx context.Context, kubeClient client.Client, namespace string, bslName string, restoreName string, w io.Writer, timeout time.Duration) error
 }
 ```
 
-Velero's `velero backup describe`, `velero restore describe`, `velero backup log` and `velero restore log` CLI will also be refactored to use this SDK.   
+Velero's `velero debug`, `velero backup describe`, `velero restore describe`, `velero backup log` and `velero restore log` CLI will also be refactored to use this SDK.   
 
 ### Backup Download
 
