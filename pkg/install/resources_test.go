@@ -17,6 +17,7 @@ limitations under the License.
 package install
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,8 +54,8 @@ func TestResources(t *testing.T) {
 	assert.Equal(t, "latest", ns.Labels["pod-security.kubernetes.io/audit-version"])
 	assert.Equal(t, "privileged", ns.Labels["pod-security.kubernetes.io/warn"])
 	assert.Equal(t, "latest", ns.Labels["pod-security.kubernetes.io/warn-version"])
-	// The Velero namespace is excluded from backups by default.
-	assert.Equal(t, "true", ns.Labels[velerov1api.ExcludeFromBackupLabel])
+	// The exclude-from-backup label is added by AllResources based on VeleroOptions.
+	assert.NotContains(t, ns.Labels, velerov1api.ExcludeFromBackupLabel)
 
 	crb := ClusterRoleBinding(DefaultVeleroNamespace)
 	// The CRB is a cluster-scoped resource
@@ -272,6 +273,31 @@ func TestAllResourcesWithPriorityClassName(t *testing.T) {
 			// Verify we found the daemonset if node agent is enabled
 			if tc.useNodeAgent {
 				assert.True(t, daemonsetFound, "DaemonSet should be present when UseNodeAgent is true")
+			}
+		})
+	}
+}
+
+func TestAllResourcesExcludeNamespaceFromBackup(t *testing.T) {
+	for _, exclude := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ExcludeNamespaceFromBackup=%t", exclude), func(t *testing.T) {
+			list := AllResources(&VeleroOptions{
+				Namespace:                  "velero",
+				ExcludeNamespaceFromBackup: exclude,
+			})
+
+			var labels map[string]string
+			for _, item := range list.Items {
+				if item.GetKind() == "Namespace" {
+					labels = item.GetLabels()
+				}
+			}
+			require.NotNil(t, labels)
+
+			if exclude {
+				assert.Equal(t, "true", labels[velerov1api.ExcludeFromBackupLabel])
+			} else {
+				assert.NotContains(t, labels, velerov1api.ExcludeFromBackupLabel)
 			}
 		})
 	}

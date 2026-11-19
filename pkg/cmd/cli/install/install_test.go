@@ -325,3 +325,35 @@ func TestWaitFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestExcludeNamespaceFromBackupFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected bool
+	}{
+		{
+			name:     "default: namespace is excluded from backups",
+			args:     []string{},
+			expected: true,
+		},
+		{
+			name:     "--exclude-namespace-from-backup=false opts out",
+			args:     []string{"--exclude-namespace-from-backup=false"},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := NewInstallOptions()
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			o.BindFlags(flags)
+			require.NoError(t, flags.Parse(tc.args))
+
+			veleroOptions, err := o.AsVeleroOptions()
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, veleroOptions.ExcludeNamespaceFromBackup)
+		})
+	}
+}

@@ -236,13 +236,13 @@ Velero does not support backing up its own namespace, so `velero install` adds t
   ```
 
   Installations that use other methods (such as Helm) also need to add the label themselves.
-* **Opting out:** remove the label:
+* **Opting out:** install with `--exclude-namespace-from-backup=false` so the label isn't added. If the label is already there, remove it:
 
   ```bash
   kubectl label namespace <velero-namespace> velero.io/exclude-from-backup-
   ```
 
-  `velero install --apply` force-applies the namespace, so it adds the label back every time it runs.
+  `velero install --apply` adds the label back unless you also pass `--exclude-namespace-from-backup=false`.
 * **Multiple Velero instances:** the label isn't tied to a Velero instance. Every Velero instance in the cluster skips every namespace with this label, so by default one instance doesn't back up another instance's namespace. To back up another instance's namespace, remove the label from that namespace, and add `--exclude-namespaces <namespace>` to that instance's own backups and schedules so it doesn't back up its own namespace. Because an explicit `--exclude-namespaces` counts as filtering namespaces, also set `--include-cluster-resources=true` on those backups if they should include cluster-scoped resources.
 
 ### --exclude-cluster-scoped-resources
