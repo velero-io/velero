@@ -66,8 +66,9 @@ type itemCollector struct {
 //	The namespaces, which do not have backup including resources,
 //	are not collected.
 //
-//	b. If the namespace I/E filters and the (Or)LabelSelectors selected
-//	namespaces are different. The tracker takes the union of them.
+//	b. Explicit namespace exclusion takes precedence over the
+//	(Or)LabelSelectors: an excluded namespace is never tracked, even
+//	when its own labels (or a resource within it) match the selector(s).
 type nsTracker struct {
 	singleLabelSelector labels.Selector
 	orLabelSelector     []labels.Selector
@@ -125,10 +126,20 @@ func (nt *nsTracker) init(
 			continue
 		}
 
+		// Explicit namespace exclusion takes precedence over the
+		// (Or)LabelSelectors, so check it upfront once instead of
+		// repeating it in every branch below.
+		if !nt.namespaceFilter.ShouldInclude(namespace.GetName()) {
+			nt.logger.Debugf("Skip namespace %s, because it doesn't match backup namespace filter (glob rules) includes=%q excludes=%q.",
+				namespace.GetName(), nt.namespaceFilter.IncludesString(), nt.namespaceFilter.ExcludesString(),
+			)
+			continue
+		}
+
 		if nt.singleLabelSelector != nil &&
 			nt.singleLabelSelector.Matches(labels.Set(namespace.GetLabels())) {
-			nt.logger.Debugf("Track namespace %s, because its labels match backup LabelSelector.",
-				namespace.GetName(),
+			nt.logger.Debugf("Track namespace %s, because its labels match backup LabelSelector %q.",
+				namespace.GetName(), nt.singleLabelSelector.String(),
 			)
 
 			nt.track(namespace.GetName())
@@ -138,8 +149,8 @@ func (nt *nsTracker) init(
 		if len(nt.orLabelSelector) > 0 {
 			for _, selector := range nt.orLabelSelector {
 				if selector.Matches(labels.Set(namespace.GetLabels())) {
-					nt.logger.Debugf("Track namespace %s, because its labels match the backup OrLabelSelector.",
-						namespace.GetName(),
+					nt.logger.Debugf("Track namespace %s, because its labels match the backup OrLabelSelector %q.",
+						namespace.GetName(), selector.String(),
 					)
 					nt.track(namespace.GetName())
 					continue
@@ -156,12 +167,10 @@ func (nt *nsTracker) init(
 			continue
 		}
 
-		if nt.namespaceFilter.ShouldInclude(namespace.GetName()) {
-			nt.logger.Debugf("Track namespace %s, because its name match the backup namespace filter.",
-				namespace.GetName(),
-			)
-			nt.track(namespace.GetName())
-		}
+		nt.logger.Debugf("Track namespace %s, because its name matches backup namespace filter (glob rules) includes=%q excludes=%q.",
+			namespace.GetName(), nt.namespaceFilter.IncludesString(), nt.namespaceFilter.ExcludesString(),
+		)
+		nt.track(namespace.GetName())
 	}
 }
 
