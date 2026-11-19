@@ -221,7 +221,7 @@ func TestExecute(t *testing.T) {
 		},
 		{
 			name:                "Volume policy with snapshotClass selects correct VolumeSnapshotClass",
-			backup:              builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").CSISnapshotTimeout(time.Duration(3600) * time.Second).Result(),
+			backup:              builder.ForBackup("velero", "test").ObjectMeta(builder.WithUID("test-uid")).ResourcePolicies("resourcePolicy").CSISnapshotTimeout(time.Duration(3600) * time.Second).Result(),
 			resourcePolicy:      builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"snapshotClass":"policy-selected-vsclass"}}}]}`).Result(),
 			pvc:                 builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
 			pv:                  builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
@@ -419,6 +419,8 @@ func TestExecute(t *testing.T) {
 				require.NotNil(t, vsList.Items[0].Spec.VolumeSnapshotClassName)
 				assert.Equal(t, tc.expectedVSClassName, *vsList.Items[0].Spec.VolumeSnapshotClassName,
 					"VolumeSnapshot should use the VolumeSnapshotClass specified by volume policy")
+				assert.Equal(t, label.GetValidName(tc.backup.Name), vsList.Items[0].Labels[velerov1api.BackupNameLabel])
+				assert.Equal(t, string(tc.backup.UID), vsList.Items[0].Labels[velerov1api.BackupUIDLabel])
 			}
 		})
 	}
