@@ -191,6 +191,12 @@ type BackupSpec struct {
 	// BackupType specifies how volume data is backed up, with possible values including Full and Incremental.
 	// +optional
 	BackupType BackupType `json:"backupType,omitempty"`
+
+	// CollectItemOutcomes specifies whether to assemble a structured per-item
+	// outcome artifact for this backup, downloadable via DownloadRequest.
+	// +optional
+	// +nullable
+	CollectItemOutcomes *bool `json:"collectItemOutcomes,omitempty"`
 }
 
 // UploaderConfigForBackup defines the configuration for the uploader when doing backup.

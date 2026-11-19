@@ -105,6 +105,7 @@ type CreateOptions struct {
 	SnapshotMoveData                flag.OptionalBool
 	DataMover                       string
 	DefaultVolumesToFsBackup        flag.OptionalBool
+	CollectItemOutcomes             flag.OptionalBool
 	IncludeNamespaces               flag.StringArray
 	ExcludeNamespaces               flag.StringArray
 	IncludeResources                flag.StringArray
@@ -139,6 +140,7 @@ func NewCreateOptions() *CreateOptions {
 		Annotations:             flag.NewMap(),
 		SnapshotVolumes:         flag.NewOptionalBool(nil),
 		IncludeClusterResources: flag.NewOptionalBool(nil),
+		CollectItemOutcomes:     flag.NewOptionalBool(nil),
 	}
 }
 
@@ -173,6 +175,9 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	f.NoOptDefVal = cmd.TRUE
 
 	f = flags.VarPF(&o.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", "", "Use pod volume file system backup by default for volumes")
+	f.NoOptDefVal = cmd.TRUE
+
+	f = flags.VarPF(&o.CollectItemOutcomes, "collect-item-outcomes", "", "Collect a structured per-item outcome artifact for this backup. If unset, the server default applies.")
 	f.NoOptDefVal = cmd.TRUE
 
 	flags.StringVar(&o.ResPoliciesConfigmap, "resource-policies-configmap", "", "Reference to the resource policies configmap that backup should use")
@@ -487,6 +492,9 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 		}
 		if o.DefaultVolumesToFsBackup.Value != nil {
 			backupBuilder.DefaultVolumesToFsBackup(*o.DefaultVolumesToFsBackup.Value)
+		}
+		if o.CollectItemOutcomes.Value != nil {
+			backupBuilder.CollectItemOutcomes(*o.CollectItemOutcomes.Value)
 		}
 		if o.ResPoliciesConfigmap != "" {
 			backupBuilder.ResourcePolicies(o.ResPoliciesConfigmap)

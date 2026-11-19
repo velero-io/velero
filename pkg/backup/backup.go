@@ -925,6 +925,20 @@ func (kb *kubernetesBackupper) handleItemBlockPreHooks(itemBlock *BackupItemBloc
 		} else {
 			failedPods = append(failedPods, pod)
 			errs = append(errs, err)
+			// A failed pre-hook stops the pod from being backed up: the caller
+			// flags it as backed up, and backupItem's already-backed-up check
+			// returns before Observe. Record the failure here, against the pod it
+			// belongs to, or the artifact would never mention it.
+			outcome := itemBlock.itemBackupper.backupRequest.ItemOutcomes.For(
+				newResourceIdentifier(pod.Gr, pod.Item.GetNamespace(), pod.Item.GetName()),
+			)
+			// The normal capture path records the owner reported-by entry before Observe.
+			// This path reaches Fail directly, so resolve the owner report here too or
+			// an owned pod would appear as a root.
+			if metadata, mErr := meta.Accessor(pod.Item); mErr == nil {
+				itemBlock.itemBackupper.recordOwner(metadata, outcome)
+			}
+			outcome.Fail(fmt.Sprintf("pre hook failed: %v", err))
 		}
 	}
 	return successPods, failedPods, errs
@@ -944,6 +958,11 @@ func (kb *kubernetesBackupper) handleItemBlockPostHooks(itemBlock *BackupItemBlo
 		if err := itemBlock.itemBackupper.itemHookHandler.HandleHooks(itemBlock.Log, pod.Gr, pod.Item, itemBlock.itemBackupper.backupRequest.ResourceHooks,
 			hook.PhasePost, itemBlock.itemBackupper.hookTracker); err != nil {
 			log.WithError(err).WithField("name", pod.Item.GetName()).Error("Error running post hooks for pod")
+			// The pod was backed up before its post hooks ran, so its row already
+			// exists. Record the failure against it directly; no other code path
+			// will, now that outcomes no longer come from the log hook.
+			itemBlock.itemBackupper.backupRequest.ItemOutcomes.For(newResourceIdentifier(pod.Gr, pod.Item.GetNamespace(), pod.Item.GetName())).
+				Fail(fmt.Sprintf("post hook failed: %v", err))
 		}
 	}
 }
@@ -1237,6 +1256,14 @@ func (kb *kubernetesBackupper) FinalizeBackup(
 	// write new tar archive replacing files in original with content updateFiles for matches
 	if err := buildFinalTarball(tr, tw, updateFiles); err != nil {
 		log.Errorf("Error building final tarball: %s", err.Error())
+		return err
+	}
+
+	// Write the finalized item outcomes only after the archive is complete. If
+	// the tarball fails, the stored artifact stays unfinalized, which is the
+	// truthful state: the finalize pass did not commit the post-operation items
+	// the rows describe.
+	if err := finalizeItemOutcomes(log, backupRequest, volumeInfos, asyncBIAOperations, backupStore); err != nil {
 		return err
 	}
 

@@ -584,3 +584,36 @@ func TestCreateOptions_Validate(t *testing.T) {
 		})
 	}
 }
+
+// --collect-item-outcomes is tri-state: unset leaves the server default in
+// charge, while an explicit true or false is recorded on the BackupSpec.
+func TestCreateOptions_BuildBackupCollectItemOutcomes(t *testing.T) {
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name  string
+		value *bool
+	}{
+		{name: "unset leaves the server default", value: nil},
+		{name: "enabled", value: &enabled},
+		{name: "disabled", value: &disabled},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := NewCreateOptions()
+			o.CollectItemOutcomes.Value = tc.value
+
+			backup, err := o.BuildBackup(cmdtest.VeleroNameSpace)
+			require.NoError(t, err)
+
+			if tc.value == nil {
+				assert.Nil(t, backup.Spec.CollectItemOutcomes)
+				return
+			}
+			require.NotNil(t, backup.Spec.CollectItemOutcomes)
+			assert.Equal(t, *tc.value, *backup.Spec.CollectItemOutcomes)
+		})
+	}
+}

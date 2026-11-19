@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/velero-io/velero/internal/itemoutcome"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	pkgbackup "github.com/velero-io/velero/pkg/backup"
 	"github.com/velero-io/velero/pkg/client"
@@ -42,6 +43,7 @@ import (
 	"github.com/velero-io/velero/pkg/persistence"
 	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
 	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/csi"
 	"github.com/velero-io/velero/pkg/util/encode"
 )
@@ -196,6 +198,9 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		BackedUpItems:                 pkgbackup.NewBackedUpItemsMap(),
 		MustIncludeAdditionalItemPVCs: pkgbackup.NewBackedUpItemsMap(),
 	}
+	if boolptr.IsSetToTrue(backup.Spec.CollectItemOutcomes) {
+		backupRequest.ItemOutcomes = itemoutcome.NewRecorder()
+	}
 	var outBackupFile *os.File
 	if len(operations) > 0 {
 		log.Info("Setting up finalized backup temp file")
@@ -231,6 +236,13 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		)
 		if err != nil {
 			log.WithError(err).Error("error finalizing Backup")
+			return ctrl.Result{}, errors.WithStack(err)
+		}
+	} else if backupRequest.ItemOutcomes != nil {
+		// No archive rewrite is needed, but the artifact still needs its final volume verdicts.
+		log.Info("Finalizing backup item outcomes without async operations")
+		if err := pkgbackup.FinalizeItemOutcomes(log, backupRequest, operations, backupStore); err != nil {
+			log.WithError(err).Error("error finalizing backup item outcomes")
 			return ctrl.Result{}, errors.WithStack(err)
 		}
 	}

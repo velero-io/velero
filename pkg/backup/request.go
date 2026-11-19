@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/itemoutcome"
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -93,6 +94,11 @@ type Request struct {
 	SkippedVolumeTracker          *skipVolumeTracker
 	VolumesInformation            volume.BackupVolumesInformation
 	WorkerPool                    *ItemBlockWorkerPool
+
+	// ItemOutcomes records the per-item outcome of this backup. It is nil
+	// when the feature is disabled for this backup, in which case recording
+	// is a no-op.
+	ItemOutcomes *itemoutcome.Recorder
 
 	// ClusterScopedFilterMap holds resolved global filters for cluster-scoped resources.
 	// Key is the resolved group-resource string.

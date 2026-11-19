@@ -89,3 +89,31 @@ func TestCreateScheduleUploadConcurrency(t *testing.T) {
 		})
 	}
 }
+
+// A schedule's backups inherit the template, so the opt-in must be copied into
+// it rather than captured only on the schedule object.
+func TestCreateSchedulePropagatesCollectItemOutcomes(t *testing.T) {
+	enabled := true
+
+	crClient := velerotest.NewFakeControllerRuntimeClient(t)
+
+	f := &factorymocks.Factory{}
+	f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+	f.On("KubebuilderClient").Return(crClient, nil)
+
+	o := NewCreateOptions()
+	o.Schedule = "@daily"
+	o.BackupOptions.Name = "test-schedule-items"
+	o.BackupOptions.CollectItemOutcomes.Value = &enabled
+
+	require.NoError(t, o.Run(&cobra.Command{}, f))
+
+	created := new(velerov1api.Schedule)
+	require.NoError(t, crClient.Get(t.Context(), ctrlclient.ObjectKey{
+		Namespace: cmdtest.VeleroNameSpace,
+		Name:      "test-schedule-items",
+	}, created))
+
+	require.NotNil(t, created.Spec.Template.CollectItemOutcomes)
+	assert.True(t, *created.Spec.Template.CollectItemOutcomes)
+}

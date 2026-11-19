@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"time"
@@ -43,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/itemoutcome"
 	"github.com/velero-io/velero/internal/resourcepolicies"
 	"github.com/velero-io/velero/internal/storage"
 	"github.com/velero-io/velero/internal/volume"
@@ -113,6 +115,7 @@ type backupReconciler struct {
 	concurrentBackups                  int
 	globalVolumePoliciesConfigMap      string
 	knownSchedulesWithSuccessfulBackup sets.Set[string]
+	defaultCollectItemOutcomes         bool
 }
 
 func NewBackupReconciler(
@@ -142,6 +145,7 @@ func NewBackupReconciler(
 	concurrentBackups int,
 	globalCRClient kbclient.Client,
 	globalVolumePoliciesConfigMap string,
+	defaultCollectItemOutcomes bool,
 ) *backupReconciler {
 	b := &backupReconciler{
 		ctx:                           ctx,
@@ -171,6 +175,7 @@ func NewBackupReconciler(
 		concurrentBackups:             max(concurrentBackups, 1),
 		globalCRClient:                globalCRClient,
 		globalVolumePoliciesConfigMap: globalVolumePoliciesConfigMap,
+		defaultCollectItemOutcomes:    defaultCollectItemOutcomes,
 	}
 	b.updateTotalBackupMetric()
 	return b
@@ -453,6 +458,12 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 
 	if request.Spec.SnapshotMoveData == nil {
 		request.Spec.SnapshotMoveData = &b.defaultSnapshotMoveData
+	}
+
+	collectItemOutcomes := itemoutcome.CollectEnabled(request.Spec.CollectItemOutcomes, b.defaultCollectItemOutcomes)
+	request.Spec.CollectItemOutcomes = &collectItemOutcomes
+	if collectItemOutcomes {
+		request.ItemOutcomes = itemoutcome.NewRecorder()
 	}
 
 	// find which storage location to use
@@ -1129,6 +1140,14 @@ func persistBackup(backup *pkgbackup.Request,
 		persistErrs = append(persistErrs, errs...)
 	}
 
+	// A nil recorder means the feature is disabled for this backup: write no
+	// artifact at all, rather than an empty one.
+	var itemOutcomesJSON *bytes.Buffer
+	itemOutcomesJSON, errs = encodeItemOutcomes(backup)
+	if errs != nil {
+		persistErrs = append(persistErrs, errs...)
+	}
+
 	if len(persistErrs) > 0 {
 		// Don't upload the JSON files or backup tarball if encoding to json fails.
 		backupJSON = nil
@@ -1139,6 +1158,19 @@ func persistBackup(backup *pkgbackup.Request,
 		csiSnapshotClassesJSON = nil
 		backupResult = nil
 		volumeInfoJSON = nil
+		itemOutcomesJSON = nil
+	}
+
+	// itemOutcomesJSON is the only one of these that can be nil on the
+	// success path (whenever the feature is disabled for this backup), so it
+	// is the only one that needs this guard: assigning a nil *bytes.Buffer
+	// directly to the BackupItemOutcomes io.Reader field would store a
+	// non-nil interface wrapping a nil pointer, which later nil-checks
+	// (e.g. in seekAndPutObject) can't detect, causing a panic when it's
+	// read from. Leaving the interface itself nil avoids that trap.
+	var backupItemOutcomesReader io.Reader
+	if itemOutcomesJSON != nil {
+		backupItemOutcomesReader = itemOutcomesJSON
 	}
 
 	backupInfo := persistence.BackupInfo{
@@ -1153,6 +1185,7 @@ func persistBackup(backup *pkgbackup.Request,
 		BackupResourceList:       backupResourceList,
 		CSIVolumeSnapshotClasses: csiSnapshotClassesJSON,
 		BackupVolumeInfo:         volumeInfoJSON,
+		BackupItemOutcomes:       backupItemOutcomesReader,
 	}
 	if err := backupStore.PutBackup(backupInfo); err != nil {
 		persistErrs = append(persistErrs, err)

@@ -20,6 +20,8 @@ package mocks
 import (
 	io "io"
 
+	itemoutcome "github.com/velero-io/velero/internal/itemoutcome"
+
 	mock "github.com/stretchr/testify/mock"
 	itemoperation "github.com/velero-io/velero/pkg/itemoperation"
 
@@ -151,6 +153,36 @@ func (_m *BackupStore) GetBackupItemOperations(name string) ([]*itemoperation.Ba
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*itemoperation.BackupOperation)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetBackupItemOutcomes provides a mock function with given fields: name
+func (_m *BackupStore) GetBackupItemOutcomes(name string) (*itemoutcome.ItemOutcomes, error) {
+	ret := _m.Called(name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBackupItemOutcomes")
+	}
+
+	var r0 *itemoutcome.ItemOutcomes
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*itemoutcome.ItemOutcomes, error)); ok {
+		return rf(name)
+	}
+	if rf, ok := ret.Get(0).(func(string) *itemoutcome.ItemOutcomes); ok {
+		r0 = rf(name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*itemoutcome.ItemOutcomes)
 		}
 	}
 
@@ -616,6 +648,24 @@ func (_m *BackupStore) PutBackupItemOperations(backup string, backupItemOperatio
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, io.Reader) error); ok {
 		r0 = rf(backup, backupItemOperations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PutBackupItemOutcomes provides a mock function with given fields: name, itemOutcomes
+func (_m *BackupStore) PutBackupItemOutcomes(name string, itemOutcomes io.Reader) error {
+	ret := _m.Called(name, itemOutcomes)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutBackupItemOutcomes")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, io.Reader) error); ok {
+		r0 = rf(name, itemOutcomes)
 	} else {
 		r0 = ret.Error(0)
 	}

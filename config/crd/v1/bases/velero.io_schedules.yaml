@@ -89,6 +89,12 @@ spec:
                     - Full
                     - Incremental
                     type: string
+                  collectItemOutcomes:
+                    description: |-
+                      CollectItemOutcomes specifies whether to assemble a structured per-item
+                      outcome artifact for this backup, downloadable via DownloadRequest.
+                    nullable: true
+                    type: boolean
                   csiSnapshotTimeout:
                     description: |-
                       CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot status turns to

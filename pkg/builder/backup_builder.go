@@ -321,6 +321,12 @@ func (b *BackupBuilder) SnapshotMoveData(val bool) *BackupBuilder {
 	return b
 }
 
+// CollectItemOutcomes sets the Backup's "collect item outcomes" flag.
+func (b *BackupBuilder) CollectItemOutcomes(val bool) *BackupBuilder {
+	b.object.Spec.CollectItemOutcomes = &val
+	return b
+}
+
 // DataMover sets the Backup's data mover
 func (b *BackupBuilder) DataMover(name string) *BackupBuilder {
 	b.object.Spec.DataMover = name
