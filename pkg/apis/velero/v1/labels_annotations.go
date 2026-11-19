@@ -61,6 +61,10 @@ const (
 	// normally the value of the label should the "true" or "false"
 	DataUploadSnapshotInfoLabel = "velero.io/data-upload-snapshot-info"
 
+	// DataUploadRetainedSnapshotLabel is used to identify the configmap that contains the volume snapshot
+	// a data upload retained in the storage. Normally the value of the label should be "true"
+	DataUploadRetainedSnapshotLabel = "velero.io/data-upload-retained-snapshot"
+
 	// DataDownloadLabel is the label key used to identify the datadownload for snapshot restore pod
 	DataDownloadLabel = "velero.io/data-download"
 

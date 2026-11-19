@@ -535,6 +535,24 @@ As a result, after you delete a backup, the backup storage size does not reduce 
 For the **file system data mover**:
 - Kopia uploader may keep internal snapshots that are automatically managed during routine backups or purged during repository maintenance.
 
+If the VolumeSnapshotClass used for a **block data mover** backup has `deletionPolicy: Retain`, the volume snapshot is kept in the storage after the data movement completes. Some storages, e.g. Ceph RBD, require this, because the changed blocks of the next incremental backup are calculated against the retained snapshot. The file system data mover doesn't keep the snapshot. Velero records the retained snapshot in the `status.retainedSnapshot` field of the `DataUpload` CR, and has the CSI driver delete the snapshot when the backup is deleted. If the `DataUpload` fails or is canceled, the snapshot is not kept and is deleted when the `DataUpload` is cleaned up. As a result, deleting the most recent backup of a volume also deletes the base for its next incremental backup; the next incremental backup then uses the parent snapshot of an earlier backup, or falls back to a full backup as described in [Fallback to Full Backup](#fallback-to-full-backup). A block data mover backup taken by a Velero version that didn't record retained snapshots has no such record. For it, Velero reads the snapshot handle from the backup data in the backup repository before deleting that data, if the VolumeSnapshotClass of the backup still exists and has `deletionPolicy: Retain`. That isn't possible for the vSphere CSI driver, for the file system data mover, or for a `DataUpload` that didn't complete; delete such snapshots from the storage manually.
+
+Velero deletes the retained snapshots of a backup only after the other data of the backup, e.g. the backup data in the backup repository, is deleted. If deleting the other data fails, the backup deletion fails and the retained snapshots are kept, so that the next incremental backup can still use them; they are deleted when the backup deletion is retried. Velero keeps the record of a retained snapshot until the snapshot is deleted.
+
+Some CSI drivers, e.g. Ceph RBD, need a secret to delete a snapshot. The VolumeSnapshotClass names it in the `csi.storage.k8s.io/snapshotter-secret-name` and `csi.storage.k8s.io/snapshotter-secret-namespace` parameters, and Velero records that secret with the retained snapshot. For the deletion to succeed when the backup is deleted:
+- The secret must still exist under the same name and namespace. For a backup synced to another cluster, the secret must exist in that cluster.
+- The CSI snapshotter sidecar of the driver must be allowed to read the secret. Otherwise it reports `Failed to get snapshot credentials`, and the backup deletion fails with that error.
+
+To delete a retained snapshot, Velero creates a VolumeSnapshotContent named `vsc-<hash>` with the `velero.io/backup-name` label of the backup, and deletes it so that the CSI driver deletes the snapshot. Velero deletes the VolumeSnapshotContent only after the CSI snapshotter has set its status, because the snapshotter doesn't delete the snapshot otherwise; if that doesn't happen within 30 seconds, the backup deletion fails and can be retried. If the CSI driver reports a failure, the backup deletion fails with that error. If the deletion is not finished after 30 seconds, the backup deletion completes with a warning in the Velero server log, and the VolumeSnapshotContent stays until the CSI driver has deleted the snapshot. To find snapshots whose deletion didn't complete, list the remaining VolumeSnapshotContents:
+
+```bash
+kubectl get volumesnapshotcontents -l velero.io/backup-name=<backup name>
+```
+
+The events of such a VolumeSnapshotContent and the logs of the CSI snapshotter show why the snapshot is not deleted.
+
+Velero treats the snapshot as deleted once the CSI driver's `DeleteSnapshot` call succeeds. Some CSI drivers, e.g. Ceph RBD, finish removing the snapshot from the storage asynchronously after that call returns, so the snapshot may stay in the storage for a while, and errors that happen after the call returns are not reported to Velero. Check the storage for such snapshots if needed.
+
 Even after deleting all backups and their backup data (via repository maintenance), repository metadata remains to preserve the repository instance. If you stop using the backup repository, you can empty the backup storage manually.  
 
 ### Parallelism

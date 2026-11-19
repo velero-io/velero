@@ -43,6 +43,15 @@ type fakeProvider struct {
 	connectErr error
 	forgetErr  error
 	forgetErrs []error
+
+	tags        map[string]string
+	tagsErr     error
+	gotTagsSnap string
+}
+
+func (f *fakeProvider) GetSnapshotTags(_ context.Context, snapshotID string, _ provider.RepoParam) (map[string]string, error) {
+	f.gotTagsSnap = snapshotID
+	return f.tags, f.tagsErr
 }
 
 func (f *fakeProvider) BoostRepoConnect(ctx context.Context, _ provider.RepoParam) error {
@@ -172,4 +181,19 @@ func TestBatchForgetReturnsConnectError(t *testing.T) {
 
 	require.Len(t, errs, 1)
 	require.ErrorContains(t, errs[0], "boom: connection refused")
+}
+
+func TestGetSnapshotTags(t *testing.T) {
+	prd := &fakeProvider{tags: map[string]string{"cbt-change-id": "fake-handle"}}
+	mgr := newTestManager(t, prd)
+
+	tags, err := mgr.GetSnapshotTags(context.Background(), newTestRepo(), "snapshot-1")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"cbt-change-id": "fake-handle"}, tags)
+	assert.Equal(t, "snapshot-1", prd.gotTagsSnap)
+
+	prd = &fakeProvider{connectErr: errors.New("boom: connection refused")}
+	mgr = newTestManager(t, prd)
+	_, err = mgr.GetSnapshotTags(context.Background(), newTestRepo(), "snapshot-1")
+	require.ErrorContains(t, err, "boom: connection refused")
 }

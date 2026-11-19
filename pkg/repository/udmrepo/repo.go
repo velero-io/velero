@@ -18,9 +18,30 @@ package udmrepo
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 )
+
+// ErrSnapshotNotFound matches the error returned when a snapshot doesn't exist in
+// the repository.
+var ErrSnapshotNotFound = errors.New("snapshot not found")
+
+// SnapshotNotFound wraps err, an error for a snapshot that doesn't exist, so that
+// it matches ErrSnapshotNotFound.
+func SnapshotNotFound(err error) error {
+	return &snapshotNotFoundError{err: err}
+}
+
+type snapshotNotFoundError struct {
+	err error
+}
+
+func (e *snapshotNotFoundError) Error() string { return e.err.Error() }
+
+func (e *snapshotNotFoundError) Unwrap() error { return e.err }
+
+func (e *snapshotNotFoundError) Is(target error) bool { return target == ErrSnapshotNotFound }
 
 type ID string
 
