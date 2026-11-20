@@ -98,15 +98,15 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERS
 RUN set -eux; \
     GOARCH="$(go env GOARCH)"; \
     case "$GOARCH" in \
-        amd64) ARCH="x86_64"; GORELEASER_SHA256="cfbdf12e3ea20e4c3a209d07311f43c2e0baf20d5cce09bcdc232567e0f34307" ;; \
-        386) ARCH="i386"; GORELEASER_SHA256="21c236575cccd29588182b570b4ffe83ad8fb96cd3b13b2af79feafd8ae37b1b" ;; \
-        arm64) ARCH="arm64"; GORELEASER_SHA256="2b984e2932b24be0d638c7dab7357a59d86eb79ca7fee1afd31be5ebb1847cbb" ;; \
-        arm) ARCH="armv7"; GORELEASER_SHA256="6db2899885be19f123b36192a42dcfb3bb2b3e1009fec7277517969e96d8a7c6" ;; \
-        ppc64|ppc64le) ARCH="ppc64"; GORELEASER_SHA256="76d060ebb8d48e76fde45983f87040fe3ac0ca37c5ace4648a956959b81bfdf0" ;; \
+        amd64) ARCH="x86_64"; GORELEASER_SHA256="dc7faeeeb6da8bdfda788626263a4ae725892a8c7504b975c3234127d4a44579" ;; \
+        386) ARCH="i386"; GORELEASER_SHA256="eb91316bea78a5fb74ae4906123ab54100757272ed560fe7ba3f2a6ba5f08aaa" ;; \
+        arm64) ARCH="arm64"; GORELEASER_SHA256="581a10e53c1176b3e81ee45cf531e02dbf899db0bc7b795669347df4276ce948" ;; \
+        arm) ARCH="armv7"; GORELEASER_SHA256="02e78d748a9fd4244c5401224381c6b39d58245778789d9fac4405dbfeb531e8" ;; \
+        ppc64|ppc64le) ARCH="ppc64"; GORELEASER_SHA256="7c93002f1caf10770c7a59d6846b549b08231b2c2c302fa4b9a59fb4cda37787" ;; \
         *) echo "Unsupported goreleaser architecture: $GOARCH" >&2; exit 1 ;; \
     esac; \
     FILE="goreleaser_Linux_$ARCH.tar.gz"; \
-    wget --quiet "https://github.com/goreleaser/goreleaser/releases/download/v1.26.2/$FILE"; \
+    wget --quiet "https://github.com/goreleaser/goreleaser/releases/download/v2.14.3/$FILE"; \
     echo "$GORELEASER_SHA256  $FILE" | sha256sum -c -; \
     tar xvf "$FILE"; \
     mv goreleaser /usr/bin/goreleaser; \
