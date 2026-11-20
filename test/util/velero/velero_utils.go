@@ -1570,30 +1570,6 @@ func DeletePVs(ctx context.Context, client TestClient, pvList []string) error {
 	return nil
 }
 
-func CleanAllRetainedPV(ctx context.Context, client TestClient) {
-	pvNameList, err := GetAllPVNames(ctx, client)
-	if err != nil {
-		fmt.Println("fail to list PV")
-	}
-	for _, pv := range pvNameList {
-		args := []string{"patch", "pv", pv, "-p", "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}"}
-		fmt.Println(args)
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err := veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to patch PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-
-		args = []string{"delete", "pv", pv, "--timeout=60s"}
-		fmt.Println(args)
-		cmd = exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err = veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to delete PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-	}
-}
-
 func KubectlGetBackupRepository(ctx context.Context, uploaderType, veleroNamespace string) ([]string, error) {
 	args1 := []string{"get", "backuprepository", "-n", veleroNamespace}
 

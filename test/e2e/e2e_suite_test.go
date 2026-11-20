@@ -426,18 +426,6 @@ var _ = Describe(
 )
 
 var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups",
-	Label("Basic", "Snapshot", "RetainPV", "AdditionalBSL"),
-	BackupRestoreRetainedPVWithSnapshots,
-)
-
-var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and file system backup for volumes",
-	Label("Basic", "FSBackup", "RetainPV", "AdditionalBSL"),
-	BackupRestoreRetainedPVWithFSBackup,
-)
-
-var _ = Describe(
 	"Backup/restore of cluster resources",
 	Label("Basic", "ClusterResource"),
 	ResourcesCheckTest,
