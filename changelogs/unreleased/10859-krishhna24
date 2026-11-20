@@ -1,0 +1,1 @@
+Fail the e2e backup deletion helper when the backup or its DeleteBackupRequests are not cleaned up
