@@ -654,9 +654,18 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	prefix,
 	config,
 	secretName,
-	secretKey,
-	caCertFile string,
+	secretKey string,
 ) error {
+	// An additional location pointing at the same object store as the default
+	// one needs the same CA bundle. `velero install --cacert` already stored it
+	// in the default BSL, so take it from there instead of asking for the path
+	// a second time.
+	caCertFile, cleanup, err := caCertFileFromDefaultBSL(ctx, veleroNamespace)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	args := createBackupLocationArgs(
 		veleroNamespace,
 		name,
@@ -674,6 +683,54 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	}
 
 	return CheckBSL(ctx, veleroNamespace, name)
+}
+
+// caCertFileFromDefaultBSL returns the path to a temporary file holding the CA
+// bundle configured on the default backup storage location, or "" when the
+// location has none. `velero install --cacert` stores the bundle in the BSL's
+// spec.objectStorage.caCert, so it can be handed to `backup-location create
+// --cacert`, which takes a file path rather than the data.
+//
+// The second return value removes the file. It is always safe to call.
+func caCertFileFromDefaultBSL(ctx context.Context, veleroNamespace string) (string, func(), error) {
+	noop := func() {}
+
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "bsl", common.DefaultBSLName, "-o", "json", "-n", veleroNamespace)
+	stdout, stderr, err := veleroexec.RunCommand(cmd)
+	if err != nil {
+		return "", noop, errors.Wrapf(err, "failed to get bsl %s stdout=%s, stderr=%s", common.DefaultBSLName, stdout, stderr)
+	}
+
+	bsl := &velerov1api.BackupStorageLocation{}
+	if err := json.Unmarshal([]byte(stdout), bsl); err != nil {
+		return "", noop, errors.Wrap(err, "failed to unmarshal the velero bsl")
+	}
+
+	if len(bsl.Spec.ObjectStorage.CACert) == 0 {
+		return "", noop, nil
+	}
+
+	return writeTempCACert(bsl.Spec.ObjectStorage.CACert)
+}
+
+// writeTempCACert writes a CA bundle to a temporary file so it can be handed to
+// a Velero CLI flag that takes a path. The second return value removes the
+// file; it is always safe to call.
+func writeTempCACert(data []byte) (string, func(), error) {
+	noop := func() {}
+
+	f, err := os.CreateTemp("", "bsl-ca-cert-*.crt")
+	if err != nil {
+		return "", noop, errors.Wrap(err, "failed to create a temporary file for the BSL CA bundle")
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", noop, errors.Wrap(err, "failed to write the BSL CA bundle to a temporary file")
+	}
+
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
 // createBackupLocationArgs builds the argument list for

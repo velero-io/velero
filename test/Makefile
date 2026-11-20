@@ -122,7 +122,6 @@ ADDITIONAL_CREDS_FILE ?=
 ADDITIONAL_BSL_BUCKET ?=
 ADDITIONAL_BSL_PREFIX ?=
 ADDITIONAL_BSL_CONFIG ?=
-ADDITIONAL_BSL_CA_CERT_FILE ?=
 
 FEATURES ?=
 DEBUG_VELERO_POD_RESTART ?= false
@@ -236,7 +235,6 @@ run-e2e: ginkgo
 		--additional-bsl-bucket=$(ADDITIONAL_BSL_BUCKET) \
 		--additional-bsl-prefix=$(ADDITIONAL_BSL_PREFIX) \
 		--additional-bsl-config=$(ADDITIONAL_BSL_CONFIG) \
-		--additional-bsl-ca-cert-file=$(ADDITIONAL_BSL_CA_CERT_FILE) \
 		--default-cluster-context=$(DEFAULT_CLUSTER) \
 		--standby-cluster-context=$(STANDBY_CLUSTER) \
 		--snapshot-move-data=$(SNAPSHOT_MOVE_DATA) \

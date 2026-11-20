@@ -118,7 +118,6 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `ADDITIONAL_BSL_BUCKET`: `-additional-bsl-bucket`. Optional.
 1. `ADDITIONAL_BSL_PREFIX`: `-additional-bsl-prefix`. Optional.
 1. `ADDITIONAL_BSL_CONFIG`: `-additional-bsl-config`. Optional.
-1. `ADDITIONAL_BSL_CA_CERT_FILE`: `-additional-bsl-ca-cert-file`. Optional. Certificate bundle used to verify TLS connections to the additional backup storage location's object store
 1. `FEATURES`: `-features`. Optional.
 1. `REGISTRY_CREDENTIAL_FILE`: `-registry-credential-file`. Optional.
 1. `KIBISHII_DIRECTORY`: `-kibishii-directory`. Optional.

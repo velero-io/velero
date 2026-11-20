@@ -17,6 +17,7 @@ limitations under the License.
 package velero
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -90,6 +91,24 @@ func TestV118PluginSelection(t *testing.T) {
 			require.Equal(t, []string{image}, plugins)
 		})
 	}
+}
+
+func Test_writeTempCACert(t *testing.T) {
+	data := []byte("-----BEGIN CERTIFICATE-----\nnot-a-real-cert\n-----END CERTIFICATE-----\n")
+
+	path, cleanup, err := writeTempCACert(data)
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	require.NotEmpty(t, path, "expected a path to the written bundle")
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, data, got, "the bundle handed to the CLI must be the one read back from the BSL")
+
+	cleanup()
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err), "cleanup must remove the temporary bundle, got err=%v", err)
 }
 
 func Test_createBackupLocationArgs(t *testing.T) {

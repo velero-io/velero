@@ -203,7 +203,6 @@ func BackupRestoreTest(backupRestoreTestConfig BackupRestoreTestConfig) {
 				veleroCfg.AdditionalBSLConfig,
 				secretName,
 				secretKey,
-				veleroCfg.AdditionalBSLCACertFile,
 			)).To(Succeed())
 
 			// We limit the length of backup name here to avoid the issue of vsphere plugin

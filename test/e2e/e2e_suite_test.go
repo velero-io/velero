@@ -235,12 +235,6 @@ func init() {
 		"file containing credentials for additional backup storage location provider. Required if testing multiple credentials support.",
 	)
 	flag.StringVar(
-		&test.VeleroCfg.AdditionalBSLCACertFile,
-		"additional-bsl-ca-cert-file",
-		"",
-		"file containing a certificate bundle to use when verifying TLS connections to the additional backup storage location's object store. Optional.",
-	)
-	flag.StringVar(
 		&test.VeleroCfg.Features,
 		"features",
 		"",
