@@ -17,6 +17,7 @@ limitations under the License.
 package velero
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -90,4 +91,71 @@ func TestV118PluginSelection(t *testing.T) {
 			require.Equal(t, []string{image}, plugins)
 		})
 	}
+}
+
+func Test_writeTempCACert(t *testing.T) {
+	data := []byte("-----BEGIN CERTIFICATE-----\nnot-a-real-cert\n-----END CERTIFICATE-----\n")
+
+	path, cleanup, err := writeTempCACert(data)
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	require.NotEmpty(t, path, "expected a path to the written bundle")
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, data, got, "the bundle handed to the CLI must be the one read back from the BSL")
+
+	cleanup()
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err), "cleanup must remove the temporary bundle, got err=%v", err)
+}
+
+func Test_createBackupLocationArgs(t *testing.T) {
+	// argValue returns the value following flag, and whether flag was present.
+	argValue := func(args []string, flag string) (string, bool) {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1], true
+			}
+		}
+		return "", false
+	}
+
+	const (
+		namespace = "velero"
+		bslName   = "additional-bsl"
+		provider  = "aws"
+		bucket    = "additional-bucket"
+		config    = "region=minio,s3ForcePathStyle=\"true\",s3Url=https://minio.example.com:9000"
+		caCert    = "/tmp/minio-certs/public.crt"
+	)
+
+	t.Run("emits --cacert when a CA bundle is configured", func(t *testing.T) {
+		args := createBackupLocationArgs(
+			namespace, bslName, provider, bucket, "", config,
+			"bsl-credentials", "creds-aws", caCert,
+		)
+
+		require.Equal(t, []string{
+			"--namespace", namespace,
+			"create", "backup-location", bslName,
+			"--provider", provider,
+			"--bucket", bucket,
+		}, args[:9], "leading subcommand shape changed")
+
+		value, found := argValue(args, "--cacert")
+		require.True(t, found, "expected --cacert to be emitted, got %v", args)
+		require.Equal(t, caCert, value, "--cacert must be followed by the bundle path")
+	})
+
+	t.Run("omits --cacert when no CA bundle is configured", func(t *testing.T) {
+		args := createBackupLocationArgs(
+			namespace, bslName, provider, bucket, "", config,
+			"bsl-credentials", "creds-aws", "",
+		)
+
+		_, found := argValue(args, "--cacert")
+		require.False(t, found, "did not expect --cacert, got %v", args)
+	})
 }
