@@ -51,7 +51,7 @@ Retention is opt-in per volume through the existing volume policy: a `retainSnap
 Retention applies to the block data mover only.
 
 The backup VolumeSnapshotContent is created with `deletionPolicy: Delete`, as on current main.
-When a DataUpload subject to retention completes, the node-agent records the snapshot handle, the CSI driver and the deletion secret in a new `DataUpload.status.retainedSnapshot` field, and only then switches the content to `Retain`, so the snapshot survives the exposer cleanup that follows.
+When a DataUpload subject to retention completes, the node-agent records the snapshot handle, the CSI driver and the deletion secret in a new `DataUpload.status.retainedCSIStorageSnapshot` field, and only then switches the content to `Retain`, so the snapshot survives the exposer cleanup that follows.
 The DataUpload is stored in the backup tarball, so the record survives Velero restarts and travels with backup sync to another cluster.
 
 Data movements that do not complete never retain: their content keeps the `Delete` policy, and the patch-back reclaims the snapshot (section 3); the exposer cleanup handles the pod and PVC intermediates.
@@ -105,17 +105,20 @@ No retry loop is needed: the exposer creates the backup content itself, synchron
 The deletion secret is not a field: it lives in the content's `snapshot.storage.kubernetes.io/deletion-secret-name` and `-namespace` annotations.
 The driver and the snapshot class are already on `DataUpload.spec.csiSnapshot` and need no re-reading.
 
-The record, a `RetainedSnapshot` struct, is persisted in a new optional field, `DataUpload.status.retainedSnapshot`; the field is additive, so the DataUpload CRD changes are backward compatible.
+The record, a `RetainedCSIStorageSnapshot` struct, is persisted in a new optional field, `DataUpload.status.retainedCSIStorageSnapshot`; the field is additive, so the DataUpload CRD changes are backward compatible.
 It is a typed field rather than an entry in the existing `status.dataMoverResult` string map because the backup-deletion controller is a typed consumer, and the record must keep defined semantics after the mover result it came from is no longer relevant:
 
 ```go
-type RetainedSnapshot struct {
+type RetainedCSIStorageSnapshot struct {
     CSISnapshotHandle string                `json:"csiSnapshotHandle"`
     Driver            string                `json:"driver"`
     DeletionSecretRef *corev1api.SecretReference `json:"deletionSecretRef,omitempty"`
     ManagedByLabelValue string              `json:"managedByLabelValue,omitempty"`
 }
 ```
+
+The names were chosen to avoid the existing `RetainedSnapshot` field of `VolumeInfo`, which holds the VolumeSnapshot name on the data-mover paths (`BackupSnapshotDataMovementInfo` and `RestoreSnapshotDataMovementInfo`).
+Both records would otherwise surface side by side in `velero backup describe`, same name, different meaning.
 
 Only after the record is persisted does the node-agent patch the content's `deletionPolicy` to `Retain`.
 The existing exposer cleanup then runs, and the `Retain` policy keeps the storage snapshot.
@@ -126,7 +129,7 @@ The cleanup on the retention path must also be able to fail.
 `Exposer.CleanUp` returns nothing today, and `OnDataUploadCompleted` marks the DataUpload `Completed` unconditionally after calling it, so this design extends the cleanup interface to return an error (or adds an error-returning variant used by the retention path), and the completion callback holds the `Completed` mark until the cleanup has confirmed the intended end state.
 
 The ordering is a hard rule, not an implementation detail.
-Persisted means verified: after the status write, the node-agent gets the DataUpload back and asserts that `status.retainedSnapshot` carries the handle and the driver, before it patches the content.
+Persisted means verified: after the status write, the node-agent gets the DataUpload back and asserts that `status.retainedCSIStorageSnapshot` carries the handle and the driver, before it patches the content.
 The read-back is a direct, uncached read (an `APIReader`), because the node-agent's cached client can return the pre-write object — the DataUpload has no status subresource, so the persist is a plain object update — and a cached read would fail the verification spuriously, leaving retention silently off.
 A cluster whose DataUpload CRD predates the field prunes it on write and the update still reports success (see Compatibility), so the read-back, not the API response, is the proof; if the field comes back empty, the DataUpload fails and the content keeps `Delete`.
 If Velero restarts in between, the worst case is a snapshot that is deleted instead of retained: the next incremental falls back to a full backup, which is safe; the other order leaves a retained storage snapshot with no recoverable record, which is a leak.
@@ -180,24 +183,24 @@ The temporary content is:
 - named `vsc-<hash>` of driver and snapshot handle instead of a fresh UUID, so a retry of an interrupted deletion gets `AlreadyExists` and reuses the leftover instead of stacking a second content for the same snapshot;
 - statically provisioned, with `deletionPolicy: Delete`, the retained `snapshotHandle` in `spec.source.snapshotHandle`, and no `volumeSnapshotClassName`, as in the existing action;
 - given the existing action's synthetic `volumeSnapshotRef`, which the schema requires, with an **empty `uid`**: an empty UID is what makes the snapshotter's `shouldDelete` take the unbound pre-provisioned path and delete immediately, where a fabricated UID routes the content into the bound path and the referenced VolumeSnapshot is expected to exist;
-- created with the `volumesnapshotcontent-bound-protection` finalizer;
+- created with the `snapshot.storage.kubernetes.io/volumesnapshotcontent-bound-protection` finalizer;
 - labeled with the record's `snapshot.storage.kubernetes.io/managed-by` label value, when it has one, so distributed snapshotters, which select contents by that label, process it too;
 - created with the deletion secret from the record, when the driver needs one, written back into the `snapshot.storage.kubernetes.io/deletion-secret-name` and `-namespace` annotations the sidecar reads credentials from.
 
 The finalizer and the bounded wait are the second change, and they are required rather than cosmetic: live validation on kind (external-snapshotter v8.6.0) showed that a statically provisioned content without the finalizer can be dropped with no `DeleteSnapshot` call at all — every API-level check passes while the storage still holds the snapshot, which is exactly the regression the e2e case in #10694 asserts at the storage level.
 The existing action's create-delete sleep has not been shown to be sufficient at that snapshotter version, so this design does not rely on it.
 Within the retained path, the finalizer is the mechanism that keeps the object alive, and a status write is the mechanism that makes the sidecar act: in external-snapshotter v8.6.0, `syncContent` issues `DeleteSnapshot` only when `deletionPolicy` is `Delete` **and** `status.snapshotHandle` is set — otherwise it removes the finalizer and the content disappears with no CSI call and no error, a silent leak that reads as success to any API-level check.
-The sidecar's own status update runs `ListSnapshots` first, which for an already-gone snapshot — the stale-record case section 5 relies on — never succeeds, so the status cannot come from the sidecar on exactly the path that needs it.
+The sidecar's own status update runs `ListSnapshots` first, which for an already-gone snapshot — the stale-record case section 5 relies on — fails on any driver that implements `LIST_SNAPSHOTS`; a driver without the capability assumes the handle is valid and skips the check, but the drivers this design targets do implement `ListSnapshots`, so the status cannot come from the sidecar on exactly the path that needs it.
 The controller therefore initializes the content's status itself: before deleting the temp content, it writes the retained handle from the record into `status.snapshotHandle` through the content's status subresource, confirms the write by the status response itself — not merely orders the two — and only then deletes the content, with no `readyToUse` wait; the record's handle is known, so the write works whether or not the sidecar's status check ever succeeds.
 
 These changes apply to the retained-snapshot path only.
 The existing `volumesnapshotcontent_action` serves every legacy CSI backup deletion, so it keeps its current shape — a create-delete sleep with no finalizer — and if that sleep proves insufficient at newer snapshotter versions it is a separate bug to file and fix on its own, not a silent behavior change riding this design; the retained path gets its own helper or a guarded extension of the action, and the difference is called out in Compatibility.
 
 Deleting the content makes the sidecar call `DeleteSnapshot` on the driver.
-The controller polls every two seconds, without backoff, until the content disappears from the API, as `EnsureDeleteVSC` does, or until the sidecar reports failure: on a failed `DeleteSnapshot`, the external-snapshotter sidecar emits a `SnapshotDeleteError` event for the content and does not write `status.error` (the error status is a create-path mechanism), so the controller watches that event — Velero already reads events in `csi.DiagnoseVSC` — and keeps the timeout as the backstop.
+The controller polls every two seconds, without backoff, until the content disappears from the API, as `EnsureDeleteVSC` does, or until the sidecar reports failure: on a failed `DeleteSnapshot`, the external-snapshotter sidecar emits a `SnapshotDeleteError` event for the content and does not write `status.error` (the error status is a create-path mechanism), so the controller watches that event — Velero already consumes an `EventList` in `csi.DiagnoseVS`, the csi package's events reader, which is VolumeSnapshot-scoped — and keeps the timeout as the backstop.
 The wait is bounded by a deletion timeout, default five minutes, not by a short fixed poll: on a live cluster, a CSI snapshotter leader handover was observed to delay `DeleteSnapshot` by roughly two and a half minutes, which a 30-second bound would have turned into a spurious failure.
 The third change is where the deletion runs: in a dedicated retained-snapshot controller, not in the DeleteBackupRequest reconcile.
-A DeleteBackupRequest in `InProgress` or `Processed` is not reconciled again, and every failure path marks it `Processed`, with the retry being a new request, so the request's reconcile cannot carry a requeue-based wait.
+A DeleteBackupRequest in `InProgress` or `Processed` is not reconciled again, and the failure paths that give up mark it `Processed`, with the retry being a new request; the remaining error paths return the request `New` for a plain requeue, which restarts the reconcile rather than resuming it, so the request's reconcile cannot carry a requeue-based wait.
 It cannot carry a blocking wait either: the backup-deletion controller runs with the controller-runtime default of one worker, so any wait inside it — even a short poll for a ConfigMap to empty — blocks the deletion of every unrelated backup behind it.
 The DeleteBackupRequest therefore does not wait at all: its snapshot step writes the `velero.io/retained-snapshots-pending` annotation and activates the record ConfigMap family in one write — annotate first, then activate, never the reverse — and returns, leaving the request `InProgress`.
 That annotation is a guard change the design requires: the request controller's skip-`InProgress` rule must consult it, and only a request carrying the annotation is let back in to evaluate completion — repair activation, re-read the family, and run the tail, meaning tarball removal and completion, only when nothing is active; a re-entry that finds pending work goes back to waiting without touching the tail.
@@ -224,7 +227,7 @@ The backup tarball in the backup storage is deleted after that, only when all pr
 
 Because the DataUploads are deleted in an earlier step, the working record for the controller is a sharded ConfigMap family:
 
-- The DataUpload delete action runs at the start of backup deletion, before the repository data is deleted, and reads the DataUpload from the backup tarball; any DataUpload carrying a `retainedSnapshot` record contributes an entry to the `retained-snapshots-<backup-UID>-<n>` family in the Velero namespace, keyed by the DataUpload name, whatever the DataUpload's final phase.
+- The DataUpload delete action runs at the start of backup deletion, before the repository data is deleted, and reads the DataUpload from the backup tarball; any DataUpload carrying a `retainedCSIStorageSnapshot` record contributes an entry to the `retained-snapshots-<backup-UID>-<n>` family in the Velero namespace, keyed by the DataUpload name, whatever the DataUpload's final phase.
   Section 3 clears the record only after the backup content is gone, so a surviving record means the snapshot was never released; and even a stale record is harmless, because a deletion that finds the snapshot already gone is a success (section 4) — it costs one wasted temp-content round at worst, where refusing to read it would strand a real snapshot for good.
   The ConfigMap is written create-or-update: an existing map from an earlier, failed attempt of the same deletion is merged into, never rejected, because a plain create fails on `AlreadyExists` and turns every later retry of `velero backup delete` into a permanent failure until an operator removes the map by hand.
   ConfigMap data is limited to 1 MiB and a record is a few hundred bytes, so a backup with thousands of retained snapshots would exceed the bound and fail the gather itself; the records are therefore sharded into `retained-snapshots-<backup-UID>-<n>` objects, split before the limit and labeled by backup for discovery, and the orphan-snapshot ConfigMap is sharded the same way as entries accumulate across backups.
@@ -320,9 +323,12 @@ The node-agent and the backup-deletion controller already hold most of these, an
 ## Compatibility
 
 - Case 1 storage and users who do not set `retainSnapshot` see exactly the post-#10753 1.19.0 behavior.
-- The `DataUpload.status.retainedSnapshot` field is additive and optional; older Velero versions ignore it, and backups without it use the legacy tag-resolution path, subject to the conditions in section 7.
+- The `DataUpload.status.retainedCSIStorageSnapshot` field is additive and optional; older Velero versions ignore it, and backups without it use the legacy tag-resolution path, subject to the conditions in section 7.
   The reverse direction needs care, and it is a hard prerequisite, not a silent degradation: while the cluster's DataUpload CRD predates the field, the API server prunes it on write, the read-back verification detects the missing record, and the DataUpload fails — so operators must upgrade the DataUpload CRD before enabling `retainSnapshot`.
   This applies to OADP, which ships the DataUpload CRD in its own bundle and may lag the Velero patch; the user docs state it.
+- Downgrading from the 1.19.x patch to 1.19.0 is supported but lossy: the 1.19.0 binary knows nothing of retention, so deleting a backup there removes the DataUploads and the tarball while the storage snapshot stays, which is exactly the #10693 condition this design fixes.
+  Before rolling back, delete the backups that have retained snapshots, or accept that their snapshots leak and need manual cleanup.
+  An in-flight backup deletion interrupted by a rollback must be re-run after re-upgrading: the old binary's DeleteBackupRequest GC deletes `InProgress` requests after 24 hours (`deleteBackupRequestMaxAge`, backup_deletion_controller.go) and does not honor this design's annotations, so the request cannot be resumed, only restarted.
 - The record is one snapshot per DataUpload.
 A future design that keeps N local snapshots for fast restore (#7002 / #6240) extends it to a list; nothing here conflicts with that work.
 - A `Retain` VolumeSnapshotClass no longer keeps data mover snapshots, matching 1.19.0; the user docs state this for both data movers.
@@ -348,9 +354,8 @@ A future design that keeps N local snapshots for fast restore (#7002 / #6240) ex
 1. Is the volume policy the right home for `retainSnapshot`, given retention is a per-storage capability rather than a per-volume decision?
 2. Should deleting a retained snapshot that a later backup still uses as its base snapshot be blocked, and how aggressively, or is backup deletion ordering the user's responsibility in this release?
    Evidence to weigh: the base is consumed when the DataDownload calls `GetMetadataDelta`, not when the restore is created, and Ceph RBD answers a deleted base with an internal error rather than a not-found code, so a restore that loses its base mid-flight surfaces an opaque driver error that error codes cannot distinguish from a real storage fault.
-3. The field name `retainedSnapshot` collides conceptually with the existing `VolumeInfo` `RetainedSnapshot` field (the VolumeSnapshot name kept for plain CSI backups); rename one of them before the API freezes?
-4. Fold the restore baseline cleanup (#10728) into the implementation PR, or land it immediately after in the same window?
-5. Snapshot count grows with backup retention (one retained snapshot per volume per backup, on the order of 720 at hourly/30-day); is that acceptable for every Case 2 driver, or does the patch window need eager deletion of superseded snapshots after all?
+3. Fold the restore baseline cleanup (#10728) into the implementation PR, or land it immediately after in the same window?
+4. Snapshot count grows with backup retention (one retained snapshot per volume per backup, on the order of 720 at hourly/30-day); is that acceptable for every Case 2 driver, or does the patch window need eager deletion of superseded snapshots after all?
 
 Velero issue numbers (`#NNNN`) refer to https://github.com/velero-io/velero/issues/NNNN.
 
