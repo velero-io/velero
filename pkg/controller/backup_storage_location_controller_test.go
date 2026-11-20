@@ -85,7 +85,6 @@ var _ = Describe("Backup Storage Location Reconciler", func() {
 		// Setup reconciler
 		Expect(velerov1api.AddToScheme(scheme.Scheme)).To(Succeed())
 		r := backupStorageLocationReconciler{
-			ctx:    ctx,
 			client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(locations).Build(),
 			defaultBackupLocationInfo: storage.DefaultBackupLocationInfo{
 				StorageLocation:           "location-1",
@@ -151,7 +150,6 @@ var _ = Describe("Backup Storage Location Reconciler", func() {
 		// Setup reconciler
 		Expect(velerov1api.AddToScheme(scheme.Scheme)).To(Succeed())
 		r := backupStorageLocationReconciler{
-			ctx:    ctx,
 			client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(locations).Build(),
 			defaultBackupLocationInfo: storage.DefaultBackupLocationInfo{
 				StorageLocation:           "default",
@@ -245,13 +243,12 @@ func TestEnsureSingleDefaultBSL(t *testing.T) {
 		require.NoError(t, velerov1api.AddToScheme(scheme.Scheme))
 		t.Run(test.name, func(t *testing.T) {
 			r := &backupStorageLocationReconciler{
-				ctx:                       t.Context(),
 				client:                    fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(&test.locations).Build(),
 				defaultBackupLocationInfo: test.defaultBackupInfo,
 				metrics:                   metrics.NewServerMetrics(),
 				log:                       velerotest.NewLogger(),
 			}
-			defaultFound, err := r.ensureSingleDefaultBSL(test.locations)
+			defaultFound, err := r.ensureSingleDefaultBSL(t.Context(), test.locations)
 
 			assert.Equal(t, test.expectedDefaultSet, defaultFound)
 			assert.Equal(t, test.expectedError, err)
@@ -290,7 +287,6 @@ func TestBSLReconcile(t *testing.T) {
 		require.NoError(t, velerov1api.AddToScheme(scheme.Scheme))
 		t.Run(test.name, func(t *testing.T) {
 			r := &backupStorageLocationReconciler{
-				ctx:              t.Context(),
 				client:           fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(&test.locationList).Build(),
 				newPluginManager: func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
 				metrics:          metrics.NewServerMetrics(),
