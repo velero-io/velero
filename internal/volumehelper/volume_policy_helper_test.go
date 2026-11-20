@@ -2264,3 +2264,110 @@ func TestGetPVAndMatchAction(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRetainSnapshotFromActionParameters(t *testing.T) {
+	testCases := []struct {
+		name             string
+		inputObj         runtime.Object
+		groupResource    schema.GroupResource
+		resourcePolicies *resourcepolicies.ResourcePolicies
+		expected         bool
+	}{
+		{
+			name:          "VolumePolicy match with retainSnapshot true, returns true",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								resourcepolicies.DataMoverParameter:      "velero-block",
+								resourcepolicies.RetainSnapshotParameter: true,
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name:          "VolumePolicy match without retainSnapshot, returns false",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								resourcepolicies.DataMoverParameter: "velero-block",
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name:          "VolumePolicy not match, returns false",
+			inputObj:      builder.ForPersistentVolume("example-pv").StorageClass("gp3-csi").ClaimRef("ns", "pvc-1").Result(),
+			groupResource: kuberesource.PersistentVolumes,
+			resourcePolicies: &resourcepolicies.ResourcePolicies{
+				Version: "v1",
+				VolumePolicies: []resourcepolicies.VolumePolicy{
+					{
+						Conditions: map[string]any{
+							"storageClass": []string{"gp2-csi"},
+						},
+						Action: resourcepolicies.Action{
+							Type: resourcepolicies.Snapshot,
+							Parameters: map[string]any{
+								resourcepolicies.RetainSnapshotParameter: true,
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+
+			var p *resourcepolicies.Policies
+			if tc.resourcePolicies != nil {
+				p = &resourcepolicies.Policies{}
+				err := p.BuildPolicy(tc.resourcePolicies)
+				require.NoError(t, err)
+			}
+
+			vh := NewVolumeHelperImpl(
+				p,
+				ptr.To(true),
+				logrus.StandardLogger(),
+				fakeClient,
+				false,
+				false,
+				nil,
+			)
+
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tc.inputObj)
+			require.NoError(t, err)
+
+			actual := vh.GetRetainSnapshotFromActionParameters(&unstructured.Unstructured{Object: obj}, tc.groupResource)
+			assert.Equal(t, tc.expected, actual)
+		})
+	}
+}

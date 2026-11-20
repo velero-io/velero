@@ -18,6 +18,9 @@ package resourcepolicies
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -836,6 +839,191 @@ func TestValidateForRestore(t *testing.T) {
 					t.Fatalf("Expected error %v, but got error %v %v", tc.wantErr, err1, err2)
 				}
 			}
+		})
+	}
+}
+
+// TestActionValidateSnapshotParameterClosedList checks that the snapshot action
+// validates its parameter names against a closed list: a typo such as
+// "retainSnapshots" must fail validation instead of silently reading as false,
+// while the custom action keeps accepting arbitrary parameters.
+func TestActionValidateSnapshotParameterClosedList(t *testing.T) {
+	testCases := []struct {
+		name    string
+		action  *Action
+		wantErr string
+	}{
+		{
+			name: "snapshot action with all known parameters",
+			action: &Action{Type: Snapshot, Parameters: map[string]any{
+				"dataMover":      "velero-block",
+				"snapshotClass":  "rbd-class",
+				"retainSnapshot": true,
+			}},
+		},
+		{
+			name:    "snapshot action with a typoed retainSnapshot parameter fails",
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshots": true}},
+			wantErr: `unknown parameter "retainSnapshots" for the "snapshot" action`,
+		},
+		{
+			name:    "snapshot action with an unknown parameter fails",
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"csiSnapshotTimeout": "10m"}},
+			wantErr: `unknown parameter "csiSnapshotTimeout" for the "snapshot" action`,
+		},
+		{
+			name:   "custom action keeps accepting arbitrary parameters",
+			action: &Action{Type: Custom, Parameters: map[string]any{"anything": "goes", "retainSnapshots": true}},
+		},
+		{
+			name:   "skip action keeps accepting arbitrary parameters",
+			action: &Action{Type: Skip, Parameters: map[string]any{"anything": "goes"}},
+		},
+		{
+			name:   "fs-backup action keeps accepting arbitrary parameters",
+			action: &Action{Type: FSBackup, Parameters: map[string]any{"anything": "goes"}},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.action.validate()
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestActionValidateRetainSnapshot checks the strict validation of the
+// retainSnapshot parameter's value: a YAML boolean or exactly "true"/"false".
+func TestActionValidateRetainSnapshot(t *testing.T) {
+	testCases := []struct {
+		name    string
+		action  *Action
+		wantErr string
+	}{
+		{
+			name:   "boolean true",
+			action: &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": true}},
+		},
+		{
+			name:   "boolean false",
+			action: &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": false}},
+		},
+		{
+			name:   "string true",
+			action: &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "true"}},
+		},
+		{
+			name:   "string false",
+			action: &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "false"}},
+		},
+		{
+			name:    "typoed value fails with the received and the allowed values",
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "ture"}},
+			wantErr: `invalid "retainSnapshot" value ture`,
+		},
+		{
+			name:    "yes is not accepted",
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "yes"}},
+			wantErr: `invalid "retainSnapshot" value yes`,
+		},
+		{
+			name:    "integer is not accepted",
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": 1}},
+			wantErr: `invalid "retainSnapshot" value 1`,
+		},
+		{
+			name:    "retainSnapshot on a non-snapshot action fails",
+			action:  &Action{Type: FSBackup, Parameters: map[string]any{"retainSnapshot": true}},
+			wantErr: `is only supported for the "snapshot" action`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.action.validate()
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			// The accessor agrees with the validator on the valid values.
+			_, err = tc.action.GetRetainSnapshot()
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestActionGetRetainSnapshot checks the accessor for the retainSnapshot
+// parameter, which the backup action uses to carry the retention decision on
+// the DataUpload.
+func TestActionGetRetainSnapshot(t *testing.T) {
+	testCases := []struct {
+		name      string
+		action    *Action
+		expected  bool
+		expectErr bool
+	}{
+		{
+			name:      "nil action",
+			action:    nil,
+			expectErr: true,
+		},
+		{
+			name:     "snapshot action without parameters returns false",
+			action:   &Action{Type: Snapshot},
+			expected: false,
+		},
+		{
+			name:     "snapshot action without retainSnapshot returns false",
+			action:   &Action{Type: Snapshot, Parameters: map[string]any{"dataMover": "velero-block"}},
+			expected: false,
+		},
+		{
+			name:     "boolean true",
+			action:   &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": true}},
+			expected: true,
+		},
+		{
+			name:     "boolean false",
+			action:   &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": false}},
+			expected: false,
+		},
+		{
+			name:     "string true",
+			action:   &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "true"}},
+			expected: true,
+		},
+		{
+			name:     "string false",
+			action:   &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "false"}},
+			expected: false,
+		},
+		{
+			name:      "non-snapshot action returns error",
+			action:    &Action{Type: FSBackup, Parameters: map[string]any{"retainSnapshot": true}},
+			expectErr: true,
+		},
+		{
+			name:      "invalid value returns error",
+			action:    &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "maybe"}},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			retainSnapshot, err := tc.action.GetRetainSnapshot()
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, retainSnapshot)
 		})
 	}
 }

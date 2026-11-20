@@ -2364,6 +2364,7 @@ func TestNewDataUpload(t *testing.T) {
 		vsClassName               *string
 		uploaderConfig            *velerov1api.UploaderConfigForBackup
 		dataMoverFromVolumePolicy string
+		retainSnapshot            bool
 		expectedParentSnap        string
 		expectedDataMoverCfg      map[string]string
 	}{
@@ -2408,6 +2409,29 @@ func TestNewDataUpload(t *testing.T) {
 			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelBlocksUpload: 7},
 			dataMoverFromVolumePolicy: "velero-block",
 			expectedDataMoverCfg:      map[string]string{uploaderUtil.ParallelBlocksUpload: "7"},
+		},
+		{
+			// The retention decision must not depend on the uploader-config
+			// branch that initializes the map today.
+			name:                      "retention without uploader config initializes the map",
+			vsClassName:               ptr.To("test-vs-class"),
+			uploaderConfig:            nil,
+			dataMoverFromVolumePolicy: "velero-block",
+			retainSnapshot:            true,
+			expectedDataMoverCfg: map[string]string{
+				velerov2alpha1.RetainSnapshotDataMoverConfigKey: "true",
+			},
+		},
+		{
+			name:                      "retention with uploader config keeps the concurrency settings",
+			vsClassName:               ptr.To("test-vs-class"),
+			uploaderConfig:            &velerov1api.UploaderConfigForBackup{ParallelBlocksUpload: 7},
+			dataMoverFromVolumePolicy: "velero-block",
+			retainSnapshot:            true,
+			expectedDataMoverCfg: map[string]string{
+				uploaderUtil.ParallelBlocksUpload:               "7",
+				velerov2alpha1.RetainSnapshotDataMoverConfigKey: "true",
+			},
 		},
 		{
 			name:                 "both uploader concurrency settings",
@@ -2463,7 +2487,7 @@ func TestNewDataUpload(t *testing.T) {
 			operationID := "test-op-id"
 			fsType := "ext4"
 
-			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy)
+			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy, tc.retainSnapshot)
 
 			require.NotNil(t, du)
 			assert.Equal(t, velerov2alpha1.SchemeGroupVersion.String(), du.APIVersion)

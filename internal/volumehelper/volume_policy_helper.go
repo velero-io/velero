@@ -534,3 +534,29 @@ func (v *volumeHelperImpl) GetDataMoverFromActionParameters(obj runtime.Unstruct
 		groupResource.String(), metadata.GetNamespace()+"/"+metadata.GetName())
 	return ""
 }
+
+// GetRetainSnapshotFromActionParameters returns whether the matched volume policy
+// action opts the volume into base snapshot retention for the block data mover.
+// It returns false when no volume policy matches or the parameter is absent; the
+// parameter value itself is validated at policy load time, so a value that fails
+// to read here is logged and read as false.
+func (v *volumeHelperImpl) GetRetainSnapshotFromActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) bool {
+	action, _, err := v.getPVAndMatchAction(obj, groupResource)
+	if err != nil || action == nil {
+		return false
+	}
+
+	retainSnapshot, err := action.GetRetainSnapshot()
+	if err != nil {
+		v.logger.WithError(err).Warn("fail to get the retainSnapshot parameter, reading it as false")
+		return false
+	}
+	if retainSnapshot {
+		metadata, metaErr := meta.Accessor(obj)
+		if metaErr == nil {
+			v.logger.Infof("found matching action for %s: %s, base snapshot retention is on",
+				groupResource.String(), metadata.GetNamespace()+"/"+metadata.GetName())
+		}
+	}
+	return retainSnapshot
+}

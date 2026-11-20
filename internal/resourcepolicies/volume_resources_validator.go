@@ -101,6 +101,19 @@ func (a *Action) validate() error {
 		return fmt.Errorf("invalid action type %s", a.Type)
 	}
 
+	// The snapshot action validates its parameter names against a closed list:
+	// a typo such as "retainSnapshots" would otherwise read as false and silently
+	// turn every incremental back into a full backup. The custom action keeps
+	// accepting arbitrary parameters, which it passes to plugins.
+	if a.Type == Snapshot {
+		for name := range a.Parameters {
+			if _, ok := validSnapshotActionParameters[name]; !ok {
+				return fmt.Errorf("unknown parameter %q for the %q action, valid parameters are %q, %q, %q",
+					name, Snapshot, DataMoverParameter, SnapshotClassParameter, RetainSnapshotParameter)
+			}
+		}
+	}
+
 	// validate parameters
 	if raw, ok := a.Parameters[DataMoverParameter]; ok {
 		// the dataMover parameter is only meaningful for the snapshot action
@@ -129,6 +142,16 @@ func (a *Action) validate() error {
 		}
 		if snapshotClass == "" {
 			return fmt.Errorf("parameter %q must not be empty", SnapshotClassParameter)
+		}
+	}
+
+	if _, ok := a.Parameters[RetainSnapshotParameter]; ok {
+		if a.Type != Snapshot {
+			return fmt.Errorf("parameter %q is only supported for the %q action, but the action type is %q",
+				RetainSnapshotParameter, Snapshot, a.Type)
+		}
+		if _, err := a.GetRetainSnapshot(); err != nil {
+			return err
 		}
 	}
 
