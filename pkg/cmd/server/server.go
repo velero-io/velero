@@ -712,10 +712,18 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	// snapshot deletion does not block the backup-deletion controller, which
 	// runs with one worker.
 	if _, ok := enabledRuntimeControllers[constant.ControllerRetainedSnapshot]; ok {
-		if err := controller.NewRetainedSnapshotReconciler(
+		eventRecorder := kube.NewEventRecorder(
+			s.kubeClient,
+			s.mgr.GetScheme(),
+			"velero-retained-snapshot",
+			"",
+			s.logger,
+		)
+		if err := controller.NewRetainedSnapshotReconcilerWithRecorder(
 			s.logger,
 			s.mgr.GetClient(),
 			clock.RealClock{},
+			eventRecorder,
 		).SetupWithManager(s.mgr); err != nil {
 			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerRetainedSnapshot)
 		}

@@ -148,6 +148,7 @@ func getDataUpload(t *testing.T, r *DataUploadReconciler, du *velerov2alpha1api.
 }
 
 func getBackupVSC(t *testing.T, r *DataUploadReconciler, du *velerov2alpha1api.DataUpload) (*snapshotv1api.VolumeSnapshotContent, error) {
+	t.Helper()
 	return r.csiSnapshotClient.VolumeSnapshotContents().Get(t.Context(), du.Name, metav1.GetOptions{})
 }
 

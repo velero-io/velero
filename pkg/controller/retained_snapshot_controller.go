@@ -28,8 +28,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,7 +50,13 @@ type retainedSnapshotReconciler struct {
 	client.Client
 	logger   logrus.FieldLogger
 	clock    clock.Clock
-	recorder record.EventRecorder
+	recorder kubeEventRecorder
+}
+
+// kubeEventRecorder is the subset of the event recorders used to report
+// skipped and escalated records; it is satisfied by kube.EventRecorder.
+type kubeEventRecorder interface {
+	Event(object runtime.Object, warning bool, reason string, message string, a ...any)
 }
 
 // NewRetainedSnapshotReconciler creates a new retained-snapshot reconciler.
@@ -59,6 +65,18 @@ func NewRetainedSnapshotReconciler(logger logrus.FieldLogger, client client.Clie
 		Client: client,
 		logger: logger,
 		clock:  clock,
+	}
+}
+
+// NewRetainedSnapshotReconcilerWithRecorder creates a new retained-snapshot
+// reconciler with an event recorder, for reporting skipped and escalated
+// records.
+func NewRetainedSnapshotReconcilerWithRecorder(logger logrus.FieldLogger, client client.Client, clock clock.Clock, recorder kubeEventRecorder) *retainedSnapshotReconciler {
+	return &retainedSnapshotReconciler{
+		Client:   client,
+		logger:   logger,
+		clock:    clock,
+		recorder: recorder,
 	}
 }
 
@@ -71,9 +89,6 @@ func NewRetainedSnapshotReconciler(logger logrus.FieldLogger, client client.Clie
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents/status,verbs=get;update;patch
 
 func (r *retainedSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if r.recorder == nil {
-		r.recorder = mgr.GetEventRecorderFor("velero-retained-snapshot")
-	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1api.ConfigMap{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
@@ -161,7 +176,7 @@ func (r *retainedSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, errors.Wrap(err, "error re-reading the retained snapshot records")
 	}
 	if !family.HasPendingWork() {
-		if err := r.wakeDeleteBackupRequest(ctx, backup, log); err != nil {
+		if err := r.wakeDeleteBackupRequest(ctx, backup); err != nil {
 			return ctrl.Result{}, err
 		}
 		log.Info("The retained snapshots are deleted, the backup deletion is woken up")
@@ -337,13 +352,13 @@ func (r *retainedSnapshotReconciler) garbageCollectShard(ctx context.Context, sh
 // wakeDeleteBackupRequest enqueues the DeleteBackupRequest that waits on this
 // family with an update that leaves the pending annotation in place -- the
 // annotation is what lets the request back in, so the waker never clears it.
-func (r *retainedSnapshotReconciler) wakeDeleteBackupRequest(ctx context.Context, backup *velerov1api.Backup, log logrus.FieldLogger) error {
+func (r *retainedSnapshotReconciler) wakeDeleteBackupRequest(ctx context.Context, backup *velerov1api.Backup) error {
 	return r.patchWaitingRequest(ctx, backup, func(req *velerov1api.DeleteBackupRequest) {
 		if req.Annotations == nil {
 			req.Annotations = map[string]string{}
 		}
 		req.Annotations[velerov1api.RetainedSnapshotsWakeAnnotation] = r.clock.Now().UTC().Format(time.RFC3339)
-	}, log)
+	})
 }
 
 // failDeleteBackupRequest marks the DeleteBackupRequest that waits on this
@@ -355,10 +370,10 @@ func (r *retainedSnapshotReconciler) failDeleteBackupRequest(ctx context.Context
 	return r.patchWaitingRequest(ctx, backup, func(req *velerov1api.DeleteBackupRequest) {
 		req.Status.Phase = velerov1api.DeleteBackupRequestPhaseProcessed
 		req.Status.Errors = []string{message}
-	}, r.logger)
+	})
 }
 
-func (r *retainedSnapshotReconciler) patchWaitingRequest(ctx context.Context, backup *velerov1api.Backup, mutate func(*velerov1api.DeleteBackupRequest), log logrus.FieldLogger) error {
+func (r *retainedSnapshotReconciler) patchWaitingRequest(ctx context.Context, backup *velerov1api.Backup, mutate func(*velerov1api.DeleteBackupRequest)) error {
 	list := &velerov1api.DeleteBackupRequestList{}
 	selector := labels.SelectorFromSet(map[string]string{
 		velerov1api.BackupNameLabel: backup.Name,
@@ -387,5 +402,5 @@ func (r *retainedSnapshotReconciler) eventf(shard *corev1api.ConfigMap, backup *
 		r.logger.WithField("backup", backup.Name).Warningf(reason+": "+message, args...)
 		return
 	}
-	r.recorder.Eventf(shard, corev1api.EventTypeWarning, reason, message, args...)
+	r.recorder.Event(shard, true, reason, fmt.Sprintf(message, args...))
 }

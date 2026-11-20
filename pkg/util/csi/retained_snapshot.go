@@ -64,7 +64,7 @@ const (
 // itself is a stale-snapshot signal; the others are environment problems or
 // follow a successful delete and stay retryable.
 const (
-	snapshotDeleteCredentialFailureMessage = "Failed to get snapshot credentials"
+	snapshotDeleteCredentialFailureMessage = "Failed to get snapshot credentials" // #nosec G101
 	snapshotDeleteCallFailureMessage       = "Failed to delete snapshot"
 )
 

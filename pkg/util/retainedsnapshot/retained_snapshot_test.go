@@ -202,7 +202,7 @@ func TestActivateIsolatedFromPending(t *testing.T) {
 
 	family, err := LoadFamily(t.Context(), c, backup)
 	require.NoError(t, err)
-	assert.True(t, family.IsActivated() == false)
+	assert.False(t, family.IsActivated())
 	assert.False(t, family.HasPendingWork(), "an inactive shard has no work for the retained-snapshot controller")
 
 	require.NoError(t, Activate(t.Context(), c, backup))

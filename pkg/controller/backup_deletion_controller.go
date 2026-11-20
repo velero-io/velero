@@ -378,7 +378,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// the controller itself writes the family from the local DataUploads;
 		// without that fallback every retained snapshot of such a backup would
 		// leak silently.
-		if gatherErrs := r.gatherRetainedSnapshotRecords(ctx, backup, log); len(gatherErrs) > 0 {
+		if gatherErrs := r.gatherRetainedSnapshotRecords(ctx, backup); len(gatherErrs) > 0 {
 			for _, err := range gatherErrs {
 				errs = append(errs, errors.Wrap(err, "error gathering the retained snapshot records").Error())
 			}
@@ -655,7 +655,7 @@ func (r *backupDeletionReconciler) reconcileRetainedSnapshots(
 // family already did: an entry whose snapshot was confirmed deleted stays in
 // the completed set and is not recreated, and a persisted attempt count is
 // merged, not reset.
-func (r *backupDeletionReconciler) gatherRetainedSnapshotRecords(ctx context.Context, backup *velerov1api.Backup, log logrus.FieldLogger) []error {
+func (r *backupDeletionReconciler) gatherRetainedSnapshotRecords(ctx context.Context, backup *velerov1api.Backup) []error {
 	family, err := retainedsnapshot.LoadFamily(ctx, r.Client, backup)
 	if err != nil {
 		return []error{errors.Wrap(err, "error reading the retained snapshot records")}

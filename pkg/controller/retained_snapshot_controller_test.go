@@ -598,7 +598,7 @@ func TestResolveRetainedSnapshotHandles(t *testing.T) {
 				return tc.tags, tc.tagsErr
 			}
 
-			r := &backupDeletionReconciler{Client: c, logger: velerotest.NewLogger(), repoMgr: repomocks.NewManager(t), repoEnsurer: repository.NewEnsurer(c, velerotest.NewLogger(), time.Duration(time.Hour))}
+			r := &backupDeletionReconciler{Client: c, logger: velerotest.NewLogger(), repoMgr: repomocks.NewManager(t), repoEnsurer: repository.NewEnsurer(c, velerotest.NewLogger(), time.Hour)}
 			errs := r.resolveRetainedSnapshotHandles(t.Context(), backup, velerotest.NewLogger())
 
 			assert.Equal(t, "kopia-1", looked)
