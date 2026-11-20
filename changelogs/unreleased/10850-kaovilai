@@ -1,0 +1,1 @@
+Design for block data mover base snapshot retention on storage that requires the base snapshot for delta, e.g. Ceph RBD (#10744).
