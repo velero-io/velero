@@ -221,16 +221,21 @@ func DeleteRetainedSnapshot(
 
 	tempVSC := BuildTempVSCForRetainedSnapshot(record)
 
+	current := tempVSC
 	existing := &snapshotv1api.VolumeSnapshotContent{}
 	err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, existing)
 	switch {
 	case err == nil:
 		// A retry of an interrupted deletion reuses the leftover.
+		current = existing
 		log.Infof("Temp VolumeSnapshotContent %s for snapshot %s already exists, reusing it", tempVSC.Name, record.CSISnapshotHandle)
 	case apierrors.IsNotFound(err):
+		// The Create populates the resourceVersion the status write below
+		// carries, as a real API server requires.
 		if err := crClient.Create(ctx, tempVSC); err != nil && !apierrors.IsAlreadyExists(err) {
 			return errors.Wrapf(err, "error creating temp VolumeSnapshotContent %s", tempVSC.Name)
 		}
+		current = tempVSC
 		log.Infof("Created temp VolumeSnapshotContent %s with DeletionPolicy=Delete for snapshot %s", tempVSC.Name, record.CSISnapshotHandle)
 	default:
 		return errors.Wrapf(err, "error getting temp VolumeSnapshotContent %s", tempVSC.Name)
@@ -238,15 +243,25 @@ func DeleteRetainedSnapshot(
 
 	// Initialize the status the sidecar needs to issue DeleteSnapshot. The
 	// write works whether or not the sidecar's own status check ever succeeds,
-	// because the handle is known from the record.
-	statusVSC := &snapshotv1api.VolumeSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{Name: tempVSC.Name},
-		Status: &snapshotv1api.VolumeSnapshotContentStatus{
-			SnapshotHandle: &record.CSISnapshotHandle,
-		},
+	// because the handle is known from the record, and the status response
+	// itself is the confirmation of the write.
+	statusVSC := current.DeepCopy()
+	if statusVSC.Status == nil {
+		statusVSC.Status = &snapshotv1api.VolumeSnapshotContentStatus{}
 	}
+	statusVSC.Status.SnapshotHandle = &record.CSISnapshotHandle
 	if err := crClient.Status().Update(ctx, statusVSC); err != nil {
 		return errors.Wrapf(err, "error writing the status of temp VolumeSnapshotContent %s", tempVSC.Name)
+	}
+	// The write is confirmed by reading the status back, not merely ordered:
+	// deleting the content before the sidecar sees status.snapshotHandle would
+	// remove it with no DeleteSnapshot call.
+	confirmed := &snapshotv1api.VolumeSnapshotContent{}
+	if err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, confirmed); err != nil {
+		return errors.Wrapf(err, "error reading back the status of temp VolumeSnapshotContent %s", tempVSC.Name)
+	}
+	if confirmed.Status == nil || confirmed.Status.SnapshotHandle == nil || *confirmed.Status.SnapshotHandle != record.CSISnapshotHandle {
+		return errors.Errorf("the status of temp VolumeSnapshotContent %s does not carry the snapshot handle", tempVSC.Name)
 	}
 
 	// The status response itself is the confirmation: deleting the content
@@ -258,7 +273,10 @@ func DeleteRetainedSnapshot(
 
 	err = wait.PollUntilContextTimeout(ctx, retainedSnapshotPollInterval, RetainedSnapshotDeletionTimeout, true, func(ctx context.Context) (bool, error) {
 		err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, &snapshotv1api.VolumeSnapshotContent{})
-		return apierrors.IsNotFound(err), err
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
 	})
 	if err == nil {
 		log.Infof("Deleted temp VolumeSnapshotContent %s, the CSI driver deleted snapshot %s", tempVSC.Name, record.CSISnapshotHandle)

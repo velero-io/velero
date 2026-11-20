@@ -593,6 +593,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		constant.ControllerServerStatusRequest: {},
 		constant.ControllerRestoreFinalizer:    {},
 		constant.ControllerBackupQueue:         {},
+		constant.ControllerRetainedSnapshot:    {},
 	}
 
 	if s.config.RestoreOnly {
@@ -600,6 +601,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		s.config.DisabledControllers = append(s.config.DisabledControllers,
 			constant.ControllerBackup,
 			constant.ControllerBackupDeletion,
+			constant.ControllerRetainedSnapshot,
 			constant.ControllerBackupFinalizer,
 			constant.ControllerBackupOperations,
 			constant.ControllerGarbageCollection,
@@ -702,6 +704,20 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.repoEnsurer,
 		).SetupWithManager(s.mgr); err != nil {
 			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerBackupDeletion)
+		}
+	}
+
+	// The retained-snapshot controller is keyed by the record ConfigMap family
+	// the backup deletion hands off to; it runs its own workers, so a slow
+	// snapshot deletion does not block the backup-deletion controller, which
+	// runs with one worker.
+	if _, ok := enabledRuntimeControllers[constant.ControllerRetainedSnapshot]; ok {
+		if err := controller.NewRetainedSnapshotReconciler(
+			s.logger,
+			s.mgr.GetClient(),
+			clock.RealClock{},
+		).SetupWithManager(s.mgr); err != nil {
+			s.logger.Fatal(err, "unable to create controller", "controller", constant.ControllerRetainedSnapshot)
 		}
 	}
 
