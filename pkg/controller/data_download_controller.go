@@ -482,15 +482,16 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 	}
 
 	objRef := getDataDownloadOwnerObject(&dd)
-	err := r.restoreExposer.RebindVolume(ctx, objRef, exposer.GenericRestoreRebindVolumeParam{
+	rebindErr := r.restoreExposer.RebindVolume(ctx, objRef, exposer.GenericRestoreRebindVolumeParam{
 		TargetPVCName:    dd.Spec.TargetVolume.PVC,
 		TargetNamespace:  dd.Spec.TargetVolume.Namespace,
 		OperationTimeout: dd.Spec.OperationTimeout.Duration,
 		TargetFSType:     dd.Spec.TargetVolume.FSType,
 	})
-	if err != nil {
-		log.WithError(err).Error("Failed to rebind PV to target PVC on completion")
-		return
+	if rebindErr != nil {
+		// The data has already been restored, so still complete the DataDownload
+		// and leave a warning in the status instead of leaving it in InProgress.
+		log.WithError(rebindErr).Error("Failed to rebind PV to target PVC on completion")
 	}
 
 	log.Info("Cleaning up exposed environment")
@@ -507,6 +508,10 @@ func (r *DataDownloadReconciler) OnDataDownloadCompleted(ctx context.Context, na
 		dd.Status.IncrementalBytes = ptr.To(result.Restore.IncrementalBytes)
 		dd.Status.FallbackFull = result.Restore.FallbackFull
 		dd.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
+		if rebindErr != nil {
+			dd.Status.Message = fmt.Sprintf("warning: data is restored but failed to rebind the restored volume to target PVC %s/%s: %v",
+				dd.Spec.TargetVolume.Namespace, dd.Spec.TargetVolume.PVC, rebindErr)
+		}
 
 		delete(dd.Labels, exposer.ExposeOnGoingLabel)
 
