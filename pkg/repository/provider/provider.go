@@ -62,6 +62,10 @@ type Provider interface {
 
 	// BatchForget is to delete a list of snapshots from the repository
 	BatchForget(ctx context.Context, snapshotIDs []string, param RepoParam) []error
+
+	// GetSnapshotTags returns the tags of a snapshot, or an error that matches
+	// udmrepo.ErrSnapshotNotFound if the snapshot doesn't exist.
+	GetSnapshotTags(ctx context.Context, snapshotID string, param RepoParam) (map[string]string, error)
 }
 
 // ConfigProvider defines the methods to get configurations of a backup repository
