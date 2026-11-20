@@ -49,6 +49,7 @@ func TestExecutePVAction_NoSnapshotRestores(t *testing.T) {
 		volumeSnapshots []*volume.Snapshot
 		locations       []*api.VolumeSnapshotLocation
 		expectedErr     bool
+		expectedErrIs   error
 		expectedRes     *unstructured.Unstructured
 	}{
 		{
@@ -112,6 +113,23 @@ func TestExecutePVAction_NoSnapshotRestores(t *testing.T) {
 			},
 			expectedRes: newTestUnstructured().WithName("pv-1").WithSpec().Unstructured,
 		},
+		{
+			name:            "no snapshot and Delete reclaim policy: return errPVNeedsReprovisioning",
+			obj:             newTestUnstructured().WithName("pv-1").WithSpec().WithSpecField("persistentVolumeReclaimPolicy", "Delete").Unstructured,
+			restore:         builder.ForRestore(api.DefaultNamespace, "").RestorePVs(true).Result(),
+			backup:          defaultBackup().Result(),
+			volumeSnapshots: []*volume.Snapshot{},
+			expectedErr:     true,
+			expectedErrIs:   errPVNeedsReprovisioning,
+		},
+		{
+			name:            "no snapshot and Retain reclaim policy: return PV as-is",
+			obj:             newTestUnstructured().WithName("pv-1").WithSpec().WithSpecField("persistentVolumeReclaimPolicy", "Retain").Unstructured,
+			restore:         builder.ForRestore(api.DefaultNamespace, "").RestorePVs(true).Result(),
+			backup:          defaultBackup().Result(),
+			volumeSnapshots: []*volume.Snapshot{},
+			expectedRes:     newTestUnstructured().WithName("pv-1").WithSpec().WithSpecField("persistentVolumeReclaimPolicy", "Retain").Unstructured,
+		},
 	}
 
 	for _, tc := range tests {
@@ -135,6 +153,9 @@ func TestExecutePVAction_NoSnapshotRestores(t *testing.T) {
 			case true:
 				assert.Nil(t, res)
 				require.Error(t, err)
+				if tc.expectedErrIs != nil {
+					assert.Equal(t, tc.expectedErrIs, err)
+				}
 			case false:
 				assert.Equal(t, tc.expectedRes, res)
 				assert.NoError(t, err)
