@@ -1023,19 +1023,21 @@ func DeleteBackup(ctx context.Context, backupName string, velerocfg *VeleroConfi
 		return errors.Wrapf(err, "backup %s was still present after the delete request", backupName)
 	}
 
-	// Wait for the DeleteBackupRequest CRs to be handled, rather than assuming a
-	// fixed interval is long enough. Polling returns as soon as they are gone and
-	// still fails if they never are.
-	var drList []string
-	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, time.Minute, true,
-		func(context.Context) (bool, error) {
-			drList, err = KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
-			if err != nil {
-				return false, errors.Wrapf(err, "fail to list DeleteBackupRequests for backup %s", backupName)
-			}
-			return len(drList) <= 1, nil
-		})
+	// Waiting for completion of handling deleteBackupRequest CR.
+	//
+	// This also gives the provider time to remove the snapshots: callers check
+	// those immediately afterwards with a one-shot assertion that has no wait of
+	// its own, so replacing this with a poll on the DeleteBackupRequest count
+	// alone makes the snapshot check run too early. Removing it needs
+	// checkSnapshotsOnKind to poll first.
+	time.Sleep(1 * time.Minute)
+
+	// Verify deleteBackupRequest are all gone because they are handled successfully
+	drList, err := KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
 	if err != nil {
+		return errors.Wrapf(err, "fail to list DeleteBackupRequests for backup %s", backupName)
+	}
+	if len(drList) > 1 {
 		// Log deleteBackupRequest details for debug
 		for _, dr := range drList {
 			details, detailsErr := KubectlGetDeleteBackupRequestDetails(context.Background(), dr, velerocfg.VeleroNamespace)
@@ -1044,10 +1046,7 @@ func DeleteBackup(ctx context.Context, backupName string, velerocfg *VeleroConfi
 			}
 			fmt.Printf("Failed DeleteBackupRequest details: %s", details)
 		}
-		if len(drList) > 1 {
-			return errors.New(fmt.Sprintf("Count of DeleteBackupRequest %d is not expected", len(drList)))
-		}
-		return errors.Wrapf(err, "DeleteBackupRequests for backup %s were not handled", backupName)
+		return errors.New(fmt.Sprintf("Count of DeleteBackupRequest %d is not expected", len(drList)))
 	}
 
 	return nil
