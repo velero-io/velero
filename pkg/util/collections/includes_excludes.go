@@ -162,6 +162,12 @@ func (nie *NamespaceIncludesExcludes) ShouldInclude(s string) bool {
 // namespace (such as Velero's own) doesn't stop a backup of all namespaces
 // from including cluster-scoped resources.
 func (nie *NamespaceIncludesExcludes) IncludeEverything() bool {
+	// A wildcard that matched no namespace leaves the includes list empty,
+	// which must not be mistaken for "include everything". See ShouldInclude.
+	if nie.wildcardExpanded && nie.includesExcludes.includes.Len() == 0 {
+		return false
+	}
+
 	if nie.includesExcludes.IncludeEverything() {
 		return true
 	}
