@@ -1,0 +1,1 @@
+Update Go to 1.27.3 and klauspost/compress to 1.20.2 to address vulnerabilities in Velero binaries.

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=$TARGETPLATFORM golang:1.27-trixie
+FROM --platform=$TARGETPLATFORM golang:1.27.3-trixie
 
 ARG GOPROXY
 ARG PROTOC_GEN_GO_VERSION
