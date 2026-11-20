@@ -11,8 +11,15 @@ It lets a user check filters, namespace mappings, resource modifiers and existin
 > - One optional field, `spec.dryRun`, and the same restore engine, so a dry run gives the answers a real restore would give.
 > - A dry run never writes.
 >   When the restore starts, Velero gives the engine read-only versions of its [write paths](#write-paths), runs its built-in plugins with [clients that can only read](#read-only-clients-for-the-built-in-actions), and does not start plugins from outside the Velero repository.
-> - It remembers the namespaces and CRDs it would create, so the first restore into an empty cluster is reported correctly.
-> - Its limits are written down in [Item outcomes](#item-outcomes), including six known differences and the errors it cannot predict.
+> - A dry run creates nothing, so it keeps the namespaces and CRDs a real restore would create in a [planned state](#planned-state), and checks the objects that depend on them against it.
+> - It cannot predict errors that only the API server or a storage provider returns, and six cases differ from a real restore, see [Item outcomes](#item-outcomes).
+> - An old `Restore` CRD or an old Velero server could turn a dry run into a real restore.
+>   The Velero CLI is guarded against both, and other clients only partly, see [Version skew](#version-skew).
+> - It costs less than a real restore of the same backup, because it sends the same number of API requests, with reads in place of writes, and copies no volume data.
+>   But the controller runs one restore at a time, so a real restore created while a large dry run is running waits until the dry run finishes, see [Controller, phases and metrics](#controller-phases-and-metrics).
+>   Letting a real restore go before dry runs that are still waiting in the queue is a follow-up in [Non Goals](#non-goals).
+> - It is built in seven pull requests behind a feature flag, and no step lets a dry run write, see [Feature flag and order of work](#feature-flag-and-order-of-work).
+> - One question is open for plugin authors, whether a plugin should be able to declare that it follows the dry-run contract, see [Open Issues](#open-issues).
 
 ## Background
 
