@@ -1,5 +1,5 @@
 ---
-title: "We've enabled CSI Snapshot Tests in Velero Kind E2E"
+title: "CSI Snapshot Tests Now Run in Velero's kind E2E Job"
 excerpt: Velero's kind end-to-end job now runs seven rows of CSI coverage, where it ran none. Snapshot regressions are caught before a change merges. Here is what was stopping those tests, and three adjacent things the work turned up.
 author_name: Krishna Tupe
 slug: Enabling-CSI-Snapshot-Tests-In-Velero-Kind-E2E
@@ -11,15 +11,19 @@ tags: ['Velero Team', 'Krishna Tupe']
 
 Velero's end-to-end suite now runs its CSI volume snapshot cases on a [kind](https://kind.sigs.k8s.io/) cluster in CI. Seven matrix rows cover CSI snapshots, the data mover, VolumeGroupSnapshot, Kibishii snapshot and file system backup, namespace mapping, backup storage location deletion, and backup deletion with file system backup. Until recently that job ran none of them.
 
-This is Velero's only automated end-to-end coverage, and it runs on every pull request that touches Go code. So a change that breaks the CSI backup path, the data mover or VolumeGroupSnapshot is now caught before it merges, against a real CSI driver taking real `VolumeSnapshot` objects, on hardware the project already pays nothing for.
+This is Velero's only automated end-to-end coverage, and it runs on every pull request that touches Go code. So a change that breaks the CSI backup path, the data mover or VolumeGroupSnapshot is now caught before it merges, against a real CSI driver taking real `VolumeSnapshot` objects, on free GitHub-hosted runners.
 
 Getting there was my [LFX Mentorship](https://mentorship.lfx.linuxfoundation.org/) project with the Velero community, tracked in [issue #7507](https://github.com/velero-io/velero/issues/7507). What follows is what had been switching those tests off, and three adjacent things the work turned up that are worth knowing if you maintain a test suite of your own.
 
 ## Why they did not run before
 
-Eight provider checks across six test files skipped the snapshot cases on kind, each carrying a comment that said the same thing: volume snapshots and file system backups are not supported on kind. The oldest of those checks dates to 2021. Not one of them is obviously wrong, which is why all eight survived.
+Two separate things kept those cases off, and only one of them was visible in Velero's test code.
 
-kind can take CSI snapshots. `csi-driver-host-path` installs into a kind cluster and takes real `VolumeSnapshot` objects. The real cause was in a different repository altogether.
+The first was that the kind job never installed a snapshot stack. The backup-volume-info cases, which cover CSI snapshots, the data mover and VolumeGroupSnapshot, do not use Kibishii and carry no kind guard. They never ran because the cluster had no CSI driver, no snapshot controller and no `VolumeSnapshotClass` to run them against, so no CI job selected them.
+
+The second was harder to see. Eight provider checks across six test files skipped the Kibishii-backed snapshot cases on kind, each carrying a comment that said the same thing: volume snapshots and file system backups are not supported on kind. The oldest of those checks dates to 2021. Not one of them is obviously wrong, which is why all eight survived.
+
+kind can take CSI snapshots. `csi-driver-host-path` installs into a kind cluster and takes real `VolumeSnapshot` objects. For the Kibishii cases, the real cause was in a different repository altogether.
 
 Velero's suite uses [Kibishii](https://github.com/vmware-tanzu-experiments/distributed-data-generator) as its sample workload. The suite installs the StorageClass named by its `--storage-class-file` flag, but Kibishii's kustomize overlay ships a class of its own and points its PersistentVolumeClaims at that one instead. On kind, the overlay declared it like this:
 
@@ -35,11 +39,11 @@ volumeBindingMode: WaitForFirstConsumer
 
 So every PersistentVolume Kibishii created was a hostPath volume, whatever the suite had installed. Velero declines to act on those twice over. The CSI backup action returns early unless the volume has a `CSI` source (`pkg/backup/actions/csi/pvc_action.go`). The file system backup path reads the PersistentVolume, finds a `HostPath` source, and skips it too (`pkg/podvolume/backupper.go`).
 
-Skipping produced the right outcome for the wrong reason. There was genuinely nothing to snapshot, so the tests would have failed had they run. But the comments named kind, and the fix was one line in a fixture in another repository. It was a believable wrong answer, too: kind does ship a local-path provisioner that cannot snapshot, so the explanation fit everything anyone could see from inside Velero.
+Skipping produced the right outcome for the wrong reason. There was genuinely nothing to snapshot, so the tests would have failed had they run. But the comments named kind, and the fix belonged in another repository: a new kind overlay whose StorageClass sits on a CSI driver. It was a believable wrong answer, too: kind does ship a local-path provisioner that cannot snapshot, so the explanation fit everything anyone could see from inside Velero.
 
 ## Three things that hid in plain sight
 
-Fixing the StorageClass was the small part. Finding out what else had quietly never run was the rest.
+Removing those two blockers was the small part. Finding out what else had quietly never run was the rest.
 
 **A label filter matches a bare token by equality.** Velero selects test cases with Ginkgo label filters. Ginkgo compares a bare token like this:
 
@@ -55,7 +59,7 @@ So the filter `CSISnapshot` does not select a case labelled `CSIVolumeGroupSnaps
 
 ## What it took
 
-Order mattered more than size. The StorageClass lived in another repository, so a CSI-backed overlay had to merge there first. Only then could Velero map the combination of kind and CSI onto that overlay and move its pinned Kibishii commit forward. Only then could the provider checks narrow from "kind" to "kind without CSI", which is what they had always meant. Only then could the CI matrix select the cases.
+Order mattered more than size. The kind cluster needed a snapshot stack before any CSI case could run, so a script that installs the snapshot controller and `csi-driver-host-path` came first, then a CI job that calls it. The StorageClass lived in another repository, so a CSI-backed overlay had to merge there next. Only then could Velero map the combination of kind and CSI onto that overlay and move its pinned Kibishii commit forward. Only then could the provider checks narrow from "kind" to "kind without CSI", which is what they had always meant. Only then could the CI matrix select the cases.
 
 Done in that order, each change was small and reviewable on its own.
 
