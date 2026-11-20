@@ -52,6 +52,7 @@ if [[ "${PUBLISH:-}" != "TRUE" ]]; then
     goreleaser release \
         --clean \
         --parallelism 2 \
+        --timeout "${RELEASE_TIMEOUT:-60m}" \
         --release-notes="${RELEASE_NOTES_FILE}" \
         --snapshot # Generate an unversioned snapshot release, skipping all validations and without publishing any artifacts (implies --skip-publish, --skip-announce and --skip-validate)
 else
@@ -59,5 +60,6 @@ else
     goreleaser release \
         --clean \
         --parallelism 2 \
+        --timeout "${RELEASE_TIMEOUT:-60m}" \
         --release-notes="${RELEASE_NOTES_FILE}"
 fi
