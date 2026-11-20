@@ -194,6 +194,7 @@ func BackupRestoreTest(backupRestoreTestConfig BackupRestoreTestConfig) {
 
 			// Create additional BSL using credential
 			Expect(VeleroCreateBackupLocation(context.TODO(),
+				veleroCfg.ClientToInstallVelero.Kubebuilder,
 				veleroCfg.VeleroCLI,
 				veleroCfg.VeleroNamespace,
 				common.AdditionalBSLName,

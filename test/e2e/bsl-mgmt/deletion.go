@@ -121,6 +121,7 @@ func BslDeletionTest(useVolumeSnapshots bool) {
 
 			By(fmt.Sprintf("Create additional BSL using credential %s", secretName), func() {
 				Expect(VeleroCreateBackupLocation(context.TODO(),
+					veleroCfg.ClientToInstallVelero.Kubebuilder,
 					veleroCfg.VeleroCLI,
 					veleroCfg.VeleroNamespace,
 					additionalBsl,

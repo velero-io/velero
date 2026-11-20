@@ -49,6 +49,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
 	cliinstall "github.com/velero-io/velero/pkg/cmd/cli/install"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
 	"github.com/velero-io/velero/pkg/cmd/util/flag"
 	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 	"github.com/velero-io/velero/test"
@@ -646,6 +647,7 @@ func RunDebug(ctx context.Context, veleroCLI, veleroNamespace, backup, restore s
 }
 
 func VeleroCreateBackupLocation(ctx context.Context,
+	client kbclient.Client,
 	veleroCLI,
 	veleroNamespace,
 	name,
@@ -660,9 +662,18 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	// one needs the same CA bundle. `velero install --cacert` already stored it
 	// in the default BSL, so take it from there instead of asking for the path
 	// a second time.
-	caCertFile, cleanup, err := caCertFileFromDefaultBSL(ctx, veleroNamespace)
+	caCert, err := cacert.GetCACertFromBSL(ctx, client, veleroNamespace, common.DefaultBSLName)
 	if err != nil {
 		return err
+	}
+
+	var caCertFile string
+	cleanup := func() {}
+	if caCert != "" {
+		caCertFile, cleanup, err = writeTempCACert([]byte(caCert))
+		if err != nil {
+			return err
+		}
 	}
 	defer cleanup()
 
@@ -683,34 +694,6 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	}
 
 	return CheckBSL(ctx, veleroNamespace, name)
-}
-
-// caCertFileFromDefaultBSL returns the path to a temporary file holding the CA
-// bundle configured on the default backup storage location, or "" when the
-// location has none. `velero install --cacert` stores the bundle in the BSL's
-// spec.objectStorage.caCert, so it can be handed to `backup-location create
-// --cacert`, which takes a file path rather than the data.
-//
-// The second return value removes the file. It is always safe to call.
-func caCertFileFromDefaultBSL(ctx context.Context, veleroNamespace string) (string, func(), error) {
-	noop := func() {}
-
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "bsl", common.DefaultBSLName, "-o", "json", "-n", veleroNamespace)
-	stdout, stderr, err := veleroexec.RunCommand(cmd)
-	if err != nil {
-		return "", noop, errors.Wrapf(err, "failed to get bsl %s stdout=%s, stderr=%s", common.DefaultBSLName, stdout, stderr)
-	}
-
-	bsl := &velerov1api.BackupStorageLocation{}
-	if err := json.Unmarshal([]byte(stdout), bsl); err != nil {
-		return "", noop, errors.Wrap(err, "failed to unmarshal the velero bsl")
-	}
-
-	if len(bsl.Spec.ObjectStorage.CACert) == 0 {
-		return "", noop, nil
-	}
-
-	return writeTempCACert(bsl.Spec.ObjectStorage.CACert)
 }
 
 // writeTempCACert writes a CA bundle to a temporary file so it can be handed to
