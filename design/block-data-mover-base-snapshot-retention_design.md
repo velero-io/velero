@@ -5,7 +5,7 @@
 This design adds Case 2 storage support to the Velero block data mover: storages, such as Ceph RBD, that need the base (parent) volume snapshot to still exist when changed blocks are computed.
 Velero decides when to retain a snapshot, tracks every retained snapshot, and deletes each one when its backup is deleted.
 Retention no longer depends on the `deletionPolicy` of the user's VolumeSnapshotClass.
-It targets a 1.19.x patch release, as agreed in the 2026-10-27 community meeting (#10743, #10744).
+It targets inclusion after 1.19.0, as agreed in the 2026-10-27 community meeting (#10743, #10744).
 
 ## Background
 
@@ -18,8 +18,8 @@ Storages fall into two cases:
 
 On Case 2 storage, deleting the backup snapshot after each backup forces every later "incremental" back to a full read of the allocated blocks, and incremental restores degrade to full restores.
 
-Through Velero 1.18 and the 1.19 pre-rc.1 builds, a `Retain` VolumeSnapshotClass kept the backup snapshot through `deletionPolicy` inheritance (#10307), and nothing ever deleted those snapshots: every backup leaked one storage snapshot per volume, and the file system data mover leaked them too without ever using them (#10693, #10723).
-Per the 2026-10-27 community meeting, we decided to leave Case 2 out of 1.19.0: Velero stops reading the VolumeSnapshotClass `deletionPolicy` for data movers (#10753), and Case 2 storage is listed as a known issue in the v1.19.0-rc.1 release notes.
+Through Velero 1.18, and in 1.19 until the rollback, a `Retain` VolumeSnapshotClass kept the backup snapshot through `deletionPolicy` inheritance (#10307), and nothing ever deleted those snapshots: every backup leaked one storage snapshot per volume, and the file system data mover leaked them too without ever using them (#10693, #10723).
+Per the 2026-10-27 community meeting, we decided to leave Case 2 out of 1.19.0: Velero stops reading the VolumeSnapshotClass `deletionPolicy` for data movers (#10753), and Case 2 storage is a known issue.
 
 The result is that 1.19.0 has no Case 2 support at all, and no way for a user to ask for it.
 This design defines Case 2 support explicitly: Velero decides when to retain, and Velero owns the cleanup.
@@ -260,9 +260,9 @@ Deleting an older backup deletes only that backup's snapshot and never breaks ne
 The guarantee covers the backup chain, not an in-place restore in flight: a restore whose DataDownload has not yet called `GetMetadataDelta` against the backup being deleted fails on the driver's error for the missing base, with no fallback on that path today (Open Issue 2), so deleting a backup that is being restored in place is the user's responsibility in this release.
 Deleting the latest backup deletes its snapshot too; the next backup then uses the new most recent backup as its parent, and falls back to a full backup only when no usable base snapshot remains, the existing safe fallback ([1], "Fallback to Full Backup").
 
-### 7. Backups created by Velero 1.18 and 1.19 pre-rc.1
+### 7. Backups created before the rollback
 
-Backups taken by Velero 1.18 or a 1.19 build earlier than v1.19.0-rc.1 on a `Retain` VolumeSnapshotClass kept their snapshots, but their DataUploads carry no record.
+Backups taken by Velero 1.18, or by a 1.19 build from before the rollback, on a `Retain` VolumeSnapshotClass kept their snapshots, but their DataUploads carry no record.
 The handle is still recoverable: the block uploader saves the CSI snapshot handle as the `cbt-change-id` tag of the repository snapshot.
 
 For those backups:
@@ -278,9 +278,9 @@ Snapshots that cannot be recovered this way need manual cleanup and are document
 
 ### 8. Restore-side baseline
 
-In-place incremental restore creates a restore baseline, a snapshot of the target volume, and under the pre-rc.1 behavior it leaked the same way (#10728).
+In-place incremental restore creates a restore baseline, a snapshot of the target volume, and under the pre-rollback behavior it leaked the same way (#10728).
 The restore baseline cleanup lands separately (#10699): the fix routes the exposer cleanup through the existing `csi.CleanupVolumeSnapshot` helper, which already patches the bound content's `deletionPolicy` to `Delete`; the change is in the exposer's routing, not in the helper.
-Backup-side retention and restore baseline cleanup are one lifecycle story and land in the same 1.19.x window, as separate PRs.
+Backup-side retention and restore baseline cleanup are one lifecycle story and land together after 1.19.0, as separate PRs.
 
 ## Alternatives Considered
 
@@ -326,7 +326,7 @@ The node-agent and the backup-deletion controller already hold most of these, an
 - The `DataUpload.status.retainedCSIStorageSnapshot` field is additive and optional; older Velero versions ignore it, and backups without it use the legacy tag-resolution path, subject to the conditions in section 7.
   The reverse direction needs care, and it is a hard prerequisite, not a silent degradation: while the cluster's DataUpload CRD predates the field, the API server prunes it on write, the read-back verification detects the missing record, and the DataUpload fails — so operators must upgrade the DataUpload CRD before enabling `retainSnapshot`.
   This applies to OADP, which ships the DataUpload CRD in its own bundle and may lag the Velero patch; the user docs state it.
-- Downgrading from the 1.19.x patch to 1.19.0 is supported but lossy: the 1.19.0 binary knows nothing of retention, so deleting a backup there removes the DataUploads and the tarball while the storage snapshot stays, which is exactly the #10693 condition this design fixes.
+- Downgrading to 1.19.0 from a release carrying this design is supported but lossy: the 1.19.0 binary knows nothing of retention, so deleting a backup there removes the DataUploads and the tarball while the storage snapshot stays, which is exactly the #10693 condition this design fixes.
   Before rolling back, delete the backups that have retained snapshots, or accept that their snapshots leak and need manual cleanup.
   An in-flight backup deletion interrupted by a rollback must be re-run after re-upgrading: the old binary's DeleteBackupRequest GC deletes `InProgress` requests after 24 hours (`deleteBackupRequestMaxAge`, backup_deletion_controller.go) and does not honor this design's annotations, so the request cannot be resumed, only restarted.
 - The record is one snapshot per DataUpload.
@@ -334,19 +334,19 @@ A future design that keeps N local snapshots for fast restore (#7002 / #6240) ex
 - A `Retain` VolumeSnapshotClass no longer keeps data mover snapshots, matching 1.19.0; the user docs state this for both data movers.
 - Validating the `snapshot` action's parameter names against a closed list is a behavior change for policies that carry typos or unexpected keys today; it is called out in the changelog, and `custom` actions are unaffected.
 - The temp-content deletion changes (finalizer, bounded wait) apply to the retained-snapshot path only; legacy CSI backup deletion keeps its existing mechanism and latency.
-- Backups from 1.18 and 1.19 pre-rc.1 builds are handled as in section 7; backups taken by v1.19.0-rc.1 through v1.19.0 never retained and are unaffected; retention starts with the 1.19.x patch.
+- Backups from before the rollback are handled as in section 7; backups taken by 1.19.0 never retained and are unaffected; retention starts with the release carrying this design.
 - The parent design [2] states that a Case 2 parent snapshot "can NOT be deleted as long as there are incremental backups based on it"; this design supersedes that sentence, because once a backup's delta is uploaded the repository chain no longer depends on the storage snapshot.
 
 ## Implementation
 
-- The candidate implementation is #10691, reworked against this design; it covers the record (section 2), the unfinished-DataUpload release (section 3), the deletion mechanics (sections 4 and 5) and the 1.18 and pre-rc.1 recovery (section 7).
+- The candidate implementation is #10691, reworked against this design; it covers the record (section 2), the unfinished-DataUpload release (section 3), the deletion mechanics (sections 4 and 5) and the pre-rollback recovery (section 7).
 - Restore-side baseline cleanup lands as #10699 in the same window.
 - e2e coverage is #10694: a kind CSI case that asserts on the storage, not just the API objects, because csi-driver-host-path keeps each snapshot as `/csi-data-dir/<handle>.snap`, which is what catches a missing bound-protection finalizer that API-level checks miss.
 - The case either installs the snapshot metadata service into the kind CSI job, or runs host-path-only against the retention mechanics.
 - Unit tests: lifecycle and idempotency against a fake CSI backend, one dedicated test per ordering and failure-propagation rule (persist-before-retain with the read-back verification, deletionPolicy-patch-failure propagation, create-or-update of the record ConfigMap across repeated deletions), and the legacy tag-resolution paths.
 - Diagnostics: `velero backup describe` reports, per volume, whether retention applied and which policy entry matched, the retained handle, and a DataUpload `fallbackReason` when an incremental fell back to a full read (base not retained, base gone, driver error), because the existing first-backup wording, "fallen back to Full", does not say why.
   A volume that matched no policy, or matched one without `retainSnapshot`, logs the decision and its source at backup time.
-- Live validation on Ceph RBD: delete non-latest and latest backups, force-kill Velero mid-deletion and rerun `velero backup delete`, and recover 1.18 and pre-rc.1 backups with no record.
+- Live validation on Ceph RBD: delete non-latest and latest backups, force-kill Velero mid-deletion and rerun `velero backup delete`, and recover pre-rollback backups with no record.
 - The "Volume Snapshot Retention" section of [1] is updated to point to this design.
 
 ## Open Issues
