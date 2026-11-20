@@ -17,10 +17,20 @@ limitations under the License.
 package v2alpha1
 
 import (
+	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/velero-io/velero/pkg/apis/velero/shared"
 )
+
+// RetainSnapshotDataMoverConfigKey is the key of the DataMoverConfig entry that
+// carries the base snapshot retention decision for the DataUpload. The volume
+// policy is evaluated once, server-side, where the DataUpload is created; the
+// node-agent never re-evaluates it, because the policy ConfigMap is not
+// guaranteed to be readable from the node-agent. DataMoverConfig is documented
+// for mover-specific configuration and is forwarded to the data path, which
+// ignores unknown keys, so this controller-owned key in that map is safe.
+const RetainSnapshotDataMoverConfigKey = "retainSnapshot"
 
 // DataUploadSpec is the specification for a DataUpload.
 type DataUploadSpec struct {
@@ -210,6 +220,44 @@ type DataUploadStatus struct {
 	// +optional
 	// +nullable
 	Activities []string `json:"activities,omitempty"`
+
+	// RetainedCSIStorageSnapshot records the volume snapshot that Velero keeps in the
+	// storage after the DataUpload completes, so that the next incremental backup of the
+	// volume can compute its changed blocks against it. It is set only when the DataUpload
+	// opted into base snapshot retention and the record was verified to be persisted.
+	// Backup deletion uses it to delete the snapshot from the storage when the backup is
+	// deleted. The name deliberately differs from the RetainedSnapshot field of VolumeInfo,
+	// which holds the VolumeSnapshot name of a data mover backup and would otherwise
+	// surface side by side with this record under the same name but a different meaning.
+	// +optional
+	// +nullable
+	RetainedCSIStorageSnapshot *RetainedCSIStorageSnapshot `json:"retainedCSIStorageSnapshot,omitempty"`
+}
+
+// RetainedCSIStorageSnapshot identifies a volume snapshot that Velero retained in the
+// storage for a completed DataUpload. Deleting it requires a CSI DeleteSnapshot call,
+// for which the driver and, when the driver needs one, the deletion secret are recorded
+// alongside the handle.
+type RetainedCSIStorageSnapshot struct {
+	// CSISnapshotHandle is the CSI snapshot handle of the retained snapshot, as the
+	// CSI driver reports it.
+	CSISnapshotHandle string `json:"csiSnapshotHandle"`
+
+	// Driver is the name of the CSI driver that created the snapshot.
+	Driver string `json:"driver"`
+
+	// DeletionSecretRef names the secret the CSI driver requires to delete the snapshot.
+	// It is nil for drivers that need no deletion secret, the common case.
+	// +optional
+	// +nullable
+	DeletionSecretRef *corev1api.SecretReference `json:"deletionSecretRef,omitempty"`
+
+	// ManagedByLabelValue is the value of the snapshot.storage.kubernetes.io/managed-by
+	// label of the backup VolumeSnapshotContent the snapshot came from. A distributed CSI
+	// snapshotter only handles the VolumeSnapshotContents carrying the label of its node,
+	// so the temporary content rebuilt to delete the snapshot must carry it too.
+	// +optional
+	ManagedByLabelValue string `json:"managedByLabelValue,omitempty"`
 }
 
 // TODO(2.0) After converting all resources to use the runttime-controller client,

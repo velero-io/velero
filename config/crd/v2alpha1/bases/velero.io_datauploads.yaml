@@ -262,6 +262,53 @@ spec:
                     format: int64
                     type: integer
                 type: object
+              retainedCSIStorageSnapshot:
+                description: |-
+                  RetainedCSIStorageSnapshot records the volume snapshot that Velero keeps in the
+                  storage after the DataUpload completes, so that the next incremental backup of the
+                  volume can compute its changed blocks against it. It is set only when the DataUpload
+                  opted into base snapshot retention and the record was verified to be persisted.
+                  Backup deletion uses it to delete the snapshot from the storage when the backup is
+                  deleted. The name deliberately differs from the RetainedSnapshot field of VolumeInfo,
+                  which holds the VolumeSnapshot name of a data mover backup and would otherwise
+                  surface side by side with this record under the same name but a different meaning.
+                nullable: true
+                properties:
+                  csiSnapshotHandle:
+                    description: |-
+                      CSISnapshotHandle is the CSI snapshot handle of the retained snapshot, as the
+                      CSI driver reports it.
+                    type: string
+                  deletionSecretRef:
+                    description: |-
+                      DeletionSecretRef names the secret the CSI driver requires to delete the snapshot.
+                      It is nil for drivers that need no deletion secret, the common case.
+                    nullable: true
+                    properties:
+                      name:
+                        description: Name is unique within a namespace to reference a secret
+                          resource.
+                        type: string
+                      namespace:
+                        description: Namespace defines the space within which the secret name
+                          must be unique.
+                        type: string
+                    type: object
+                  driver:
+                    description: Driver is the name of the CSI driver that created the
+                      snapshot.
+                    type: string
+                  managedByLabelValue:
+                    description: |-
+                      ManagedByLabelValue is the value of the snapshot.storage.kubernetes.io/managed-by
+                      label of the backup VolumeSnapshotContent the snapshot came from. A distributed CSI
+                      snapshotter only handles the VolumeSnapshotContents carrying the label of its node,
+                      so the temporary content rebuilt to delete the snapshot must carry it too.
+                    type: string
+                required:
+                - csiSnapshotHandle
+                - driver
+                type: object
               snapshotID:
                 description: SnapshotID is the identifier for the snapshot in the
                   backup repository.
