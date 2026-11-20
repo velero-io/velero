@@ -999,38 +999,55 @@ func DeleteBackup(ctx context.Context, backupName string, velerocfg *VeleroConfi
 				return false, errors.Wrapf(err, "Fail to perform get backup, stdout=%s, stderr=%s", stdout, stderr)
 			}
 
-			var status string
-			var drList []string
-			drList, err = KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
+			drList, err := KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
+			if err != nil {
+				return false, errors.Wrapf(err, "fail to list DeleteBackupRequests for backup %s", backupName)
+			}
 			if len(drList) > 1 {
 				return false, errors.New(fmt.Sprintf("Count of DeleteBackupRequest %d is not expected", len(drList)))
 			}
 
 			// Record DeleteBackupRequest status for debugging
 			for _, dr := range drList {
-				status, err = KubectlGetDeleteBackupRequestStatus(context.Background(), dr, velerocfg.VeleroNamespace)
+				status, err := KubectlGetDeleteBackupRequestStatus(context.Background(), dr, velerocfg.VeleroNamespace)
+				if err != nil {
+					fmt.Printf("Failed to read DeleteBackupRequest %s status: %v\n", dr, err)
+					continue
+				}
 				fmt.Printf("DeleteBackupRequest status: %s\n", status)
 			}
 
 			return true, nil
 		})
+	if err != nil {
+		return errors.Wrapf(err, "backup %s was still present after the delete request", backupName)
+	}
 
-	// Waiting for completion of handling deleteBackupRequest CR
-	time.Sleep(1 * time.Minute)
-
-	// Verify deleteBackupRequest are all gone because they are handled successfully
+	// Wait for the DeleteBackupRequest CRs to be handled, rather than assuming a
+	// fixed interval is long enough. Polling returns as soon as they are gone and
+	// still fails if they never are.
 	var drList []string
-	drList, err = KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
-	if len(drList) > 1 {
+	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, time.Minute, true,
+		func(context.Context) (bool, error) {
+			drList, err = KubectlGetAllDeleteBackupRequest(context.Background(), backupName, velerocfg.VeleroNamespace)
+			if err != nil {
+				return false, errors.Wrapf(err, "fail to list DeleteBackupRequests for backup %s", backupName)
+			}
+			return len(drList) <= 1, nil
+		})
+	if err != nil {
 		// Log deleteBackupRequest details for debug
 		for _, dr := range drList {
-			details, err := KubectlGetDeleteBackupRequestDetails(context.Background(), dr, velerocfg.VeleroNamespace)
-			if err != nil {
-				return errors.Wrapf(err, "fail to get DeleteBackupRequest %s details", dr)
+			details, detailsErr := KubectlGetDeleteBackupRequestDetails(context.Background(), dr, velerocfg.VeleroNamespace)
+			if detailsErr != nil {
+				return errors.Wrapf(detailsErr, "fail to get DeleteBackupRequest %s details", dr)
 			}
 			fmt.Printf("Failed DeleteBackupRequest details: %s", details)
 		}
-		return errors.New(fmt.Sprintf("Count of DeleteBackupRequest %d is not expected", len(drList)))
+		if len(drList) > 1 {
+			return errors.New(fmt.Sprintf("Count of DeleteBackupRequest %d is not expected", len(drList)))
+		}
+		return errors.Wrapf(err, "DeleteBackupRequests for backup %s were not handled", backupName)
 	}
 
 	return nil
