@@ -478,8 +478,11 @@ Below diagram shows what happens during BSL initialization.
 │        │                     │                                   │  • AAD = RSD header                        │             │
 │        │                     │                                   │  • iter = 600000                           │             │
 │        │                     │                                   │  • KEK = PBKDF2(Passphrase, Salt, iter)    │             │
+│        │                     │                                   │  • nonce = 12 fresh random bytes           │             │
+│        │                     │                                   │  • ciphertext, tag =                       │             │
+│        │                     │                                   │    AES-GCM-Encrypt(KEK, nonce, BMK, AAD)   │             │
 │        │                     │                                   │  • wrappedKey =                            │             │
-│        │                     │                                   │    AES-GCM-Encrypt(KEK, BMK, AAD)          │             │
+│        │                     │                                   │    Encode(nonce, ciphertext, tag)          │             │
 │        │                     │                                   │  • keyFingerprint =                        │             │
 │        │                     │                                   │    "sha256:" + Hex(SHA256(BMK))            │             │
 │        │                     │                                   │  • headerChecksum =                        │             │
@@ -812,21 +815,70 @@ Below is the diagram for password rotation workflow:
 
 ### Encryption
 
-Resource data and Velero metadata are encrypted/decrypted with `DEK_resource` in below way:
+A new encryption layer is added to support streaming encryption/decryption. Below shows the interface:  
+```go
+type EncryptionContext struct {
+    Key []byte
+    AAD []byte
+}
 
+type StreamEncryption interface {
+    NewEncryptWriter(dst io.Writer, ctx EncryptionContext) (io.WriteCloser, error)
+    NewDecryptReader(src io.Reader, ctx EncryptionContext) (io.Reader, error)
+}
 ```
-Encryption:
-  DEK_resource = HKDF-SHA256(BMK, bslID, Encode("resource", backupName), length)
-  AAD = Encode(bslID, backupName, fileName)
-  ciphertext, tag = AES-GCM-Encrypt(DEK_resource, nonce, compressedData, AAD)
 
-Decryption:
-  DEK_resource = HKDF-SHA256(BMK, bslID, Encode("resource", backupName), length)
-  AAD = Encode(bslID, backupName, fileName)
-  compressedData = AES-GCM-Decrypt(DEK_resource, nonce, ciphertext, tag, AAD)
+**Key**: Key is the `DEK_resource`. It is calculated as: `DEK_resource = HKDF-SHA256(BMK, bslID, Encode("resource", backupName), length)`
+**AAD**: AAD is calculated as: `AAD = Encode(bslID, backupName, fileName)`
+
+`DEK_resource` is the per-backup derivation key for encryption. Each new file-encryption attempt uses a fresh stream key derived from `DEK_resource` with a random salt. The the salt and other stream parameters are stored with the ciphertext.  
+
+The encryption layer implements chunking and buffering to support streaming encryption/decryption.
+Nonces are generated per chunk in the stream with chunk order information.  
+
+Below diagram shows the workflow for streaming encryption and decryption:  
+```text
+                 BMK + bslID + backupName
+                            |
+                         HKDF
+                            |
+                      DEK_resource
+                            |
+          +-----------------+------------------+
+          |                                    |
+     ENCRYPTION                            DECRYPTION
+          |                                    |
+ Create fresh header                    Read stored header
+ (random salt + nonce parameters)       (salt + nonce parameters)
+          |                                    |
+ Derive stream key                      Derive same stream key
+ (DEK_resource, header, AAD)             (DEK_resource, header, AAD)
+          |                                    |
+ Read input bytes                        Read encrypted stream
+ Buffer into chunks                      Parse framed chunks
+              |                                           |
+              v                                           v
+ +-----------------------------------+   +-------------------------------------------+
+ | For each chunk:                    |  | For each chunk:                           |
+ | - Index i and isFinal              |  | - Expected i and isFinal                  |
+ | - Construct nonce and chunkAAD     |  | - Reconstruct nonce and chunkAAD          |
+ |   using header and AAD             |  |   using header and AAD                    |
+ | - AES-GCM-Encrypt(streamKey,       |  | - AES-GCM-Decrypt(streamKey, nonce,       |
+ |     nonce, chunk, chunkAAD)        |  |     ciphertext, tag, chunkAAD)            |
+ | - Emit ciphertext + tag            |  | - Authentication valid?                   |
+ | - Repeat for remaining chunks      |  |     Yes: return chunk bytes               |
+ +-----------------------------------+   |     No: return error; stop                |
+              |                          | - Repeat for remaining chunks             |
+              v                          +-------------------------------------------+
+ Encrypted output:                                        |
+ [header][chunk 0 + tag]...                               v
+ [final chunk + tag]                               Decrypted output
 ```
 
-The encryption/decryption happens per file and binds contexts of BSL, backup and file.  
+During encryption, the encryption happens at chunk boundary. If the write buffer is not aligned to the chunk boundary, the leftover will be cached for next write or be encrypted separately at Close.  
+During decryption, similarly, the decryption happens at chunk boundary and the encryption reader caches extra chunk data for the caller. By the end of the stream, it also verifies if the final chunk has been reached and returns io.EOF or error accordingly.  
+
+For decryption, callers of the reader must roll out and ensure that they have reached the complete stream and received io.EOF so as to complete the authentication for the entire stream. The callers may detect a logical stopper without reading to the io.EOF (e.g., json.Decoder.Decode), this should be prohibited and the callerers should be enhanced if any.    
 
 ### Compression
 
