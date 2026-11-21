@@ -200,6 +200,11 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 // VolumeSnapshot's group, as recorded at backup time. The CSI driver rejects a
 // stub VGSC whose handles do not match the group. Backups taken before the
 // handles were recorded only give this VolumeSnapshot's own handle.
+//
+// The handles keep the order the CSI driver returned when it created the group.
+// The CSI spec does not say whether that order matters. The hostpath driver
+// sorts both lists before comparing, and ceph-csi's RBD driver does not read
+// them.
 func (p *volumeSnapshotRestoreItemAction) groupMemberHandles(vs *snapshotv1api.VolumeSnapshot, snapshotHandle string) []string {
 	recorded, ok := vs.Annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
 	if !ok {
