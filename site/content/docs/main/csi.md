@@ -115,7 +115,7 @@ This section documents some of the choices made during implementing the CSI snap
             - ReadWriteOnce
             resources:
                 requests:
-                storage: 1Gi
+                    storage: 1Gi
             storageClassName: disk.csi.cloud.com
         ```
  4. The VolumeSnapshot objects will be removed from the cluster after the backup is uploaded to the object storage, so that the namespace that is backed up can be deleted without removing the snapshot in the storage provider if the `DeletionPolicy` is `Delete`.  
