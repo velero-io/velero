@@ -1453,3 +1453,65 @@ func setupDiscoveryClientWithResources(APIResources []*test.APIResource) *test.F
 	discoveryHelper.ResourceList = resourceList
 	return discoveryHelper
 }
+
+func TestNamespaceIncludesExcludesIncludeEverythingWithExcludedByLabel(t *testing.T) {
+	tests := []struct {
+		name            string
+		includes        []string
+		excludes        []string
+		excludedByLabel []string
+		want            bool
+	}{
+		{
+			name: "no includes or excludes",
+			want: true,
+		},
+		{
+			name:     "user excludes without labeled namespaces",
+			excludes: []string{"ns-1"},
+			want:     false,
+		},
+		{
+			name:            "only labeled namespaces excluded, empty includes",
+			excludes:        []string{"velero"},
+			excludedByLabel: []string{"velero"},
+			want:            true,
+		},
+		{
+			name:            "only labeled namespaces excluded, wildcard includes",
+			includes:        []string{"*"},
+			excludes:        []string{"velero", "other-velero"},
+			excludedByLabel: []string{"velero", "other-velero"},
+			want:            true,
+		},
+		{
+			name:            "labeled and user excludes",
+			excludes:        []string{"velero", "ns-1"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+		{
+			name:            "labeled namespace excluded but specific namespaces included",
+			includes:        []string{"ns-1"},
+			excludes:        []string{"velero"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+		{
+			name:            "glob exclude is not a labeled namespace",
+			excludes:        []string{"vel*"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nie := NewNamespaceIncludesExcludes().
+				ExcludedByLabel(tc.excludedByLabel...).
+				Includes(tc.includes...).
+				Excludes(tc.excludes...)
+			assert.Equal(t, tc.want, nie.IncludeEverything())
+		})
+	}
+}

@@ -258,6 +258,7 @@ type VeleroOptions struct {
 	PodVolumeOperationTimeout        time.Duration
 	Plugins                          []string
 	NoDefaultBackupLocation          bool
+	ExcludeNamespaceFromBackup       bool
 	CACertData                       []byte
 	Features                         []string
 	DefaultVolumesToFsBackup         bool
@@ -308,6 +309,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 	resources := AllCRDs()
 
 	ns := Namespace(o.Namespace)
+	if o.ExcludeNamespaceFromBackup {
+		// Velero does not support backing up its own namespace.
+		ns.Labels[velerov1api.ExcludeFromBackupLabel] = "true"
+	}
 	if err := appendUnstructured(resources, ns); err != nil {
 		fmt.Printf("error appending Namespace %s: %s\n", ns.GetName(), err.Error())
 	}
