@@ -953,14 +953,103 @@ func TestCleanupStubVGSC(t *testing.T) {
 	snapshotHandle1 := "snap-handle-1"
 	snapshotHandle2 := "snap-handle-2"
 
+	stubVGSC := func(groupHandle string, snapshotHandles ...string) *volumegroupsnapshotv1.VolumeGroupSnapshotContent {
+		return &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "vgsc-stub-" + groupHandle,
+				Labels: map[string]string{velerov1api.RestoreNameLabel: "restore-1"},
+			},
+			Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
+				Driver: "hostpath.csi.k8s.io",
+				Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
+					GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
+						VolumeGroupSnapshotHandle: groupHandle,
+						VolumeSnapshotHandles:     snapshotHandles,
+					},
+				},
+			},
+		}
+	}
+	readyVSC := func(name string, snapshotHandle *string) *snapshotv1api.VolumeSnapshotContent {
+		return &snapshotv1api.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{velerov1api.RestoreNameLabel: "restore-1"},
+			},
+			Spec: snapshotv1api.VolumeSnapshotContentSpec{
+				Driver:         "hostpath.csi.k8s.io",
+				DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+				Source:         snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: snapshotHandle},
+			},
+			Status: &snapshotv1api.VolumeSnapshotContentStatus{ReadyToUse: boolptr.True()},
+		}
+	}
+	restoredVS := func(name, groupHandle string, readyToUse bool) *snapshotv1api.VolumeSnapshot {
+		return &snapshotv1api.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        name,
+				Namespace:   "ns-1",
+				Labels:      map[string]string{velerov1api.RestoreNameLabel: "restore-1"},
+				Annotations: map[string]string{velerov1api.VolumeGroupSnapshotHandleAnnotation: groupHandle},
+			},
+			Status: &snapshotv1api.VolumeSnapshotStatus{ReadyToUse: &readyToUse},
+		}
+	}
+
 	tests := []struct {
 		name              string
 		restore           *velerov1api.Restore
 		existingVGSCs     []*volumegroupsnapshotv1.VolumeGroupSnapshotContent
 		existingVSCs      []*snapshotv1api.VolumeSnapshotContent
+		existingVSs       []*snapshotv1api.VolumeSnapshot
+		resourceTimeout   time.Duration
 		expectedRemaining int
 		expectedWarnings  bool
 	}{
+		{
+			// The VolumeSnapshotContent is ReadyToUse before the CSI snapshot controller
+			// has updated the VolumeSnapshot, which still needs the stub.
+			name:              "stub VGSC kept while a restored VolumeSnapshot of its group is not ready",
+			restore:           builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs:     []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			existingVSCs:      []*snapshotv1api.VolumeSnapshotContent{readyVSC("vsc-1", &snapshotHandle1)},
+			existingVSs:       []*snapshotv1api.VolumeSnapshot{restoredVS("vs-1", "vgs-handle-1", false)},
+			resourceTimeout:   time.Second,
+			expectedRemaining: 0,
+			expectedWarnings:  true,
+		},
+		{
+			// The stub lists only the first snapshot handle of the group, because the
+			// handles cannot be changed after creation.
+			name:          "stub VGSC kept while a group member missing from its snapshot handles is not ready",
+			restore:       builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs: []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			existingVSCs: []*snapshotv1api.VolumeSnapshotContent{
+				readyVSC("vsc-1", &snapshotHandle1),
+				readyVSC("vsc-2", &snapshotHandle2),
+			},
+			existingVSs: []*snapshotv1api.VolumeSnapshot{
+				restoredVS("vs-1", "vgs-handle-1", true),
+				restoredVS("vs-2", "vgs-handle-1", false),
+			},
+			resourceTimeout:   time.Second,
+			expectedRemaining: 0,
+			expectedWarnings:  true,
+		},
+		{
+			name:          "stub VGSC deleted once the restored VolumeSnapshots of its group are ready",
+			restore:       builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs: []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			existingVSCs:  []*snapshotv1api.VolumeSnapshotContent{readyVSC("vsc-1", &snapshotHandle1)},
+			existingVSs: []*snapshotv1api.VolumeSnapshot{
+				restoredVS("vs-1", "vgs-handle-1", true),
+				restoredVS("vs-2", "vgs-handle-1", true),
+				// A VolumeSnapshot of another group does not hold this stub.
+				restoredVS("vs-other", "vgs-handle-2", false),
+			},
+			expectedRemaining: 0,
+			expectedWarnings:  false,
+		},
 		{
 			name:              "no stub VGSCs to clean up",
 			restore:           builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
@@ -1173,13 +1262,20 @@ func TestCleanupStubVGSC(t *testing.T) {
 			for _, vsc := range tc.existingVSCs {
 				seed = append(seed, vsc)
 			}
+			for _, vs := range tc.existingVSs {
+				seed = append(seed, vs)
+			}
 			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
+			resourceTimeout := tc.resourceTimeout
+			if resourceTimeout == 0 {
+				resourceTimeout = 10 * time.Second
+			}
 			ctx := &finalizerContext{
 				logger:          logger,
 				crClient:        crClient,
 				restore:         tc.restore,
-				resourceTimeout: 10 * time.Second,
+				resourceTimeout: resourceTimeout,
 			}
 
 			warnings := ctx.cleanupStubVGSC()

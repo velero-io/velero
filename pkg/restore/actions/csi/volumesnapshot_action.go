@@ -108,12 +108,13 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	// Generate a deterministic name for the stub VGSC based on the group handle
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
-	// Check if VGSC already exists
-	existingVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
+	// Check if VGSC already exists. Its snapshot handles are immutable, so a stub
+	// created for another member of the group is used as is: the CSI snapshot
+	// controller matches it by its group handle, not by its snapshot handles.
+	_, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 	if err == nil {
-		// VGSC already exists, add this snapshot handle if not already present
 		p.log.Infof("Stub VGSC %s already exists for VolumeGroupSnapshotHandle %s", vgscName, vgsh)
-		return p.addSnapshotHandleToVGSC(ctx, existingVGSC, snapshotHandle)
+		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return errors.Wrapf(err, "failed to check for existing VGSC %s", vgscName)
@@ -166,13 +167,8 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	if _, err := csiutil.CreateVGSC(ctx, p.crClient, vgsc); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			// Another VS restore created the VGSC between our Get and Create.
-			// Re-fetch and add our snapshot handle.
-			p.log.Infof("Stub VGSC %s was created by another VS restore, adding our handle", vgscName)
-			raceVGSC, getErr := csiutil.GetVGSC(ctx, p.crClient, vgscName)
-			if getErr != nil {
-				return errors.Wrapf(getErr, "failed to get VGSC %s after race", vgscName)
-			}
-			return p.addSnapshotHandleToVGSC(ctx, raceVGSC, snapshotHandle)
+			p.log.Infof("Stub VGSC %s was created by another VS restore", vgscName)
+			return nil
 		}
 		return errors.Wrapf(err, "failed to create stub VGSC %s", vgscName)
 	}
@@ -195,56 +191,6 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	}
 
 	p.log.Infof("Successfully created stub VGSC %s", vgscName)
-	return nil
-}
-
-// addSnapshotHandleToVGSC adds a snapshot handle to an existing VGSC if not already present.
-// This is needed when multiple VolumeSnapshots from the same VolumeGroupSnapshot are restored.
-func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
-	ctx context.Context,
-	vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent,
-	snapshotHandle string,
-) error {
-	// Check if handle is already in the list
-	if vgsc.Spec.Source.GroupSnapshotHandles != nil {
-		for _, handle := range vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-			if handle == snapshotHandle {
-				p.log.Infof("Snapshot handle %s already present in VGSC %s", snapshotHandle, vgsc.Name)
-				return nil
-			}
-		}
-	}
-
-	// Add the snapshot handle to the list. Re-fetch inside the retry to pick up the
-	// latest resourceVersion and avoid conflicts with concurrent VS restores.
-	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		latest, err := csiutil.GetVGSC(ctx, p.crClient, vgsc.Name)
-		if err != nil {
-			return err
-		}
-
-		if latest.Spec.Source.GroupSnapshotHandles != nil {
-			for _, handle := range latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-				if handle == snapshotHandle {
-					return nil
-				}
-			}
-		} else {
-			latest.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1.GroupSnapshotHandles{}
-		}
-
-		latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(
-			latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles,
-			snapshotHandle,
-		)
-
-		_, err = csiutil.UpdateVGSC(ctx, p.crClient, latest)
-		return err
-	}); err != nil {
-		return errors.Wrapf(err, "failed to add snapshot handle to VGSC %s", vgsc.Name)
-	}
-
-	p.log.Infof("Added snapshot handle %s to existing VGSC %s", snapshotHandle, vgsc.Name)
 	return nil
 }
 

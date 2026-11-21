@@ -346,7 +346,8 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			expectedHandle: testSnapshotHandle,
 		},
 		{
-			name: "VGSC already exists - should add snapshot handle",
+			// The snapshot handles of a VGSC are immutable, so the stub is used as is.
+			name: "VGSC already exists - left unchanged",
 			vs: &snapshotv1api.VolumeSnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-vs-2",
@@ -376,7 +377,7 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			},
 			expectVGSC:     true,
 			expectErr:      false,
-			expectedHandle: "snap-handle-789",
+			expectedHandle: testSnapshotHandle,
 		},
 	}
 
@@ -408,93 +409,13 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			if tc.expectVGSC {
 				require.NoError(t, getErr)
 				require.NotNil(t, vgsc.Spec.Source.GroupSnapshotHandles)
-				require.Contains(t, vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles, tc.expectedHandle)
+				require.Equal(t, []string{tc.expectedHandle}, vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 			} else {
 				// If no VGSC expected, it's okay if Get returns not found or if vgscName is empty
 				if tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] != "" {
 					require.Error(t, getErr)
 				}
 			}
-		})
-	}
-}
-
-func TestAddSnapshotHandleToVGSC(t *testing.T) {
-	testDriver := "rbd.csi.ceph.com"
-	testVGSHandle := "vgs-handle-123"
-
-	tests := []struct {
-		name                    string
-		existingHandles         []string
-		nilGroupSnapshotHandles bool
-		newHandle               string
-		expectedHandles         []string
-	}{
-		{
-			name:            "Add new handle to empty list",
-			existingHandles: []string{},
-			newHandle:       "snap-1",
-			expectedHandles: []string{"snap-1"},
-		},
-		{
-			name:            "Add new handle to existing list",
-			existingHandles: []string{"snap-1"},
-			newHandle:       "snap-2",
-			expectedHandles: []string{"snap-1", "snap-2"},
-		},
-		{
-			name:            "Handle already exists - no change",
-			existingHandles: []string{"snap-1", "snap-2"},
-			newHandle:       "snap-1",
-			expectedHandles: []string{"snap-1", "snap-2"},
-		},
-		{
-			name:                    "Nil GroupSnapshotHandles - should initialize and add",
-			nilGroupSnapshotHandles: true,
-			newHandle:               "snap-1",
-			expectedHandles:         []string{"snap-1"},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var source volumegroupsnapshotv1.VolumeGroupSnapshotContentSource
-			if tc.nilGroupSnapshotHandles {
-				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{}
-			} else {
-				source = volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
-					GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
-						VolumeGroupSnapshotHandle: testVGSHandle,
-						VolumeSnapshotHandles:     tc.existingHandles,
-					},
-				}
-			}
-
-			existingVGSC := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-vgsc",
-				},
-				Spec: volumegroupsnapshotv1.VolumeGroupSnapshotContentSpec{
-					Driver:         testDriver,
-					DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
-					Source:         source,
-				},
-			}
-
-			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, existingVGSC)
-
-			p := &volumeSnapshotRestoreItemAction{
-				log:      logrus.StandardLogger(),
-				crClient: crClient,
-			}
-
-			err := p.addSnapshotHandleToVGSC(context.Background(), existingVGSC, tc.newHandle)
-			require.NoError(t, err)
-
-			// Verify the VGSC has expected handles
-			updatedVGSC, err := csiutil.GetVGSC(context.Background(), crClient, "test-vgsc")
-			require.NoError(t, err)
-			require.ElementsMatch(t, tc.expectedHandles, updatedVGSC.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
 		})
 	}
 }

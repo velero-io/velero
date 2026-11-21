@@ -45,6 +45,7 @@ import (
 	serverconfig "github.com/velero-io/velero/pkg/cmd/server/config"
 	"github.com/velero-io/velero/pkg/constant"
 	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/metrics"
 	"github.com/velero-io/velero/pkg/persistence"
 	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
@@ -491,8 +492,9 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 // cleanupStubVGSC deletes stub VolumeGroupSnapshotContent objects that were
 // created during restore to satisfy CSI controller validation. These stubs are
 // labeled with velero.io/restore-name for identification.
-// Before deleting each VGSC, it waits for all related VolumeSnapshotContents
-// to become ReadyToUse, since the CSI controller needs the VGSC during VSC reconciliation.
+// Before deleting each VGSC, it waits for the restored VolumeSnapshots of its
+// group to become ReadyToUse, since the CSI snapshot controller needs the VGSC
+// every time it updates the status of one of those VolumeSnapshots.
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
@@ -523,43 +525,19 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		vgsc := &vgscList.Items[i]
 		log := ctx.logger.WithField("vgsc", vgsc.Name)
 
-		// Collect the snapshot handles associated with this VGSC
-		snapshotHandles := map[string]bool{}
-		if vgsc.Spec.Source.GroupSnapshotHandles != nil {
-			for _, h := range vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-				snapshotHandles[h] = true
-			}
-		}
-
-		if len(snapshotHandles) > 0 {
-			// Wait for related VSCs to become ReadyToUse before deleting the VGSC
-			log.Infof("waiting for %d related VolumeSnapshotContents to become ReadyToUse", len(snapshotHandles))
+		// The VolumeSnapshotContents can be ReadyToUse before the CSI snapshot
+		// controller has copied their status to the VolumeSnapshots, and that copy
+		// looks the stub up again. Deleting the stub in between leaves the
+		// VolumeSnapshots unbound for good, so wait for the VolumeSnapshots.
+		if vgsc.Spec.Source.GroupSnapshotHandles != nil && vgsc.Spec.Source.GroupSnapshotHandles.VolumeGroupSnapshotHandle != "" {
+			groupHandle := vgsc.Spec.Source.GroupSnapshotHandles.VolumeGroupSnapshotHandle
+			log.Infof("waiting for the restored VolumeSnapshots of group %s to become ReadyToUse", groupHandle)
 			err := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, ctx.resourceTimeout, true, func(context.Context) (bool, error) {
-				vscList := &snapshotv1api.VolumeSnapshotContentList{}
-				if err := ctx.crClient.List(context.Background(), vscList, client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name}); err != nil {
-					log.WithError(err).Warn("failed to list VolumeSnapshotContents")
-					return false, nil
-				}
-
-				for j := range vscList.Items {
-					vsc := &vscList.Items[j]
-					if vsc.Spec.Source.SnapshotHandle == nil {
-						continue
-					}
-					if !snapshotHandles[*vsc.Spec.Source.SnapshotHandle] {
-						continue
-					}
-					// This VSC is related to our VGSC
-					if vsc.Status == nil || !boolptr.IsSetToTrue(vsc.Status.ReadyToUse) {
-						log.Debugf("VolumeSnapshotContent %s not yet ReadyToUse", vsc.Name)
-						return false, nil
-					}
-				}
-				return true, nil
+				return ctx.groupVolumeSnapshotsReady(groupHandle, log), nil
 			})
 			if err != nil {
-				log.WithError(err).Warn("timed out waiting for related VolumeSnapshotContents to become ReadyToUse, proceeding with VGSC deletion")
-				warnings.Add("cluster", errors.Wrapf(err, "timed out waiting for VSCs related to VGSC %s", vgsc.Name))
+				log.WithError(err).Warn("timed out waiting for the restored VolumeSnapshots to become ReadyToUse, proceeding with VGSC deletion")
+				warnings.Add("cluster", errors.Wrapf(err, "timed out waiting for VolumeSnapshots related to VGSC %s", vgsc.Name))
 			}
 		}
 
@@ -577,6 +555,28 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	}
 
 	return warnings
+}
+
+// groupVolumeSnapshotsReady reports whether every VolumeSnapshot restored by
+// this restore from the given VolumeGroupSnapshot is ReadyToUse.
+func (ctx *finalizerContext) groupVolumeSnapshotsReady(groupHandle string, log logrus.FieldLogger) bool {
+	vsList := &snapshotv1api.VolumeSnapshotList{}
+	if err := ctx.crClient.List(context.Background(), vsList, client.MatchingLabels{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)}); err != nil {
+		log.WithError(err).Warn("failed to list VolumeSnapshots")
+		return false
+	}
+
+	for i := range vsList.Items {
+		vs := &vsList.Items[i]
+		if vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] != groupHandle {
+			continue
+		}
+		if vs.Status == nil || !boolptr.IsSetToTrue(vs.Status.ReadyToUse) {
+			log.Debugf("VolumeSnapshot %s/%s not yet ReadyToUse", vs.Namespace, vs.Name)
+			return false
+		}
+	}
+	return true
 }
 
 func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {
