@@ -18,7 +18,9 @@ package csi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
@@ -36,6 +38,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/client"
 	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/label"
 	plugincommon "github.com/velero-io/velero/pkg/plugin/framework/common"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	"github.com/velero-io/velero/pkg/util"
@@ -108,12 +111,12 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	// Generate a deterministic name for the stub VGSC based on the group handle
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
-	// Check if VGSC already exists
-	existingVGSC, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
+	// Check if VGSC already exists. A stub created for another member of the
+	// group already lists every member, and its snapshot handles are immutable.
+	_, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 	if err == nil {
-		// VGSC already exists, add this snapshot handle if not already present
 		p.log.Infof("Stub VGSC %s already exists for VolumeGroupSnapshotHandle %s", vgscName, vgsh)
-		return p.addSnapshotHandleToVGSC(ctx, existingVGSC, snapshotHandle)
+		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return errors.Wrapf(err, "failed to check for existing VGSC %s", vgscName)
@@ -143,7 +146,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vgscName,
 			Labels: map[string]string{
-				velerov1api.RestoreNameLabel: restore.Name,
+				velerov1api.RestoreNameLabel: label.GetValidName(restore.Name),
 			},
 			Annotations: vgscAnnotations,
 		},
@@ -153,7 +156,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
 				GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
 					VolumeGroupSnapshotHandle: vgsh,
-					VolumeSnapshotHandles:     []string{snapshotHandle},
+					VolumeSnapshotHandles:     p.groupMemberHandles(vs, snapshotHandle),
 				},
 			},
 			VolumeGroupSnapshotRef: corev1api.ObjectReference{
@@ -166,13 +169,8 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	if _, err := csiutil.CreateVGSC(ctx, p.crClient, vgsc); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			// Another VS restore created the VGSC between our Get and Create.
-			// Re-fetch and add our snapshot handle.
-			p.log.Infof("Stub VGSC %s was created by another VS restore, adding our handle", vgscName)
-			raceVGSC, getErr := csiutil.GetVGSC(ctx, p.crClient, vgscName)
-			if getErr != nil {
-				return errors.Wrapf(getErr, "failed to get VGSC %s after race", vgscName)
-			}
-			return p.addSnapshotHandleToVGSC(ctx, raceVGSC, snapshotHandle)
+			p.log.Infof("Stub VGSC %s was created by another VS restore", vgscName)
+			return nil
 		}
 		return errors.Wrapf(err, "failed to create stub VGSC %s", vgscName)
 	}
@@ -198,54 +196,33 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	return nil
 }
 
-// addSnapshotHandleToVGSC adds a snapshot handle to an existing VGSC if not already present.
-// This is needed when multiple VolumeSnapshots from the same VolumeGroupSnapshot are restored.
-func (p *volumeSnapshotRestoreItemAction) addSnapshotHandleToVGSC(
-	ctx context.Context,
-	vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent,
-	snapshotHandle string,
-) error {
-	// Check if handle is already in the list
-	if vgsc.Spec.Source.GroupSnapshotHandles != nil {
-		for _, handle := range vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-			if handle == snapshotHandle {
-				p.log.Infof("Snapshot handle %s already present in VGSC %s", snapshotHandle, vgsc.Name)
-				return nil
-			}
-		}
+// groupMemberHandles returns the snapshot handles of every member of the
+// VolumeSnapshot's group, as recorded at backup time. The CSI driver rejects a
+// stub VGSC whose handles do not match the group. Backups taken before the
+// handles were recorded only give this VolumeSnapshot's own handle.
+//
+// The handles keep the order the CSI driver returned when it created the group.
+// The CSI spec does not say whether that order matters. The hostpath driver
+// sorts both lists before comparing, and ceph-csi's RBD driver does not read
+// them.
+func (p *volumeSnapshotRestoreItemAction) groupMemberHandles(vs *snapshotv1api.VolumeSnapshot, snapshotHandle string) []string {
+	recorded, ok := vs.Annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+	if !ok {
+		p.log.Warnf("VS %s/%s has no group member snapshot handles, so the stub VGSC lists only its own snapshot. "+
+			"The CSI driver may reject it, and the restored VolumeSnapshots of the group then never become ready",
+			vs.Namespace, vs.Name)
+		return []string{snapshotHandle}
 	}
 
-	// Add the snapshot handle to the list. Re-fetch inside the retry to pick up the
-	// latest resourceVersion and avoid conflicts with concurrent VS restores.
-	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		latest, err := csiutil.GetVGSC(ctx, p.crClient, vgsc.Name)
-		if err != nil {
-			return err
-		}
-
-		if latest.Spec.Source.GroupSnapshotHandles != nil {
-			for _, handle := range latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles {
-				if handle == snapshotHandle {
-					return nil
-				}
-			}
-		} else {
-			latest.Spec.Source.GroupSnapshotHandles = &volumegroupsnapshotv1.GroupSnapshotHandles{}
-		}
-
-		latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles = append(
-			latest.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles,
-			snapshotHandle,
-		)
-
-		_, err = csiutil.UpdateVGSC(ctx, p.crClient, latest)
-		return err
-	}); err != nil {
-		return errors.Wrapf(err, "failed to add snapshot handle to VGSC %s", vgsc.Name)
+	var handles []string
+	if err := json.Unmarshal([]byte(recorded), &handles); err != nil {
+		p.log.WithError(err).Warnf("VS %s/%s has unreadable group member snapshot handles", vs.Namespace, vs.Name)
+		return []string{snapshotHandle}
 	}
-
-	p.log.Infof("Added snapshot handle %s to existing VGSC %s", snapshotHandle, vgsc.Name)
-	return nil
+	if !slices.Contains(handles, snapshotHandle) {
+		handles = append(handles, snapshotHandle)
+	}
+	return handles
 }
 
 func (p *volumeSnapshotRestoreItemAction) Execute(
