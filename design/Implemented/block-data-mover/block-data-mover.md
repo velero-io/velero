@@ -379,6 +379,7 @@ type Action struct {
 }
 ```
 In this way, users could specify --- for storage class "xxx" or CSI driver "yyy", backup through CSI snapshot with Velero block data mover and retain the snapshot.   
+The Case 2 retention is fully specified, including the tracking and deletion of retained snapshots, in [block data mover base snapshot retention design][6]; there, a retained snapshot is deleted with its backup once the delta is uploaded, superseding the "can NOT be deleted" rule above.  
 
 #### Incremental Size
 By the end of the backup, incremental size is also returned by the uploader, as same as Velero file system uploader. The size indicates how much data are unique so processed by the uploader, based on the provided CBT.  
@@ -549,3 +550,4 @@ When the parameter is not specified, by default, Velero goes with incremental ba
 [3]: ../Implemented/vgdp-micro-service/vgdp-micro-service.md
 [4]: https://kubernetes.io/blog/2025/09/25/csi-changed-block-tracking/
 [5]: https://kopia.io/docs/advanced/architecture/
+[6]: ../../block-data-mover-base-snapshot-retention_design.md
