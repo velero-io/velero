@@ -22,9 +22,11 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -201,6 +203,85 @@ func TestVSExecute(t *testing.T) {
 				require.NoError(t, vsBIA.crClient.Get(t.Context(), crclient.ObjectKey{Name: "vsc"}, updatedVSC))
 				require.Equal(t, "backup-uid", updatedVSC.Labels[velerov1api.BackupUIDLabel])
 			}
+		})
+	}
+}
+
+func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
+	groupVGS := func(boundContent string) *volumegroupsnapshotv1.VolumeGroupSnapshot {
+		return &volumegroupsnapshotv1.VolumeGroupSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "app", Name: "group"},
+			Status:     &volumegroupsnapshotv1.VolumeGroupSnapshotStatus{BoundVolumeGroupSnapshotContentName: ptr.To(boundContent)},
+		}
+	}
+	groupVGSC := func(name, groupHandle string, snapshotHandles ...string) *volumegroupsnapshotv1.VolumeGroupSnapshotContent {
+		vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status:     &volumegroupsnapshotv1.VolumeGroupSnapshotContentStatus{VolumeGroupSnapshotHandle: ptr.To(groupHandle)},
+		}
+		for _, h := range snapshotHandles {
+			vgsc.Status.VolumeSnapshotInfoList = append(vgsc.Status.VolumeSnapshotInfoList, volumegroupsnapshotv1.VolumeSnapshotInfo{SnapshotHandle: h})
+		}
+		return vgsc
+	}
+
+	tests := []struct {
+		name            string
+		objects         []runtime.Object
+		expectedHandles string
+	}{
+		{
+			name:            "group snapshot content found - every member handle is recorded",
+			objects:         []runtime.Object{groupVGS("ours"), groupVGSC("ours", "group-1", "snap-1", "snap-2")},
+			expectedHandles: `["snap-1","snap-2"]`,
+		},
+		{
+			name:            "empty member handles are skipped",
+			objects:         []runtime.Object{groupVGS("ours"), groupVGSC("ours", "group-1", "snap-1", "", "snap-2")},
+			expectedHandles: `["snap-1","snap-2"]`,
+		},
+		{
+			name:            "group snapshot content lists no handles - nothing is recorded",
+			objects:         []runtime.Object{groupVGS("ours"), groupVGSC("ours", "group-1")},
+			expectedHandles: "",
+		},
+		{
+			name:            "group snapshot content of another group - nothing is recorded",
+			objects:         []runtime.Object{groupVGS("ours"), groupVGSC("ours", "group-2", "snap-3")},
+			expectedHandles: "",
+		},
+		{
+			name:            "group snapshot not found - nothing is recorded",
+			objects:         []runtime.Object{groupVGSC("ours", "group-1", "snap-1", "snap-2")},
+			expectedHandles: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backup := builder.ForBackup("velero", "backup").Phase(velerov1api.BackupPhaseInProgress).Result()
+			vs := builder.ForVolumeSnapshot("app", "vs").Status().BoundVolumeSnapshotContentName("vsc").Result()
+			vs.Status.VolumeGroupSnapshotName = ptr.To("group")
+			vsc := builder.ForVolumeSnapshotContent("vsc").Status(&snapshotv1api.VolumeSnapshotContentStatus{
+				SnapshotHandle:            ptr.To("snap-1"),
+				VolumeGroupSnapshotHandle: ptr.To("group-1"),
+			}).Result()
+			action := &volumeSnapshotBackupItemAction{
+				log:      velerotest.NewLogger(),
+				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, append(tc.objects, vs, vsc)...),
+			}
+
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vs)
+			require.NoError(t, err)
+			result, _, _, _, err := action.Execute(&unstructured.Unstructured{Object: obj}, backup)
+			require.NoError(t, err)
+
+			handles, found := result.UnstructuredContent()["metadata"].(map[string]any)["annotations"].(map[string]any)[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+			if tc.expectedHandles == "" {
+				require.False(t, found, "unexpected member handles %v", handles)
+				return
+			}
+			require.Equal(t, tc.expectedHandles, handles)
 		})
 	}
 }

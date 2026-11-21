@@ -19,11 +19,13 @@ package csi
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +35,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
 	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	velerotest "github.com/velero-io/velero/pkg/test"
 	"github.com/velero-io/velero/pkg/util"
@@ -271,13 +274,14 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 	testSnapshotHandle := "snap-handle-456"
 
 	tests := []struct {
-		name           string
-		vs             *snapshotv1api.VolumeSnapshot
-		restore        *velerov1api.Restore
-		existingVGSC   *volumegroupsnapshotv1.VolumeGroupSnapshotContent
-		expectVGSC     bool
-		expectErr      bool
-		expectedHandle string
+		name            string
+		vs              *snapshotv1api.VolumeSnapshot
+		restore         *velerov1api.Restore
+		existingVGSC    *volumegroupsnapshotv1.VolumeGroupSnapshotContent
+		expectVGSC      bool
+		expectErr       bool
+		expectedHandles []string
+		expectedWarning string
 	}{
 		{
 			name: "VS without VolumeGroupSnapshotHandle annotation - no VGSC created",
@@ -340,10 +344,71 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 					},
 				},
 			},
-			restore:        builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
-			expectVGSC:     true,
-			expectErr:      false,
-			expectedHandle: testSnapshotHandle,
+			restore:         builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{testSnapshotHandle},
+			// A backup taken before the group members were recorded.
+			expectedWarning: "no group member snapshot handles",
+		},
+		{
+			// Label values are limited to 63 characters.
+			name: "restore with a long name - VGSC created with a valid restore name label",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vs",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotHandleAnnotation:        testVGSHandle,
+						velerov1api.VolumeSnapshotHandleAnnotation:             testSnapshotHandle,
+						velerov1api.DriverNameAnnotation:                       testDriver,
+						velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation: `["snap-handle-456"]`,
+					},
+				},
+			},
+			restore:         builder.ForRestore("velero", "restore-"+strings.Repeat("a", 70)).ObjectMeta(builder.WithUID("restore-uid")).Result(),
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{testSnapshotHandle},
+		},
+		{
+			// The driver checks the stub against every snapshot of the group.
+			name: "VS with group member handles - VGSC lists every member",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vs",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotHandleAnnotation:        testVGSHandle,
+						velerov1api.VolumeSnapshotHandleAnnotation:             testSnapshotHandle,
+						velerov1api.DriverNameAnnotation:                       testDriver,
+						velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation: `["snap-handle-456","snap-handle-789"]`,
+					},
+				},
+			},
+			restore:         builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{testSnapshotHandle, "snap-handle-789"},
+		},
+		{
+			name: "VS with unreadable group member handles - VGSC lists only this snapshot",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vs",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotHandleAnnotation:        testVGSHandle,
+						velerov1api.VolumeSnapshotHandleAnnotation:             testSnapshotHandle,
+						velerov1api.DriverNameAnnotation:                       testDriver,
+						velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation: "not-json",
+					},
+				},
+			},
+			restore:         builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{testSnapshotHandle},
 		},
 		{
 			// The snapshot handles of a VGSC are immutable, so the stub is used as is.
@@ -375,9 +440,9 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 					},
 				},
 			},
-			expectVGSC:     true,
-			expectErr:      false,
-			expectedHandle: testSnapshotHandle,
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{testSnapshotHandle},
 		},
 	}
 
@@ -389,12 +454,22 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			}
 			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
 
+			logger, logHook := logtest.NewNullLogger()
 			p := &volumeSnapshotRestoreItemAction{
-				log:      logrus.StandardLogger(),
+				log:      logger,
 				crClient: crClient,
 			}
 
 			err := p.ensureStubVGSCExists(context.Background(), tc.vs, tc.restore)
+			if tc.expectedWarning != "" {
+				var warnings []string
+				for _, entry := range logHook.AllEntries() {
+					if entry.Level == logrus.WarnLevel {
+						warnings = append(warnings, entry.Message)
+					}
+				}
+				require.Contains(t, strings.Join(warnings, "\n"), tc.expectedWarning)
+			}
 
 			if tc.expectErr {
 				require.Error(t, err)
@@ -409,7 +484,10 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			if tc.expectVGSC {
 				require.NoError(t, getErr)
 				require.NotNil(t, vgsc.Spec.Source.GroupSnapshotHandles)
-				require.Equal(t, []string{tc.expectedHandle}, vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
+				require.Equal(t, tc.expectedHandles, vgsc.Spec.Source.GroupSnapshotHandles.VolumeSnapshotHandles)
+				if tc.existingVGSC == nil {
+					require.Equal(t, label.GetValidName(tc.restore.Name), vgsc.Labels[velerov1api.RestoreNameLabel])
+				}
 			} else {
 				// If no VGSC expected, it's okay if Get returns not found or if vgscName is empty
 				if tc.vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] != "" {

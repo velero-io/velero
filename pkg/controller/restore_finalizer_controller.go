@@ -22,10 +22,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -501,7 +503,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	vgscList, err := csiutil.ListVGSC(
 		context.Background(),
 		ctx.crClient,
-		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
+		map[string]string{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)},
 	)
 	if err != nil {
 		if errors.Is(err, csiutil.ErrVGSAPINotAvailable) {
@@ -525,20 +527,9 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		vgsc := &vgscList.Items[i]
 		log := ctx.logger.WithField("vgsc", vgsc.Name)
 
-		// The VolumeSnapshotContents can be ReadyToUse before the CSI snapshot
-		// controller has copied their status to the VolumeSnapshots, and that copy
-		// looks the stub up again. Deleting the stub in between leaves the
-		// VolumeSnapshots unbound for good, so wait for the VolumeSnapshots.
-		if vgsc.Spec.Source.GroupSnapshotHandles != nil && vgsc.Spec.Source.GroupSnapshotHandles.VolumeGroupSnapshotHandle != "" {
-			groupHandle := vgsc.Spec.Source.GroupSnapshotHandles.VolumeGroupSnapshotHandle
-			log.Infof("waiting for the restored VolumeSnapshots of group %s to become ReadyToUse", groupHandle)
-			err := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, ctx.resourceTimeout, true, func(context.Context) (bool, error) {
-				return ctx.groupVolumeSnapshotsReady(groupHandle, log), nil
-			})
-			if err != nil {
-				log.WithError(err).Warn("timed out waiting for the restored VolumeSnapshots to become ReadyToUse, proceeding with VGSC deletion")
-				warnings.Add("cluster", errors.Wrapf(err, "timed out waiting for VolumeSnapshots related to VGSC %s", vgsc.Name))
-			}
+		if err := ctx.waitForStubGroup(vgsc, log); err != nil {
+			log.WithError(err).Warn("proceeding with stub VolumeGroupSnapshotContent deletion")
+			warnings.Add("cluster", err)
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
@@ -557,26 +548,67 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	return warnings
 }
 
-// groupVolumeSnapshotsReady reports whether every VolumeSnapshot restored by
-// this restore from the given VolumeGroupSnapshot is ReadyToUse.
-func (ctx *finalizerContext) groupVolumeSnapshotsReady(groupHandle string, log logrus.FieldLogger) bool {
-	vsList := &snapshotv1api.VolumeSnapshotList{}
-	if err := ctx.crClient.List(context.Background(), vsList, client.MatchingLabels{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)}); err != nil {
-		log.WithError(err).Warn("failed to list VolumeSnapshots")
-		return false
+// waitForStubGroup waits until the restored VolumeSnapshots of the stub's group
+// are ReadyToUse. Their VolumeSnapshotContents can be ReadyToUse before the CSI
+// snapshot controller has copied that status to the VolumeSnapshots, and that
+// copy looks the stub up again, so deleting the stub earlier leaves them unbound.
+// A stub that misses a member's snapshot handle is rejected by the CSI driver,
+// so its VolumeSnapshots never become ready and waiting for them is pointless.
+func (ctx *finalizerContext) waitForStubGroup(vgsc *volumegroupsnapshotv1.VolumeGroupSnapshotContent, log logrus.FieldLogger) error {
+	handles := vgsc.Spec.Source.GroupSnapshotHandles
+	if handles == nil || handles.VolumeGroupSnapshotHandle == "" {
+		return nil
+	}
+	groupHandle := handles.VolumeGroupSnapshotHandle
+
+	members, err := ctx.restoredGroupVolumeSnapshots(groupHandle)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list the restored VolumeSnapshots of VGSC %s", vgsc.Name)
+	}
+	var missing []string
+	for _, vs := range members {
+		if h := vs.Annotations[velerov1api.VolumeSnapshotHandleAnnotation]; h != "" && !slices.Contains(handles.VolumeSnapshotHandles, h) {
+			missing = append(missing, h)
+		}
+	}
+	if len(missing) > 0 {
+		return errors.Errorf("stub VGSC %s does not list snapshot handles %v of its group, so the restored VolumeSnapshots "+
+			"of the group cannot become ready; the backup was likely taken before Velero recorded the group members", vgsc.Name, missing)
 	}
 
-	for i := range vsList.Items {
-		vs := &vsList.Items[i]
-		if vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] != groupHandle {
-			continue
+	log.Infof("waiting for the restored VolumeSnapshots of group %s to become ReadyToUse", groupHandle)
+	err = wait.PollUntilContextTimeout(context.Background(), 10*time.Second, ctx.resourceTimeout, true, func(context.Context) (bool, error) {
+		members, err := ctx.restoredGroupVolumeSnapshots(groupHandle)
+		if err != nil {
+			log.WithError(err).Warn("failed to list VolumeSnapshots")
+			return false, nil
 		}
-		if vs.Status == nil || !boolptr.IsSetToTrue(vs.Status.ReadyToUse) {
-			log.Debugf("VolumeSnapshot %s/%s not yet ReadyToUse", vs.Namespace, vs.Name)
-			return false
+		for _, vs := range members {
+			if vs.Status == nil || !boolptr.IsSetToTrue(vs.Status.ReadyToUse) {
+				log.Debugf("VolumeSnapshot %s/%s not yet ReadyToUse", vs.Namespace, vs.Name)
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	return errors.Wrapf(err, "timed out waiting for VolumeSnapshots related to VGSC %s", vgsc.Name)
+}
+
+// restoredGroupVolumeSnapshots returns the VolumeSnapshots this restore created
+// from the VolumeGroupSnapshot with the given handle.
+func (ctx *finalizerContext) restoredGroupVolumeSnapshots(groupHandle string) ([]snapshotv1api.VolumeSnapshot, error) {
+	vsList := &snapshotv1api.VolumeSnapshotList{}
+	if err := ctx.crClient.List(context.Background(), vsList, client.MatchingLabels{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)}); err != nil {
+		return nil, err
+	}
+
+	var members []snapshotv1api.VolumeSnapshot
+	for _, vs := range vsList.Items {
+		if vs.Annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] == groupHandle {
+			members = append(members, vs)
 		}
 	}
-	return true
+	return members, nil
 }
 
 func needPatch(newPV *corev1api.PersistentVolume, pvInfo *volume.PVInfo) bool {

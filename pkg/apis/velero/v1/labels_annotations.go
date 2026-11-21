@@ -153,6 +153,7 @@ const (
 	DriverNameAnnotation                            = "velero.io/csi-driver-name"
 	VSCDeletionPolicyAnnotation                     = "velero.io/csi-vsc-deletion-policy"
 	VolumeGroupSnapshotHandleAnnotation             = "velero.io/csi-volumegroupsnapshot-handle"
+	VolumeGroupSnapshotMemberHandlesAnnotation      = "velero.io/csi-volumegroupsnapshot-member-handles"
 	VolumeSnapshotClassSelectorLabel                = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverBackupAnnotationPrefix = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverPVCAnnotation          = "velero.io/csi-volumesnapshot-class"

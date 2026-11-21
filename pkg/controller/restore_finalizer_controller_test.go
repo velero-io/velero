@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -51,6 +52,7 @@ import (
 	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 	"github.com/velero-io/velero/pkg/builder"
 	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/metrics"
 	persistencemocks "github.com/velero-io/velero/pkg/persistence/mocks"
 	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
@@ -996,6 +998,20 @@ func TestCleanupStubVGSC(t *testing.T) {
 		}
 	}
 
+	memberVS := func(name, groupHandle, snapshotHandle string) *snapshotv1api.VolumeSnapshot {
+		vs := restoredVS(name, groupHandle, false)
+		vs.Annotations[velerov1api.VolumeSnapshotHandleAnnotation] = snapshotHandle
+		return vs
+	}
+	longRestoreName := "restore-" + strings.Repeat("a", 70)
+	withRestoreLabel := func(obj metav1.Object, restoreName string) {
+		obj.SetLabels(map[string]string{velerov1api.RestoreNameLabel: label.GetValidName(restoreName)})
+	}
+	longNameStub := stubVGSC("vgs-handle-1", snapshotHandle1)
+	withRestoreLabel(longNameStub, longRestoreName)
+	longNameVS := restoredVS("vs-1", "vgs-handle-1", true)
+	withRestoreLabel(longNameVS, longRestoreName)
+
 	tests := []struct {
 		name              string
 		restore           *velerov1api.Restore
@@ -1005,7 +1021,33 @@ func TestCleanupStubVGSC(t *testing.T) {
 		resourceTimeout   time.Duration
 		expectedRemaining int
 		expectedWarnings  bool
+		expectedWarning   string
 	}{
+		{
+			// A backup taken before Velero recorded the group members gives a stub
+			// with one snapshot handle. The CSI driver rejects it, so the other
+			// VolumeSnapshots of the group can never become ready.
+			name:          "stub VGSC missing a group member - not waited for, warning names the member",
+			restore:       builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs: []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			existingVSs: []*snapshotv1api.VolumeSnapshot{
+				memberVS("vs-1", "vgs-handle-1", snapshotHandle1),
+				memberVS("vs-2", "vgs-handle-1", snapshotHandle2),
+			},
+			resourceTimeout:   time.Second,
+			expectedRemaining: 0,
+			expectedWarnings:  true,
+			expectedWarning:   snapshotHandle2,
+		},
+		{
+			// Label values are limited to 63 characters.
+			name:              "stub VGSC of a restore with a long name is found and deleted",
+			restore:           builder.ForRestore(velerov1api.DefaultNamespace, longRestoreName).Result(),
+			existingVGSCs:     []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{longNameStub},
+			existingVSs:       []*snapshotv1api.VolumeSnapshot{longNameVS},
+			expectedRemaining: 0,
+			expectedWarnings:  false,
+		},
 		{
 			// The VolumeSnapshotContent is ReadyToUse before the CSI snapshot controller
 			// has updated the VolumeSnapshot, which still needs the stub.
@@ -1282,6 +1324,9 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 			if tc.expectedWarnings {
 				assert.False(t, warnings.IsEmpty())
+				if tc.expectedWarning != "" {
+					assert.Contains(t, fmt.Sprintf("%v", warnings), tc.expectedWarning)
+				}
 			} else {
 				assert.True(t, warnings.IsEmpty(), "expected no warnings")
 			}
@@ -1292,7 +1337,7 @@ func TestCleanupStubVGSC(t *testing.T) {
 
 			// Verify remaining VGSCs don't belong to this restore
 			for _, remaining := range remainingList.Items {
-				assert.NotEqual(t, tc.restore.Name, remaining.Labels[velerov1api.RestoreNameLabel],
+				assert.NotEqual(t, label.GetValidName(tc.restore.Name), remaining.Labels[velerov1api.RestoreNameLabel],
 					"VGSC %s should have been deleted", remaining.Name)
 			}
 		})

@@ -18,7 +18,9 @@ package csi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
@@ -36,6 +38,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/client"
 	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/label"
 	plugincommon "github.com/velero-io/velero/pkg/plugin/framework/common"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	"github.com/velero-io/velero/pkg/util"
@@ -108,9 +111,8 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 	// Generate a deterministic name for the stub VGSC based on the group handle
 	vgscName := util.GenerateSha256FromRestoreUIDAndVsName(string(restore.UID), vgsh)
 
-	// Check if VGSC already exists. Its snapshot handles are immutable, so a stub
-	// created for another member of the group is used as is: the CSI snapshot
-	// controller matches it by its group handle, not by its snapshot handles.
+	// Check if VGSC already exists. A stub created for another member of the
+	// group already lists every member, and its snapshot handles are immutable.
 	_, err := csiutil.GetVGSC(ctx, p.crClient, vgscName)
 	if err == nil {
 		p.log.Infof("Stub VGSC %s already exists for VolumeGroupSnapshotHandle %s", vgscName, vgsh)
@@ -144,7 +146,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vgscName,
 			Labels: map[string]string{
-				velerov1api.RestoreNameLabel: restore.Name,
+				velerov1api.RestoreNameLabel: label.GetValidName(restore.Name),
 			},
 			Annotations: vgscAnnotations,
 		},
@@ -154,7 +156,7 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 			Source: volumegroupsnapshotv1.VolumeGroupSnapshotContentSource{
 				GroupSnapshotHandles: &volumegroupsnapshotv1.GroupSnapshotHandles{
 					VolumeGroupSnapshotHandle: vgsh,
-					VolumeSnapshotHandles:     []string{snapshotHandle},
+					VolumeSnapshotHandles:     p.groupMemberHandles(vs, snapshotHandle),
 				},
 			},
 			VolumeGroupSnapshotRef: corev1api.ObjectReference{
@@ -192,6 +194,30 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 
 	p.log.Infof("Successfully created stub VGSC %s", vgscName)
 	return nil
+}
+
+// groupMemberHandles returns the snapshot handles of every member of the
+// VolumeSnapshot's group, as recorded at backup time. The CSI driver rejects a
+// stub VGSC whose handles do not match the group. Backups taken before the
+// handles were recorded only give this VolumeSnapshot's own handle.
+func (p *volumeSnapshotRestoreItemAction) groupMemberHandles(vs *snapshotv1api.VolumeSnapshot, snapshotHandle string) []string {
+	recorded, ok := vs.Annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+	if !ok {
+		p.log.Warnf("VS %s/%s has no group member snapshot handles, so the stub VGSC lists only its own snapshot. "+
+			"The CSI driver may reject it, and the restored VolumeSnapshots of the group then never become ready",
+			vs.Namespace, vs.Name)
+		return []string{snapshotHandle}
+	}
+
+	var handles []string
+	if err := json.Unmarshal([]byte(recorded), &handles); err != nil {
+		p.log.WithError(err).Warnf("VS %s/%s has unreadable group member snapshot handles", vs.Namespace, vs.Name)
+		return []string{snapshotHandle}
+	}
+	if !slices.Contains(handles, snapshotHandle) {
+		handles = append(handles, snapshotHandle)
+	}
+	return handles
 }
 
 func (p *volumeSnapshotRestoreItemAction) Execute(
