@@ -185,7 +185,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	// Don't allow deleting backups in read-only storage locations
 	location := &velerov1api.BackupStorageLocation{}
-	if err := r.Get(context.Background(), client.ObjectKey{
+	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: backup.Namespace,
 		Name:      backup.Spec.StorageLocation,
 	}, location); err != nil {
