@@ -209,10 +209,14 @@ func TestVSExecute(t *testing.T) {
 
 func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 	groupVGS := func(boundContent string) *volumegroupsnapshotv1.VolumeGroupSnapshot {
-		return &volumegroupsnapshotv1.VolumeGroupSnapshot{
+		vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "app", Name: "group"},
-			Status:     &volumegroupsnapshotv1.VolumeGroupSnapshotStatus{BoundVolumeGroupSnapshotContentName: ptr.To(boundContent)},
+			Status:     &volumegroupsnapshotv1.VolumeGroupSnapshotStatus{},
 		}
+		if boundContent != "" {
+			vgs.Status.BoundVolumeGroupSnapshotContentName = ptr.To(boundContent)
+		}
+		return vgs
 	}
 	groupVGSC := func(name, groupHandle string, snapshotHandles ...string) *volumegroupsnapshotv1.VolumeGroupSnapshotContent {
 		vgsc := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{
@@ -228,6 +232,7 @@ func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 	tests := []struct {
 		name            string
 		objects         []runtime.Object
+		noGroupName     bool
 		expectedHandles string
 	}{
 		{
@@ -255,13 +260,31 @@ func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 			objects:         []runtime.Object{groupVGSC("ours", "group-1", "snap-1", "snap-2")},
 			expectedHandles: "",
 		},
+		{
+			name:            "VolumeSnapshot without a group snapshot name - nothing is recorded",
+			objects:         []runtime.Object{groupVGS("ours"), groupVGSC("ours", "group-1", "snap-1", "snap-2")},
+			noGroupName:     true,
+			expectedHandles: "",
+		},
+		{
+			name:            "group snapshot not bound to a content - nothing is recorded",
+			objects:         []runtime.Object{groupVGS(""), groupVGSC("ours", "group-1", "snap-1", "snap-2")},
+			expectedHandles: "",
+		},
+		{
+			name:            "group snapshot content not found - nothing is recorded",
+			objects:         []runtime.Object{groupVGS("ours")},
+			expectedHandles: "",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backup := builder.ForBackup("velero", "backup").Phase(velerov1api.BackupPhaseInProgress).Result()
 			vs := builder.ForVolumeSnapshot("app", "vs").Status().BoundVolumeSnapshotContentName("vsc").Result()
-			vs.Status.VolumeGroupSnapshotName = ptr.To("group")
+			if !tc.noGroupName {
+				vs.Status.VolumeGroupSnapshotName = ptr.To("group")
+			}
 			vsc := builder.ForVolumeSnapshotContent("vsc").Status(&snapshotv1api.VolumeSnapshotContentStatus{
 				SnapshotHandle:            ptr.To("snap-1"),
 				VolumeGroupSnapshotHandle: ptr.To("group-1"),

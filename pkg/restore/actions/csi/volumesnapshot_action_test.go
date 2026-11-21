@@ -392,6 +392,25 @@ func TestEnsureStubVGSCExists(t *testing.T) {
 			expectedHandles: []string{testSnapshotHandle, "snap-handle-789"},
 		},
 		{
+			name: "VS whose own handle is missing from the group member handles - VGSC lists it too",
+			vs: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-vs",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						velerov1api.VolumeGroupSnapshotHandleAnnotation:        testVGSHandle,
+						velerov1api.VolumeSnapshotHandleAnnotation:             testSnapshotHandle,
+						velerov1api.DriverNameAnnotation:                       testDriver,
+						velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation: `["snap-handle-789"]`,
+					},
+				},
+			},
+			restore:         builder.ForRestore("velero", "restore").ObjectMeta(builder.WithUID("restore-uid")).Result(),
+			expectVGSC:      true,
+			expectErr:       false,
+			expectedHandles: []string{"snap-handle-789", testSnapshotHandle},
+		},
+		{
 			name: "VS with unreadable group member handles - VGSC lists only this snapshot",
 			vs: &snapshotv1api.VolumeSnapshot{
 				ObjectMeta: metav1.ObjectMeta{
