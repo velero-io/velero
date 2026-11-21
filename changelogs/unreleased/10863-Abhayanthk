@@ -1,0 +1,1 @@
+Create the VolumeGroupSnapshot restore stub with every member's snapshot handle, so restored PVCs no longer stay Pending
