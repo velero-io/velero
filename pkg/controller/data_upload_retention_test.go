@@ -532,6 +532,68 @@ func TestReconcileReleasesRetainedSnapshotOfUnfinishedDataUpload(t *testing.T) {
 	}
 }
 
+// TestReconcileSkipsReleaseForDataUploadWithoutRecord proves the hook's gate:
+// only a DataUpload carrying a retained snapshot record runs the release,
+// because the record provably precedes the Retain patch, so it covers every
+// retained case. An in-flight CSI DataUpload without a record -- including a
+// progress-update-driven reconcile and a file system data mover one -- must
+// not pay the release's uncached DataUpload and VolumeSnapshotContent reads.
+func TestReconcileSkipsReleaseForDataUploadWithoutRecord(t *testing.T) {
+	tests := []struct {
+		name   string
+		du     *velerov2alpha1api.DataUpload
+		cancel bool
+	}{
+		{
+			name: "an in-progress CSI data upload without a record",
+			du: retentionDataUploadBuilder().
+				Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+				Node("node-1").
+				Finalizers([]string{DataUploadDownloadFinalizer}).
+				Result(),
+		},
+		{
+			name: "a prepared CSI data upload without a record",
+			du: retentionDataUploadBuilder().
+				Phase(velerov2alpha1api.DataUploadPhasePrepared).
+				Node("node-1").
+				Finalizers([]string{DataUploadDownloadFinalizer}).
+				Result(),
+		},
+		{
+			name: "a canceling CSI data upload without a record",
+			du: retentionDataUploadBuilder().
+				Phase(velerov2alpha1api.DataUploadPhaseCanceling).
+				Node("node-1").
+				Finalizers([]string{DataUploadDownloadFinalizer}).
+				Result(),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := initDataUploaderReconciler()
+			require.NoError(t, err)
+
+			createRetainedSnapshotObjects(t, r, tc.du, retentionBackupVSC())
+
+			var vscReads int
+			r.csiSnapshotClient.(*snapshotv1fake.FakeSnapshotV1).PrependReactor("*", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+				if _, ok := action.(clientTesting.GetAction); ok {
+					vscReads++
+				}
+				return false, nil, nil
+			})
+
+			// The finalizer is already in place, so one reconcile reaches the hook.
+			_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: tc.du.Namespace, Name: tc.du.Name}})
+			require.NoError(t, err)
+
+			assert.Zero(t, vscReads, "a DataUpload without a record must not read the VolumeSnapshotContent")
+		})
+	}
+}
+
 // TestOnDataUploadFailedReleasesRetainedSnapshot proves the failure
 // propagation: a DataUpload that fails after the record was persisted carries
 // a stale record only until the patch-back clears it after the release.

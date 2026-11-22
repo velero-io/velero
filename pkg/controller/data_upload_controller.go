@@ -271,9 +271,15 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// return early when status.node names a different node, and the velero
 	// server never runs the exposer cleanup, so a DataUpload whose node is gone
 	// is otherwise acted on by nobody.
+	// The gate is the record, not the phase: the record is persisted before
+	// the content is switched to Retain (design section 2), so every DataUpload
+	// whose snapshot may need releasing carries one, in every phase the switch
+	// window can be observed from. A DataUpload without a record has nothing
+	// to release -- its content was never switched to Retain -- so it skips
+	// the release and its uncached reads entirely, progress-update-driven
+	// reconciles and file system data mover DataUploads included.
 	if du.Spec.SnapshotType == velerov2alpha1api.SnapshotTypeCSI && !isDataUploadInFinalState(du) &&
-		(du.Status.RetainedCSIStorageSnapshot != nil || du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress ||
-			du.Status.Phase == velerov2alpha1api.DataUploadPhasePrepared || du.Status.Phase == velerov2alpha1api.DataUploadPhaseCanceling) {
+		du.Status.RetainedCSIStorageSnapshot != nil {
 		if releaseErr := r.releaseRetainedSnapshot(ctx, du, log); releaseErr != nil {
 			log.WithError(releaseErr).Warn("Failed to release the retained snapshot of the unfinished DataUpload, will retry")
 			// A refused lease mark is retried when it has expired; any other
