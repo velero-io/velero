@@ -69,9 +69,14 @@ const (
 	// side for long.
 	dataUploadLeaseDuration = time.Minute
 
-	// dataUploadLeaseCleanupMargin is added to the deletion timeout when the
-	// retention lease is renewed for the cleanup that follows the Retain patch,
-	// so the renewal covers the whole bounded wait plus scheduling slack.
+	// dataUploadLeaseCleanupMargin is the unit of scheduling slack added to the
+	// deletion timeout when the retention lease is renewed for the cleanup that
+	// follows the Retain patch. The cleanup the renewal must cover is the
+	// exposer cleanup -- itself bounded by one margin -- plus the explicit
+	// content deletion and its bounded wait, so the renewal spans
+	// RetainedSnapshotDeletionTimeout + 2*margin: a single margin is fully
+	// consumed by the exposer cleanup's own bound and leaves the renewal
+	// expiring while the deletion wait still runs.
 	dataUploadLeaseCleanupMargin = time.Minute
 )
 
@@ -311,12 +316,14 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 	// destroy a successfully retained snapshot -- the next incremental of the
 	// volume would silently fall back to a full backup. The lease is
 	// therefore renewed, as the same holder, to cover the whole bounded
-	// cleanup; a callback that crashes after the renewal blocks the rollback
-	// for at most that long, which the deletion-timeout bound already
-	// tolerates. A refused renewal means a rollback is running or ran: the
-	// callback must not continue, it fails the DataUpload and keeps the
-	// record, leaving the snapshot to the patch-back and the backup deletion.
-	renewed, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, csi.RetainedSnapshotDeletionTimeout+dataUploadLeaseCleanupMargin, log)
+	// cleanup -- the exposer cleanup's own bound plus the content deletion's
+	// deletion-timeout bound -- which outlasts a single margin; a callback
+	// that crashes after the renewal blocks the rollback for at most that
+	// long, which the deletion-timeout bound already tolerates. A refused
+	// renewal means a rollback is running or ran: the callback must not
+	// continue, it fails the DataUpload and keeps the record, leaving the
+	// snapshot to the patch-back and the backup deletion.
+	renewed, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, csi.RetainedSnapshotDeletionTimeout+2*dataUploadLeaseCleanupMargin, log)
 	if err != nil {
 		return errors.Wrapf(err, "error renewing the retention lease of DataUpload %s for its cleanup", du.Name)
 	}
