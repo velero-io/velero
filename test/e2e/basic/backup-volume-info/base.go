@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cockroachdb/errors"
 	. "github.com/onsi/ginkgo/v2"
@@ -40,6 +41,21 @@ type BackupVolumeInfo struct {
 	DefaultVolumesToFSBackup bool
 	SnapshotMoveData         bool
 	TimeoutDuration          time.Duration
+
+	// restoredVolumes records what CreateResources put in each volume, so the
+	// restore can be checked against it. Recorded at write time rather than
+	// recomputed during verification: the content includes the pod name, and
+	// rebuilding it from the restored pod would quietly depend on Velero
+	// bringing the pod back under the name it had at backup time.
+	restoredVolumes []volumeContent
+}
+
+// volumeContent is one volume as CreateResources left it. An empty FileName
+// means the volume was deliberately left empty and must come back that way.
+type volumeContent struct {
+	VolumeName string
+	FileName   string
+	Content    string
 }
 
 func (v *BackupVolumeInfo) Init() error {
@@ -151,19 +167,96 @@ func (v *BackupVolumeInfo) CreateResources() error {
 				// Hitting issue https://github.com/velero-io/velero/issues/7388
 				// So populate data only to some of pods, leave other pods empty to verify empty PV datamover
 				if i%2 == 0 {
+					fileName := fmt.Sprintf("file-%s", pod.Name)
+					content := CreateFileContent(createNSName, pod.Name, vols[i].Name)
 					Expect(CreateFileToPod(
 						createNSName,
 						pod.Name,
 						DefaultContainerName,
 						vols[i].Name,
-						fmt.Sprintf("file-%s", pod.Name),
-						CreateFileContent(createNSName, pod.Name, vols[i].Name),
+						fileName,
+						content,
 						v.VeleroCfg.WorkerOS,
 					)).To(Succeed())
+					v.restoredVolumes = append(v.restoredVolumes, volumeContent{
+						VolumeName: vols[i].Name,
+						FileName:   fileName,
+						Content:    content,
+					})
+					continue
 				}
+				// Left empty on purpose. Record it anyway: a restore that loses
+				// an empty volume, or fills one, is also wrong.
+				v.restoredVolumes = append(v.restoredVolumes, volumeContent{
+					VolumeName: vols[i].Name,
+					FileName:   fmt.Sprintf("file-%s", pod.Name),
+				})
 			}
 		}
 	}
+	return nil
+}
+
+// VerifyRestoredVolumeContents checks the restore, not just the backup
+// metadata. Every volume CreateResources populated must come back with its
+// contents, and every volume it deliberately left empty must come back empty.
+//
+// The cases that call this restore into the namespace they backed up, so the
+// workload is expected under the same name.
+func (v *BackupVolumeInfo) VerifyRestoredVolumeContents(namespace string) error {
+	Expect(v.restoredVolumes).ToNot(BeEmpty(),
+		"CreateResources recorded no volumes, so there is nothing to check the restore against")
+
+	Expect(WaitForReadyDeployment(v.Client.ClientGo, namespace, v.CaseBaseName)).To(Succeed(),
+		fmt.Sprintf("the deployment in namespace %s is not ready after the restore", namespace))
+
+	podList, err := ListPods(v.Ctx, v.Client, namespace)
+	Expect(err).ToNot(HaveOccurred(),
+		fmt.Sprintf("failed to list pods in namespace %s after the restore", namespace))
+
+	expected := make(map[string]volumeContent, len(v.restoredVolumes))
+	for _, vol := range v.restoredVolumes {
+		expected[vol.VolumeName] = vol
+	}
+
+	podsChecked := 0
+	for _, pod := range podList.Items {
+		// A pod from before the restore may still be terminating, and only a
+		// running one can be exec'd into.
+		if pod.Status.Phase != corev1api.PodRunning {
+			continue
+		}
+		podsChecked++
+
+		checked := 0
+		for _, vol := range pod.Spec.Volumes {
+			want, ours := expected[vol.Name]
+			if !ours {
+				continue
+			}
+			checked++
+
+			content, _, readErr := ReadFileFromPodVolume(
+				namespace, pod.Name, DefaultContainerName, vol.Name, want.FileName, v.VeleroCfg.WorkerOS,
+			)
+			if want.Content == "" {
+				// Nothing was written here, so the read is expected to fail.
+				Expect(readErr).To(HaveOccurred(),
+					fmt.Sprintf("volume %s was left empty before the backup but came back with %q", vol.Name, content))
+				continue
+			}
+
+			Expect(readErr).ToNot(HaveOccurred(),
+				fmt.Sprintf("failed to read %s from volume %s of restored pod %s", want.FileName, vol.Name, pod.Name))
+			Expect(strings.TrimRightFunc(content, unicode.IsSpace)).To(Equal(want.Content),
+				fmt.Sprintf("volume %s did not come back with its contents", vol.Name))
+		}
+		Expect(checked).To(Equal(len(expected)),
+			fmt.Sprintf("pod %s came back with %d of the %d volumes that were backed up", pod.Name, checked, len(expected)))
+	}
+	Expect(podsChecked).To(BeNumerically(">", 0),
+		fmt.Sprintf("no running pod was restored into namespace %s, so nothing was verified", namespace))
+
 	return nil
 }
 
