@@ -712,7 +712,7 @@ func TestReconcileReleaseRetrySemantics(t *testing.T) {
 		})
 
 		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
-		assert.Error(t, err, "a non-refused release failure must reach the controller runtime's backoff")
+		require.Error(t, err, "a non-refused release failure must reach the controller runtime's backoff")
 		assert.Zero(t, result.RequeueAfter)
 	})
 }
