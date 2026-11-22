@@ -993,12 +993,6 @@ func (r *DataUploadReconciler) onPrepareTimeout(ctx context.Context, du *velerov
 		return
 	}
 
-	// The prepare-timeout path must also release a retained snapshot and keep
-	// the release retryable until the Delete policy is confirmed.
-	if releaseErr := r.releaseRetainedSnapshot(ctx, du, log); releaseErr != nil {
-		log.WithError(releaseErr).Error("Failed to release the volume snapshot of the timed-out DataUpload, its record is kept and the backup deletion owns it")
-	}
-
 	ep, ok := r.snapshotExposerList[du.Spec.SnapshotType]
 	if !ok {
 		log.WithError(fmt.Errorf("%v type of snapshot exposer is not exist", du.Spec.SnapshotType)).
