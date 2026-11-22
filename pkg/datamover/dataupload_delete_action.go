@@ -78,14 +78,16 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 		)
 		return nil
 	}
-	cm := genConfigmap(input.Backup, *du)
-	if cm == nil {
-		// will not fail the backup deletion
-		return nil
-	}
-	err := d.client.Create(context.Background(), cm)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+	// The snapshot-info ConfigMap of the repository data is only created for
+	// a DataUpload the config can be generated for; the retained-snapshot
+	// record gather below must not depend on it, or a failed or interrupted
+	// DataUpload with a retained record but no SnapshotID would lose its
+	// record as soon as the DataUpload is gone from the cluster.
+	if cm := genConfigmap(input.Backup, *du); cm != nil {
+		err := d.client.Create(context.Background(), cm)
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return errors.WithStack(errors.Wrapf(err, "failed to create the configmap for DataUpload %s/%s", du.Namespace, du.Name))
+		}
 	}
 
 	// The DataUploads are deleted in an earlier step of the backup deletion
@@ -99,6 +101,14 @@ func (d *DataUploadDeleteAction) Execute(input *velero.DeleteItemActionExecuteIn
 	// merges into the map an earlier, failed attempt left behind.
 	entries := map[string]*retainedsnapshot.Entry{}
 	if entry := retainedsnapshot.FromDataUploadStatus(du); entry != nil {
+		// A record read from the tarball is not trusted, whatever it was on
+		// the live DataUpload: the tarball is backup-storage data, written by
+		// anyone who can write the storage, so only a live DataUpload read --
+		// the backup-deletion controller's own gather -- establishes trust.
+		// An untrusted record naming a driver the cluster does not run is
+		// moved to the orphan-snapshot ConfigMap instead of timing out
+		// against a temp content the driver will never delete.
+		entry.Trusted = false
 		entries[du.Name] = entry
 	} else if entry := d.unrecordedRetainedSnapshotEntry(input.Backup, *du); entry != nil {
 		// A backup taken before Velero recorded retained snapshots kept its
@@ -163,7 +173,17 @@ func (d *DataUploadDeleteAction) unrecordedRetainedSnapshotEntry(bak *velerov1.B
 			Source:                GetRealSource(du.Spec.SourceNamespace, du.Spec.SourcePVC),
 		},
 	}
-	if name := class.Parameters[velerov1.PrefixedSecretNameAnnotation]; name != "" && !isTemplateSecret(name) {
+	if name := class.Parameters[velerov1.PrefixedSecretNameAnnotation]; name != "" {
+		// A templated secret name or namespace cannot be resolved to the
+		// secret the driver needs: the temp VolumeSnapshotContent would be
+		// built without credentials, and the driver's credential failures
+		// never qualify for escalation, so the backup would be undeletable.
+		// The entry is left out and the snapshot is flagged for manual
+		// cleanup, the same as a class that no longer exists.
+		if isTemplateSecret(name) {
+			log.Warnf("VolumeSnapshotClass %s names the deletion secret with a template, a snapshot it retained needs manual cleanup", class.Name)
+			return nil
+		}
 		entry.DeletionSecretRef = &corev1api.SecretReference{
 			Name:      name,
 			Namespace: class.Parameters[velerov1.PrefixedSecretNamespaceAnnotation],

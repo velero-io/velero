@@ -250,7 +250,7 @@ func TestDataUploadDeleteActionGathersRetainedSnapshotRecords(t *testing.T) {
 				entry, ok := family.Entry("daily-backup-abcde")
 				require.True(t, ok)
 				assert.Equal(t, tc.wantSnapshot, entry.CSISnapshotHandle)
-				assert.True(t, entry.Trusted, "a record from DataUpload status is trusted")
+				assert.False(t, entry.Trusted, "a record read from the tarball is not trusted, only a live DataUpload read establishes trust")
 			}
 		})
 	}
@@ -276,6 +276,12 @@ func TestDataUploadDeleteActionGathersUnrecordedRetainedSnapshot(t *testing.T) {
 	deleteClass := retainClass.DeepCopy()
 	deleteClass.Name = "delete-class"
 	deleteClass.DeletionPolicy = snapshotv1api.VolumeSnapshotContentDelete
+	templateNameClass := retainClass.DeepCopy()
+	templateNameClass.Name = "template-name-class"
+	templateNameClass.Parameters = map[string]string{
+		velerov1.PrefixedSecretNameAnnotation:      "${secret-name}",
+		velerov1.PrefixedSecretNamespaceAnnotation: "rook-ceph",
+	}
 
 	backup := builder.ForBackup("velero", "daily-backup").StorageLocation("default").Result()
 	backup.UID = "daily-uid"
@@ -302,6 +308,15 @@ func TestDataUploadDeleteActionGathersUnrecordedRetainedSnapshot(t *testing.T) {
 			wantEntry: false,
 		},
 		{
+			// A templated secret name cannot be resolved to the secret the
+			// driver needs: the temp VolumeSnapshotContent would be built
+			// without credentials and the driver's credential failures never
+			// qualify for escalation, so the backup would be undeletable.
+			name:      "a templated deletion secret name is left for manual cleanup",
+			mutate:    func(du *velerov2alpha1.DataUpload) { du.Spec.CSISnapshot.SnapshotClass = "template-name-class" },
+			wantEntry: false,
+		},
+		{
 			name:      "the vSphere change ID is not a snapshot handle",
 			mutate:    func(du *velerov2alpha1.DataUpload) { du.Spec.CSISnapshot.Driver = "csi.vsphere.vmware.com" },
 			wantEntry: false,
@@ -320,7 +335,7 @@ func TestDataUploadDeleteActionGathersUnrecordedRetainedSnapshot(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			crClient := velerotest.NewFakeControllerRuntimeClient(t, retainClass, deleteClass)
+			crClient := velerotest.NewFakeControllerRuntimeClient(t, retainClass, deleteClass, templateNameClass)
 			action := NewDataUploadDeleteAction(velerotest.NewLogger(), crClient)
 
 			du := newCompletedDataUpload("daily-backup-abcde", "daily-backup")
@@ -354,4 +369,40 @@ func TestDataUploadDeleteActionGathersUnrecordedRetainedSnapshot(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDataUploadDeleteActionGathersRecordWithoutSnapshotID proves the
+// retained-record gather does not depend on the snapshot-info ConfigMap: a
+// failed DataUpload that carries a retained record but no SnapshotID --
+// retention recorded the handle, then a cleanup failure failed the upload
+// before the ID was written -- still contributes its entry, or the record
+// would be lost as soon as the DataUpload is gone from the cluster.
+func TestDataUploadDeleteActionGathersRecordWithoutSnapshotID(t *testing.T) {
+	crClient := velerotest.NewFakeControllerRuntimeClient(t)
+	action := NewDataUploadDeleteAction(velerotest.NewLogger(), crClient)
+
+	du := newCompletedDataUpload("daily-backup-abcde", "daily-backup")
+	du.Status.Phase = velerov2alpha1.DataUploadPhaseFailed
+	du.Status.SnapshotID = ""
+	du.Status.RetainedCSIStorageSnapshot = &velerov2alpha1.RetainedCSIStorageSnapshot{
+		CSISnapshotHandle: "0001-0009-rook-ceph-0000000000000001-snap",
+		Driver:            "rbd.csi.ceph.com",
+	}
+	backup := builder.ForBackup("velero", "daily-backup").StorageLocation("default").Result()
+	backup.UID = "daily-uid"
+
+	require.NoError(t, action.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   toUnstructured(t, du),
+		Backup: backup,
+	}))
+
+	err := crClient.Get(t.Context(), crclient.ObjectKey{Namespace: backup.Namespace, Name: "daily-backup-abcde-info"}, &corev1api.ConfigMap{})
+	assert.True(t, apierrors.IsNotFound(err), "no snapshot-info ConfigMap is created without a SnapshotID")
+
+	family, err := retainedsnapshot.LoadFamily(t.Context(), crClient, backup)
+	require.NoError(t, err)
+	assert.Equal(t, 1, family.PendingEntries(), "the retained record is gathered without a SnapshotID")
+	entry, ok := family.Entry("daily-backup-abcde")
+	require.True(t, ok)
+	assert.Equal(t, "0001-0009-rook-ceph-0000000000000001-snap", entry.CSISnapshotHandle)
 }
