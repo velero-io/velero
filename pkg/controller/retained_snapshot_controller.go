@@ -91,7 +91,11 @@ func NewRetainedSnapshotReconcilerWithRecorder(logger logrus.FieldLogger, client
 }
 
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;delete
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// The events list verb backs the timeout diagnosis: the SnapshotDeleteError
+// events of a cluster-scoped VolumeSnapshotContent are listed to tell a
+// DeleteSnapshot call failure, which escalates after the bounded attempts,
+// from a credential failure or a plain timeout, which stay retryable.
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;create;patch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=csidrivers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=velero.io,resources=deletebackuprequests,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=velero.io,resources=deletebackuprequests/status,verbs=get;update;patch
