@@ -281,11 +281,20 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if du.Spec.SnapshotType == velerov2alpha1api.SnapshotTypeCSI && !isDataUploadInFinalState(du) &&
 		du.Status.RetainedCSIStorageSnapshot != nil {
 		if releaseErr := r.releaseRetainedSnapshot(ctx, du, log); releaseErr != nil {
+			var refused *leaseRefusedError
+			if errors.As(releaseErr, &refused) {
+				// A refused lease mark carries its own retry: nothing else
+				// re-enqueues the DataUpload for this, the node-agent has no
+				// sync period, so the hook requeues for the lease duration and
+				// retries when the mark has expired.
+				log.WithError(releaseErr).Info("The release of the retained snapshot waits for the retention lease to expire")
+				return ctrl.Result{RequeueAfter: dataUploadLeaseDuration}, nil
+			}
 			log.WithError(releaseErr).Warn("Failed to release the retained snapshot of the unfinished DataUpload, will retry")
-			// A refused lease mark is retried when it has expired; any other
-			// failure is retried on the same cadence, which is bounded by the
-			// deletion timeout the release waits on.
-			return ctrl.Result{RequeueAfter: dataUploadLeaseDuration}, nil
+			// Any other failure is retried by the controller runtime's
+			// backoff; the release's own waits are bounded by the deletion
+			// timeout.
+			return ctrl.Result{}, releaseErr
 		}
 	}
 

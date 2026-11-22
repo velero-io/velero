@@ -653,6 +653,70 @@ func TestReconcileDoesNotReleaseDuringRetentionCleanup(t *testing.T) {
 	}
 }
 
+// TestReconcileReleaseRetrySemantics proves the hook's retry wiring: a
+// refused lease mark is requeued for the lease duration, when the mark has
+// expired, because nothing else re-enqueues the DataUpload for it; any other
+// release failure is returned to the controller runtime's backoff instead of
+// being swallowed into a fixed requeue.
+func TestReconcileReleaseRetrySemantics(t *testing.T) {
+	t.Run("a refused lease mark requeues for the lease duration", func(t *testing.T) {
+		r, err := initDataUploaderReconciler()
+		require.NoError(t, err)
+
+		du := retentionDataUploadBuilder().
+			Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+			Node("node-1").
+			Finalizers([]string{DataUploadDownloadFinalizer}).
+			Result()
+		du.Status.RetainedCSIStorageSnapshot = retentionRecord()
+		// Another actor's unexpired retaining mark refuses the release.
+		du.Annotations = map[string]string{dataUploadRetainLeaseAnnotation: (&dataUploadLease{
+			Holder:    "other-node-1",
+			ExpiresAt: r.Clock.Now().Add(10 * time.Minute),
+		}).String()}
+		createRetainedSnapshotObjects(t, r, du, func() *snapshotv1api.VolumeSnapshotContent {
+			vsc := retentionBackupVSC()
+			vsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
+			return vsc
+		}())
+
+		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
+		require.NoError(t, err)
+		assert.Equal(t, dataUploadLeaseDuration, result.RequeueAfter,
+			"the refused mark is retried when it has expired")
+
+		vsc, getErr := getBackupVSC(t, r, du)
+		require.NoError(t, getErr)
+		assert.Equal(t, snapshotv1api.VolumeSnapshotContentRetain, vsc.Spec.DeletionPolicy,
+			"the content must not be touched while the mark is unexpired")
+	})
+
+	t.Run("any other release failure is returned for backoff", func(t *testing.T) {
+		r, err := initDataUploaderReconciler()
+		require.NoError(t, err)
+
+		du := retentionDataUploadBuilder().
+			Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+			Node("node-1").
+			Finalizers([]string{DataUploadDownloadFinalizer}).
+			Result()
+		du.Status.RetainedCSIStorageSnapshot = retentionRecord()
+		createRetainedSnapshotObjects(t, r, du, nil)
+
+		// The content read fails with a non-refused error.
+		r.csiSnapshotClient.(*snapshotv1fake.FakeSnapshotV1).PrependReactor("get", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+			if action.(clientTesting.GetAction).GetName() == dataUploadName {
+				return true, nil, apierrors.NewInternalError(errors.New("fake apiserver error"))
+			}
+			return false, nil, nil
+		})
+
+		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
+		assert.Error(t, err, "a non-refused release failure must reach the controller runtime's backoff")
+		assert.Zero(t, result.RequeueAfter)
+	})
+}
+
 // TestOnDataUploadFailedReleasesRetainedSnapshot proves the failure
 // propagation: a DataUpload that fails after the record was persisted carries
 // a stale record only until the patch-back clears it after the release.
