@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -409,6 +410,60 @@ func TestRetainedSnapshotControllerGarbageCollects(t *testing.T) {
 		err := c.Get(t.Context(), client.ObjectKeyFromObject(shard), &corev1api.ConfigMap{})
 		assert.True(t, apierrors.IsNotFound(err), "the shard is removed after the move")
 	})
+}
+
+// TestRetainedSnapshotControllerRetriggersItself proves the convergence of a
+// multi-shard family: a reconcile that finishes its own shard while a sibling
+// shard still has pending work re-enqueues itself with a requeue instead of
+// waking the request, so the deletion converges one bounded cycle at a time
+// without relying on a further write to trigger the next reconcile; the last
+// shard to empty wakes the request.
+func TestRetainedSnapshotControllerRetriggersItself(t *testing.T) {
+	backend := &fakeSnapshotBackend{snapshots: map[string]bool{retainedTestHandle: true, "another-snapshot": true}}
+	backup := retainedTestBackup()
+	c := backend.client(t, backup)
+
+	shardA := retainedTestFamily(t, c, backup, map[string]*retainedsnapshot.Entry{
+		"foo-du": {CSISnapshotHandle: retainedTestHandle, Driver: retainedTestDriver, Trusted: true},
+	})
+	dbr := retainedTestRequest(t, c, backup)
+	// A sibling shard the gather split the family into, with its own pending
+	// entry, activated like the first.
+	siblingEntry, err := json.Marshal(&retainedsnapshot.Entry{CSISnapshotHandle: "another-snapshot", Driver: retainedTestDriver, Trusted: true})
+	require.NoError(t, err)
+	shardB := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      retainedsnapshot.FamilyNamePrefix(string(backup.UID)) + "1",
+			Namespace: backup.Namespace,
+			Labels:    retainedsnapshot.FamilyLabels(backup),
+		},
+		Data: map[string]string{
+			retainedsnapshot.ActiveKey: "true",
+			"bar-du":                   string(siblingEntry),
+		},
+	}
+	require.NoError(t, c.Create(t.Context(), shardB))
+
+	r := newRetainedTestReconciler(c)
+
+	// Reconciling the first shard deletes its own snapshot but leaves the
+	// sibling pending: the controller re-enqueues itself rather than waking
+	// the request early or stalling until an external write re-triggers it.
+	result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: shardA.Namespace, Name: shardA.Name}})
+	require.NoError(t, err)
+	assert.Equal(t, csi.RetainedSnapshotDeletionTimeout, result.RequeueAfter,
+		"a reconcile with pending work left in the family must re-enqueue itself")
+	assert.Equal(t, []string{retainedTestHandle}, backend.deleteCallsTo)
+	assert.Empty(t, getRequest(t, c, dbr).Annotations[velerov1api.RetainedSnapshotsWakeAnnotation],
+		"the request must not be woken while the sibling shard is pending")
+
+	// The self-requeue reconciles the sibling shard, empties the family and
+	// wakes the request.
+	result, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: shardB.Namespace, Name: shardB.Name}})
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter, "an emptied family needs no further requeue")
+	assert.Equal(t, []string{retainedTestHandle, "another-snapshot"}, backend.deleteCallsTo)
+	assert.NotEmpty(t, getRequest(t, c, dbr).Annotations[velerov1api.RetainedSnapshotsWakeAnnotation])
 }
 
 // TestBackupDeletionHandsOffToRetainedSnapshotController proves the handoff of
