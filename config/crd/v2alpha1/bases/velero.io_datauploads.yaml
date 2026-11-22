@@ -286,17 +286,18 @@ spec:
                     nullable: true
                     properties:
                       name:
-                        description: Name is unique within a namespace to reference a secret
-                          resource.
+                        description: name is unique within a namespace to reference
+                          a secret resource.
                         type: string
                       namespace:
-                        description: Namespace defines the space within which the secret name
-                          must be unique.
+                        description: namespace defines the space within which the
+                          secret name must be unique.
                         type: string
                     type: object
+                    x-kubernetes-map-type: atomic
                   driver:
-                    description: Driver is the name of the CSI driver that created the
-                      snapshot.
+                    description: Driver is the name of the CSI driver that created
+                      the snapshot.
                     type: string
                   managedByLabelValue:
                     description: |-

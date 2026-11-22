@@ -5,7 +5,7 @@
 package v2alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -322,7 +322,7 @@ func (in *RetainedCSIStorageSnapshot) DeepCopyInto(out *RetainedCSIStorageSnapsh
 	*out = *in
 	if in.DeletionSecretRef != nil {
 		in, out := &in.DeletionSecretRef, &out.DeletionSecretRef
-		*out = new(corev1.SecretReference)
+		*out = new(v1.SecretReference)
 		**out = **in
 	}
 }
