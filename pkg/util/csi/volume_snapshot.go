@@ -237,6 +237,28 @@ func RemoveVSCProtect(ctx context.Context, snapshotClient snapshotter.SnapshotV1
 	return err
 }
 
+// VSCDeletionTimeoutError reports that the bounded wait for a
+// VolumeSnapshotContent's disappearance expired: the content is still on the
+// API server, its deletion in progress or stuck behind a finalizer. The
+// caller decides what the bound means; the DataUpload patch-back, for one,
+// fails its DataUpload at it and leaves the record to the backup deletion.
+type VSCDeletionTimeoutError struct {
+	// VSCName is the content the wait was bounded on.
+	VSCName string
+	// Finalizers are the finalizers the content carried when last read;
+	// FinalizersRead false means the content could not be read at all before
+	// the deadline.
+	Finalizers     []string
+	FinalizersRead bool
+}
+
+func (e *VSCDeletionTimeoutError) Error() string {
+	if e.FinalizersRead {
+		return fmt.Sprintf("timeout to assure VolumeSnapshotContent %s is deleted, finalizers in VSC %v", e.VSCName, e.Finalizers)
+	}
+	return fmt.Sprintf("timeout to assure VolumeSnapshotContent %s is deleted", e.VSCName)
+}
+
 // EnsureDeleteVSC asserts the existence of a VSC by name, deletes it and waits for its
 // disappearance and returns errors on any failure.
 func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1Interface,
@@ -276,9 +298,9 @@ func EnsureDeleteVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1I
 			// is still nil when the deadline is exceeded before that happens, e.g.
 			// when the first Get times out. No finalizers are available to report.
 			if updated == nil {
-				return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted", vscName)
+				return &VSCDeletionTimeoutError{VSCName: vscName}
 			}
-			return errors.Errorf("timeout to assure VolumeSnapshotContent %s is deleted, finalizers in VSC %v", vscName, updated.Finalizers)
+			return &VSCDeletionTimeoutError{VSCName: vscName, Finalizers: updated.Finalizers, FinalizersRead: true}
 		} else {
 			return errors.Wrapf(err, "error to assure VolumeSnapshotContent is deleted, %s", vscName)
 		}

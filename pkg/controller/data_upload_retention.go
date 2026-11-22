@@ -70,6 +70,15 @@ type leaseRefusedError struct {
 	error
 }
 
+// retainedSnapshotReleaseTimeoutError reports that the patch-back's bounded
+// wait for the content's disappearance expired. At the bound the DataUpload
+// fails and the record stays in place, so the backup deletion's
+// read-any-record rule owns the snapshot (design section 3); the reconcile
+// hook marks the terminal failure instead of requeueing forever.
+type retainedSnapshotReleaseTimeoutError struct {
+	error
+}
+
 // dataUploadLease is the value of a lease annotation: the holder's identity and
 // the time the lease expires.
 type dataUploadLease struct {
@@ -498,8 +507,15 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 	}
 
 	if err := csi.EnsureDeleteVSC(ctx, r.csiSnapshotClient, du.Name, csi.RetainedSnapshotDeletionTimeout); err != nil {
-		// At the bound, the record is kept so the backup deletion owns the
-		// snapshot.
+		// At the bound, the DataUpload fails and the record is kept so the
+		// backup deletion owns the snapshot (design section 3). The typed
+		// error carries that rule to the reconcile hook, which marks the
+		// terminal failure instead of requeueing every lease duration
+		// forever.
+		var timeout *csi.VSCDeletionTimeoutError
+		if errors.As(err, &timeout) {
+			return &retainedSnapshotReleaseTimeoutError{errors.Wrapf(err, "error confirming the release of the snapshot of DataUpload %s", du.Name)}
+		}
 		return errors.Wrapf(err, "error confirming the release of the snapshot of DataUpload %s", du.Name)
 	}
 

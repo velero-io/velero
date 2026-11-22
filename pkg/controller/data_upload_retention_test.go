@@ -717,6 +717,60 @@ func TestReconcileReleaseRetrySemantics(t *testing.T) {
 	})
 }
 
+// TestReconcileFailsDataUploadAtReleaseBound proves the bound rule of design
+// section 3: when the patch-back's bounded wait for the content's
+// disappearance expires, the DataUpload fails terminally with the record kept
+// -- so the backup deletion's read-any-record rule owns the snapshot --
+// instead of the hook requeueing every lease duration forever.
+func TestReconcileFailsDataUploadAtReleaseBound(t *testing.T) {
+	// Shorten the deletion wait so the bound is reached quickly.
+	originalTimeout := csi.RetainedSnapshotDeletionTimeout
+	t.Cleanup(func() { csi.RetainedSnapshotDeletionTimeout = originalTimeout })
+	csi.RetainedSnapshotDeletionTimeout = 200 * time.Millisecond
+
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	du := retentionDataUploadBuilder().
+		Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+		Node("node-1").
+		Finalizers([]string{DataUploadDownloadFinalizer}).
+		Result()
+	du.Status.RetainedCSIStorageSnapshot = retentionRecord()
+	createRetainedSnapshotObjects(t, r, du, func() *snapshotv1api.VolumeSnapshotContent {
+		vsc := retentionBackupVSC()
+		vsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
+		return vsc
+	}())
+	r.snapshotExposerList = map[velerov2alpha1api.SnapshotType]exposer.SnapshotExposer{
+		velerov2alpha1api.SnapshotTypeCSI: exposer.NewCSISnapshotExposer(r.kubeClient, r.csiSnapshotClient, velerotest.NewLogger()),
+	}
+
+	// The content never disappears: the CSI snapshotter is not running, and
+	// the deletion is swallowed, as a driver that keeps failing
+	// DeleteSnapshot behind the bound-protection finalizer looks.
+	r.csiSnapshotClient.(*snapshotv1fake.FakeSnapshotV1).PrependReactor("delete", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		return true, nil, nil
+	})
+
+	result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter, "the bound is terminal, the hook must not requeue forever")
+
+	updated := getDataUpload(t, r, du)
+	assert.Equal(t, velerov2alpha1api.DataUploadPhaseFailed, updated.Status.Phase,
+		"at the bound the DataUpload fails")
+	assert.NotNil(t, updated.Status.RetainedCSIStorageSnapshot,
+		"the record stays in place so the backup deletion owns the snapshot")
+	assert.Contains(t, updated.Status.Message, "timeout releasing the retained snapshot")
+
+	// The content is patched back to Delete, so the driver deletes the
+	// snapshot when it resumes, and the record is the backstop.
+	vsc, getErr := getBackupVSC(t, r, du)
+	require.NoError(t, getErr)
+	assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, vsc.Spec.DeletionPolicy)
+}
+
 // TestOnDataUploadFailedReleasesRetainedSnapshot proves the failure
 // propagation: a DataUpload that fails after the record was persisted carries
 // a stale record only until the patch-back clears it after the release.

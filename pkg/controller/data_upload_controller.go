@@ -290,6 +290,16 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				log.WithError(releaseErr).Info("The release of the retained snapshot waits for the retention lease to expire")
 				return ctrl.Result{RequeueAfter: dataUploadLeaseDuration}, nil
 			}
+			var bound *retainedSnapshotReleaseTimeoutError
+			if errors.As(releaseErr, &bound) {
+				// At the bound the DataUpload fails and the record stays in
+				// place, so the backup deletion's read-any-record rule owns
+				// the snapshot (design section 3): the bound is terminal, the
+				// hook must not requeue forever.
+				log.WithError(releaseErr).Error("The retained snapshot of the unfinished DataUpload was not released in time, failing the DataUpload; its record is kept and the backup deletion owns the snapshot")
+				_ = r.updateStatusToFailed(ctx, du, releaseErr, "timeout releasing the retained snapshot of the unfinished data upload", log)
+				return ctrl.Result{}, nil
+			}
 			log.WithError(releaseErr).Warn("Failed to release the retained snapshot of the unfinished DataUpload, will retry")
 			// Any other failure is retried by the controller runtime's
 			// backoff; the release's own waits are bounded by the deletion
