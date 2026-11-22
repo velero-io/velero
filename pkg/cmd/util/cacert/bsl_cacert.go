@@ -87,7 +87,7 @@ func GetSSECKeyFromBSL(ctx context.Context, client kbclient.Client, bsl *velerov
 		return "", nil
 	}
 	secretPath, exists := bsl.Spec.Config["customerKeyEncryptionSecret"]
-	if !exists {
+	if !exists || secretPath == "" {
 		if _, hasFile := bsl.Spec.Config["customerKeyEncryptionFile"]; hasFile {
 			return "", errors.Errorf("bsl %s uses customerKeyEncryptionFile, which the CLI cannot read (the path only exists in the velero server pod); use customerKeyEncryptionSecret instead", bsl.Name)
 		}

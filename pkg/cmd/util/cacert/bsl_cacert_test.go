@@ -580,14 +580,32 @@ func TestGetBSL_ClientError(t *testing.T) {
 	}
 }
 
-// TestGetBackupFromRestore_ClientError tests error scenarios for GetBackupFromRestore
-func TestGetBackupFromRestore_ClientError(t *testing.T) {
+// TestGetBSLFromRestore tests BSL resolution in GetBSLFromRestore
+func TestGetBSLFromRestore(t *testing.T) {
 	testCases := []struct {
 		name          string
 		restore       *velerov1api.Restore
 		backup        *velerov1api.Backup
-		expectedError string
+		bsl           *velerov1api.BackupStorageLocation
+		expectedBsl   bool
+		expectedError bool
 	}{
+		{
+			name: "successful resolution",
+			restore: builder.ForRestore("test-ns", "test-restore").
+				Backup("test-backup").
+				Result(),
+			backup: builder.ForBackup("test-ns", "test-backup").
+				StorageLocation("test-bsl").
+				Result(),
+			bsl: &velerov1api.BackupStorageLocation{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-bsl",
+				},
+			},
+			expectedBsl: true,
+		},
 		{
 			name: "backup in different namespace",
 			restore: builder.ForRestore("test-ns", "test-restore").
@@ -596,7 +614,6 @@ func TestGetBackupFromRestore_ClientError(t *testing.T) {
 			backup: builder.ForBackup("different-ns", "test-backup"). // Different namespace
 											StorageLocation("test-bsl").
 											Result(),
-			expectedError: "not found",
 		},
 	}
 
@@ -607,6 +624,9 @@ func TestGetBackupFromRestore_ClientError(t *testing.T) {
 			if tc.backup != nil {
 				objs = append(objs, tc.backup)
 			}
+			if tc.bsl != nil {
+				objs = append(objs, tc.bsl)
+			}
 
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(util.VeleroScheme).
@@ -614,10 +634,18 @@ func TestGetBackupFromRestore_ClientError(t *testing.T) {
 				Build()
 
 			// This should not find the backup in the wrong namespace
-			cacert, err := GetBackupFromRestore(t.Context(), fakeClient, tc.restore)
+			bsl, err := GetBSLFromRestore(t.Context(), fakeClient, tc.restore)
 
-			require.NoError(t, err) // Not found errors are handled gracefully, returning empty string
-			assert.Empty(t, cacert)
+			if tc.expectedBsl {
+				assert.NotNil(t, bsl)
+			} else {
+				assert.Nil(t, bsl)
+			}
+			if tc.expectedError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
