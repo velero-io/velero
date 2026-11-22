@@ -741,6 +741,136 @@ func TestRetainSnapshotOnCompletionStaleResourceVersionConflicts(t *testing.T) {
 		"the stale Retain patch must not land")
 }
 
+// TestRetainSnapshotOnCompletionFreshResourceVersionAfterRecheck proves the
+// capture point of the Retain patch precondition: the resourceVersion is read
+// immediately after the lease re-check, not reused from the Get at the top of
+// the callback, which predates the lease acquisition, the record persist and
+// the read-back -- a window in which the snapshot controllers update the
+// content routinely. A stale capture there fails the patch spuriously, which
+// fails the DataUpload and degrades the next incremental to a full backup.
+func TestRetainSnapshotOnCompletionFreshResourceVersionAfterRecheck(t *testing.T) {
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	du := retentionDataUploadBuilder().Result()
+	vsc := retentionBackupVSC() // stored at resourceVersion 42
+	createRetainedSnapshotObjects(t, r, du, vsc)
+
+	fakeV1 := r.csiSnapshotClient.(*snapshotv1fake.FakeSnapshotV1)
+	// Serve the callback a stale first read, as a cached client or a slow
+	// request would: the object the callback starts from carries
+	// resourceVersion 41, while the API server holds 42 and a snapshot
+	// controller write has landed in between.
+	var gets int
+	fakeV1.PrependReactor("get", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		if action.(clientTesting.GetAction).GetName() != dataUploadName {
+			return false, nil, nil
+		}
+		gets++
+		if gets == 1 {
+			stale := vsc.DeepCopy()
+			stale.ResourceVersion = "41"
+			return true, stale, nil
+		}
+		return false, nil, nil
+	})
+	// Enforce the precondition semantics the real API server provides.
+	fakeV1.PrependReactor("patch", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		patchAction := action.(clientTesting.PatchAction)
+		if patchAction.GetName() != dataUploadName {
+			return false, nil, nil
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(patchAction.GetPatch(), &payload); err != nil {
+			return true, nil, err
+		}
+		if rv, ok := payload["resourceVersion"].(string); ok && rv != "42" {
+			return true, nil, apierrors.NewConflict(snapshotv1api.Resource("volumesnapshotcontents"), dataUploadName, errors.New("resourceVersion mismatch"))
+		}
+		return false, nil, nil
+	})
+
+	require.NoError(t, r.retainSnapshotOnCompletion(t.Context(), du, velerotest.NewLogger()),
+		"the Retain patch must carry the post-recheck resourceVersion, not the stale one from the first Get")
+
+	current, getErr := getBackupVSC(t, r, du)
+	require.NoError(t, getErr)
+	assert.Equal(t, snapshotv1api.VolumeSnapshotContentRetain, current.Spec.DeletionPolicy)
+}
+
+// TestReleaseRetainedSnapshotUsesFreshResourceVersions proves the
+// resourceVersion chain of the patch-back: every write bumps the content's
+// resourceVersion, so the status seed must carry the resourceVersion the
+// Delete patch returned and the content delete must be preconditioned on the
+// post-seed resourceVersion -- never on the one from the Get at the top,
+// which would self-conflict on every release against a real API server. The
+// fake snapshot clientset neither bumps resourceVersions nor enforces the
+// delete preconditions, so the reactors simulate the bumps and the test
+// asserts the resourceVersions the operations actually carry.
+func TestReleaseRetainedSnapshotUsesFreshResourceVersions(t *testing.T) {
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	du := retentionDataUploadBuilder().Phase(velerov2alpha1api.DataUploadPhaseInProgress).Result()
+	du.Status.RetainedCSIStorageSnapshot = retentionRecord()
+	stored := func() *snapshotv1api.VolumeSnapshotContent {
+		vsc := retentionBackupVSC() // resourceVersion 42
+		vsc.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentRetain
+		vsc.Status = nil
+		return vsc
+	}()
+	createRetainedSnapshotObjects(t, r, du, stored)
+
+	var statusUpdateResourceVersions []string
+	var deletePreconditions []string
+	fakeV1 := r.csiSnapshotClient.(*snapshotv1fake.FakeSnapshotV1)
+	// The Delete patch bumps the resourceVersion, as the API server does.
+	fakeV1.PrependReactor("patch", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		patchAction := action.(clientTesting.PatchAction)
+		if patchAction.GetName() != dataUploadName {
+			return false, nil, nil
+		}
+		stored = stored.DeepCopy()
+		stored.ResourceVersion = "43"
+		stored.Spec.DeletionPolicy = snapshotv1api.VolumeSnapshotContentDelete
+		return true, stored, nil
+	})
+	// The status seed bumps it again.
+	fakeV1.PrependReactor("update", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		updateAction := action.(clientTesting.UpdateAction)
+		updated, ok := updateAction.GetObject().(*snapshotv1api.VolumeSnapshotContent)
+		if !ok || updateAction.GetSubresource() != "status" || updated.Name != dataUploadName {
+			return false, nil, nil
+		}
+		statusUpdateResourceVersions = append(statusUpdateResourceVersions, updated.ResourceVersion)
+		stored = stored.DeepCopy()
+		stored.ResourceVersion = "44"
+		handle := retentionHandle
+		stored.Status = &snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &handle}
+		return true, stored, nil
+	})
+	// The delete's resourceVersion precondition is what the test asserts.
+	fakeV1.PrependReactor("delete", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		deleteAction := action.(clientTesting.DeleteAction)
+		if deleteAction.GetName() != dataUploadName {
+			return false, nil, nil
+		}
+		if deleteAction.GetDeleteOptions().Preconditions != nil && deleteAction.GetDeleteOptions().Preconditions.ResourceVersion != nil {
+			deletePreconditions = append(deletePreconditions, *deleteAction.GetDeleteOptions().Preconditions.ResourceVersion)
+		}
+		return false, nil, nil
+	})
+
+	require.NoError(t, r.releaseRetainedSnapshot(t.Context(), du, velerotest.NewLogger()))
+
+	require.Len(t, statusUpdateResourceVersions, 1, "the status must be seeded exactly once")
+	assert.Equal(t, "43", statusUpdateResourceVersions[0],
+		"the status seed must carry the post-patch resourceVersion, not the original Get's")
+	require.NotEmpty(t, deletePreconditions, "the content must be deleted with a resourceVersion precondition")
+	assert.Equal(t, "44", deletePreconditions[0],
+		"the content delete must be preconditioned on the post-seed resourceVersion, not the original Get's")
+}
+
 // TestReleaseRetainedSnapshotSeedsStatus proves that the patch-back seeds
 // status.snapshotHandle before deleting the content: the sidecar only issues
 // DeleteSnapshot when the policy is Delete and the status carries the handle,

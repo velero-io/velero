@@ -342,13 +342,18 @@ func latestSnapshotDeleteErrorMessage(ctx context.Context, crClient crclient.Cli
 // otherwise remove the finalizer under Retain with no DeleteSnapshot, and a
 // vanished content would read as released. A resourceVersion of "" skips the
 // precondition. A NotFound is tolerated, the caller decides what that means.
+// The patched object the API server returned is handed back, because the
+// write bumps the resourceVersion: the caller's next preconditioned
+// operation on the same content must be built on the returned object, not on
+// the object its own resourceVersion was captured from, or it fails with a
+// self-inflicted conflict on every call against a real API server.
 func PatchVSCDeletionPolicy(
 	ctx context.Context,
 	snapshotClient snapshotter.SnapshotV1Interface,
 	vscName string,
 	policy snapshotv1api.DeletionPolicy,
 	resourceVersion string,
-) error {
+) (*snapshotv1api.VolumeSnapshotContent, error) {
 	patch := map[string]any{
 		"spec": map[string]any{"deletionPolicy": string(policy)},
 	}
@@ -357,12 +362,13 @@ func PatchVSCDeletionPolicy(
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return errors.Wrap(err, "error marshaling deletion policy patch")
+		return nil, errors.Wrap(err, "error marshaling deletion policy patch")
 	}
-	if _, err := snapshotClient.VolumeSnapshotContents().Patch(ctx, vscName, types.MergePatchType, patchBytes, metav1.PatchOptions{}); err != nil {
-		return errors.Wrapf(err, "error patching the deletion policy of VolumeSnapshotContent %s", vscName)
+	patched, err := snapshotClient.VolumeSnapshotContents().Patch(ctx, vscName, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+	if err != nil {
+		return nil, errors.Wrapf(err, "error patching the deletion policy of VolumeSnapshotContent %s", vscName)
 	}
-	return nil
+	return patched, nil
 }
 
 // DeleteVSCWithResourceVersion deletes the named VolumeSnapshotContent with a
@@ -408,7 +414,12 @@ func DeleteVSWithResourceVersion(
 
 // SeedVSCStatusSnapshotHandle writes the given handle into the content's
 // status.snapshotHandle through the status subresource, unless it is already
-// set.
+// set. It returns the object the API server holds after the write, because
+// the status update bumps the resourceVersion: the caller's next
+// preconditioned operation on the same content must be built on the returned
+// object, not on the one passed in, or it fails with a self-inflicted
+// conflict on every call against a real API server. On an early return the
+// passed object is handed back unchanged.
 //
 // The CSI snapshotter sidecar only issues DeleteSnapshot for a content being
 // deleted when its DeletionPolicy is Delete and status.snapshotHandle is set;
@@ -424,12 +435,12 @@ func SeedVSCStatusSnapshotHandle(
 	snapshotClient snapshotter.SnapshotV1Interface,
 	vsc *snapshotv1api.VolumeSnapshotContent,
 	handle string,
-) error {
+) (*snapshotv1api.VolumeSnapshotContent, error) {
 	if handle == "" {
-		return nil
+		return vsc, nil
 	}
 	if vsc.Status != nil && vsc.Status.SnapshotHandle != nil && *vsc.Status.SnapshotHandle != "" {
-		return nil
+		return vsc, nil
 	}
 
 	updated := vsc.DeepCopy()
@@ -437,22 +448,24 @@ func SeedVSCStatusSnapshotHandle(
 		updated.Status = &snapshotv1api.VolumeSnapshotContentStatus{}
 	}
 	updated.Status.SnapshotHandle = &handle
-	if _, err := snapshotClient.VolumeSnapshotContents().UpdateStatus(ctx, updated, metav1.UpdateOptions{}); err != nil {
+	current, err := snapshotClient.VolumeSnapshotContents().UpdateStatus(ctx, updated, metav1.UpdateOptions{})
+	if err != nil {
 		if !apierrors.IsConflict(err) {
 			if apierrors.IsNotFound(err) {
-				return nil
+				return vsc, nil
 			}
-			return errors.Wrapf(err, "error writing the status of VolumeSnapshotContent %s", vsc.Name)
+			return nil, errors.Wrapf(err, "error writing the status of VolumeSnapshotContent %s", vsc.Name)
 		}
 		// The sidecar wrote the status concurrently; any handle in the fresh
 		// status satisfies the requirement.
 		fresh, getErr := snapshotClient.VolumeSnapshotContents().Get(ctx, vsc.Name, metav1.GetOptions{})
 		if getErr != nil {
-			return errors.Wrap(getErr, "error re-reading the status of the VolumeSnapshotContent after a conflict")
+			return nil, errors.Wrap(getErr, "error re-reading the status of the VolumeSnapshotContent after a conflict")
 		}
 		if fresh.Status == nil || fresh.Status.SnapshotHandle == nil || *fresh.Status.SnapshotHandle == "" {
-			return errors.Wrap(err, "error writing the status of VolumeSnapshotContent after a conflict")
+			return nil, errors.Wrap(err, "error writing the status of VolumeSnapshotContent after a conflict")
 		}
+		return fresh, nil
 	}
-	return nil
+	return current, nil
 }

@@ -252,7 +252,26 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 		return errors.Errorf("the retention lease of DataUpload %s was lost before its snapshot was retained", du.Name)
 	}
 
-	if err := csi.PatchVSCDeletionPolicy(ctx, r.csiSnapshotClient, vsc.Name, snapshotv1api.VolumeSnapshotContentRetain, vsc.ResourceVersion); err != nil {
+	// The Retain patch is preconditioned on a resourceVersion captured
+	// immediately after the mark re-check and used without a further re-read,
+	// per the design: a rollback that has patched or deleted the content in
+	// between makes the delayed write fail instead of landing after it. The
+	// Get at the top of this function predates the lease acquisition, the
+	// record persist and the read-back, a window in which the snapshot
+	// controllers update the content routinely (finalizers, the being-deleted
+	// annotation, status); a resourceVersion captured there fails the patch
+	// spuriously with a conflict, which fails the DataUpload and degrades the
+	// next incremental to a full backup, so the capture is repeated here.
+	fresh, err := r.csiSnapshotClient.VolumeSnapshotContents().Get(ctx, du.Name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// The rollback path already removed the content; the record is kept
+			// and the backup deletion owns the snapshot.
+			return errors.Wrapf(err, "the backup VolumeSnapshotContent %s vanished before its snapshot was retained", du.Name)
+		}
+		return errors.Wrapf(err, "error re-reading the backup VolumeSnapshotContent %s before retaining its snapshot", du.Name)
+	}
+	if _, err := csi.PatchVSCDeletionPolicy(ctx, r.csiSnapshotClient, fresh.Name, snapshotv1api.VolumeSnapshotContentRetain, fresh.ResourceVersion); err != nil {
 		if apierrors.IsNotFound(err) {
 			// The rollback path already removed the content; the record is kept
 			// and the backup deletion owns the snapshot.
@@ -421,9 +440,23 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 		// slipping between a confirm and a delete: the patch carries the
 		// content's captured resourceVersion, so a concurrent write in between
 		// makes it fail with a conflict instead of landing after it.
-		if err := csi.PatchVSCDeletionPolicy(ctx, r.csiSnapshotClient, vsc.Name, snapshotv1api.VolumeSnapshotContentDelete, vsc.ResourceVersion); err != nil {
+		//
+		// Every write bumps the content's resourceVersion, so each subsequent
+		// preconditioned operation is built on the object its predecessor
+		// returned: seeding the status with the object the Delete patch
+		// returned, and deleting with the post-seed resourceVersion. Chaining
+		// the resourceVersion of the Get at the top instead would
+		// self-conflict on every Retain-to-Delete release against a real API
+		// server, and the one-shot callers -- errorOut, cleanUp,
+		// onPrepareTimeout -- would never converge. The fake snapshot
+		// clientset enforces neither the delete preconditions nor the
+		// resourceVersion bumps, so this is proven by the focused unit test
+		// asserting the resourceVersions the operations carry.
+		patched, err := csi.PatchVSCDeletionPolicy(ctx, r.csiSnapshotClient, vsc.Name, snapshotv1api.VolumeSnapshotContentDelete, vsc.ResourceVersion)
+		if err != nil {
 			return errors.Wrapf(err, "error switching the backup VolumeSnapshotContent %s back to Delete", vsc.Name)
 		}
+		vsc = patched
 		log.Infof("Switched the backup VolumeSnapshotContent %s back to Delete to release its snapshot", vsc.Name)
 	}
 
@@ -439,9 +472,11 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 	if seedHandle == "" && vsc.Spec.Source.SnapshotHandle != nil {
 		seedHandle = *vsc.Spec.Source.SnapshotHandle
 	}
-	if err := csi.SeedVSCStatusSnapshotHandle(ctx, r.csiSnapshotClient, vsc, seedHandle); err != nil {
+	seeded, err := csi.SeedVSCStatusSnapshotHandle(ctx, r.csiSnapshotClient, vsc, seedHandle)
+	if err != nil {
 		return errors.Wrapf(err, "error seeding the status of the backup VolumeSnapshotContent %s before releasing its snapshot", vsc.Name)
 	}
+	vsc = seeded
 
 	// The PVC is a prerequisite of the VolumeSnapshot deletion, see the comment
 	// above; it is owner-referenced by the DataUpload, so nothing but this path
