@@ -92,6 +92,7 @@ func setupBackupDeletionControllerTest(t *testing.T, req *velerov1api.DeleteBack
 		controller: NewBackupDeletionReconciler(
 			velerotest.NewLogger(),
 			fakeClient,
+			nil, // falls back to the fake client
 			NewBackupTracker(),
 			nil, // repository manager
 			metrics.NewServerMetrics(),
@@ -1184,6 +1185,7 @@ func TestDeleteMovedSnapshots(t *testing.T) {
 			controller := NewBackupDeletionReconciler(
 				velerotest.NewLogger(),
 				velerotest.NewFakeControllerRuntimeClient(t, objs...),
+				nil, // falls back to the fake client
 				NewBackupTracker(),
 				test.repoMgr,
 				metrics.NewServerMetrics(),

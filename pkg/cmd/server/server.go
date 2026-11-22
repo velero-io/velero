@@ -694,6 +694,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		if err := controller.NewBackupDeletionReconciler(
 			s.logger,
 			s.mgr.GetClient(),
+			s.mgr.GetAPIReader(),
 			backupTracker,
 			s.repoManager,
 			s.metrics,

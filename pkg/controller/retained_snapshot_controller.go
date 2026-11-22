@@ -200,11 +200,17 @@ func (r *retainedSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 // backupOfShard resolves the Backup a record shard belongs to through its
-// labels, and returns nil when the Backup is gone.
+// annotation, and returns nil when the Backup is gone. The full name is taken
+// from the annotation: the backup-name label stores a sanitized value that
+// hashes names longer than 63 characters, and looking a Backup up by that
+// value would report a live Backup as gone.
 func (r *retainedSnapshotReconciler) backupOfShard(ctx context.Context, shard *corev1api.ConfigMap) (*velerov1api.Backup, error) {
-	backupName := shard.Labels[velerov1api.BackupNameLabel]
+	backupName := shard.Annotations[velerov1api.RetainedSnapshotsBackupNameAnnotation]
 	if backupName == "" {
-		return nil, errors.Errorf("the record shard %s carries no %s label", shard.Name, velerov1api.BackupNameLabel)
+		backupName = shard.Labels[velerov1api.BackupNameLabel]
+	}
+	if backupName == "" {
+		return nil, errors.Errorf("the record shard %s carries no %s annotation", shard.Name, velerov1api.RetainedSnapshotsBackupNameAnnotation)
 	}
 	backup := &velerov1api.Backup{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: shard.Namespace, Name: backupName}, backup); err != nil {
@@ -313,7 +319,10 @@ func (r *retainedSnapshotReconciler) moveToOrphan(ctx context.Context, backup *v
 	if err := retainedsnapshot.WriteOrphanEntry(ctx, r.Client, backup, name, entry); err != nil {
 		return errors.Wrapf(err, "error moving the record of DataUpload %s to the orphan-snapshot ConfigMap", name)
 	}
-	return retainedsnapshot.RemoveEntry(ctx, r.Client, backup, name)
+	// The removal leaves a tombstone in the completed set: an unchanged
+	// tarball would otherwise resurrect the entry on the next attempt of the
+	// backup deletion, with its attempt count reset to zero.
+	return retainedsnapshot.TombstoneEntry(ctx, r.Client, backup, name)
 }
 
 // driverExists reports whether the cluster runs the named CSI driver.
@@ -389,9 +398,11 @@ func (r *retainedSnapshotReconciler) failDeleteBackupRequest(ctx context.Context
 
 func (r *retainedSnapshotReconciler) patchWaitingRequest(ctx context.Context, backup *velerov1api.Backup, mutate func(*velerov1api.DeleteBackupRequest)) error {
 	list := &velerov1api.DeleteBackupRequestList{}
+	// The request is selected by the backup UID alone: the requests carry a
+	// sanitized backup-name label, which does not match the raw name of a
+	// backup with a long name.
 	selector := labels.SelectorFromSet(map[string]string{
-		velerov1api.BackupNameLabel: backup.Name,
-		velerov1api.BackupUIDLabel:  string(backup.UID),
+		velerov1api.BackupUIDLabel: string(backup.UID),
 	})
 	if err := r.List(ctx, list, &client.ListOptions{Namespace: backup.Namespace, LabelSelector: selector}); err != nil {
 		return errors.Wrap(err, "error listing the DeleteBackupRequests of the backup")

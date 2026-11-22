@@ -69,6 +69,13 @@ const (
 
 type backupDeletionReconciler struct {
 	client.Client
+	// apiReader reads from the API server instead of the cache: the reads the
+	// deletion's safety decisions are made on -- whether the record family
+	// has pending work, and which entries still need their handle resolved --
+	// must not miss a shard a gather just created or see a pre-activation
+	// copy, or the tail would remove the Backup and the tarball while
+	// retained snapshots are still pending.
+	apiReader         client.Reader
 	logger            logrus.FieldLogger
 	backupTracker     BackupTracker
 	repoMgr           repomanager.Manager
@@ -81,10 +88,12 @@ type backupDeletionReconciler struct {
 	repoEnsurer       *repository.Ensurer
 }
 
-// NewBackupDeletionReconciler creates a new backup deletion reconciler.
+// NewBackupDeletionReconciler creates a new backup deletion reconciler. The
+// apiReader reads uncached; a nil apiReader falls back to the cached client.
 func NewBackupDeletionReconciler(
 	logger logrus.FieldLogger,
 	client client.Client,
+	apiReader client.Reader,
 	backupTracker BackupTracker,
 	repoMgr repomanager.Manager,
 	metrics *metrics.ServerMetrics,
@@ -96,6 +105,7 @@ func NewBackupDeletionReconciler(
 ) *backupDeletionReconciler {
 	return &backupDeletionReconciler{
 		Client:            client,
+		apiReader:         apiReader,
 		logger:            logger,
 		backupTracker:     backupTracker,
 		repoMgr:           repoMgr,
@@ -107,6 +117,16 @@ func NewBackupDeletionReconciler(
 		credentialStore:   credentialStore,
 		repoEnsurer:       repoEnsurer,
 	}
+}
+
+// familyReader returns the reader the retained snapshot record family is
+// loaded through: the uncached API reader when one is given, the client
+// itself otherwise, e.g. in tests.
+func (r *backupDeletionReconciler) familyReader() client.Reader {
+	if r.apiReader != nil {
+		return r.apiReader
+	}
+	return r.Client
 }
 
 func (r *backupDeletionReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -439,7 +459,7 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// controller, which runs its own workers and is keyed by the record
 	// ConfigMaps.
 	if len(errs) == 0 && boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
-		family, familyErr := retainedsnapshot.LoadFamily(ctx, r.Client, backup)
+		family, familyErr := retainedsnapshot.LoadFamily(ctx, r.familyReader(), backup)
 		if familyErr != nil {
 			errs = append(errs, errors.Wrap(familyErr, "error reading the retained snapshot records").Error())
 		} else if family.PendingEntries() > 0 {
@@ -613,11 +633,15 @@ func (r *backupDeletionReconciler) reconcileRetainedSnapshots(
 		return ctrl.Result{}, errors.Wrap(err, "error repairing the retained snapshot record activation")
 	}
 
-	family, err := retainedsnapshot.LoadFamily(ctx, r.Client, backup)
+	family, err := retainedsnapshot.LoadFamily(ctx, r.familyReader(), backup)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error reading the retained snapshot records")
 	}
-	if family.HasPendingWork() {
+	// The wait is on pending entries regardless of the activation state, not
+	// only on active shards: an activation the repair above has not covered
+	// yet must hold the tail back, not let it through while the shard is
+	// still inactive.
+	if family.PendingEntries() > 0 {
 		log.Info("The retained snapshots are still being deleted, going back to waiting")
 		return ctrl.Result{}, nil
 	}
@@ -656,7 +680,7 @@ func (r *backupDeletionReconciler) reconcileRetainedSnapshots(
 // the completed set and is not recreated, and a persisted attempt count is
 // merged, not reset.
 func (r *backupDeletionReconciler) gatherRetainedSnapshotRecords(ctx context.Context, backup *velerov1api.Backup) []error {
-	family, err := retainedsnapshot.LoadFamily(ctx, r.Client, backup)
+	family, err := retainedsnapshot.LoadFamily(ctx, r.familyReader(), backup)
 	if err != nil {
 		return []error{errors.Wrap(err, "error reading the retained snapshot records")}
 	}
@@ -677,6 +701,11 @@ func (r *backupDeletionReconciler) gatherRetainedSnapshotRecords(ctx context.Con
 		du := &duList.Items[i]
 		if entry := retainedsnapshot.FromDataUploadStatus(du); entry != nil {
 			local[du.Name] = entry
+		} else if du.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted && du.Status.SnapshotID != "" {
+			// A completed DataUpload without a record is a pre-rollback
+			// backup, whose record field never existed: its legacy entry --
+			// the repository snapshot the handle is resolved from -- is the
+			// recovery path and must survive this gather.
 		} else {
 			dropped[du.Name] = struct{}{}
 		}
@@ -684,9 +713,10 @@ func (r *backupDeletionReconciler) gatherRetainedSnapshotRecords(ctx context.Con
 
 	var errs []error
 	for name := range dropped {
-		// Local presence is authoritative: the patch-back cleared the record
-		// after the snapshot was released, so the tarball's record for this
-		// DataUpload is dropped, not resurrected.
+		// Local presence is authoritative for a DataUpload that did not
+		// complete: the patch-back cleared the record after the snapshot was
+		// released, so the tarball's record for this DataUpload is dropped,
+		// not resurrected.
 		if _, ok := family.Entry(name); ok {
 			if err := retainedsnapshot.RemoveEntry(ctx, r.Client, backup, name); err != nil {
 				errs = append(errs, errors.Wrapf(err, "error dropping the tarball record of DataUpload %s", name))
@@ -727,7 +757,7 @@ func (r *backupDeletionReconciler) resolveRetainedSnapshotHandles(ctx context.Co
 	if r.repoMgr == nil {
 		return nil
 	}
-	family, err := retainedsnapshot.LoadFamily(ctx, r.Client, backup)
+	family, err := retainedsnapshot.LoadFamily(ctx, r.familyReader(), backup)
 	if err != nil {
 		return []error{errors.Wrap(err, "error reading the retained snapshot records")}
 	}

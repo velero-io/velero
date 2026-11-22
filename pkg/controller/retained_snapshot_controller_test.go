@@ -42,6 +42,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/label"
 	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
 	pluginmocks "github.com/velero-io/velero/pkg/plugin/mocks"
 	"github.com/velero-io/velero/pkg/plugin/velero"
@@ -673,4 +674,158 @@ func TestResolveRetainedSnapshotHandles(t *testing.T) {
 			assert.Equal(t, tc.wantHandle, entry.CSISnapshotHandle)
 		})
 	}
+}
+
+// TestRetainedSnapshotControllerResolvesLongBackupName proves a shard of a
+// backup whose name exceeds the 63-character label value limit resolves the
+// live Backup: the full name is preserved in the shard's annotation, while
+// the backup-name label carries the sanitized, hashed value that cannot be
+// looked up as a Backup name.
+func TestRetainedSnapshotControllerResolvesLongBackupName(t *testing.T) {
+	longName := strings.Repeat("n", 70)
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, longName).StorageLocation("default").SnapshotMoveData(true).Result()
+	backup.UID = "long-uid"
+
+	backend := &fakeSnapshotBackend{snapshots: map[string]bool{retainedTestHandle: true}}
+	c := backend.client(t, backup)
+
+	require.NoError(t, retainedsnapshot.WriteEntries(t.Context(), c, backup, map[string]*retainedsnapshot.Entry{
+		"foo-du": {CSISnapshotHandle: retainedTestHandle, Driver: retainedTestDriver, Trusted: true},
+	}))
+	family, err := retainedsnapshot.LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	require.Len(t, family.Shards, 1)
+	shard := family.Shards[0]
+	assert.Equal(t, longName, shard.Annotations[velerov1api.RetainedSnapshotsBackupNameAnnotation],
+		"the shard carries the full backup name in its annotation")
+	assert.NotEqual(t, longName, shard.Labels[velerov1api.BackupNameLabel],
+		"the label cannot carry a name longer than 63 characters")
+
+	r := newRetainedTestReconciler(c)
+	resolved, err := r.backupOfShard(t.Context(), shard)
+	require.NoError(t, err)
+	require.NotNil(t, resolved, "a live Backup with a long name must be resolved, not read as gone")
+	assert.Equal(t, longName, resolved.Name)
+}
+
+// TestRetainedSnapshotControllerWakesRequestOfLongNamedBackup proves the
+// waiting request is selected by the backup UID alone: the requests carry a
+// sanitized backup-name label, which never matches the raw name of a backup
+// with a long name.
+func TestRetainedSnapshotControllerWakesRequestOfLongNamedBackup(t *testing.T) {
+	longName := strings.Repeat("n", 70)
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, longName).StorageLocation("default").SnapshotMoveData(true).Result()
+	backup.UID = "long-uid"
+
+	backend := &fakeSnapshotBackend{snapshots: map[string]bool{retainedTestHandle: true}}
+	c := backend.client(t, backup)
+
+	shard := retainedTestFamily(t, c, backup, map[string]*retainedsnapshot.Entry{
+		"foo-du": {CSISnapshotHandle: retainedTestHandle, Driver: retainedTestDriver, Trusted: true},
+	})
+
+	// The request carries the sanitized backup-name label, as the
+	// backup-deletion controller stamps it.
+	dbr := defaultTestDbr()
+	dbr.Status.Phase = velerov1api.DeleteBackupRequestPhaseInProgress
+	dbr.Labels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
+	dbr.Labels[velerov1api.BackupUIDLabel] = string(backup.UID)
+	dbr.Annotations = map[string]string{velerov1api.RetainedSnapshotsPendingAnnotation: "true"}
+	require.NoError(t, c.Create(t.Context(), dbr))
+
+	reconcileShard(t, newRetainedTestReconciler(c), shard)
+	assert.Equal(t, []string{retainedTestHandle}, backend.deleteCallsTo)
+
+	req := getRequest(t, c, dbr)
+	assert.NotEmpty(t, req.Annotations[velerov1api.RetainedSnapshotsWakeAnnotation],
+		"the waiting request of a long-named backup is woken through its UID label")
+}
+
+// TestBackupDeletionWaitsOnFamilyMissedByCache proves the re-entry safety
+// read goes through the uncached API reader: a family the cached client has
+// not observed -- a shard a gather just created, or a pre-activation copy --
+// still holds the tail back, instead of letting the deletion remove the
+// Backup and the tarball while retained snapshots are pending.
+func TestBackupDeletionWaitsOnFamilyMissedByCache(t *testing.T) {
+	backup := retainedTestBackup()
+	backup.Status.Phase = velerov1api.BackupPhaseDeleting
+	location := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Provider("objStoreProvider").Bucket("bucket").Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result()
+
+	dbr := defaultTestDbr()
+	dbr.Status.Phase = velerov1api.DeleteBackupRequestPhaseInProgress
+	dbr.Annotations = map[string]string{velerov1api.RetainedSnapshotsPendingAnnotation: "true"}
+	td := setupBackupDeletionControllerTest(t, dbr, backup, location)
+
+	// The family lives only on the API reader's view of the cluster.
+	apiClient := velerotest.NewFakeControllerRuntimeClient(t)
+	require.NoError(t, retainedsnapshot.WriteEntries(t.Context(), apiClient, backup, map[string]*retainedsnapshot.Entry{
+		"foo-du": {CSISnapshotHandle: retainedTestHandle, Driver: retainedTestDriver, Trusted: true},
+	}))
+	require.NoError(t, retainedsnapshot.Activate(t.Context(), apiClient, backup))
+	td.controller.apiReader = apiClient
+
+	_, err := td.controller.Reconcile(t.Context(), td.req)
+	require.NoError(t, err)
+
+	res := getRequest(t, td.fakeClient, dbr)
+	assert.Equal(t, velerov1api.DeleteBackupRequestPhaseInProgress, res.Status.Phase,
+		"the request keeps waiting on the pending family the cache has not observed")
+	assert.NotEmpty(t, res.Annotations[velerov1api.RetainedSnapshotsPendingAnnotation])
+	td.backupStore.AssertNotCalled(t, "DeleteBackup", mock.Anything,
+		"the tail must not remove the tarball while a pending family is visible to the API reader")
+}
+
+// TestGatherKeepsLegacyEntryForPreRollbackDataUpload proves the pre-rollback
+// recovery rule: a completed local DataUpload without a record is a backup
+// taken before the record existed, so its legacy entry -- the repository
+// snapshot the handle is resolved from before the repository data is deleted
+// -- survives the gather. A DataUpload that did not complete had its record
+// cleared by the patch-back after the snapshot was released, so the
+// tarball's entry for it is dropped.
+func TestGatherKeepsLegacyEntryForPreRollbackDataUpload(t *testing.T) {
+	backup := retainedTestBackup()
+	c := velerotest.NewFakeControllerRuntimeClient(t, backup)
+
+	legacyEntry := func() *retainedsnapshot.Entry {
+		return &retainedsnapshot.Entry{
+			Driver:  retainedTestDriver,
+			Trusted: false,
+			Snapshot: &repotypes.SnapshotIdentifier{
+				SnapshotID:      "kopia-1",
+				VolumeNamespace: "app",
+				RepositoryType:  "kopia",
+			},
+		}
+	}
+	require.NoError(t, retainedsnapshot.WriteEntries(t.Context(), c, backup, map[string]*retainedsnapshot.Entry{
+		"foo-du": legacyEntry(),
+		"bar-du": legacyEntry(),
+	}))
+
+	// The local DataUpload of the pre-rollback backup: completed, no record.
+	preRollback := builder.ForDataUpload(velerov1api.DefaultNamespace, "foo-du").
+		Labels(map[string]string{velerov1api.BackupNameLabel: "foo"}).
+		Phase(velerov2alpha1api.DataUploadPhaseCompleted).
+		Result()
+	preRollback.Status.SnapshotID = "kopia-1"
+	require.NoError(t, c.Create(t.Context(), preRollback))
+
+	// A DataUpload that did not complete: the patch-back cleared its record
+	// after the snapshot was released.
+	released := builder.ForDataUpload(velerov1api.DefaultNamespace, "bar-du").
+		Labels(map[string]string{velerov1api.BackupNameLabel: "foo"}).
+		Phase(velerov2alpha1api.DataUploadPhaseFailed).
+		Result()
+	require.NoError(t, c.Create(t.Context(), released))
+
+	r := &backupDeletionReconciler{Client: c, logger: velerotest.NewLogger()}
+	assert.Empty(t, r.gatherRetainedSnapshotRecords(t.Context(), backup))
+
+	family, err := retainedsnapshot.LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	_, ok := family.Entry("foo-du")
+	assert.True(t, ok, "the legacy entry of a pre-rollback backup survives the gather")
+	_, ok = family.Entry("bar-du")
+	assert.False(t, ok, "the tarball entry of a released DataUpload is dropped")
+	assert.Equal(t, 1, family.PendingEntries())
 }
