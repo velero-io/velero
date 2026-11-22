@@ -1014,7 +1014,7 @@ func TestReleaseRetainedSnapshotUsesFreshResourceVersions(t *testing.T) {
 
 	require.Len(t, statusUpdateResourceVersions, 1, "the status must be seeded exactly once")
 	assert.Equal(t, "43", statusUpdateResourceVersions[0],
-		"the status seed must carry the post-patch resourceVersion, not the original Get's")
+		"the status seed must carry the post-patch resourceVersion, not the one from the original Get")
 	require.NotEmpty(t, deletePreconditions, "the content must be deleted with a resourceVersion precondition")
 	assert.Equal(t, "45", deletePreconditions[0],
 		"the content delete must be preconditioned on the post-wait resourceVersion, not the post-seed one the sidecar's wait-window writes superseded")

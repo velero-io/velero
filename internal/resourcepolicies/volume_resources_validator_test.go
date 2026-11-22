@@ -923,8 +923,8 @@ func TestActionValidateRetainSnapshot(t *testing.T) {
 		},
 		{
 			name:    "typoed value fails with the received and the allowed values",
-			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "ture"}},
-			wantErr: `invalid "retainSnapshot" value ture`,
+			action:  &Action{Type: Snapshot, Parameters: map[string]any{"retainSnapshot": "treu"}},
+			wantErr: `invalid "retainSnapshot" value treu`,
 		},
 		{
 			name:    "yes is not accepted",
