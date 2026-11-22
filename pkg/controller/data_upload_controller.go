@@ -285,10 +285,17 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if errors.As(releaseErr, &refused) {
 				// A refused lease mark carries its own retry: nothing else
 				// re-enqueues the DataUpload for this, the node-agent has no
-				// sync period, so the hook requeues for the lease duration and
-				// retries when the mark has expired.
+				// sync period, so the hook requeues until the blocking mark
+				// has expired -- its parsed remaining time, which a renewed
+				// retention mark holds far beyond the lease duration -- plus a
+				// second of scheduling slack; an unknown remaining time falls
+				// back to the lease duration.
+				requeueAfter := refused.retryAfter
+				if requeueAfter <= 0 {
+					requeueAfter = dataUploadLeaseDuration
+				}
 				log.WithError(releaseErr).Info("The release of the retained snapshot waits for the retention lease to expire")
-				return ctrl.Result{RequeueAfter: dataUploadLeaseDuration}, nil
+				return ctrl.Result{RequeueAfter: requeueAfter + time.Second}, nil
 			}
 			var bound *retainedSnapshotReleaseTimeoutError
 			if errors.As(releaseErr, &bound) {

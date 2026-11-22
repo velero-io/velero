@@ -81,11 +81,16 @@ const (
 )
 
 // leaseRefusedError reports that a lease was not acquired because another
-// holder's unexpired mark is on the DataUpload. The caller requeues for the
-// lease duration, when the mark has expired, instead of relying on another
-// event to retry.
+// holder's unexpired mark is on the DataUpload. It carries the remaining time
+// of the blocking mark, so the caller requeues until that mark has expired --
+// which a renewed retention mark can hold far beyond the lease duration --
+// instead of relying on another event to retry.
 type leaseRefusedError struct {
 	error
+	// retryAfter is how long the blocking mark still runs; zero when unknown,
+	// e.g. the DataUpload reached a final state between the guard and the
+	// acquisition attempt.
+	retryAfter time.Duration
 }
 
 // retainedSnapshotReleaseTimeoutError reports that the patch-back's bounded
@@ -137,9 +142,13 @@ func parseDataUploadLease(value string) (*dataUploadLease, bool) {
 // two intents through the one object, so an unexpired retaining mark blocks a
 // rollback and an unexpired rolling-back mark blocks a retention. An absent,
 // expired or own lease is (re-)acquired. The update is conflict-retried with a
-// fresh read, so two racers cannot both acquire.
-func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du *velerov2alpha1api.DataUpload, annotation, holder string, duration time.Duration, log logrus.FieldLogger) (bool, error) {
+// fresh read, so two racers cannot both acquire. When the acquisition is
+// refused, the returned duration is the longest remaining time of a blocking
+// mark, so the caller can wait out the actual holder instead of a fixed
+// window; a final-state refusal reports zero.
+func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du *velerov2alpha1api.DataUpload, annotation, holder string, duration time.Duration, log logrus.FieldLogger) (bool, time.Duration, error) {
 	acquired := false
+	blockedFor := time.Duration(0)
 	err := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log, func(current *velerov2alpha1api.DataUpload) bool {
 		if isDataUploadInFinalState(current) {
 			return false
@@ -147,6 +156,9 @@ func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du
 		for _, leaseAnnotation := range []string{dataUploadRetainLeaseAnnotation, dataUploadRollbackLeaseAnnotation} {
 			if lease, ok := parseDataUploadLease(current.Annotations[leaseAnnotation]); ok &&
 				lease.Holder != holder && r.Clock.Now().Before(lease.ExpiresAt) {
+				if remaining := lease.ExpiresAt.Sub(r.Clock.Now()); remaining > blockedFor {
+					blockedFor = remaining
+				}
 				return false
 			}
 		}
@@ -161,9 +173,9 @@ func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du
 		return true
 	})
 	if err != nil {
-		return false, errors.Wrapf(err, "error acquiring the %s lease of DataUpload %s", annotation, du.Name)
+		return false, blockedFor, errors.Wrapf(err, "error acquiring the %s lease of DataUpload %s", annotation, du.Name)
 	}
-	return acquired, nil
+	return acquired, blockedFor, nil
 }
 
 // dataUploadLeaseHeld reports whether the lease annotation on the DataUpload is
@@ -248,7 +260,7 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 	}
 
 	holder := fmt.Sprintf("%s-%d", r.nodeName, r.Clock.Now().UnixNano())
-	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, dataUploadLeaseDuration, log)
+	acquired, _, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, dataUploadLeaseDuration, log)
 	if err != nil {
 		return err
 	}
@@ -333,7 +345,7 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 	// renewal means a rollback is running or ran: the callback must not
 	// continue, it fails the DataUpload and keeps the record, leaving the
 	// snapshot to the patch-back and the backup deletion.
-	renewed, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, csi.RetainedSnapshotDeletionTimeout+2*dataUploadLeaseCleanupMargin, log)
+	renewed, _, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, csi.RetainedSnapshotDeletionTimeout+2*dataUploadLeaseCleanupMargin, log)
 	if err != nil {
 		return errors.Wrapf(err, "error renewing the retention lease of DataUpload %s for its cleanup", du.Name)
 	}
@@ -463,15 +475,19 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 	// expiry and steal an expired mark, so a crashed holder blocks the other
 	// side for at most the lease duration.
 	holder := fmt.Sprintf("%s-%d", r.nodeName, r.Clock.Now().UnixNano())
-	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRollbackLeaseAnnotation, holder, dataUploadLeaseDuration, log)
+	acquired, blockedFor, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRollbackLeaseAnnotation, holder, dataUploadLeaseDuration, log)
 	if err != nil {
 		return err
 	}
 	if !acquired {
 		// A refused mark must drive a retry: nothing else re-enqueues the
 		// DataUpload for this, the node-agent has no sync period. The caller
-		// requeues for the lease expiry.
-		return &leaseRefusedError{errors.Errorf("another actor holds the retention lease of DataUpload %s, retrying the release after it expires", du.Name)}
+		// requeues for the blocking mark's remaining time, which a renewed
+		// retention mark can hold far beyond the lease duration.
+		return &leaseRefusedError{
+			error:      errors.Errorf("another actor holds the retention lease of DataUpload %s, retrying the release after it expires", du.Name),
+			retryAfter: blockedFor,
+		}
 	}
 
 	if vsc.Spec.DeletionPolicy == snapshotv1api.VolumeSnapshotContentRetain {

@@ -661,12 +661,14 @@ func TestReconcileDoesNotReleaseDuringRetentionCleanup(t *testing.T) {
 }
 
 // TestReconcileReleaseRetrySemantics proves the hook's retry wiring: a
-// refused lease mark is requeued for the lease duration, when the mark has
-// expired, because nothing else re-enqueues the DataUpload for it; any other
-// release failure is returned to the controller runtime's backoff instead of
-// being swallowed into a fixed requeue.
+// refused lease mark is requeued for the blocking mark's parsed remaining
+// time, when it has expired, because nothing else re-enqueues the DataUpload
+// for it -- a fixed lease-duration requeue would retry into the same refusal
+// for as long as a renewed retention mark runs; any other release failure is
+// returned to the controller runtime's backoff instead of being swallowed
+// into a fixed requeue.
 func TestReconcileReleaseRetrySemantics(t *testing.T) {
-	t.Run("a refused lease mark requeues for the lease duration", func(t *testing.T) {
+	t.Run("a refused lease mark requeues for the blocking mark's remaining time", func(t *testing.T) {
 		r, err := initDataUploaderReconciler()
 		require.NoError(t, err)
 
@@ -676,7 +678,9 @@ func TestReconcileReleaseRetrySemantics(t *testing.T) {
 			Finalizers([]string{DataUploadDownloadFinalizer}).
 			Result()
 		du.Status.RetainedCSIStorageSnapshot = retentionRecord()
-		// Another actor's unexpired retaining mark refuses the release.
+		// Another actor's unexpired retaining mark refuses the release; a
+		// renewed one runs for the deletion timeout plus margins, far beyond
+		// the lease duration.
 		du.Annotations = map[string]string{dataUploadRetainLeaseAnnotation: (&dataUploadLease{
 			Holder:    "other-node-1",
 			ExpiresAt: r.Clock.Now().Add(10 * time.Minute),
@@ -689,8 +693,8 @@ func TestReconcileReleaseRetrySemantics(t *testing.T) {
 
 		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
 		require.NoError(t, err)
-		assert.Equal(t, dataUploadLeaseDuration, result.RequeueAfter,
-			"the refused mark is retried when it has expired")
+		assert.Equal(t, 10*time.Minute+time.Second, result.RequeueAfter,
+			"the refused mark is retried when the blocking mark has expired, not after a fixed lease duration")
 
 		vsc, getErr := getBackupVSC(t, r, du)
 		require.NoError(t, getErr)
