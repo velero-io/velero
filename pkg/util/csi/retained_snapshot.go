@@ -362,11 +362,16 @@ func PatchVSCDeletionPolicy(
 	policy snapshotv1api.DeletionPolicy,
 	resourceVersion string,
 ) (*snapshotv1api.VolumeSnapshotContent, error) {
+	// The precondition must sit under metadata.resourceVersion: that is the
+	// only placement the API server honors as an optimistic-concurrency check
+	// on a merge patch. A top-level resourceVersion key is not part of the
+	// object's schema and is silently dropped when the patched JSON is
+	// decoded, which would make the patch unconditional.
 	patch := map[string]any{
 		"spec": map[string]any{"deletionPolicy": string(policy)},
 	}
 	if resourceVersion != "" {
-		patch["resourceVersion"] = resourceVersion
+		patch["metadata"] = map[string]any{"resourceVersion": resourceVersion}
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
@@ -427,7 +432,10 @@ func DeleteVSWithResourceVersion(
 // preconditioned operation on the same content must be built on the returned
 // object, not on the one passed in, or it fails with a self-inflicted
 // conflict on every call against a real API server. On an early return the
-// passed object is handed back unchanged.
+// passed object is handed back unchanged. A content that vanished before the
+// write is reported as an error, not tolerated: a content that disappears
+// under Retain releases nothing, and the caller must keep its record instead
+// of reading the disappearance as release.
 //
 // The CSI snapshotter sidecar only issues DeleteSnapshot for a content being
 // deleted when its DeletionPolicy is Delete and status.snapshotHandle is set;
@@ -459,9 +467,6 @@ func SeedVSCStatusSnapshotHandle(
 	current, err := snapshotClient.VolumeSnapshotContents().UpdateStatus(ctx, updated, metav1.UpdateOptions{})
 	if err != nil {
 		if !apierrors.IsConflict(err) {
-			if apierrors.IsNotFound(err) {
-				return vsc, nil
-			}
 			return nil, errors.Wrapf(err, "error writing the status of VolumeSnapshotContent %s", vsc.Name)
 		}
 		// The sidecar wrote the status concurrently; any handle in the fresh

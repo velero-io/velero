@@ -150,6 +150,12 @@ func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du
 	acquired := false
 	blockedFor := time.Duration(0)
 	err := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log, func(current *velerov2alpha1api.DataUpload) bool {
+		// Every attempt reports its own outcome: an earlier, conflict-retried
+		// attempt's acquisition must not leak out when a later attempt finds
+		// another holder or a final state, or the caller would proceed without
+		// owning the lease.
+		acquired = false
+		blockedFor = time.Duration(0)
 		if isDataUploadInFinalState(current) {
 			return false
 		}
@@ -405,6 +411,8 @@ func (r *DataUploadReconciler) confirmRetainedSnapshotCleanup(ctx context.Contex
 //
 // The patch-back is ordered delete-first, clear-last:
 //
+//   - seed status.snapshotHandle, so the sidecar never sees a Delete content
+//     without it;
 //   - patch the content to Delete with a resourceVersion precondition;
 //   - delete the backup PVC, the backup VolumeSnapshot and the backup
 //     VolumeSnapshotContent. The PVC deletion is a prerequisite because the
@@ -490,6 +498,35 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 		}
 	}
 
+	// Seed status.snapshotHandle before the policy is flipped to Delete and
+	// before any deletion: the sidecar only issues DeleteSnapshot for a
+	// content being deleted when its policy is Delete and its status carries
+	// the handle, otherwise it removes the finalizer with no CSI call and the
+	// content's disappearance would read as release while the snapshot leaks.
+	// Seeding first closes the window in which the content is already Delete
+	// -- flipped here or by a restart of this path -- while the status is
+	// still empty, and a VolumeSnapshot deletion cascades onto it: the sidecar
+	// would drop the finalizer with no DeleteSnapshot and the confirmation
+	// below would clear the only record while the snapshot leaks.
+	seedHandle := ""
+	if record != nil {
+		seedHandle = record.CSISnapshotHandle
+	}
+	if seedHandle == "" && vsc.Spec.Source.SnapshotHandle != nil {
+		seedHandle = *vsc.Spec.Source.SnapshotHandle
+	}
+	// The seeded object's resourceVersion is intentionally not carried into
+	// the delete below: the PVC wait that follows gives the sidecar a window
+	// to write status and bump it, so the delete re-reads the content instead.
+	seeded, err := csi.SeedVSCStatusSnapshotHandle(ctx, r.csiSnapshotClient, vsc, seedHandle)
+	if err != nil {
+		// A content that vanished before the seed released nothing under this
+		// path's control; the record is kept and the backup deletion owns the
+		// snapshot.
+		return errors.Wrapf(err, "error seeding the status of the backup VolumeSnapshotContent %s before releasing its snapshot", vsc.Name)
+	}
+	vsc = seeded
+
 	if vsc.Spec.DeletionPolicy == snapshotv1api.VolumeSnapshotContentRetain {
 		// A raced Retain write makes this fail and be retried instead of
 		// slipping between a confirm and a delete: the patch carries the
@@ -498,12 +535,12 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 		//
 		// Every write bumps the content's resourceVersion, so each subsequent
 		// preconditioned operation is built on the object its predecessor
-		// returned: seeding the status with the object the Delete patch
-		// returned, and deleting with the resourceVersion of the re-read that
-		// follows the PVC wait, not the post-seed one, because the sidecar
-		// writes status during that wait. Chaining the resourceVersion of the
-		// Get at the top instead would self-conflict on every
-		// Retain-to-Delete release against a real API server, and the
+		// returned: the Delete patch is preconditioned on the object the
+		// status seed returned, and the delete uses the resourceVersion of the
+		// re-read that follows the PVC wait, not the post-patch one, because
+		// the sidecar writes status during that wait. Chaining the
+		// resourceVersion of the Get at the top instead would self-conflict on
+		// every Retain-to-Delete release against a real API server, and the
 		// one-shot callers -- errorOut, cleanUp, onPrepareTimeout -- would
 		// never converge. The fake snapshot clientset enforces neither the
 		// delete preconditions nor the resourceVersion bumps, so this is
@@ -515,25 +552,6 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 		}
 		vsc = patched
 		log.Infof("Switched the backup VolumeSnapshotContent %s back to Delete to release its snapshot", vsc.Name)
-	}
-
-	// Seed status.snapshotHandle before the deletions: the sidecar only issues
-	// DeleteSnapshot for a content being deleted when its policy is Delete and
-	// its status carries the handle, otherwise it removes the finalizer with no
-	// CSI call and the content's disappearance would read as release while the
-	// snapshot leaks.
-	seedHandle := ""
-	if record != nil {
-		seedHandle = record.CSISnapshotHandle
-	}
-	if seedHandle == "" && vsc.Spec.Source.SnapshotHandle != nil {
-		seedHandle = *vsc.Spec.Source.SnapshotHandle
-	}
-	// The seeded object's resourceVersion is intentionally not carried into
-	// the delete below: the PVC wait that follows gives the sidecar a window
-	// to write status and bump it, so the delete re-reads the content instead.
-	if _, err := csi.SeedVSCStatusSnapshotHandle(ctx, r.csiSnapshotClient, vsc, seedHandle); err != nil {
-		return errors.Wrapf(err, "error seeding the status of the backup VolumeSnapshotContent %s before releasing its snapshot", vsc.Name)
 	}
 
 	// The PVC is a prerequisite of the VolumeSnapshot deletion, see the comment

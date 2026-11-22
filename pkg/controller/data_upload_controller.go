@@ -571,7 +571,7 @@ func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namesp
 
 	if retainErr != nil {
 		log.WithError(retainErr).Error("Failed to retain the volume snapshot for the next incremental backup, releasing it")
-		_, _ = r.errorOut(ctx, &du, retainErr, "failed to retain the volume snapshot for the next incremental backup", log)
+		r.errorOutAfterUpload(ctx, &du, retainErr, "failed to retain the volume snapshot for the next incremental backup", result.Backup.SnapshotID, log)
 		return
 	}
 
@@ -582,7 +582,7 @@ func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namesp
 	// confirmed the intended end state.
 	if err := r.confirmRetainedSnapshotCleanup(ctx, &du, log); err != nil {
 		log.WithError(err).Error("Failed to clean up the retained volume snapshot exposure")
-		_, _ = r.errorOut(ctx, &du, err, "failed to clean up the retained volume snapshot exposure", log)
+		r.errorOutAfterUpload(ctx, &du, err, "failed to clean up the retained volume snapshot exposure", result.Backup.SnapshotID, log)
 		return
 	}
 
@@ -624,6 +624,30 @@ func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namesp
 		log.Info("Data upload completed")
 		r.metrics.RegisterDataUploadSuccess(r.nodeName)
 	}
+}
+
+// errorOutAfterUpload fails a DataUpload whose data path already finished and
+// uploaded the repository snapshot. The SnapshotID is persisted with the
+// failure, before the Failed phase is written: updateStatusToFailed only
+// copies a SnapshotID out of a datapath.DataPathError, so without this the
+// repository snapshot of these failure paths would be recorded nowhere and
+// the backup deletion could neither delete the repository data nor resolve a
+// retained snapshot handle from its tag.
+func (r *DataUploadReconciler) errorOutAfterUpload(ctx context.Context, du *velerov2alpha1api.DataUpload, err error, msg string, snapshotID string, log logrus.FieldLogger) {
+	if snapshotID != "" {
+		if updateErr := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log, func(current *velerov2alpha1api.DataUpload) bool {
+			if isDataUploadInFinalState(current) {
+				return false
+			}
+			if current.Status.SnapshotID == "" {
+				current.Status.SnapshotID = snapshotID
+			}
+			return true
+		}); updateErr != nil {
+			log.WithError(updateErr).Error("error persisting the snapshot ID of the failed upload")
+		}
+	}
+	_, _ = r.errorOut(ctx, du, err, msg, log)
 }
 
 func (r *DataUploadReconciler) OnDataUploadFailed(ctx context.Context, namespace, duName string, err error) {
