@@ -70,6 +70,13 @@ const (
 	// when it observes the completed family and runs the tail.
 	RetainedSnapshotsPendingAnnotation = "velero.io/retained-snapshots-pending"
 
+	// RetainedSnapshotsBackupNameAnnotation carries the full, unmodified name
+	// of the backup a retained snapshot record shard belongs to. The
+	// backup-name label stores a sanitized value that hashes names longer
+	// than 63 characters, which cannot be turned back into the Backup's name,
+	// while an annotation value has no such limit.
+	RetainedSnapshotsBackupNameAnnotation = "velero.io/retained-snapshots-backup-name"
+
 	// RetainedSnapshotsWakeAnnotation is set by the retained-snapshot
 	// controller to enqueue a DeleteBackupRequest waiting on retained
 	// snapshots. The update leaves the pending annotation in place: the

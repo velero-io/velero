@@ -196,8 +196,10 @@ type Family struct {
 
 // LoadFamily discovers a backup's shard family by label. A backup whose
 // records were never gathered, or whose family a previous attempt already
-// emptied and deleted, returns an empty family.
-func LoadFamily(ctx context.Context, c client.Client, backup *velerov1api.Backup) (*Family, error) {
+// emptied and deleted, returns an empty family. The reader may be an uncached
+// API reader: the backup-deletion controller's safety decisions must not be
+// made on an informer-lagged list that misses a shard a gather just created.
+func LoadFamily(ctx context.Context, c client.Reader, backup *velerov1api.Backup) (*Family, error) {
 	list := &corev1api.ConfigMapList{}
 	if err := c.List(ctx, list, &client.ListOptions{
 		Namespace:     backup.Namespace,
@@ -371,6 +373,12 @@ func writeShardedEntries(ctx context.Context, c client.Client, backup *velerov1a
 	sort.Strings(names)
 
 	nextIndex := len(shards)
+	// Only the shards an entry was written into are persisted: the delete
+	// action gathers once per DataUpload in the tarball, and rewriting every
+	// shard on each of those calls would make the API traffic quadratic in
+	// the number of records and starve the single-worker controllers behind
+	// it.
+	dirty := map[string]struct{}{}
 	for _, name := range names {
 		if _, done := completed[name]; done {
 			// The snapshot was already confirmed deleted by an earlier
@@ -379,11 +387,21 @@ func writeShardedEntries(ctx context.Context, c client.Client, backup *velerov1a
 			continue
 		}
 		entry := entries[name]
-		// Merge the persisted attempt count instead of resetting it.
+		// Merge the persisted state instead of resetting it: the attempt
+		// count, and a handle a previous attempt resolved from the repository
+		// snapshot's tag. The regather's entry still carries an empty handle
+		// -- the tarball never changes -- while the resolved handle is the
+		// only copy left once the repository data is deleted; losing it turns
+		// a resolvable record into a dropped one and leaks the snapshot.
 		for _, shard := range shards {
 			if value, ok := shard.Data[name]; ok {
-				if existing, err := UnmarshalEntry(value); err == nil && existing.Attempts > entry.Attempts {
-					entry.Attempts = existing.Attempts
+				if existing, err := UnmarshalEntry(value); err == nil {
+					if existing.Attempts > entry.Attempts {
+						entry.Attempts = existing.Attempts
+					}
+					if entry.CSISnapshotHandle == "" && existing.CSISnapshotHandle != "" {
+						entry.CSISnapshotHandle = existing.CSISnapshotHandle
+					}
 				}
 			}
 		}
@@ -399,6 +417,12 @@ func writeShardedEntries(ctx context.Context, c client.Client, backup *velerov1a
 					Namespace: backup.Namespace,
 					Name:      fmt.Sprintf("%s%d", namePrefix, nextIndex),
 					Labels:    shardLabels,
+					// The full backup name lives in an annotation because the
+					// backup-name label cannot carry it: label values are
+					// capped at 63 characters and the sanitized label hashes
+					// longer names, which cannot be turned back into the
+					// Backup's name.
+					Annotations: map[string]string{velerov1api.RetainedSnapshotsBackupNameAnnotation: backup.Name},
 				},
 				Data: map[string]string{},
 			}
@@ -407,12 +431,20 @@ func writeShardedEntries(ctx context.Context, c client.Client, backup *velerov1a
 		if shard.Data == nil {
 			shard.Data = map[string]string{}
 		}
+		if shard.Annotations == nil {
+			shard.Annotations = map[string]string{}
+		}
+		shard.Annotations[velerov1api.RetainedSnapshotsBackupNameAnnotation] = backup.Name
 		shard.Data[name] = value
 		shard.Data[ActiveKey] = inactiveValue
 		shards[shard.Name] = shard
+		dirty[shard.Name] = struct{}{}
 	}
 
-	for _, shard := range shards {
+	for name, shard := range shards {
+		if _, changed := dirty[name]; !changed && shard.ResourceVersion != "" {
+			continue
+		}
 		if shard.ResourceVersion == "" {
 			if err := c.Create(ctx, shard); err != nil {
 				return errors.Wrapf(err, "error creating the retained snapshot shard %s", shard.Name)
@@ -426,13 +458,25 @@ func writeShardedEntries(ctx context.Context, c client.Client, backup *velerov1a
 	return nil
 }
 
+// findShardWithRoom returns the shard the key belongs in: the shard that
+// already carries the key, searched across the whole family first, so a retry
+// never duplicates an entry in a second shard -- a duplicate would survive
+// MarkCompleted, which removes only one copy, and be deleted twice. A key not
+// yet present goes to a shard with room for it.
 func findShardWithRoom(shards map[string]*corev1api.ConfigMap, key, value string) *corev1api.ConfigMap {
-	for _, shard := range shards {
-		if _, exists := shard.Data[key]; exists {
-			return shard
+	shardNames := make([]string, 0, len(shards))
+	for name := range shards {
+		shardNames = append(shardNames, name)
+	}
+	sort.Strings(shardNames)
+	for _, name := range shardNames {
+		if _, exists := shards[name].Data[key]; exists {
+			return shards[name]
 		}
-		if shardSize(shard)+len(key)+len(value) < dataBudget {
-			return shard
+	}
+	for _, name := range shardNames {
+		if shardSize(shards[name])+len(key)+len(value) < dataBudget {
+			return shards[name]
 		}
 	}
 	return nil
@@ -457,6 +501,17 @@ func decodeCompleted(shard *corev1api.ConfigMap) []string {
 // after the snapshot is confirmed deleted and a later regather does not
 // recreate it.
 func MarkCompleted(ctx context.Context, c client.Client, backup *velerov1api.Backup, duName string) error {
+	return TombstoneEntry(ctx, c, backup, duName)
+}
+
+// TombstoneEntry removes the entry of the named DataUpload from its shard and
+// records the name in the shard's completed set, for a record this controller
+// will not delete: escalated, skipped, or undecodable. The tombstone is what
+// suppresses a regather from the unchanged tarball; without it, a retry of
+// the backup deletion would resurrect the entry with its attempt count reset
+// to zero and hammer a driver that already failed the bounded number of
+// DeleteSnapshot calls.
+func TombstoneEntry(ctx context.Context, c client.Client, backup *velerov1api.Backup, duName string) error {
 	family, err := LoadFamily(ctx, c, backup)
 	if err != nil {
 		return err

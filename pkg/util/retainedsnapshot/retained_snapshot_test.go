@@ -17,6 +17,7 @@ limitations under the License.
 package retainedsnapshot
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -24,10 +25,12 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 	"github.com/velero-io/velero/pkg/builder"
+	repotypes "github.com/velero-io/velero/pkg/repository/types"
 	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
@@ -187,6 +190,136 @@ func TestWriteEntriesMergesAttemptCount(t *testing.T) {
 	entry, ok := family.Entry("du-1")
 	require.True(t, ok)
 	assert.Equal(t, 3, entry.Attempts)
+}
+
+// TestWriteEntriesPreservesResolvedHandle proves that a regather of a
+// pre-rollback entry, whose tarball copy still carries an empty handle, does
+// not overwrite a handle a previous attempt resolved from the repository
+// snapshot's tag: after the repository data is deleted, the resolved handle
+// is the only copy left, and losing it turns a resolvable record into a
+// dropped one that leaks the snapshot.
+func TestWriteEntriesPreservesResolvedHandle(t *testing.T) {
+	c := velerotest.NewFakeControllerRuntimeClient(t)
+	backup := testBackup()
+
+	// The pre-rollback gather: no handle, the repository snapshot identifies it.
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{
+		"du-1": {Driver: "d", Snapshot: &repotypes.SnapshotIdentifier{SnapshotID: "kopia-1"}},
+	}))
+	// The handle was resolved from the tag and persisted.
+	family, err := LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	entry, ok := family.Entry("du-1")
+	require.True(t, ok)
+	entry.CSISnapshotHandle = "resolved-handle"
+	require.NoError(t, UpdateEntry(t.Context(), c, backup, "du-1", entry))
+
+	// A retry regathers from the unchanged tarball: the incoming entry still
+	// carries no handle.
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{
+		"du-1": {Driver: "d", Snapshot: &repotypes.SnapshotIdentifier{SnapshotID: "kopia-1"}},
+	}))
+
+	family, err = LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	entry, ok = family.Entry("du-1")
+	require.True(t, ok)
+	assert.Equal(t, "resolved-handle", entry.CSISnapshotHandle,
+		"the resolved handle must survive a regather whose incoming entry carries none")
+}
+
+// TestWriteEntriesDoesNotDuplicateKeyAcrossShards proves that a retry writes
+// an existing key into the shard that already carries it, not into a
+// different shard with room: a duplicate would survive MarkCompleted, which
+// removes only one copy, and the snapshot would be deleted twice.
+func TestWriteEntriesDoesNotDuplicateKeyAcrossShards(t *testing.T) {
+	c := velerotest.NewFakeControllerRuntimeClient(t)
+	backup := testBackup()
+
+	// Fill the first shard and spill into a second, then place du-x in the
+	// first shard, which is nearly full, while the second has room.
+	big := func() *Entry { return testEntry(strings.Repeat("h", 300*1024)) }
+	entries := map[string]*Entry{
+		"big-00": big(), "big-01": big(), "big-02": big(), "big-03": big(),
+		"du-x": testEntry("handle-x"),
+	}
+	require.NoError(t, WriteEntries(t.Context(), c, backup, entries))
+	shards := listShards(t, c)
+	require.Len(t, shards, 2, "four 300 KiB records plus a small one must spill into a second shard")
+	inShard := 0
+	for _, shard := range shards {
+		if _, ok := shard.Data["du-x"]; ok {
+			inShard++
+		}
+	}
+	require.Equal(t, 1, inShard, "du-x must live in exactly one shard after the first write")
+
+	// A retry of the same entry must not duplicate it in the other shard.
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{"du-x": testEntry("handle-x")}))
+	shards = listShards(t, c)
+	require.Len(t, shards, 2)
+	inShard = 0
+	for _, shard := range shards {
+		if _, ok := shard.Data["du-x"]; ok {
+			inShard++
+		}
+	}
+	assert.Equal(t, 1, inShard, "a retry must write the key into the shard that already carries it, not a second one")
+}
+
+// TestWriteEntriesUpdatesOnlyChangedShards proves the gather persists only
+// the shards it wrote an entry into: the delete action gathers once per
+// DataUpload in the tarball, and rewriting every shard on each call would
+// make the API traffic quadratic in the number of records.
+func TestWriteEntriesUpdatesOnlyChangedShards(t *testing.T) {
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t)
+	var updates int
+	c := interceptor.NewClient(fakeClient.(client.WithWatch), interceptor.Funcs{
+		Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			updates++
+			return cl.Update(ctx, obj, opts...)
+		},
+	})
+	backup := testBackup()
+
+	big := func() *Entry { return testEntry(strings.Repeat("h", 300*1024)) }
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{
+		"big-00": big(), "big-01": big(), "big-02": big(), "big-03": big(),
+	}))
+	require.Len(t, listShards(t, c), 2)
+
+	// A gather of one small entry touches only the shard it lands in.
+	updates = 0
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{"du-1": testEntry("handle-1")}))
+	assert.Equal(t, 1, updates, "only the shard the entry was written into is updated")
+}
+
+// TestTombstoneEntrySuppressesRegather proves the escalated-entry tombstone:
+// a record moved to the orphan-snapshot ConfigMap leaves the DataUpload name
+// in the completed set, so a regather from the unchanged tarball does not
+// resurrect it with its attempt count reset to zero.
+func TestTombstoneEntrySuppressesRegather(t *testing.T) {
+	c := velerotest.NewFakeControllerRuntimeClient(t)
+	backup := testBackup()
+
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{
+		"du-1": {CSISnapshotHandle: "handle-1", Driver: "d", Attempts: MaxAttempts},
+	}))
+	require.NoError(t, TombstoneEntry(t.Context(), c, backup, "du-1"))
+
+	family, err := LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	_, pending := family.Entry("du-1")
+	assert.False(t, pending, "the escalated entry is removed")
+	assert.Contains(t, family.CompletedSet(), "du-1")
+
+	// The regather from the unchanged tarball must not recreate the entry.
+	require.NoError(t, WriteEntries(t.Context(), c, backup, map[string]*Entry{
+		"du-1": testEntry("handle-1"),
+	}))
+	family, err = LoadFamily(t.Context(), c, backup)
+	require.NoError(t, err)
+	assert.Zero(t, family.PendingEntries(), "a regather does not recreate an escalated entry")
 }
 
 // TestActivateIsolatedFromPending proves the activation semantics: the
