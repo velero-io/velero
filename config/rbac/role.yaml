@@ -27,6 +27,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumeclaims
+  verbs:
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumerclaims
   - persistentvolumes
   - pods
@@ -50,6 +57,7 @@ rules:
   - delete
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - snapshot.storage.k8s.io
@@ -59,6 +67,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - delete
+  - get
 - apiGroups:
   - storage.k8s.io
   resources:

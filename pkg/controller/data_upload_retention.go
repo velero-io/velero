@@ -37,6 +37,19 @@ import (
 	"github.com/velero-io/velero/pkg/util/kube"
 )
 
+// The retention path below runs in the node agent, on the DataUpload
+// reconciler, and writes snapshot.storage.k8s.io objects the rest of the data
+// mover never touches. The verbs are exactly the ones the path exercises:
+// reading and patching the deletion policy of the backup content, seeding its
+// status so the snapshotter issues DeleteSnapshot, deleting the backup
+// VolumeSnapshot, PVC and content, and polling for the PVC's and the content's
+// disappearance. The node agent has no informer on these objects -- every
+// access is a typed client call -- so no list or watch is granted.
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;patch;delete
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents/status,verbs=get;update
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;delete
+
 const (
 	// dataUploadRetainLeaseAnnotation marks a DataUpload whose completion
 	// callback is between the persisted record and the Retain patch of the
