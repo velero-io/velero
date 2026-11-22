@@ -48,9 +48,14 @@ import (
 // only its own entry; the DeleteBackupRequest itself never waits.
 type retainedSnapshotReconciler struct {
 	client.Client
-	logger   logrus.FieldLogger
-	clock    clock.Clock
-	recorder kubeEventRecorder
+	// apiReader reads from the API server instead of the cache: the
+	// verification reads of the retained snapshot deletion must see what the
+	// API server holds, not an informer-lagged copy, or a just-written status
+	// reads back missing and fails the deletion spuriously.
+	apiReader client.Reader
+	logger    logrus.FieldLogger
+	clock     clock.Clock
+	recorder  kubeEventRecorder
 }
 
 // kubeEventRecorder is the subset of the event recorders used to report
@@ -60,23 +65,28 @@ type kubeEventRecorder interface {
 }
 
 // NewRetainedSnapshotReconciler creates a new retained-snapshot reconciler.
-func NewRetainedSnapshotReconciler(logger logrus.FieldLogger, client client.Client, clock clock.Clock) *retainedSnapshotReconciler {
+// The apiReader reads uncached; a nil apiReader falls back to the cached
+// client.
+func NewRetainedSnapshotReconciler(logger logrus.FieldLogger, client client.Client, apiReader client.Reader, clock clock.Clock) *retainedSnapshotReconciler {
 	return &retainedSnapshotReconciler{
-		Client: client,
-		logger: logger,
-		clock:  clock,
+		Client:    client,
+		apiReader: apiReader,
+		logger:    logger,
+		clock:     clock,
 	}
 }
 
 // NewRetainedSnapshotReconcilerWithRecorder creates a new retained-snapshot
 // reconciler with an event recorder, for reporting skipped and escalated
-// records.
-func NewRetainedSnapshotReconcilerWithRecorder(logger logrus.FieldLogger, client client.Client, clock clock.Clock, recorder kubeEventRecorder) *retainedSnapshotReconciler {
+// records. The apiReader reads uncached; a nil apiReader falls back to the
+// cached client.
+func NewRetainedSnapshotReconcilerWithRecorder(logger logrus.FieldLogger, client client.Client, apiReader client.Reader, clock clock.Clock, recorder kubeEventRecorder) *retainedSnapshotReconciler {
 	return &retainedSnapshotReconciler{
-		Client:   client,
-		logger:   logger,
-		clock:    clock,
-		recorder: recorder,
+		Client:    client,
+		apiReader: apiReader,
+		logger:    logger,
+		clock:     clock,
+		recorder:  recorder,
 	}
 }
 
@@ -245,7 +255,7 @@ func (r *retainedSnapshotReconciler) deleteEntry(ctx context.Context, backup *ve
 		}
 	}
 
-	err = csi.DeleteRetainedSnapshot(ctx, r.Client, entry.Record(), log)
+	err = csi.DeleteRetainedSnapshot(ctx, r.Client, r.apiReader, entry.Record(), log)
 	if err == nil {
 		// The entry is removed only after the snapshot is confirmed deleted.
 		if err := retainedsnapshot.MarkCompleted(ctx, r.Client, backup, name); err != nil {

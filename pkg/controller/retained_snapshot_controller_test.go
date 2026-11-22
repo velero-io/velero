@@ -168,7 +168,7 @@ func retainedTestRequest(t *testing.T, c client.Client, backup *velerov1api.Back
 }
 
 func newRetainedTestReconciler(c client.Client) *retainedSnapshotReconciler {
-	return NewRetainedSnapshotReconciler(velerotest.NewLogger(), c, clock.RealClock{})
+	return NewRetainedSnapshotReconciler(velerotest.NewLogger(), c, nil, clock.RealClock{})
 }
 
 func reconcileShard(t *testing.T, r *retainedSnapshotReconciler, shard *corev1api.ConfigMap) {

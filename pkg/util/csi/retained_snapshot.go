@@ -191,7 +191,11 @@ func BuildTempVSCForRetainedSnapshot(record *velerov2alpha1api.RetainedCSIStorag
 
 // DeleteRetainedSnapshot has the CSI snapshotter delete the storage snapshot
 // identified by record, through a temporary statically provisioned
-// VolumeSnapshotContent.
+// VolumeSnapshotContent. All reads go through the given reader, which must be
+// uncached -- an API reader -- when the writing client is manager-cached:
+// the read-backs verify what the API server holds, and an informer-lagged
+// cache would fail the verification spuriously, or report a leftover content
+// the deletion just wrote. A nil reader falls back to the writing client.
 //
 // In external-snapshotter v8.6.0, syncContent issues DeleteSnapshot only when
 // deletionPolicy is Delete and status.snapshotHandle is set, and its own
@@ -212,9 +216,13 @@ func BuildTempVSCForRetainedSnapshot(record *velerov2alpha1api.RetainedCSIStorag
 func DeleteRetainedSnapshot(
 	ctx context.Context,
 	crClient crclient.Client,
+	reader crclient.Reader,
 	record *velerov2alpha1api.RetainedCSIStorageSnapshot,
 	log logrus.FieldLogger,
 ) error {
+	if reader == nil {
+		reader = crClient
+	}
 	if record == nil || record.CSISnapshotHandle == "" || record.Driver == "" {
 		return errors.New("invalid retained snapshot record, handle and driver are required")
 	}
@@ -223,7 +231,7 @@ func DeleteRetainedSnapshot(
 
 	current := tempVSC
 	existing := &snapshotv1api.VolumeSnapshotContent{}
-	err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, existing)
+	err := reader.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, existing)
 	switch {
 	case err == nil:
 		// A retry of an interrupted deletion reuses the leftover.
@@ -257,7 +265,7 @@ func DeleteRetainedSnapshot(
 	// deleting the content before the sidecar sees status.snapshotHandle would
 	// remove it with no DeleteSnapshot call.
 	confirmed := &snapshotv1api.VolumeSnapshotContent{}
-	if err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, confirmed); err != nil {
+	if err := reader.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, confirmed); err != nil {
 		return errors.Wrapf(err, "error reading back the status of temp VolumeSnapshotContent %s", tempVSC.Name)
 	}
 	if confirmed.Status == nil || confirmed.Status.SnapshotHandle == nil || *confirmed.Status.SnapshotHandle != record.CSISnapshotHandle {
@@ -272,7 +280,7 @@ func DeleteRetainedSnapshot(
 	}
 
 	err = wait.PollUntilContextTimeout(ctx, retainedSnapshotPollInterval, RetainedSnapshotDeletionTimeout, true, func(ctx context.Context) (bool, error) {
-		err := crClient.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, &snapshotv1api.VolumeSnapshotContent{})
+		err := reader.Get(ctx, crclient.ObjectKey{Name: tempVSC.Name}, &snapshotv1api.VolumeSnapshotContent{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
@@ -287,7 +295,7 @@ func DeleteRetainedSnapshot(
 	}
 
 	// The wait timed out: report the sidecar's failure if it recorded one.
-	if message, kind := latestSnapshotDeleteErrorMessage(ctx, crClient, tempVSC.Name, log); message != "" {
+	if message, kind := latestSnapshotDeleteErrorMessage(ctx, reader, tempVSC.Name, log); message != "" {
 		if kind == snapshotDeleteCallFailureMessage {
 			return &SnapshotDeleteCallError{Message: message}
 		}
@@ -304,9 +312,9 @@ func DeleteRetainedSnapshot(
 // Velero manager's cache does not cover, so reads go through the API reader
 // when one is given. A failure to list the events only removes detail from a
 // pending deletion and is not an error.
-func latestSnapshotDeleteErrorMessage(ctx context.Context, crClient crclient.Client, vscName string, log logrus.FieldLogger) (message, kind string) {
+func latestSnapshotDeleteErrorMessage(ctx context.Context, reader crclient.Reader, vscName string, log logrus.FieldLogger) (message, kind string) {
 	events := &corev1api.EventList{}
-	if err := crClient.List(ctx, events, crclient.InNamespace(metav1.NamespaceDefault)); err != nil {
+	if err := reader.List(ctx, events, crclient.InNamespace(metav1.NamespaceDefault)); err != nil {
 		log.WithError(err).Warnf("Failed to list the events of VolumeSnapshotContent %s", vscName)
 		return "", ""
 	}

@@ -722,6 +722,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		if err := controller.NewRetainedSnapshotReconcilerWithRecorder(
 			s.logger,
 			s.mgr.GetClient(),
+			s.mgr.GetAPIReader(),
 			clock.RealClock{},
 			eventRecorder,
 		).SetupWithManager(s.mgr); err != nil {
