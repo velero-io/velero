@@ -919,9 +919,10 @@ func TestRetainSnapshotOnCompletionFreshResourceVersionAfterRecheck(t *testing.T
 // TestReleaseRetainedSnapshotUsesFreshResourceVersions proves the
 // resourceVersion chain of the patch-back: every write bumps the content's
 // resourceVersion, so the status seed must carry the resourceVersion the
-// Delete patch returned and the content delete must be preconditioned on the
-// post-seed resourceVersion -- never on the one from the Get at the top,
-// which would self-conflict on every release against a real API server. The
+// Delete patch returned, and the content delete must be preconditioned on the
+// resourceVersion of the re-read that follows the bounded PVC wait -- never on
+// the post-seed one, which the sidecar's own status writes during the wait
+// have already superseded, and never on the one from the Get at the top. The
 // fake snapshot clientset neither bumps resourceVersions nor enforces the
 // delete preconditions, so the reactors simulate the bumps and the test
 // asserts the resourceVersions the operations actually carry.
@@ -967,6 +968,22 @@ func TestReleaseRetainedSnapshotUsesFreshResourceVersions(t *testing.T) {
 		stored.Status = &snapshotv1api.VolumeSnapshotContentStatus{SnapshotHandle: &handle}
 		return true, stored, nil
 	})
+	// The re-read after the PVC wait observes the sidecar's own status write
+	// from inside the wait window, which bumps the resourceVersion once more.
+	var gets int
+	fakeV1.PrependReactor("get", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		if action.(clientTesting.GetAction).GetName() != dataUploadName {
+			return false, nil, nil
+		}
+		gets++
+		if gets == 2 {
+			// The re-read before the delete: post-seed, post-sidecar-write.
+			bumped := stored.DeepCopy()
+			bumped.ResourceVersion = "45"
+			return true, bumped, nil
+		}
+		return false, nil, nil
+	})
 	// The delete's resourceVersion precondition is what the test asserts.
 	fakeV1.PrependReactor("delete", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
 		deleteAction := action.(clientTesting.DeleteAction)
@@ -985,8 +1002,8 @@ func TestReleaseRetainedSnapshotUsesFreshResourceVersions(t *testing.T) {
 	assert.Equal(t, "43", statusUpdateResourceVersions[0],
 		"the status seed must carry the post-patch resourceVersion, not the original Get's")
 	require.NotEmpty(t, deletePreconditions, "the content must be deleted with a resourceVersion precondition")
-	assert.Equal(t, "44", deletePreconditions[0],
-		"the content delete must be preconditioned on the post-seed resourceVersion, not the original Get's")
+	assert.Equal(t, "45", deletePreconditions[0],
+		"the content delete must be preconditioned on the post-wait resourceVersion, not the post-seed one the sidecar's wait-window writes superseded")
 }
 
 // TestReleaseRetainedSnapshotSeedsStatus proves that the patch-back seeds
