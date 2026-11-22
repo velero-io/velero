@@ -596,6 +596,7 @@ func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namesp
 		if result.Backup.EmptySnapshot {
 			du.Status.Message = "volume was empty so no data was upload"
 		}
+		clearDataUploadLeaseAnnotations(du)
 
 		// A retention that was requested but did not hold must not degrade
 		// silently: the completion and the rollback path can race inside the
@@ -658,6 +659,7 @@ func (r *DataUploadReconciler) OnDataUploadCancelled(ctx context.Context, namesp
 			du.Status.StartTimestamp = &metav1.Time{Time: r.Clock.Now()}
 		}
 		du.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
+		clearDataUploadLeaseAnnotations(du)
 
 		delete(du.Labels, exposer.ExposeOnGoingLabel)
 
@@ -678,6 +680,7 @@ func (r *DataUploadReconciler) tryCancelDataUpload(ctx context.Context, du *vele
 			dataUpload.Status.StartTimestamp = &metav1.Time{Time: r.Clock.Now()}
 		}
 		dataUpload.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
+		clearDataUploadLeaseAnnotations(dataUpload)
 
 		if message != "" {
 			dataUpload.Status.Message = message
@@ -924,6 +927,7 @@ func (r *DataUploadReconciler) updateStatusToFailed(ctx context.Context, du *vel
 			du.Status.SnapshotID = dataPathError.GetSnapshotID()
 		}
 		du.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
+		clearDataUploadLeaseAnnotations(du)
 
 		delete(du.Labels, exposer.ExposeOnGoingLabel)
 
@@ -979,6 +983,7 @@ func (r *DataUploadReconciler) onPrepareTimeout(ctx context.Context, du *velerov
 	succeeded, err := funcExclusiveUpdateDataUpload(ctx, r.client, du, func(du *velerov2alpha1api.DataUpload) {
 		du.Status.Phase = velerov2alpha1api.DataUploadPhaseFailed
 		du.Status.Message = "timeout on preparing data upload"
+		clearDataUploadLeaseAnnotations(du)
 
 		delete(du.Labels, exposer.ExposeOnGoingLabel)
 	})

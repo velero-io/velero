@@ -214,6 +214,13 @@ func TestOnDataUploadCompletedRetentionRecordBeforeRetain(t *testing.T) {
 
 			updated := getDataUpload(t, r, du)
 			assert.Equal(t, tc.wantPhase, updated.Status.Phase)
+			// The terminal update drops the lease marks: nothing reads them
+			// past the terminal phase, and they must not accumulate on the
+			// object forever.
+			assert.NotContains(t, updated.Annotations, dataUploadRetainLeaseAnnotation,
+				"the terminal update must drop the retention lease mark")
+			assert.NotContains(t, updated.Annotations, dataUploadRollbackLeaseAnnotation,
+				"the terminal update must drop the rollback lease mark")
 			if tc.wantRetained {
 				assert.Equal(t, retentionRecord(), updated.Status.RetainedCSIStorageSnapshot)
 				assert.True(t, patches.hasDeletionPolicy("Retain"), "the backup VSC must be switched to Retain, patches: %v", patches.patches)
@@ -763,6 +770,9 @@ func TestReconcileFailsDataUploadAtReleaseBound(t *testing.T) {
 	assert.NotNil(t, updated.Status.RetainedCSIStorageSnapshot,
 		"the record stays in place so the backup deletion owns the snapshot")
 	assert.Contains(t, updated.Status.Message, "timeout releasing the retained snapshot")
+	// The terminal update drops the rollback lease mark the release acquired.
+	assert.NotContains(t, updated.Annotations, dataUploadRollbackLeaseAnnotation,
+		"the terminal update must drop the rollback lease mark")
 
 	// The content is patched back to Delete, so the driver deletes the
 	// snapshot when it resumes, and the record is the backstop.

@@ -108,6 +108,16 @@ func (l *dataUploadLease) String() string {
 	return l.Holder + "/" + strconv.FormatInt(l.ExpiresAt.Unix(), 10)
 }
 
+// clearDataUploadLeaseAnnotations drops both lease marks from the DataUpload.
+// The marks only fence the switch window before a terminal phase; once the
+// phase is terminal nothing reads them, so the update that marks the terminal
+// phase also removes them, instead of letting expired marks accumulate on the
+// object for its remaining lifetime. Deleting from a nil map is a no-op.
+func clearDataUploadLeaseAnnotations(du *velerov2alpha1api.DataUpload) {
+	delete(du.Annotations, dataUploadRetainLeaseAnnotation)
+	delete(du.Annotations, dataUploadRollbackLeaseAnnotation)
+}
+
 func parseDataUploadLease(value string) (*dataUploadLease, bool) {
 	holder, expiry, found := strings.Cut(value, "/")
 	if !found {
