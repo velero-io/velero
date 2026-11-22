@@ -11,7 +11,7 @@ It lets a user check filters, namespace mappings, resource modifiers and existin
 > - One optional field, `spec.dryRun`, and the same restore engine, so a dry run gives the answers a real restore would give.
 > - A dry run never writes.
 >   When the restore starts, Velero gives the engine read-only versions of its [write paths](#write-paths), runs its built-in plugins with [clients that can only read](#read-only-clients-for-the-built-in-actions), and does not start plugins from outside the Velero repository.
-> - A dry run creates nothing, so it keeps the namespaces and CRDs a real restore would create in a [planned state](#planned-state), and checks the objects that depend on them against it.
+> - A dry run creates nothing, so it keeps the namespaces, CRDs and objects a real restore would create in a [planned state](#planned-state), where later items that depend on them or end up with the same name find them.
 > - It cannot predict errors that only the API server or a storage provider returns, and six cases differ from a real restore, see [Item outcomes](#item-outcomes).
 > - An old `Restore` CRD or an old Velero server could turn a dry run into a real restore.
 >   The Velero CLI is guarded against both, and other clients only partly, see [Version skew](#version-skew).
@@ -172,7 +172,7 @@ The restore controller itself writes only the `Restore` status and the restore a
 
 ### Dry-run resource client
 
-In a dry run, `Create` looks the object up instead of creating it.
+In a dry run, `Create` looks the object up instead of creating it, first in the [planned state](#planned-state), then in the cluster.
 If the object is not found, it would be created.
 If it is found, `Create` returns the same `AlreadyExists` error as a real create.
 That error sends the engine down the same existing-object path as a real restore, so **the comparison, the policy and the patch come from unchanged code**.
@@ -198,12 +198,17 @@ Two lookups need care.
 
 ### Planned state
 
-Two in-memory sets on the restore context remember what the restore would already have created.
+Three in-memory stores on the restore context remember what the restore would already have created.
 
 - `plannedNamespaces` holds the missing namespaces that this restore would create.
   A planned namespace is recorded as `created` once and is not looked up again for later items.
 - `plannedCRDs` holds the names (`<plural>.<group>`) of the missing CustomResourceDefinitions that this restore would create, added at the create step.
   The engine restores CRDs in a pass of its own before every other resource, fixed in `execute` and independent of the resource priorities an operator configures, so the set is complete before any custom resource is looked at.
+- `plannedObjects` holds a copy of every other object this restore would create, under its name after resource modifiers, namespace mapping and restore item actions.
+  The dry-run client and the informer-cache lookup check it before the cluster, and `Patch` updates the copy.
+  So when two backup items end up with the same name, the second is compared with the first, as in a real restore.
+  With the informer cache on, a real restore holds about the same objects in its cache.
+  With it off, the store is extra memory, 27 MB for 10,000 small Secrets in a separate measurement.
 
 The API server answers "not found" both for a missing object and for a resource it does not serve, so the CRD set is what tells these cases apart.
 
@@ -213,7 +218,7 @@ The API server answers "not found" both for a missing object and for a resource 
 | Already served by the cluster | creates the custom resource | `created` |
 | In neither | the create fails, because the resource is not served | `failed`, with the API server's error |
 
-**Without the two sets**, the first restore into an empty cluster, which is the main disaster-recovery case, would report most items as failures, or would report custom resources as created that a real restore cannot create.
+**Without the namespace and CRD sets**, the first restore into an empty cluster, which is the main disaster-recovery case, would report most items as failures, or would report custom resources as created that a real restore cannot create.
 Both behaviours were checked against Kubernetes v1.33 with a prototype.
 
 ### Item outcomes
@@ -232,6 +237,7 @@ The recorded action for an item follows the same rules as a real restore.
 | A plugin returns an error, or the item cannot be decoded | any | `failed` | the existing error |
 
 As in a real restore, an item that exists and equals the backup copy is recorded `failed` instead of `skipped` when it gets a warning, for example the warning that its volume data will not be restored.
+An object that an earlier item of this restore would create counts as existing, see [Planned state](#planned-state).
 
 **Six cases are known to differ from a real restore.**
 Each is tested on its own against the outcome defined here.
@@ -422,7 +428,7 @@ A dry run needs the `EnableRestoreDryRun` feature flag until the last step remov
 **No step lets a dry run write**, even with the flag on.
 
 1. API field and validation, which still rejects every dry run.
-2. Restore engine with the dry-run write paths, with all plugins and the finalizer's cluster changes turned off.
+2. Restore engine with the dry-run write paths and the planned state, with all plugins and the finalizer's cluster changes turned off.
 3. Read-only clients for the built-in plugins.
 4. CLI, version checks and user documentation.
 5. Built-in plugins run again in dry runs.
@@ -446,7 +452,7 @@ flowchart TD
 ### Testing
 
 - A no-write guard runs the existing restore test tables a second time with `dryRun` set to true, against fake clients that fail the test on any write except a patch of the `Restore` being run.
-- Parity tests check that the dry run's resource list, warnings and errors equal those of the real restore of the same input, except the six known differences in [Item outcomes](#item-outcomes), which are tested on their own.
+- Parity tests check that the dry run's resource list, warnings and errors equal those of the real restore of the same input, including two items that end up with the same name, except the six known differences in [Item outcomes](#item-outcomes), which are tested on their own.
 - Unit tests cover each dry-run write path, an empty-cluster restore with a CRD and its custom resource, the read-only clients for every kind of request, every built-in action through its real constructor with and without them, the scan for client configurations that bypass them, the plugin manager starting no action from outside the repository, the finalizing phase, the label check, and the CLI version check.
 - An end-to-end test on kind checks that a dry run leaves every resource version unchanged, and that its resource list equals that of the real restore that follows.
 
