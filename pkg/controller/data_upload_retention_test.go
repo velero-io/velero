@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgofake "k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
+	testclocks "k8s.io/utils/clock/testing"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -591,6 +592,64 @@ func TestReconcileSkipsReleaseForDataUploadWithoutRecord(t *testing.T) {
 
 			assert.Zero(t, vscReads, "a DataUpload without a record must not read the VolumeSnapshotContent")
 		})
+	}
+}
+
+// TestReconcileDoesNotReleaseDuringRetentionCleanup proves the lease renewal
+// of the completion callback: the retention-path cleanup that follows the
+// Retain patch is bounded by the deletion timeout, which outlasts the
+// one-minute lease, so at T+1min -- with the callback still inside the
+// cleanup and the DataUpload not yet final -- an expired, stealable mark must
+// not let the reconcile hook patch the content back to Delete and destroy a
+// successfully retained snapshot. Once the renewal expires too, the hook
+// steals the mark and the hard-kill recovery keeps working.
+func TestReconcileDoesNotReleaseDuringRetentionCleanup(t *testing.T) {
+	r, err := initDataUploaderReconciler()
+	require.NoError(t, err)
+
+	du := retentionDataUploadBuilder().
+		Phase(velerov2alpha1api.DataUploadPhaseInProgress).
+		Node("node-1").
+		Finalizers([]string{DataUploadDownloadFinalizer}).
+		Result()
+	createRetainedSnapshotObjects(t, r, du, retentionBackupVSC())
+	r.snapshotExposerList = map[velerov2alpha1api.SnapshotType]exposer.SnapshotExposer{
+		velerov2alpha1api.SnapshotTypeCSI: exposer.NewCSISnapshotExposer(r.kubeClient, r.csiSnapshotClient, velerotest.NewLogger()),
+	}
+
+	// The completion callback persists the record and switches the content to
+	// Retain; the lease is renewed to cover the cleanup that follows.
+	require.NoError(t, r.retainSnapshotOnCompletion(t.Context(), du, velerotest.NewLogger()))
+
+	// The callback is now inside the retention-path cleanup, bounded by the
+	// deletion timeout. Advance the clock past the original one-minute lease
+	// expiry, as a progress-update-driven reconcile observes it.
+	fakeClock := r.Clock.(*testclocks.FakeClock)
+	fakeClock.Step(2 * time.Minute)
+
+	_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
+	require.NoError(t, err)
+
+	vsc, getErr := getBackupVSC(t, r, du)
+	require.NoError(t, getErr)
+	assert.Equal(t, snapshotv1api.VolumeSnapshotContentRetain, vsc.Spec.DeletionPolicy,
+		"the successfully retained snapshot must not be released while the completion callback is still cleaning up")
+	assert.NotNil(t, getDataUpload(t, r, du).Status.RetainedCSIStorageSnapshot,
+		"the record must survive the interleaving")
+
+	// Past the renewed expiry the mark is stealable again and the hook
+	// recovers the hard-kill case: the release proceeds.
+	fakeClock.Step(csi.RetainedSnapshotDeletionTimeout + 2*time.Minute)
+	_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}})
+	require.NoError(t, err)
+
+	assert.Nil(t, getDataUpload(t, r, du).Status.RetainedCSIStorageSnapshot,
+		"the release must proceed once the renewed lease has expired")
+	vsc, getErr = getBackupVSC(t, r, du)
+	if getErr == nil {
+		assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, vsc.Spec.DeletionPolicy)
+	} else {
+		assert.True(t, apierrors.IsNotFound(getErr))
 	}
 }
 

@@ -55,6 +55,11 @@ const (
 	// guards, and short enough that a crashed holder does not block the other
 	// side for long.
 	dataUploadLeaseDuration = time.Minute
+
+	// dataUploadLeaseCleanupMargin is added to the deletion timeout when the
+	// retention lease is renewed for the cleanup that follows the Retain patch,
+	// so the renewal covers the whole bounded wait plus scheduling slack.
+	dataUploadLeaseCleanupMargin = time.Minute
 )
 
 // leaseRefusedError reports that a lease was not acquired because another
@@ -89,14 +94,14 @@ func parseDataUploadLease(value string) (*dataUploadLease, bool) {
 }
 
 // tryAcquireDataUploadLease conditionally sets the lease annotation on the
-// DataUpload to the given holder. It fails, without writing, while another
-// holder's unexpired lease is on either lease annotation -- the completion
-// callback and the rollback path serialize their two intents through the one
-// object, so an unexpired retaining mark blocks a rollback and an unexpired
-// rolling-back mark blocks a retention. An absent, expired or own lease is
-// (re-)acquired. The update is conflict-retried with a fresh read, so two
-// racers cannot both acquire.
-func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du *velerov2alpha1api.DataUpload, annotation, holder string, log logrus.FieldLogger) (bool, error) {
+// DataUpload to the given holder, expiring after the given duration. It fails,
+// without writing, while another holder's unexpired lease is on either lease
+// annotation -- the completion callback and the rollback path serialize their
+// two intents through the one object, so an unexpired retaining mark blocks a
+// rollback and an unexpired rolling-back mark blocks a retention. An absent,
+// expired or own lease is (re-)acquired. The update is conflict-retried with a
+// fresh read, so two racers cannot both acquire.
+func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du *velerov2alpha1api.DataUpload, annotation, holder string, duration time.Duration, log logrus.FieldLogger) (bool, error) {
 	acquired := false
 	err := UpdateDataUploadWithRetry(ctx, r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log, func(current *velerov2alpha1api.DataUpload) bool {
 		if isDataUploadInFinalState(current) {
@@ -113,7 +118,7 @@ func (r *DataUploadReconciler) tryAcquireDataUploadLease(ctx context.Context, du
 		}
 		current.Annotations[annotation] = (&dataUploadLease{
 			Holder:    holder,
-			ExpiresAt: r.Clock.Now().Add(dataUploadLeaseDuration),
+			ExpiresAt: r.Clock.Now().Add(duration),
 		}).String()
 		acquired = true
 		return true
@@ -206,7 +211,7 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 	}
 
 	holder := fmt.Sprintf("%s-%d", r.nodeName, r.Clock.Now().UnixNano())
-	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, log)
+	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, dataUploadLeaseDuration, log)
 	if err != nil {
 		return err
 	}
@@ -256,6 +261,27 @@ func (r *DataUploadReconciler) retainSnapshotOnCompletion(ctx context.Context, d
 		return errors.Wrapf(err, "error switching the backup VolumeSnapshotContent %s to Retain", vsc.Name)
 	}
 	log.Infof("Switched the backup VolumeSnapshotContent %s to Retain, snapshot %s survives the cleanup", vsc.Name, record.CSISnapshotHandle)
+
+	// The fence the lease buys holds until the Completed mark, not only until
+	// the patch: the retention-path cleanup that follows (the exposer cleanup
+	// and the explicit content deletion, bounded by the deletion timeout)
+	// outlasts the one-minute lease, and an expired, stealable mark there
+	// would let the reconcile hook patch the content back to Delete and
+	// destroy a successfully retained snapshot -- the next incremental of the
+	// volume would silently fall back to a full backup. The lease is
+	// therefore renewed, as the same holder, to cover the whole bounded
+	// cleanup; a callback that crashes after the renewal blocks the rollback
+	// for at most that long, which the deletion-timeout bound already
+	// tolerates. A refused renewal means a rollback is running or ran: the
+	// callback must not continue, it fails the DataUpload and keeps the
+	// record, leaving the snapshot to the patch-back and the backup deletion.
+	renewed, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRetainLeaseAnnotation, holder, csi.RetainedSnapshotDeletionTimeout+dataUploadLeaseCleanupMargin, log)
+	if err != nil {
+		return errors.Wrapf(err, "error renewing the retention lease of DataUpload %s for its cleanup", du.Name)
+	}
+	if !renewed {
+		return errors.Errorf("another actor holds the retention lease of DataUpload %s, not retaining its snapshot for the cleanup", du.Name)
+	}
 
 	return nil
 }
@@ -379,7 +405,7 @@ func (r *DataUploadReconciler) releaseRetainedSnapshot(ctx context.Context, du *
 	// expiry and steal an expired mark, so a crashed holder blocks the other
 	// side for at most the lease duration.
 	holder := fmt.Sprintf("%s-%d", r.nodeName, r.Clock.Now().UnixNano())
-	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRollbackLeaseAnnotation, holder, log)
+	acquired, err := r.tryAcquireDataUploadLease(ctx, du, dataUploadRollbackLeaseAnnotation, holder, dataUploadLeaseDuration, log)
 	if err != nil {
 		return err
 	}
