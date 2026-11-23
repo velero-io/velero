@@ -986,7 +986,11 @@ func DeleteBackup(ctx context.Context, backupName string, velerocfg *VeleroConfi
 
 	args = []string{"--namespace", velerocfg.VeleroNamespace, "backup", "get", backupName}
 
-	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, time.Minute, true,
+	// Wait for the backup to actually go. The budget has to cover the snapshot
+	// deletion behind it, which is the slow part; the deletion cases currently
+	// run in 12 to 13 minutes against a 30 minute job timeout, so five minutes
+	// here still leaves room.
+	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 5*time.Minute, true,
 		func(context.Context) (bool, error) {
 			cmd = exec.CommandContext(ctx, veleroCLI, args...)
 			fmt.Printf("Try to get backup with cmd: %s \n", cmd.String())
@@ -1017,7 +1021,11 @@ func DeleteBackup(ctx context.Context, backupName string, velerocfg *VeleroConfi
 				fmt.Printf("DeleteBackupRequest status: %s\n", status)
 			}
 
-			return true, nil
+			// Getting the backup succeeded, so it is still there. Keep waiting
+			// rather than reporting success: with immediate=true the first tick
+			// runs straight after the delete command, when the backup has almost
+			// always not gone yet.
+			return false, nil
 		})
 	if err != nil {
 		return errors.Wrapf(err, "backup %s was still present after the delete request", backupName)
