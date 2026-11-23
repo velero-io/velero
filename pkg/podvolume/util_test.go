@@ -310,7 +310,7 @@ func TestGetRealSource(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "pvb with empty annotation",
+			name:     "pvb with nil annotations",
 			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("fake-pod-name").Volume("fake-volume").Result(),
 			expected: "fake-pod-ns/fake-pod-name/fake-volume",
 		},
@@ -322,7 +322,32 @@ func TestGetRealSource(t *testing.T) {
 		{
 			name:     "pvb with pvc name annotation",
 			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("fake-pod-name").Volume("fake-volume").Annotations(map[string]string{"velero.io/pvc-name": "fake-pvc-name"}).Result(),
-			expected: "fake-pod-ns/fake-pod-name/fake-pvc-name",
+			expected: "fake-pod-ns/fake-pvc-name",
+		},
+		{
+			name:     "same pvc mounted by a replacement pod with a different volume name",
+			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("replacement-pod").Volume("replacement-volume").Annotations(map[string]string{"velero.io/pvc-name": "fake-pvc-name"}).Result(),
+			expected: "fake-pod-ns/fake-pvc-name",
+		},
+		{
+			name:     "same pvc name in another namespace",
+			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("other-pod-ns").PodName("fake-pod-name").Volume("fake-volume").Annotations(map[string]string{"velero.io/pvc-name": "fake-pvc-name"}).Result(),
+			expected: "other-pod-ns/fake-pvc-name",
+		},
+		{
+			name:     "different pvc mounted by the same pod",
+			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("fake-pod-name").Volume("fake-volume").Annotations(map[string]string{"velero.io/pvc-name": "other-pvc-name"}).Result(),
+			expected: "fake-pod-ns/other-pvc-name",
+		},
+		{
+			name:     "empty pvc name falls back to pod and volume",
+			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("fake-pod-name").Volume("fake-volume").Annotations(map[string]string{"velero.io/pvc-name": ""}).Result(),
+			expected: "fake-pod-ns/fake-pod-name/fake-volume",
+		},
+		{
+			name:     "non-pvc volumes in different pods remain distinct",
+			pvb:      builder.ForPodVolumeBackup("fake-ns", "fake-name").PodNamespace("fake-pod-ns").PodName("other-pod").Volume("fake-volume").Result(),
+			expected: "fake-pod-ns/other-pod/fake-volume",
 		},
 	}
 
