@@ -1,1 +1,1 @@
-Create the VolumeGroupSnapshot restore stub with every member's snapshot handle, so restored PVCs no longer stay Pending. For backups taken before this fix, the handles come from the backup volume info
+Fix VolumeGroupSnapshot restores that left the restored PVCs Pending, including restores of older backups. Older backups restore in most cases, but taking a new backup of VGS workloads is still recommended
