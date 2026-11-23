@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/cockroachdb/errors"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -5681,4 +5683,205 @@ func TestRestoreInplaceSourceSizeCarrierAnnotation(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, got.GetAnnotations(), velerov1api.InplaceRestoreSourceSizeAnnotation)
 	})
+}
+
+func TestGroupMemberHandlesFromVolumeInfo(t *testing.T) {
+	csiInfo := func(groupHandle, snapshotHandle string) volume.BackupVolumeInfo {
+		return volume.BackupVolumeInfo{
+			BackupMethod: volume.CSISnapshot,
+			CSISnapshotInfo: &volume.CSISnapshotInfo{
+				VolumeGroupSnapshotHandle: groupHandle,
+				SnapshotHandle:            snapshotHandle,
+			},
+		}
+	}
+
+	got := groupMemberHandlesFromVolumeInfo(map[string]volume.BackupVolumeInfo{
+		"pv-1": csiInfo("group-1", "snap-c"),
+		"pv-2": csiInfo("group-1", "snap-a"),
+		"pv-3": csiInfo("group-1", "snap-b"),
+		"pv-4": csiInfo("group-1", "snap-a"),
+		"pv-5": csiInfo("group-2", "snap-d"),
+		"pv-6": csiInfo("", "snap-e"),
+		"pv-7": csiInfo("group-3", ""),
+		"pv-8": {BackupMethod: volume.PodVolumeBackup},
+	})
+
+	assert.Equal(t, map[string][]string{
+		"group-1": {"snap-a", "snap-b", "snap-c"},
+		"group-2": {"snap-d"},
+	}, got)
+}
+
+// TestRestoreFillsGroupMemberHandles covers VolumeGroupSnapshot backups taken
+// before Velero recorded the group members: the restorer fills the member
+// handles in from the backup volume info, so the CSI VolumeSnapshot restore
+// action can create a stub VolumeGroupSnapshotContent that lists all of them.
+func TestRestoreFillsGroupMemberHandles(t *testing.T) {
+	volumeInfos := map[string]volume.BackupVolumeInfo{
+		"pv-1": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-1", SnapshotHandle: "snap-c"}},
+		"pv-2": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-1", SnapshotHandle: "snap-a"}},
+		"pv-3": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-1", SnapshotHandle: "snap-b"}},
+		"pv-4": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-2", SnapshotHandle: "snap-d"}},
+	}
+
+	tests := []struct {
+		name        string
+		annotations []string
+		want        string
+		wantSet     bool
+	}{
+		{
+			name: "backup without member handles gets them from the volume info",
+			annotations: []string{
+				velerov1api.VolumeGroupSnapshotHandleAnnotation, "group-1",
+				velerov1api.VolumeSnapshotHandleAnnotation, "snap-b",
+			},
+			want:    `["snap-a","snap-b","snap-c"]`,
+			wantSet: true,
+		},
+		{
+			name: "member handles recorded at backup time are kept",
+			annotations: []string{
+				velerov1api.VolumeGroupSnapshotHandleAnnotation, "group-1",
+				velerov1api.VolumeSnapshotHandleAnnotation, "snap-b",
+				velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation, `["snap-x","snap-b"]`,
+			},
+			want:    `["snap-x","snap-b"]`,
+			wantSet: true,
+		},
+		{
+			name: "group missing from the volume info is left without member handles",
+			annotations: []string{
+				velerov1api.VolumeGroupSnapshotHandleAnnotation, "group-9",
+				velerov1api.VolumeSnapshotHandleAnnotation, "snap-z",
+			},
+		},
+		{
+			name: "snapshot not taken in a group is left alone",
+			annotations: []string{
+				velerov1api.VolumeSnapshotHandleAnnotation, "snap-a",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.AddItems(t, test.VolumeSnapshots())
+
+			var fromItem, fromBackup string
+			var setOnItem, setOnBackup bool
+			capture := &pluggableAction{
+				selector: velero.ResourceSelector{IncludedResources: []string{"volumesnapshots.snapshot.storage.k8s.io"}},
+				executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+					fromItem, setOnItem = input.Item.(*unstructured.Unstructured).GetAnnotations()[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+					fromBackup, setOnBackup = input.ItemFromBackup.(*unstructured.Unstructured).GetAnnotations()[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+					return &velero.RestoreItemActionExecuteOutput{UpdatedItem: input.Item}, nil
+				},
+			}
+
+			warnings, errs := h.restorer.Restore(
+				&Request{
+					Log:     h.log,
+					Restore: defaultRestore().Result(),
+					Backup:  defaultBackup().Result(),
+					BackupReader: test.NewTarWriter(t).
+						AddItems("volumesnapshots.snapshot.storage.k8s.io",
+							builder.ForVolumeSnapshot("ns-1", "vs-1").ObjectMeta(builder.WithAnnotations(tc.annotations...)).Result()).
+						Done(),
+					BackupVolumeInfoMap: volumeInfos,
+				},
+				[]riav2.RestoreItemAction{capture},
+				nil,
+			)
+			assertEmptyResults(t, warnings, errs)
+
+			assert.Equal(t, tc.wantSet, setOnItem, "member handles on the item")
+			assert.Equal(t, tc.wantSet, setOnBackup, "member handles on the item from the backup")
+			assert.Equal(t, tc.want, fromItem)
+			assert.Equal(t, tc.want, fromBackup)
+		})
+	}
+}
+
+// TestRestoreFillsGroupMemberHandlesOncePerVolumeSnapshot covers a VolumeSnapshot
+// that is reached twice, as an additional item of its PVC and again in the main
+// loop, and a backup with two groups. Each VolumeSnapshot gets its own group's
+// members, and the fallback runs once per VolumeSnapshot.
+func TestRestoreFillsGroupMemberHandlesOncePerVolumeSnapshot(t *testing.T) {
+	h := newHarness(t)
+	h.AddItems(t, test.PVCs())
+	h.AddItems(t, test.VolumeSnapshots())
+
+	logger, hook := logrustest.NewNullLogger()
+	logger.SetLevel(logrus.DebugLevel)
+
+	groupVS := func(name, groupHandle, snapshotHandle string) *snapshotv1api.VolumeSnapshot {
+		return builder.ForVolumeSnapshot("ns-1", name).ObjectMeta(builder.WithAnnotations(
+			velerov1api.VolumeGroupSnapshotHandleAnnotation, groupHandle,
+			velerov1api.VolumeSnapshotHandleAnnotation, snapshotHandle,
+		)).Result()
+	}
+
+	pvcAction := &pluggableAction{
+		selector: velero.ResourceSelector{IncludedResources: []string{"persistentvolumeclaims"}},
+		executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+			return &velero.RestoreItemActionExecuteOutput{
+				UpdatedItem: input.Item,
+				AdditionalItems: []velero.ResourceIdentifier{
+					{GroupResource: kuberesource.VolumeSnapshots, Namespace: "ns-1", Name: "vs-1"},
+				},
+			}, nil
+		},
+	}
+	seen := map[string]string{}
+	vsAction := &pluggableAction{
+		selector: velero.ResourceSelector{IncludedResources: []string{"volumesnapshots.snapshot.storage.k8s.io"}},
+		executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+			item := input.ItemFromBackup.(*unstructured.Unstructured)
+			seen[item.GetName()] = item.GetAnnotations()[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
+			return &velero.RestoreItemActionExecuteOutput{UpdatedItem: input.Item}, nil
+		},
+	}
+
+	warnings, errs := h.restorer.Restore(
+		&Request{
+			Log:     logger,
+			Restore: defaultRestore().Result(),
+			Backup:  defaultBackup().Result(),
+			BackupReader: test.NewTarWriter(t).
+				AddItems("persistentvolumeclaims", builder.ForPersistentVolumeClaim("ns-1", "pvc-1").Result()).
+				AddItems("volumesnapshots.snapshot.storage.k8s.io",
+					groupVS("vs-1", "group-1", "snap-b"),
+					groupVS("vs-2", "group-2", "snap-d"),
+				).
+				Done(),
+			BackupVolumeInfoMap: map[string]volume.BackupVolumeInfo{
+				"pv-1": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-1", SnapshotHandle: "snap-b"}},
+				"pv-2": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-1", SnapshotHandle: "snap-a"}},
+				"pv-3": {BackupMethod: volume.CSISnapshot, CSISnapshotInfo: &volume.CSISnapshotInfo{VolumeGroupSnapshotHandle: "group-2", SnapshotHandle: "snap-d"}},
+			},
+		},
+		[]riav2.RestoreItemAction{pvcAction, vsAction},
+		nil,
+	)
+	assertEmptyResults(t, warnings, errs)
+
+	assert.Equal(t, map[string]string{
+		"vs-1": `["snap-a","snap-b"]`,
+		"vs-2": `["snap-d"]`,
+	}, seen)
+
+	fallbacks, skippedVS1 := 0, false
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "recorded in the backup volume info") {
+			fallbacks++
+		}
+		if strings.Contains(entry.Message, "already been restored") && strings.Contains(entry.Message, "vs-1") {
+			skippedVS1 = true
+		}
+	}
+	assert.True(t, skippedVS1, "vs-1 should be reached a second time and skipped")
+	assert.Equal(t, 2, fallbacks, "the fallback should run once per VolumeSnapshot")
 }

@@ -369,6 +369,7 @@ func (kr *kubernetesRestorer) RestoreWithResolvers(
 		disableInformerCache:           req.DisableInformerCache,
 		multiHookTracker:               kr.multiHookTracker,
 		backupVolumeInfoMap:            req.BackupVolumeInfoMap,
+		volumeGroupMemberHandles:       groupMemberHandlesFromVolumeInfo(req.BackupVolumeInfoMap),
 		restoreVolumeInfoTracker:       req.RestoreVolumeInfoTracker,
 		hooksWaitExecutor:              hooksWaitExecutor,
 		resourceDeletionStatusTracker:  req.ResourceDeletionStatusTracker,
@@ -422,6 +423,7 @@ type restoreContext struct {
 	disableInformerCache           bool
 	multiHookTracker               *hook.MultiHookTracker
 	backupVolumeInfoMap            map[string]volume.BackupVolumeInfo
+	volumeGroupMemberHandles       map[string][]string
 	restoreVolumeInfoTracker       *volume.RestoreVolumeInfoTracker
 	hooksWaitExecutor              *hooksWaitExecutor
 	resourceDeletionStatusTracker  kube.ResourceDeletionStatusTracker
@@ -1472,7 +1474,8 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	}
 
 	// Make a copy of object retrieved from backup to make it available unchanged
-	//inside restore actions.
+	// inside restore actions. The one exception is the VolumeGroupSnapshot
+	// member handles that addGroupMemberHandles fills in for older backups.
 	itemFromBackup := obj.DeepCopy()
 
 	complete, err := isCompleted(obj, groupResource)
@@ -1513,6 +1516,12 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		itemStatus.action = ItemRestoreResultFailed
 		ctx.restoredItems[itemKey] = itemStatus
 	}()
+
+	// Fill in on both copies, so the restore actions see the backup item as a
+	// backup taken by this version would have recorded it.
+	if groupResource == kuberesource.VolumeSnapshots {
+		ctx.addGroupMemberHandles(restoreLogger, obj, itemFromBackup)
+	}
 
 	// TODO: move to restore item action if/when we add a ShouldRestore() method
 	// to the interface.
@@ -2415,6 +2424,65 @@ func hasSnapshot(pvName string, snapshots []*volume.Snapshot) bool {
 	}
 
 	return false
+}
+
+// groupMemberHandlesFromVolumeInfo groups the snapshot handles of the backed-up
+// CSI snapshots by the VolumeGroupSnapshot they were taken in. The handles are
+// sorted, because the volume info map has no order.
+func groupMemberHandlesFromVolumeInfo(volumeInfos map[string]volume.BackupVolumeInfo) map[string][]string {
+	groups := map[string][]string{}
+	for _, info := range volumeInfos {
+		snapshot := info.CSISnapshotInfo
+		if snapshot == nil || snapshot.VolumeGroupSnapshotHandle == "" || snapshot.SnapshotHandle == "" {
+			continue
+		}
+		if !slices.Contains(groups[snapshot.VolumeGroupSnapshotHandle], snapshot.SnapshotHandle) {
+			groups[snapshot.VolumeGroupSnapshotHandle] = append(groups[snapshot.VolumeGroupSnapshotHandle], snapshot.SnapshotHandle)
+		}
+	}
+	for _, handles := range groups {
+		slices.Sort(handles)
+	}
+	return groups
+}
+
+// addGroupMemberHandles fills in the member snapshot handles of a VolumeSnapshot
+// taken in a VolumeGroupSnapshot, for backups taken before Velero recorded them.
+// The CSI VolumeSnapshot restore action needs every member's handle for the stub
+// VolumeGroupSnapshotContent it creates, or the CSI driver rejects the stub.
+// The backup volume info only lists the volumes the backup snapshotted, so a
+// member whose volume was not snapshotted, such as one a volume policy skipped,
+// is still missing. The handles are looked up
+// from vs and set on vs and on its copies, such as the item from the backup.
+func (ctx *restoreContext) addGroupMemberHandles(log logrus.FieldLogger, vs *unstructured.Unstructured, copies ...*unstructured.Unstructured) {
+	annotations := vs.GetAnnotations()
+	groupHandle := annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation]
+	if groupHandle == "" {
+		return
+	}
+	if _, recorded := annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]; recorded {
+		return
+	}
+
+	handles := ctx.volumeGroupMemberHandles[groupHandle]
+	if len(handles) == 0 {
+		log.Warnf("The backup volume info lists no snapshots of VolumeGroupSnapshot %s", groupHandle)
+		return
+	}
+	encoded, err := json.Marshal(handles)
+	if err != nil {
+		log.WithError(err).Warnf("Failed to encode the snapshot handles of VolumeGroupSnapshot %s", groupHandle)
+		return
+	}
+	for _, obj := range append([]*unstructured.Unstructured{vs}, copies...) {
+		objAnnotations := obj.GetAnnotations()
+		if objAnnotations == nil {
+			objAnnotations = map[string]string{}
+		}
+		objAnnotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation] = string(encoded)
+		obj.SetAnnotations(objAnnotations)
+	}
+	log.Infof("The backup has no member snapshot handles for VolumeGroupSnapshot %s, using the %d recorded in the backup volume info", groupHandle, len(handles))
 }
 
 func hasCSIVolumeSnapshot(ctx *restoreContext, unstructuredPV *unstructured.Unstructured) bool {

@@ -198,8 +198,9 @@ func (p *volumeSnapshotRestoreItemAction) ensureStubVGSCExists(
 
 // groupMemberHandles returns the snapshot handles of every member of the
 // VolumeSnapshot's group, as recorded at backup time. The CSI driver rejects a
-// stub VGSC whose handles do not match the group. Backups taken before the
-// handles were recorded only give this VolumeSnapshot's own handle.
+// stub VGSC whose handles do not match the group. For backups taken before the
+// handles were recorded, the restorer fills them in from the backup volume
+// info. Without either, only this VolumeSnapshot's own handle is known.
 //
 // The handles keep the order the CSI driver returned when it created the group.
 // The CSI spec does not say whether that order matters. The hostpath driver

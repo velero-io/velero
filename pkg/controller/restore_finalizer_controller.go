@@ -573,7 +573,7 @@ func (ctx *finalizerContext) waitForStubGroup(vgsc *volumegroupsnapshotv1.Volume
 	}
 	if len(missing) > 0 {
 		return errors.Errorf("stub VGSC %s does not list snapshot handles %v of its group, so the restored VolumeSnapshots "+
-			"of the group cannot become ready; the backup was likely taken before Velero recorded the group members", vgsc.Name, missing)
+			"of the group cannot become ready; the backup has no record of the group members", vgsc.Name, missing)
 	}
 
 	log.Infof("waiting for the restored VolumeSnapshots of group %s to become ReadyToUse", groupHandle)
