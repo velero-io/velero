@@ -295,7 +295,7 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.WithError(err).Warn("Failed to get keepLatestMaintenanceJobs from ConfigMap, using CLI parameter value")
 		}
 
-		if err := maintenance.DeleteOldJobs(r.Client, *backupRepo, keepJobs, log); err != nil {
+		if err := maintenance.DeleteOldJobs(ctx, r.Client, *backupRepo, keepJobs, log); err != nil {
 			log.WithError(err).Warn("Failed to delete old maintenance jobs")
 		}
 	}
