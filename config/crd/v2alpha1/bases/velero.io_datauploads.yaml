@@ -183,6 +183,13 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              activities:
+                description: Activities contains one or more messages about what have
+                  been done for this DataUpload.
+                items:
+                  type: string
+                nullable: true
+                type: array
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a backup was completed.
@@ -213,7 +220,8 @@ spec:
                 format: int64
                 type: integer
               message:
-                description: Message is a message about the DataUpload's status.
+                description: Message is a message describing the DataUpload when it
+                  reaches to a terminal status.
                 type: string
               node:
                 description: Node is name of the node where the DataUpload is processed.

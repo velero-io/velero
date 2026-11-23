@@ -1,0 +1,58 @@
+---
+title: "Velero Install CLI"
+layout: docs
+---
+
+This document serves as a guide to using the `velero install` CLI command to install `velero` server components into your Kubernetes cluster.
+
+_NOTE_: `velero install` will, by default, use the CLI's version information to determine the version of the server components to deploy. This behavior may be overridden by using the `--image` flag. Refer to [Building Server Component Container Images][1].
+
+## Usage
+
+This section explains some of the basic flags supported by the `velero install` CLI command. For a complete explanation of the flags, please run `velero install --help`
+
+```bash
+velero install \
+    --plugins <PLUGIN_CONTAINER_IMAGE [PLUGIN_CONTAINER_IMAGE]>
+    --provider <YOUR_PROVIDER> \
+    --bucket <YOUR_BUCKET> \
+    --secret-file <PATH_TO_FILE> \
+    --velero-pod-cpu-request <CPU_REQUEST> \
+    --velero-pod-mem-request <MEMORY_REQUEST> \
+    --velero-pod-cpu-limit <CPU_LIMIT> \
+    --velero-pod-mem-limit <MEMORY_LIMIT> \
+    --kubelet-root-dir <PATH_TO_KUBELET_ROOT_DIR> \
+    [--use-node-agent] \
+    [--default-volumes-to-fs-backup] \
+    [--node-agent-pod-cpu-request <CPU_REQUEST>] \
+    [--node-agent-pod-mem-request <MEMORY_REQUEST>] \
+    [--node-agent-pod-cpu-limit <CPU_LIMIT>] \
+    [--node-agent-pod-mem-limit <MEMORY_LIMIT>] \
+    [--maintenance-job-cpu-request <CPU_REQUEST>] \
+    [--maintenance-job-mem-request <MEMORY_REQUEST>] \
+    [--maintenance-job-cpu-limit <CPU_LIMIT>] \
+    [--maintenance-job-mem-limit <MEMORY_LIMIT>] \
+    [--server-priority-class-name <PRIORITY_CLASS_NAME>] \
+    [--node-agent-priority-class-name <PRIORITY_CLASS_NAME>]
+```
+
+The values for the resource requests and limits flags follow the same format as [Kubernetes resource requirements][3]
+For plugin container images, please refer to our [supported providers][2] page.
+
+The `--server-priority-class-name` and `--node-agent-priority-class-name` flags allow you to set priority classes for the Velero server deployment and node agent daemonset respectively. This can help ensure proper scheduling and eviction behavior in resource-constrained environments. Note that you must create the priority class before installing Velero.
+
+## Examples
+
+This section provides examples that serve as a starting point for more customized installations.
+
+```bash
+velero install --provider gcp --plugins velero/velero-plugin-for-gcp:v1.0.0 --bucket mybucket --secret-file ./gcp-service-account.json
+
+velero install --provider aws --plugins velero/velero-plugin-for-aws:v1.0.0 --bucket backups --secret-file ./aws-iam-creds --backup-location-config region=us-east-2 --snapshot-location-config region=us-east-2 --use-node-agent
+
+velero install --provider azure --plugins velero/velero-plugin-for-microsoft-azure:v1.0.0 --bucket $BLOB_CONTAINER --secret-file ./credentials-velero --backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_ID[,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID] --snapshot-location-config apiTimeout=<YOUR_TIMEOUT>[,resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID]
+```
+
+[1]: build-from-source.md#making-images-and-updating-velero
+[2]: supported-providers.md
+[3]: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/

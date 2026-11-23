@@ -29,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	common "github.com/vmware-tanzu/velero/test/util/common"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	common "github.com/velero-io/velero/test/util/common"
 )
 
 const (

@@ -1,1 +1,0 @@
-Refactor block uploader thread module for better thread safety and code reading

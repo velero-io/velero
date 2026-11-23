@@ -19,7 +19,7 @@ package test
 import (
 	"testing"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/stretchr/testify/require"
@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8sfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 )
 
 func NewFakeControllerRuntimeClientBuilder(t *testing.T) *k8sfake.ClientBuilder {
@@ -45,7 +45,7 @@ func NewFakeControllerRuntimeClientBuilder(t *testing.T) *k8sfake.ClientBuilder 
 	require.NoError(t, appsv1api.AddToScheme(scheme))
 	require.NoError(t, snapshotv1api.AddToScheme(scheme))
 	require.NoError(t, storagev1api.AddToScheme(scheme))
-	require.NoError(t, volumegroupsnapshotv1beta2.AddToScheme(scheme))
+	require.NoError(t, volumegroupsnapshotv1.AddToScheme(scheme))
 
 	return k8sfake.NewClientBuilder().WithScheme(scheme)
 }
@@ -61,7 +61,7 @@ func NewFakeControllerRuntimeClient(t *testing.T, initObjs ...runtime.Object) cl
 	require.NoError(t, snapshotv1api.AddToScheme(scheme))
 	require.NoError(t, storagev1api.AddToScheme(scheme))
 	require.NoError(t, batchv1api.AddToScheme(scheme))
-	require.NoError(t, volumegroupsnapshotv1beta2.AddToScheme(scheme))
+	require.NoError(t, volumegroupsnapshotv1.AddToScheme(scheme))
 
 	return k8sfake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjs...).Build()
 }

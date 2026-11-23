@@ -13,13 +13,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
-	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
-	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
+	podvolumeutil "github.com/velero-io/velero/pkg/util/podvolume"
+	vhutil "github.com/velero-io/velero/pkg/util/volumehelper"
 )
 
 var errGetPVForPVC = errors.New("fail to get PV for PVC")
@@ -119,7 +119,17 @@ func NewVolumeHelperImplWithCache(
 	pvcPodCache *podvolumeutil.PVCPodCache,
 	pvcMustInclusionTracker vhutil.PVCMustInclusionTracker,
 ) (vhutil.VolumeHelper, error) {
-	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackup(backup, client, logger)
+	var globalCMName string
+	if backup.Annotations != nil {
+		globalCMName = backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+	resourcePolicies, err := resourcepolicies.GetResourcePoliciesFromBackupWithGlobal(
+		backup,
+		client,
+		globalCMName,
+		backup.Namespace,
+		logger,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get volume policies from backup")
 	}

@@ -17,7 +17,7 @@ limitations under the License.
 package v1
 
 import (
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // RestoreItemAction is an actor that performs an operation on an individual item being restored.

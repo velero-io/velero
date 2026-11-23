@@ -19,7 +19,7 @@ package common
 import (
 	"google.golang.org/grpc/status"
 
-	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
+	proto "github.com/velero-io/velero/pkg/plugin/generated"
 )
 
 // FromGRPCError takes a gRPC status error, extracts a stack trace

@@ -34,13 +34,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/util"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/csi"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/csi"
+	"github.com/velero-io/velero/pkg/util/datamover"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 // BackupPVCSecretLabel is the label applied to secrets and configmaps copied to the
@@ -211,19 +211,23 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 
 	curLog.WithField("vsc name", vsc.Name).WithField("retained", (retained != nil)).Info("Finished to retain VSC")
 
-	err = csi.EnsureDeleteVS(ctx, e.csiSnapshotClient, volumeSnapshot.Name, volumeSnapshot.Namespace, csiExposeParam.OperationTimeout)
-	if err != nil {
-		return errors.Wrap(err, "error to delete volume snapshot")
+	if volumeSnapshot.Status != nil && volumeSnapshot.Status.VolumeGroupSnapshotName != nil {
+		curLog.Warn("Deferring deletion of VGS member VolumeSnapshot and VolumeSnapshotContent until VGS cleanup")
+	} else {
+		err = csi.EnsureDeleteVS(ctx, e.csiSnapshotClient, volumeSnapshot.Name, volumeSnapshot.Namespace, csiExposeParam.OperationTimeout)
+		if err != nil {
+			return errors.Wrap(err, "error to delete volume snapshot")
+		}
+
+		curLog.WithField("vs name", volumeSnapshot.Name).Infof("VS is deleted in namespace %s", volumeSnapshot.Namespace)
+
+		err = csi.EnsureDeleteVSC(ctx, e.csiSnapshotClient, vsc.Name, csiExposeParam.OperationTimeout)
+		if err != nil {
+			return errors.Wrap(err, "error to delete volume snapshot content")
+		}
+
+		curLog.WithField("vsc name", vsc.Name).Infof("VSC is deleted")
 	}
-
-	curLog.WithField("vs name", volumeSnapshot.Name).Infof("VS is deleted in namespace %s", volumeSnapshot.Namespace)
-
-	err = csi.EnsureDeleteVSC(ctx, e.csiSnapshotClient, vsc.Name, csiExposeParam.OperationTimeout)
-	if err != nil {
-		return errors.Wrap(err, "error to delete volume snapshot content")
-	}
-
-	curLog.WithField("vsc name", vsc.Name).Infof("VSC is deleted")
 
 	var volumeSize resource.Quantity
 	if volumeSnapshot.Status.RestoreSize != nil && !volumeSnapshot.Status.RestoreSize.IsZero() {
@@ -496,7 +500,6 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	backupPodName := ownerObject.Name
 	backupPVCName := ownerObject.Name
 	backupVSName := ownerObject.Name
-	backupVSCName := ownerObject.Name
 
 	kube.DeletePodIfAny(ctx, e.kubeClient.CoreV1(), backupPodName, ownerObject.Namespace, e.log)
 	kube.DeletePVAndPVCIfAny(ctx, e.kubeClient.CoreV1(), backupPVCName, ownerObject.Namespace, cleanUpTimeout, e.log)
@@ -508,13 +511,6 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
-
-	// The backup VSC is created by Velero as an internal handle to the source
-	// snapshot. Deleting the backup VS above only cascades to it when its
-	// deletion policy is Delete, so remove it explicitly to avoid leaking the
-	// object under a Retain policy. Deleting a Retain VSC drops only the API
-	// object and leaves the underlying snapshot intact.
-	csi.DeleteVolumeSnapshotContentIfAny(ctx, e.csiSnapshotClient, backupVSCName, e.log)
 }
 
 func getVolumeModeByAccessMode(accessMode string, dataMover string) (corev1api.PersistentVolumeMode, error) {
@@ -579,21 +575,7 @@ func (e *csiSnapshotExposer) createBackupVSC(ctx context.Context, ownerObject co
 			Source: snapshotv1api.VolumeSnapshotContentSource{
 				SnapshotHandle: snapshotVSC.Status.SnapshotHandle,
 			},
-			// The backup VSC is statically provisioned against the same
-			// snapshot handle as the source VSC, so both objects refer to one
-			// physical snapshot. Inherit the source's deletion policy instead
-			// of forcing Delete, otherwise a user who configured Retain on the
-			// VolumeSnapshotClass still loses the snapshot when the backup VSC
-			// is cleaned up.
-			//
-			// For Case 2 storages per the design (design/block-data-mover/block-data-mover.md,
-			// e.g. Ceph RBD), inheriting Retain is not just an option but a requirement for
-			// incrementals to work at all: rbd snap diff needs the base and target snapshots
-			// in the same clone chain, so Delete destroys the base as soon as this backup
-			// completes. The next incremental's delta query then fails and degrades to an
-			// allocated-blocks backup (see the CBT tier ladder) or, without that fix, a full
-			// whole-device transfer.
-			DeletionPolicy:          snapshotVSC.Spec.DeletionPolicy,
+			DeletionPolicy:          snapshotv1api.VolumeSnapshotContentDelete,
 			Driver:                  snapshotVSC.Spec.Driver,
 			VolumeSnapshotClassName: snapshotVSC.Spec.VolumeSnapshotClassName,
 		},

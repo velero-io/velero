@@ -20,7 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/kube-aggregator/pkg/controllers/autoregister"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 type APIServiceAction struct {

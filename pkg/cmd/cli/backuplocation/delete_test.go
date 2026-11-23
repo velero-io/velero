@@ -27,12 +27,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	"github.com/velero-io/velero/pkg/cmd/cli"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 )
 
 func TestNewDeleteCommand(t *testing.T) {

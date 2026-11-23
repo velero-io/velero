@@ -22,7 +22,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // RestoreBuilder builds Restore objects.
@@ -105,6 +105,12 @@ func (b *RestoreBuilder) ExistingResourcePolicy(policy string) *RestoreBuilder {
 // ExistingVolumeDataPolicy sets the Restore's volume data policy.
 func (b *RestoreBuilder) ExistingVolumeDataPolicy(policy string) *RestoreBuilder {
 	b.object.Spec.ExistingVolumeDataPolicy = velerov1api.VolumeDataPolicyType(policy)
+	return b
+}
+
+// AllowExistingVolumeMismatch sets the Restore's allowExistingVolumeMismatch flag.
+func (b *RestoreBuilder) AllowExistingVolumeMismatch(val bool) *RestoreBuilder {
+	b.object.Spec.AllowExistingVolumeMismatch = &val
 	return b
 }
 

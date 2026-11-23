@@ -19,10 +19,10 @@ package v1
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	riav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v1"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	riav1 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v1"
 )
 
 // AdaptedRestoreItemAction is a restore item action adapted to the v1 RestoreItemAction API

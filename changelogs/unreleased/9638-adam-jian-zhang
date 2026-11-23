@@ -1,1 +1,0 @@
-Fix issue #9636, fix configmap lookup in non-default namespaces

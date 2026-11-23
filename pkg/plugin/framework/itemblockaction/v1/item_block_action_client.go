@@ -26,10 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	protoibav1 "github.com/vmware-tanzu/velero/pkg/plugin/generated/itemblockaction/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	protoibav1 "github.com/velero-io/velero/pkg/plugin/generated/itemblockaction/v1"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // NewItemBlockActionPlugin constructs a ItemBlockActionPlugin.

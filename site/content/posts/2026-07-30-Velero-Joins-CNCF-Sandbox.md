@@ -59,7 +59,7 @@ Joining the CNCF Sandbox is the beginning of a new chapter for Velero. Here is w
 
 We welcome contributions of all kinds -- code, documentation, bug reports, feature requests, and feedback.
 
-- **Slack**: Join [#velero-users](https://kubernetes.slack.com/messages/velero) and [#velero-dev](https://kubernetes.slack.com/messages/velero-dev) on Kubernetes Slack
+- **Slack**: Join [#velero-users](https://kubernetes.slack.com/messages/velero-users) and [#velero-dev](https://kubernetes.slack.com/messages/velero-dev) on Kubernetes Slack
 - **GitHub**: [github.com/velero-io/velero](https://github.com/velero-io/velero)
 - **Community Meetings**: We hold bi-weekly community meetings alternating between US/Europe and US/Asia-friendly time zones. See the [community page](https://velero.io/community/) for details.
 - **LinkedIn**: Follow us at [Project Velero](https://www.linkedin.com/company/project-velero)

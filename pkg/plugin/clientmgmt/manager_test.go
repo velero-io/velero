@@ -26,17 +26,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/internal/restartabletest"
-	biav1cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/backupitemaction/v1"
-	biav2cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/backupitemaction/v2"
-	ibav1cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/itemblockaction/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	riav1cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/restoreitemaction/v1"
-	riav2cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/restoreitemaction/v2"
-	vsv1cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/volumesnapshotter/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/internal/restartabletest"
+	biav1cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/backupitemaction/v1"
+	biav2cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/backupitemaction/v2"
+	ibav1cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/itemblockaction/v1"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	riav1cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/restoreitemaction/v1"
+	riav2cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/restoreitemaction/v2"
+	vsv1cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 type mockRegistry struct {

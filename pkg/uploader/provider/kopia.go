@@ -26,14 +26,14 @@ import (
 	"github.com/kopia/kopia/snapshot/upload"
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/uploader/kopia"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/uploader/kopia"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	repokeys "github.com/vmware-tanzu/velero/pkg/repository/keys"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/service"
+	"github.com/velero-io/velero/internal/credentials"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	repokeys "github.com/velero-io/velero/pkg/repository/keys"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo/service"
 )
 
 var kopiaBackupFunc = kopia.Backup
@@ -175,10 +175,10 @@ func (kp *kopiaProvider) RunBackup(
 			log.Infof("Kopia backup failed with %v and get empty snapshot ID", err)
 		}
 
-		if kpUploader.IsCanceled() {
-			log.Warn("Kopia backup is canceled")
+		if ctx.Err() != nil {
 			return snapshotID, false, 0, 0, 0, snapshotInfo.Fallback, ErrorCanceled
 		}
+
 		return snapshotID, false, 0, 0, 0, snapshotInfo.Fallback, errors.Wrapf(err, "Failed to run kopia backup")
 	}
 
@@ -198,7 +198,7 @@ func (kp *kopiaProvider) GetPassword(param any) (string, error) {
 	if kp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
-	rawPass, err := kp.credGetter.FromSecret.Get(repokeys.RepoKeySelector())
+	rawPass, err := kp.credGetter.FromSecret.Get(context.TODO(), repokeys.RepoKeySelector())
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

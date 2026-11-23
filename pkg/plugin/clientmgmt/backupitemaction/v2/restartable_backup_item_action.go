@@ -20,12 +20,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	biav1cli "github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/backupitemaction/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	biav1cli "github.com/velero-io/velero/pkg/plugin/clientmgmt/backupitemaction/v1"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
 )
 
 // AdaptedBackupItemAction is a v1 BackupItemAction adapted to implement the v2 API

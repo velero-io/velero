@@ -5,7 +5,7 @@ layout: docs
 
 This guide explains how to use Velero's **fine-grained backup filters**: per-namespace, per-kind rules with independent label selectors and resource name patterns. Configuration lives in the same **ResourcePolicy ConfigMap** you may already use for volume policies.
 
-For architecture and pipeline details, see the [design document](https://github.com/velero-io/velero/blob/main/design/backup-filter-enhancement/fine-grained-backup-filters-design.md).
+For architecture and pipeline details, see the [design document](https://github.com/velero-io/velero/blob/main/design/Implemented/backup-filter-enhancement/fine-grained-backup-filters-design.md).
 
 ---
 
@@ -847,10 +847,10 @@ Velero validates the ResourcePolicy when a backup starts. Common errors:
 
 Restore is unchanged: it restores whatever is in the backup archive. Resources excluded by fine-grained filters are simply absent. Use `Restore.spec.includedNamespaces` (and existing restore filters) to limit what you restore from a partial backup.
 
-Fine-grained resource filtering is also available on the restore path using `namespacedFilterPolicies` and `clusterScopedFilterPolicy`. For details on the restore-side policies, see the [Fine-grained restore filters design](https://github.com/velero-io/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md).
+Fine-grained resource filtering is also available on the restore path using `namespacedFilterPolicies` and `clusterScopedFilterPolicy`. For details on the restore-side policies, see the [Fine-grained restore filters design](https://github.com/velero-io/velero/blob/main/design/Implemented/restore-filter-enhancement/fine-grained-restore-filters-design.md).
 
 ---
 
 ## Related links
 
-- [Fine-grained backup filters design](https://github.com/velero-io/velero/blob/main/design/backup-filter-enhancement/fine-grained-backup-filters-design.md)
+- [Fine-grained backup filters design](https://github.com/velero-io/velero/blob/main/design/Implemented/backup-filter-enhancement/fine-grained-backup-filters-design.md)

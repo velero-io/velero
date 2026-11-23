@@ -33,7 +33,7 @@ The following is an overview of Velero's restore process that starts after you r
 
 1. The `RestoreController` then extracts the tarball of backup cluster resources to the /tmp folder and performs some pre-processing on the resources, including:
 
-    * Sorting the resources to help Velero decide the [restore order](#resource-restore-order) to use.
+    * Sorting the resources to help Velero decide the [restore order](#restore-order) to use.
 
     * Attempting to discover the resources by their Kubernetes [Group Version Resource (GVR)](https://kubernetes.io/docs/reference/using-api/api-concepts/). If a resource is not discoverable, Velero will exclude it from the restore. See more about how [Velero backs up API versions](#backed-up-api-versions).
 
@@ -56,7 +56,7 @@ The following is an overview of Velero's restore process that starts after you r
 
     * The `RestoreController` adds a `velero.io/backup-name` label with the backup name and a `velero.io/restore-name` with the restore name to the resource. This can help you easily identify restored resources and which backup they were restored from.
 
-1. The `RestoreController` creates the resource object on the target cluster. If the resource is a PV then the `RestoreController` will restore the PV data from the [durable snapshot](#durable-snapshot-pv-restore), [File System Backup](#file-system-backup-pv-restore), or [CSI snapshot](#csi-pv-restore) depending on how the PV was backed up.
+1. The `RestoreController` creates the resource object on the target cluster. If the resource is a PV then the `RestoreController` will restore the PV data from the [durable snapshot](#snapshot-pv-restore), [File System Backup](#file-system-backup-pv-restore), or [CSI snapshot](#csi-pv-restore) depending on how the PV was backed up.
 
     If the resource already exists in the target cluster, which is determined by the Kubernetes API during resource creation, the `RestoreController` will skip the resource. The only [exception](#restore-existing-resource-policy) are Service Accounts, which Velero will attempt to merge differences between the backed up ServiceAccount into the ServiceAccount on the target cluster. You can [change the default existing resource restore policy](#restore-existing-resource-policy) to update resources instead of skipping them using the `--existing-resource-policy`.
 
@@ -263,8 +263,14 @@ are `none` (default) and `update`. If you choose to update existing resources du
 You can also configure the existing resource policy in a [Restore](api-types/restore.md) object.
 
 **NOTE:** 
-* Update of a resource only applies to the Kubernetes resource data such as its spec. It may not work as expected for certain resource types such as PVCs and Pods. In case of PVCs for example, data in the PV is not restored or overwritten in any way.
+* Update of a resource only applies to the Kubernetes resource data such as its spec. It may not work as expected for certain resource types such as PVCs and Pods. For PVCs, this policy alone does not restore or overwrite data in the PV. Use the separate [existing volume data policy](volume-data-inplace-restore.md#choose-a-restore-policy) to restore data into an existing volume.
 * `update` existing resource policy works in a best-effort way, which means when restore's `--existing-resource-policy` is set to `update`, Velero will try to update the resource if the resource already exists, if the update fails, Velero will fall back to the default non-destructive way in the restore, and just logs a warning without failing the restore.
+
+## Restore existing volume data policy
+
+Use `--existing-volume-data-policy=full` or `--existing-volume-data-policy=incremental` to restore data into existing, bound PVCs. This policy is independent of `--existing-resource-policy`. Before starting, remove consuming Pods and prevent their controllers from recreating them.
+
+See [Volume data in-place restore](volume-data-inplace-restore.md) for supported backup methods, workload preparation, extra-file deletion, namespace mapping requirements, and failure recovery.
 
 ## Restore "status" field of objects
 
@@ -335,10 +341,16 @@ velero restore create <RESTORE_NAME> --from-backup <BACKUP_NAME> --write-sparse-
 ``` 
 
 ## Parallel Files Download
-If using fs-restore or CSI snapshot data movements, it's possible to configure one option for parallel file downloads during the restore by Kopia uploader using the command below:
+
+`--parallel-files-download` controls how many files are processed concurrently within each volume restore using Kopia uploader. It applies to file-system restore and CSI snapshot data movement using the file system data mover. It does not control block data mover restores or the number of concurrent data mover pods.
+
+When omitted or set to `0`, it defaults to `runtime.GOMAXPROCS(0)` in the data mover process. The Go runtime can take the pod CPU limit into account when selecting this value. Set a positive integer to override the default:
+
 ```bash
-velero restore create <RESTORE_NAME> --from-backup <BACKUP_NAME> --parallel-files-download <NUM> --wait
-``` 
+velero restore create <RESTORE_NAME> --from-backup <BACKUP_NAME> --parallel-files-download=8 --wait
+```
+
+Higher concurrency can improve throughput when CPU, disk, and backup storage can keep up, but can also increase memory usage. A larger value does not always improve throughput.  
 
 ## Removing a Restore object
 

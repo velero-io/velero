@@ -19,8 +19,8 @@ package builder
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // PodVolumeBackupBuilder builds PodVolumeBackup objects

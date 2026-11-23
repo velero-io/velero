@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	storagemocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
+	storagemocks "github.com/velero-io/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
 )
 
 func TestOptionalHaveBool(t *testing.T) {

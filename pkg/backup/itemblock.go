@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/vmware-tanzu/velero/pkg/itemblock"
+	"github.com/velero-io/velero/pkg/itemblock"
 )
 
 type BackupItemBlock struct {

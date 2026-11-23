@@ -1,0 +1,1 @@
+Fix issue #10835, check cancel from context instead of kopia uploader so as to notify cancellation for timeout and user trigger only

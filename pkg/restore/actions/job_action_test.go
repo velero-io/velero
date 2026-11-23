@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestJobActionExecute(t *testing.T) {

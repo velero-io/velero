@@ -183,7 +183,7 @@ jobs:
       - name: Create backport pull requests
         id: backport
         # Pin to commit SHA: workflow has contents/pull-requests write.
-        uses: korthout/backport-action@6b65649031ac6d18ffdfd0c0820e9436f3fde22b # v4.6.1
+        uses: korthout/backport-action@ad272ff24e4a8593bf18a951a154ae6af93b26b8 # v5.0.0
         with:
           # Labels like `backport release-1.17` select the target branch.
           label_pattern: '^backport ([^ ]+)$'

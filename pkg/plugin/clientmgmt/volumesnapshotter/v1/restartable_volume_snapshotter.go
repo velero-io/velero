@@ -20,9 +20,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
 )
 
 // AdaptedVolumeSnapshotter is a volume snapshotter adapted to the v1 VolumeSnapshotter API

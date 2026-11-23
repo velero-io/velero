@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/features"
 )
 
 func TestCSIFeatureNotEnabledAndPluginIsFromCSI(t *testing.T) {

@@ -38,8 +38,8 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	"github.com/vmware-tanzu/velero/test"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/test"
 )
 
 type AWSStorage string

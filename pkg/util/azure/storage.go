@@ -162,7 +162,7 @@ func GetStorageAccountCredentials(bslCfg map[string]string, creds map[string]str
 
 // getStorageAccountURI returns the storage account URI by the following order:
 // 1. Return the storage account URI directly if it is specified in BSL config
-// 2. Try to call Azure API to get the storage account URI if possible(Background: https://github.com/vmware-tanzu/velero/issues/6163)
+// 2. Try to call Azure API to get the storage account URI if possible(Background: https://github.com/velero-io/velero/issues/6163)
 // 3. Fall back to return the default URI
 func getStorageAccountURI(log logrus.FieldLogger, bslCfg map[string]string, creds map[string]string) (string, error) {
 	// if the URI is specified in the BSL, return it directly

@@ -20,8 +20,8 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 func RelatedItemsForPVC(pvc *corev1api.PersistentVolumeClaim, log logrus.FieldLogger) []velero.ResourceIdentifier {

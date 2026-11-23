@@ -1,6 +1,6 @@
 syntax = "proto3";
 package v1;
-option go_package = "github.com/vmware-tanzu/velero/pkg/plugin/generated/itemblockaction/v1";
+option go_package = "github.com/velero-io/velero/pkg/plugin/generated/itemblockaction/v1";
 
 import "Shared.proto";
 

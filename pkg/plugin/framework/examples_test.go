@@ -20,7 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 func ExampleNewServer_volumeSnapshotter() {

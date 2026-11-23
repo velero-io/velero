@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=$TARGETPLATFORM golang:1.26-trixie
+FROM --platform=$TARGETPLATFORM golang:1.27-trixie
 
 ARG GOPROXY
 ARG PROTOC_GEN_GO_VERSION
@@ -24,7 +24,7 @@ ENV GOPROXY=${GOPROXY}
 
 # kubebuilder test bundle is separated from kubebuilder. Need to setup it for CI test.
 # Using setup-envtest to download envtest binaries
-RUN go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260305094418-8122a6266696 && \
+RUN go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 && \
     mkdir -p /usr/local/kubebuilder/bin && \
     ENVTEST_ASSETS_DIR=$(setup-envtest use 1.33.0 --bin-dir /usr/local/kubebuilder/bin -p path) && \
     cp -r ${ENVTEST_ASSETS_DIR}/* /usr/local/kubebuilder/bin/
@@ -115,7 +115,7 @@ RUN set -eux; \
 # get golangci-lint
 # Use "go install" so the download goes through GOPROXY instead of the GitHub
 # release API/CDN, which has been returning intermittent/persistent HTTP 504s.
-RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
 # Fix the "dubious ownership" issue from git when running goreleaser.sh
 RUN echo "[safe] \n\t directory = *" > /.gitconfig

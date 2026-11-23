@@ -67,3 +67,43 @@ func TestIsVolumeDataInplaceRestore(t *testing.T) {
 		})
 	}
 }
+
+func TestAllowExistingVolumeMismatch(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name     string
+		flag     *bool
+		expected bool
+	}{
+		{
+			name:     "nil flag",
+			flag:     nil,
+			expected: false,
+		},
+		{
+			name:     "false flag",
+			flag:     boolPtr(false),
+			expected: false,
+		},
+		{
+			name:     "true flag",
+			flag:     boolPtr(true),
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := &Restore{
+				Spec: RestoreSpec{
+					AllowExistingVolumeMismatch: tc.flag,
+				},
+			}
+			actual := restore.AllowExistingVolumeMismatch()
+			if actual != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, actual)
+			}
+		})
+	}
+}

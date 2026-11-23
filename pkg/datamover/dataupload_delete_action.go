@@ -12,12 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	repotypes "github.com/vmware-tanzu/velero/pkg/repository/types"
-	datamoverutil "github.com/vmware-tanzu/velero/pkg/util/datamover"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	datamoverutil "github.com/velero-io/velero/pkg/util/datamover"
 )
 
 type DataUploadDeleteAction struct {

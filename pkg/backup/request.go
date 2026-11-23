@@ -22,13 +22,13 @@ import (
 	"github.com/gobwas/glob"
 	"k8s.io/apimachinery/pkg/labels"
 
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/util/collections"
 )
 
 type itemKey struct {

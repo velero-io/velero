@@ -34,10 +34,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/metrics"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 // Test reconcile function of schedule controller. Pause is not covered as event filter will not allow it through
@@ -489,7 +489,7 @@ func TestParseCronScheduleLogsOriginalError(t *testing.T) {
 }
 
 func TestParseCronSchedule(t *testing.T) {
-	// From https://github.com/vmware-tanzu/velero/issues/30, where we originally were using cron.Parse(),
+	// From https://github.com/velero-io/velero/issues/30, where we originally were using cron.Parse(),
 	// which treats the first field as seconds, and not minutes. We want to use cron.ParseStandard()
 	// instead, which has the first field as minutes.
 

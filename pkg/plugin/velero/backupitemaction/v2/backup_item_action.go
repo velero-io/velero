@@ -23,8 +23,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // BackupItemAction is an actor that performs an operation on an individual item being backed up.

@@ -1,1 +1,0 @@
-Avoid duplicated InitContainer names generated in velero install CLI.

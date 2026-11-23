@@ -31,11 +31,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	velerodiscovery "github.com/vmware-tanzu/velero/pkg/discovery"
+	velerodiscovery "github.com/velero-io/velero/pkg/discovery"
 
-	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	v1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestRemapCRDVersionAction(t *testing.T) {

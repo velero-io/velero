@@ -19,6 +19,8 @@ package inplace
 import (
 	"testing"
 
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
@@ -27,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/restorehelper"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func podUsingPVC(name, pvcName string, phase corev1api.PodPhase, terminating bool) *corev1api.Pod {
@@ -242,7 +244,9 @@ func TestCheckPVCBoundToBackedUpVolume(t *testing.T) {
 		existingPV     *corev1api.PersistentVolume
 		backedUpPVName string
 		backedUpHandle string
+		allowMismatch  bool
 		expectError    string
+		expectWarn     string
 	}{
 		{
 			name:           "nil existing PVC returns error",
@@ -272,6 +276,15 @@ func TestCheckPVCBoundToBackedUpVolume(t *testing.T) {
 			expectError:    "is bound to volume vol-other (PV pv-1), but was bound to volume vol-1 (PV pv-1) at backup time",
 		},
 		{
+			name:           "different volume handle under the same PV name with allowMismatch logs warning and passes",
+			existingPVC:    pvc("default", "pv-1", corev1api.ClaimBound),
+			existingPV:     csiPV("pv-1", "vol-other"),
+			backedUpPVName: "pv-1",
+			backedUpHandle: "vol-1",
+			allowMismatch:  true,
+			expectWarn:     "is bound to volume vol-other (PV pv-1), but was bound to volume vol-1 (PV pv-1) at backup time",
+		},
+		{
 			name:           "bound PV not found, check fails",
 			existingPVC:    pvc("default", "pv-gone", corev1api.ClaimBound),
 			backedUpPVName: "pv-1",
@@ -290,6 +303,14 @@ func TestCheckPVCBoundToBackedUpVolume(t *testing.T) {
 			existingPV:     localPV("pv-other"),
 			backedUpPVName: "pv-1",
 			expectError:    "is bound to PV pv-other, but was bound to PV pv-1 at backup time",
+		},
+		{
+			name:           "non-CSI volume with a different PV name with allowMismatch logs warning and passes",
+			existingPVC:    pvc("default", "pv-other", corev1api.ClaimBound),
+			existingPV:     localPV("pv-other"),
+			backedUpPVName: "pv-1",
+			allowMismatch:  true,
+			expectWarn:     "is bound to PV pv-other, but was bound to PV pv-1 at backup time",
 		},
 		{
 			name:           "backup without volume handle falls back to the PV name",
@@ -314,6 +335,14 @@ func TestCheckPVCBoundToBackedUpVolume(t *testing.T) {
 			expectError:    "is not bound (phase Pending)",
 		},
 		{
+			name:           "PVC not bound with allowMismatch, check still fails",
+			existingPVC:    pvc("default", "", corev1api.ClaimPending),
+			backedUpPVName: "pv-1",
+			backedUpHandle: "vol-1",
+			allowMismatch:  true,
+			expectError:    "is not bound (phase Pending)",
+		},
+		{
 			name:           "different volume in a different namespace, check passes",
 			existingPVC:    pvc("mapped-ns", "pv-other", corev1api.ClaimBound),
 			existingPV:     csiPV("pv-other", "vol-other"),
@@ -334,7 +363,15 @@ func TestCheckPVCBoundToBackedUpVolume(t *testing.T) {
 				objs = append(objs, tc.existingPV)
 			}
 			cli := velerotest.NewFakeControllerRuntimeClient(t, objs...)
-			err := CheckPVCBoundToBackedUpVolume(t.Context(), cli, tc.existingPVC, tc.backedUpPVName, tc.backedUpHandle, "default")
+			logger, hook := logrustest.NewNullLogger()
+			err := CheckPVCBoundToBackedUpVolume(t.Context(), cli, tc.existingPVC, tc.backedUpPVName, tc.backedUpHandle, "default", tc.allowMismatch, logger)
+			if tc.expectWarn != "" {
+				require.NotEmpty(t, hook.Entries)
+				assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+				assert.Contains(t, hook.LastEntry().Message, tc.expectWarn)
+			} else {
+				assert.Empty(t, hook.Entries)
+			}
 			if tc.expectError == "" {
 				require.NoError(t, err)
 				return

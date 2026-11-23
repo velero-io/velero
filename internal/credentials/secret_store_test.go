@@ -17,6 +17,7 @@ limitations under the License.
 package credentials
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -85,7 +86,7 @@ func TestNamespacedSecretStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			val, err := store.Get(tc.selector)
+			val, err := store.Get(context.Background(), tc.selector)
 			if tc.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

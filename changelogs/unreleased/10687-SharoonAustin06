@@ -1,0 +1,1 @@
+Increment backup/restore failure metrics when in-progress CRs are marked failed during server startup cleanup

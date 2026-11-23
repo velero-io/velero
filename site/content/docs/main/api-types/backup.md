@@ -129,8 +129,12 @@ spec:
   datamover: velero
   # UploaderConfig specifies the configuration for the uploader
   uploaderConfig:
-      # ParallelFilesUpload is the number of files parallel uploads to perform when using the uploader.
+      # Concurrent file uploads per volume for the Kopia filesystem uploader.
+      # Omitted or 0 uses GOMAXPROCS in the data mover process.
       parallelFilesUpload: 10
+      # Concurrent 1 MiB block writes per volume for Velero block uploader.
+      # Omitted or 0 uses GOMAXPROCS in the data mover process.
+      parallelBlocksUpload: 10
   # Actions to perform at different times during a backup. The only hook supported is
   # executing a command in a container in a pod using the pod exec API. Optional.
   hooks:

@@ -55,6 +55,50 @@ spec:
         - --node-agent-configmap=<configMap name>
 ```
 
+### Memory Usage and Upload Concurrency
+
+CPU, memory and upload concurrency are separate settings. `podResources` sets the CPU and memory for data mover pods. [`--parallel-files-upload`][5] and [`--parallel-blocks-upload`][6] set how many uploads run concurrently within each volume backup, for the file system data mover and the block data mover respectively. Set them per backup or schedule.
+
+Uploads are asynchronous: data remains in memory until it has been written to the backup repository. So memory usage of a data mover pod grows with upload concurrency. If the concurrency is not set, it defaults to `GOMAXPROCS` of the data mover process, which the Go runtime derives from the CPU limit of the pod if one is set (see [Container-aware GOMAXPROCS][7]), or otherwise from the number of CPUs on the node. Since data mover pods have no CPU limit by default, nodes with many CPUs get a high default concurrency and high memory usage.
+
+Velero does not cap the concurrency on purpose: the best value depends on where the bottleneck of the data path is, which differs between environments. Throughput is limited by the slowest of: reading the source volume, compressing and hashing the data (CPU), and writing to the backup storage (network bandwidth and the storage itself).
+
+Raising the concurrency increases the throughput when the data mover pod has spare CPU, memory and network bandwidth, and each upload spends time waiting rather than working, for example:
+- backup storage with high bandwidth but high latency per request, such as remote object storage;
+- a fast network to the backup storage that a few concurrent uploads can't fill.
+
+Lowering the concurrency reduces memory and CPU usage without reducing the throughput when the bottleneck is elsewhere, for example:
+- the network bandwidth to the backup storage, or the backup storage itself, is already saturated;
+- reading the source volume is the slowest step;
+- the concurrency is already higher than the number of CPUs the pod can use, since compressing and hashing are CPU bound.
+
+In those cases extra concurrency only keeps more data in memory. With limited memory, especially on nodes with many CPUs, lower the concurrency to avoid the data mover pod being OOM killed.
+
+If you set `memoryLimit`, also set the upload concurrency for the backup or schedule instead of relying on the default. Changing `cpuLimit` also changes the default concurrency, but it is not the intended way to control memory usage.
+
+For the block data mover, memory usage also grows with the provisioned size of the volume, so large volumes need more memory at any concurrency.
+
+The following results are from one environment and are only an example:
+- 96-CPU nodes, so the default concurrency is 96.
+- Backup storage: in-cluster S3-compatible object storage whose measured write bandwidth is about 130 MiB/s (limited by its disks; the network between nodes measured 24 Gbit/s, so the network is not the limit).
+- Incremental backup with the block data mover of a 100 GiB block volume with 2 GiB of data to upload, no memory limit on the data mover pod, median of three runs.
+
+| `--parallel-blocks-upload` | Throughput | Peak memory |
+|---|---|---|
+| 1 | 70 MiB/s | 315 MiB |
+| 2 | 131 MiB/s | 330 MiB |
+| 4 | 131 MiB/s | 437 MiB |
+| 8 | 130 MiB/s | 639 MiB |
+| 16 | 131 MiB/s | 800 MiB |
+| 32 | 131 MiB/s | 981 MiB |
+| not set (96) | 131 MiB/s | 1017 MiB |
+
+With about 130 MiB/s of bandwidth to the backup storage, throughput stops improving above a concurrency of 2, since one upload stream reaches about 70 MiB/s and two already fill the bandwidth. The default of 96 on this node gives the same throughput but uses about 1 GiB of memory, three times as much as 2 (330 MiB) and more than twice as much as 4 (437 MiB). With `memoryLimit: 1Gi`, a backup at the default concurrency was OOM killed when 4 GiB had changed. In this environment, set `--parallel-blocks-upload` to 2, or 4 for some headroom: the same speed with less than half the memory.
+
+To pick a starting value for your environment, divide the bandwidth to your backup storage by the throughput of a single upload stream (a backup with `--parallel-blocks-upload 1`), round up and add some headroom. With more bandwidth, for example remote object storage with high throughput but high latency per request, the value is higher and a higher concurrency increases the throughput, at the cost of more memory.
+
+For restores, [`--parallel-files-download`][8] sets the concurrency of the file system data mover in the same way. The block data mover has no restore concurrency setting.
+
 ### Priority Class
 
 Data mover pods will use the priorityClassName configured in the node-agent configmap. The priorityClassName for data mover pods is configured through the node-agent configmap (specified via the `--node-agent-configmap` flag), while the node-agent daemonset itself uses the priority class set by the `--node-agent-priority-class-name` flag during Velero installation.
@@ -173,3 +217,7 @@ The configurations work for DataUpload, DataDownload, PodVolumeBackup, and PodVo
 [2]: file-system-backup.md
 [3]: https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/
 [4]: performance-guidance.md
+[5]: backup-reference.md#parallel-files-upload
+[6]: backup-reference.md#parallel-blocks-upload
+[7]: https://tip.golang.org/doc/go1.25#container-aware-gomaxprocs:~:text=Runtime%C2%B6-,Container%2Daware%20GOMAXPROCS,-%C2%B6
+[8]: restore-reference.md#parallel-files-download

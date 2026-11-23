@@ -8,7 +8,7 @@ import (
 	"context"
 
 	mock "github.com/stretchr/testify/mock"
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
+	"github.com/velero-io/velero/pkg/cbtservice"
 )
 
 // NewService creates a new instance of Service. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

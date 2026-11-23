@@ -21,15 +21,15 @@ import (
 	io "io"
 
 	mock "github.com/stretchr/testify/mock"
-	itemoperation "github.com/vmware-tanzu/velero/pkg/itemoperation"
+	itemoperation "github.com/velero-io/velero/pkg/itemoperation"
 
-	persistence "github.com/vmware-tanzu/velero/pkg/persistence"
+	persistence "github.com/velero-io/velero/pkg/persistence"
 
-	results "github.com/vmware-tanzu/velero/pkg/util/results"
+	results "github.com/velero-io/velero/pkg/util/results"
 
-	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	v1 "github.com/velero-io/velero/pkg/apis/velero/v1"
 
-	volume "github.com/vmware-tanzu/velero/internal/volume"
+	volume "github.com/velero-io/velero/internal/volume"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 )

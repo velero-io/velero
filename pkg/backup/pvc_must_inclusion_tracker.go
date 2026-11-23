@@ -17,8 +17,8 @@ limitations under the License.
 package backup
 
 import (
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	vhutil "github.com/velero-io/velero/pkg/util/volumehelper"
 )
 
 // pvcMustInclusionTracker provides read-only checks for whether a PVC is included

@@ -11,12 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/test"
-	framework "github.com/vmware-tanzu/velero/test/e2e/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	k8sutil "github.com/vmware-tanzu/velero/test/util/k8s"
-	veleroutil "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/test"
+	framework "github.com/velero-io/velero/test/e2e/test"
+	"github.com/velero-io/velero/test/util/common"
+	k8sutil "github.com/velero-io/velero/test/util/k8s"
+	veleroutil "github.com/velero-io/velero/test/util/velero"
 )
 
 var ScheduleInProgressTest func() = framework.TestFunc(&InProgressCase{})

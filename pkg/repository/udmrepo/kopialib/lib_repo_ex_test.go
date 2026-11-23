@@ -29,10 +29,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	repomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/freelist"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	repomocks "github.com/velero-io/velero/pkg/repository/udmrepo/kopialib/backend/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/freelist"
 )
 
 type mockDirectRepository struct {

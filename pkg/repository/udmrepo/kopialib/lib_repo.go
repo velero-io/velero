@@ -40,10 +40,10 @@ import (
 	"github.com/kopia/kopia/snapshot/snapshotmaintenance"
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/kopia"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend"
-	"github.com/vmware-tanzu/velero/pkg/util/freelist"
+	"github.com/velero-io/velero/pkg/kopia"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo/kopialib/backend"
+	"github.com/velero-io/velero/pkg/util/freelist"
 )
 
 type kopiaRepoService struct {
@@ -732,8 +732,27 @@ func (kr *kopiaRepository) GetSnapshot(ctx context.Context, id udmrepo.ID) (udmr
 }
 
 func (kr *kopiaRepository) DeleteSnapshot(ctx context.Context, id udmrepo.ID) error {
-	if _, err := kr.GetSnapshot(ctx, id); err != nil {
-		return errors.Wrap(err, "error getting snapshot")
+	_, err := kr.GetSnapshot(ctx, id)
+	if err != nil {
+		if !errors.Is(err, snapshot.ErrSnapshotNotFound) {
+			return errors.Wrap(err, "error getting snapshot")
+		}
+
+		err = kr.rawRepo.Refresh(ctx)
+		if err != nil {
+			return errors.Wrap(err, "error refreshing repo on snapshot not found")
+		}
+
+		_, err = kr.GetSnapshot(ctx, id)
+		if err != nil {
+			// The snapshot was already deleted, e.g. by a backup deletion that was
+			// interrupted after deleting it, so there is nothing left to do.
+			if errors.Is(err, snapshot.ErrSnapshotNotFound) {
+				kr.logger.Infof("Snapshot %s is not found after repo refresh, it is already deleted", id)
+				return nil
+			}
+			return errors.Wrap(err, "error getting snapshot after repo refresh")
+		}
 	}
 
 	return kr.DeleteManifest(ctx, id)

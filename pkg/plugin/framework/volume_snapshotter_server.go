@@ -24,9 +24,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	proto "github.com/velero-io/velero/pkg/plugin/generated"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
 )
 
 // VolumeSnapshotterGRPCServer implements the proto-generated VolumeSnapshotterServer interface, and accepts

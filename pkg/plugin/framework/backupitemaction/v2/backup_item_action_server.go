@@ -27,12 +27,12 @@ import (
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
-	protobiav2 "github.com/vmware-tanzu/velero/pkg/plugin/generated/backupitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	proto "github.com/velero-io/velero/pkg/plugin/generated"
+	protobiav2 "github.com/velero-io/velero/pkg/plugin/generated/backupitemaction/v2"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
 )
 
 // BackupItemActionGRPCServer implements the proto-generated BackupItemAction interface, and accepts

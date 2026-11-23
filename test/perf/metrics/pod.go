@@ -26,7 +26,7 @@ import (
 
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 
-	"github.com/vmware-tanzu/velero/test/util/metrics"
+	"github.com/velero-io/velero/test/util/metrics"
 )
 
 const PodResourceDesc = "Resource consumption"

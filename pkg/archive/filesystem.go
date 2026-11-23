@@ -24,8 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/util/filesystem"
 )
 
 // GetItemFilePath returns an item's file path once extracted from a Velero backup archive.

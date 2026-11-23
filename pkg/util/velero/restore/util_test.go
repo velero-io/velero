@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func TestIsResourcePolicyValid(t *testing.T) {

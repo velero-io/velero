@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // RepoParam includes the parameters to manipulate a backup repository

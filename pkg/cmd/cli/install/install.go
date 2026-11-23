@@ -28,16 +28,16 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/vmware-tanzu/velero/internal/velero"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
-	"github.com/vmware-tanzu/velero/pkg/install"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/internal/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/pkg/cmd/util/output"
+	"github.com/velero-io/velero/pkg/install"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/uploader"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
 // Options collects all the options for installing Velero into a Kubernetes cluster.
@@ -75,6 +75,7 @@ type Options struct {
 	PodVolumeOperationTimeout        time.Duration
 	Plugins                          flag.StringArray
 	NoDefaultBackupLocation          bool
+	ExcludeNamespaceFromBackup       bool
 	CRDsOnly                         bool
 	CACertFile                       string
 	Features                         string
@@ -107,6 +108,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.NoSecret, "no-secret", o.NoSecret, "Flag indicating if a secret should be created. Must be used as confirmation if --secret-file is not provided. Optional.")
 	flags.BoolVar(&o.Apply, "apply", o.Apply, "Flag indicating if resources should be applied instead of created. This can be used for updating existing resources.")
 	flags.BoolVar(&o.NoDefaultBackupLocation, "no-default-backup-location", o.NoDefaultBackupLocation, "Flag indicating if a default backup location should be created. Must be used as confirmation if --bucket or --provider are not provided. Optional.")
+	flags.BoolVar(&o.ExcludeNamespaceFromBackup, "exclude-namespace-from-backup", o.ExcludeNamespaceFromBackup, "Flag indicating if the velero.io/exclude-from-backup=true label should be added to the Velero namespace, so it is excluded from backups. Set to false to opt out. Optional.")
 	flags.StringVar(&o.Image, "image", o.Image, "Image to use for the Velero and node agent pods. Optional.")
 	flags.StringVar(&o.Prefix, "prefix", o.Prefix, "Prefix under which all Velero data should be stored within the bucket. Optional.")
 	flags.Var(&o.PodAnnotations, "pod-annotations", "Annotations to add to the Velero and node agent pods. Optional. Format is key1=value1,key2=value2")
@@ -249,6 +251,7 @@ func NewInstallOptions() *Options {
 		// Default to creating a VSL unless we're told otherwise
 		UseVolumeSnapshots:              true,
 		NoDefaultBackupLocation:         false,
+		ExcludeNamespaceFromBackup:      true,
 		CRDsOnly:                        false,
 		DefaultVolumesToFsBackup:        false,
 		UploaderType:                    uploader.KopiaType,
@@ -329,6 +332,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		PodVolumeOperationTimeout:        o.PodVolumeOperationTimeout,
 		Plugins:                          o.Plugins,
 		NoDefaultBackupLocation:          o.NoDefaultBackupLocation,
+		ExcludeNamespaceFromBackup:       o.ExcludeNamespaceFromBackup,
 		CACertData:                       caCertData,
 		Features:                         strings.Split(o.Features, ","),
 		DefaultVolumesToFsBackup:         o.DefaultVolumesToFsBackup,

@@ -63,6 +63,13 @@ spec:
           spec:
             description: RestoreSpec defines the specification for a Velero restore.
             properties:
+              allowExistingVolumeMismatch:
+                description: |-
+                  AllowExistingVolumeMismatch specifies whether to bypass the in-place restore pre-flight check
+                  that verifies the existing PVC is bound to the original volume handle from the backup.
+                  When true, in-place restore is permitted even if the existing volume handle does not match.
+                nullable: true
+                type: boolean
               backupName:
                 description: |-
                   BackupName is the unique name of the Velero backup to restore

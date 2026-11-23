@@ -23,9 +23,9 @@ import (
 	"github.com/kopia/kopia/repo/blob/azure"
 	"github.com/kopia/kopia/repo/blob/throttling"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib/backend/logging"
-	azureutil "github.com/vmware-tanzu/velero/pkg/util/azure"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo/kopialib/backend/logging"
+	azureutil "github.com/velero-io/velero/pkg/util/azure"
 )
 
 const (

@@ -27,10 +27,10 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/velero-io/velero/internal/credentials"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	"github.com/velero-io/velero/pkg/uploader"
 )
 
 const restoreProgressCheckInterval = 10 * time.Second

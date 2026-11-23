@@ -17,7 +17,7 @@ Velero supports a variety of storage providers for different backup and snapshot
 | [VMware vSphere](https://www.vmware.com/ca/products/vsphere.html)              | 🚫                                                                                               | vSphere Volumes                                                                                    | [VMware vSphere](https://github.com/velero-io/velero-plugin-for-vsphere)                    | [vSphere Plugin Setup](https://github.com/velero-io/velero-plugin-for-vsphere#velero-plugin-for-vsphere-installation-and-configuration-details)    | 🚫 |
 {{< /table >}}
 
-Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero), [GitHub Issues](https://github.com/velero-io/velero/issues)
+Contact: [#Velero Slack](https://kubernetes.slack.com/messages/velero-dev), [GitHub Issues](https://github.com/velero-io/velero/issues)
 
 ## Provider plugins maintained by the Velero community
 {{< table caption="Community supported providers" >}}
@@ -49,6 +49,7 @@ _Note that these storage providers are not regularly tested by the Velero team._
  * Ceph RADOS v12.2.7
  * Quobyte
  * [Cloudian HyperStore][38]
+ * [Hippius][39]
 
 _Some storage providers, like Quobyte, may need a different [signature algorithm version][6]._
 
@@ -68,3 +69,4 @@ In the case you want to take volume snapshots but didn't find a plugin for your 
 [30]: file-system-backup.md
 [36]: https://github.com/velero-io/velero-plugin-for-gcp#setup
 [38]: https://www.cloudian.com/
+[39]: https://docs.hippius.com/storage/s3/compatibility

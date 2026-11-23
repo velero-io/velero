@@ -21,8 +21,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	"github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	"github.com/velero-io/velero/pkg/uploader/cbt/types"
 )
 
 // SetBitmapOrFull translates the allocated/changed blocks from CBT service to the given bitmap or set the bitmap to full when error happens

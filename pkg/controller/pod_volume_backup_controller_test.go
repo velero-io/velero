@@ -46,16 +46,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/datapath"
-	datapathmocks "github.com/vmware-tanzu/velero/pkg/datapath/mocks"
-	"github.com/vmware-tanzu/velero/pkg/exposer"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/datapath"
+	datapathmocks "github.com/velero-io/velero/pkg/datapath/mocks"
+	"github.com/velero-io/velero/pkg/exposer"
+	"github.com/velero-io/velero/pkg/metrics"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 const pvbName = "pvb-1"
@@ -331,7 +331,7 @@ func TestPVBReconcile(t *testing.T) {
 			pvb:            pvbBuilder().Finalizers([]string{PodVolumeFinalizer}).Node("test-node").Result(),
 			constrained:    true,
 			expected:       pvbBuilder().Finalizers([]string{PodVolumeFinalizer}).Result(),
-			expectedResult: &ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5},
+			expectedResult: &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:        "new pvb but accept failed",
@@ -398,7 +398,7 @@ func TestPVBReconcile(t *testing.T) {
 			pvb:             pvbBuilder().Phase(velerov1api.PodVolumeBackupPhasePrepared).Finalizers([]string{PodVolumeFinalizer}).Node("test-node").Result(),
 			needMockExposer: true,
 			dataMgr:         datapath.NewManager(0),
-			expectedResult:  &ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5},
+			expectedResult:  &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:            "data path init error",
@@ -414,7 +414,7 @@ func TestPVBReconcile(t *testing.T) {
 			needMockExposer: true,
 			needErrs:        []bool{false, false, true, false},
 			expected:        pvbBuilder().Phase(velerov1api.PodVolumeBackupPhasePrepared).Finalizers([]string{PodVolumeFinalizer}).Result(),
-			expectedResult:  &ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5},
+			expectedResult:  &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:            "data path start error",
@@ -786,6 +786,223 @@ func TestFindPvbForPod(t *testing.T) {
 		if test.pod != nil {
 			r.client.Delete(ctx, test.pod, &client.DeleteOptions{})
 		}
+	}
+}
+
+type pvbContextTrackingClient struct {
+	client.Client
+	gotGetCtx    context.Context
+	gotUpdateCtx context.Context
+}
+
+func (c *pvbContextTrackingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	c.gotGetCtx = ctx
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *pvbContextTrackingClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	c.gotUpdateCtx = ctx
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+type pvbCtxKey string
+
+const pvbTestCtxKey pvbCtxKey = "pvb-test-context-key"
+
+func TestFindPVBByPod_ContextPropagation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pod := corev1api.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      "pod-with-label",
+			Labels: map[string]string{
+				velerov1api.PVBLabel: pvbName,
+			},
+		},
+	}
+
+	trackingClient := &pvbContextTrackingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvbBuilder().Result()).Build(),
+	}
+
+	sentinel := "sentinel-by-pod"
+	ctx := context.WithValue(t.Context(), pvbTestCtxKey, sentinel)
+
+	pvb, err := findPVBByPod(ctx, trackingClient, pod)
+	require.NoError(t, err)
+	require.NotNil(t, pvb)
+
+	require.NotNil(t, trackingClient.gotGetCtx)
+	assert.Equal(t, sentinel, trackingClient.gotGetCtx.Value(pvbTestCtxKey))
+}
+
+func TestFindPVBForPod_ContextPropagation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	require.NoError(t, corev1api.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		pod           *corev1api.Pod
+		expectedPhase velerov1api.PodVolumeBackupPhase
+		expectCancel  bool
+	}{
+		{
+			name: "running pod marks PVB prepared using the handler context",
+			pod: builder.ForPod(velerov1api.DefaultNamespace, "backup-pod-running").
+				Labels(map[string]string{velerov1api.PVBLabel: pvbName}).
+				Status(corev1api.PodStatus{Phase: corev1api.PodRunning}).
+				Result(),
+			expectedPhase: velerov1api.PodVolumeBackupPhasePrepared,
+		},
+		{
+			name: "unrecoverable pod cancels PVB using the handler context",
+			pod: builder.ForPod(velerov1api.DefaultNamespace, "backup-pod-failed").
+				Labels(map[string]string{velerov1api.PVBLabel: pvbName}).
+				Status(corev1api.PodStatus{Phase: corev1api.PodFailed}).
+				Result(),
+			expectedPhase: velerov1api.PodVolumeBackupPhaseAccepted,
+			expectCancel:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseAccepted).Result()
+
+			trackingClient := &pvbContextTrackingClient{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb, tc.pod).Build(),
+			}
+
+			r := &PodVolumeBackupReconciler{
+				client: trackingClient,
+				logger: logrus.New(),
+			}
+
+			sentinel := fmt.Sprintf("sentinel-%s", tc.name)
+			ctx := context.WithValue(t.Context(), pvbTestCtxKey, sentinel)
+
+			requests := r.findPVBForPod(ctx, tc.pod)
+			require.Len(t, requests, 1)
+			assert.Equal(t, pvbName, requests[0].Name)
+
+			require.NotNil(t, trackingClient.gotGetCtx)
+			assert.Equal(t, sentinel, trackingClient.gotGetCtx.Value(pvbTestCtxKey))
+
+			require.NotNil(t, trackingClient.gotUpdateCtx)
+			assert.Equal(t, sentinel, trackingClient.gotUpdateCtx.Value(pvbTestCtxKey))
+
+			updated := &velerov1api.PodVolumeBackup{}
+			require.NoError(t, trackingClient.Client.Get(t.Context(), types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, updated))
+			assert.Equal(t, tc.expectedPhase, updated.Status.Phase)
+			assert.Equal(t, tc.expectCancel, updated.Spec.Cancel)
+		})
+	}
+}
+
+// pvbConflictingClient fails every Update with a conflict, which makes
+// UpdatePVBWithRetry keep retrying until its context is done.
+type pvbConflictingClient struct {
+	client.Client
+}
+
+func (c *pvbConflictingClient) Update(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+	return apierrors.NewConflict(velerov1api.Resource("podvolumebackups"), obj.GetName(), errors.New("conflict"))
+}
+
+func TestFindPVBForPod_CanceledContextStopsRetry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+	require.NoError(t, corev1api.AddToScheme(scheme))
+
+	pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseAccepted).Result()
+	pod := builder.ForPod(velerov1api.DefaultNamespace, "backup-pod-running").
+		Labels(map[string]string{velerov1api.PVBLabel: pvbName}).
+		Status(corev1api.PodStatus{Phase: corev1api.PodRunning}).
+		Result()
+
+	r := &PodVolumeBackupReconciler{
+		client: &pvbConflictingClient{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb, pod).Build(),
+		},
+		logger: logrus.New(),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	done := make(chan []reconcile.Request, 1)
+	go func() {
+		done <- r.findPVBForPod(ctx, pod)
+	}()
+
+	select {
+	case requests := <-done:
+		assert.Empty(t, requests)
+	case <-time.After(10 * time.Second):
+		t.Fatal("findPVBForPod kept retrying the PVB update after its context was canceled")
+	}
+}
+
+func TestUpdatePVBStatusToFailed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+	pvb.Labels = map[string]string{exposer.ExposeOnGoingLabel: "true"}
+
+	trackingClient := &pvbContextTrackingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb).Build(),
+	}
+
+	sentinel := "sentinel-status-failed"
+	ctx := context.WithValue(t.Context(), pvbTestCtxKey, sentinel)
+	now := time.Now().Truncate(time.Second)
+	errOut := errors.New("data path error")
+
+	err := UpdatePVBStatusToFailed(ctx, trackingClient, pvb, errOut, "data path backup failed", now, logrus.New())
+	assert.Equal(t, errOut, err)
+
+	require.NotNil(t, trackingClient.gotGetCtx)
+	assert.Equal(t, sentinel, trackingClient.gotGetCtx.Value(pvbTestCtxKey))
+	require.NotNil(t, trackingClient.gotUpdateCtx)
+	assert.Equal(t, sentinel, trackingClient.gotUpdateCtx.Value(pvbTestCtxKey))
+
+	updated := &velerov1api.PodVolumeBackup{}
+	require.NoError(t, trackingClient.Client.Get(t.Context(), types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, updated))
+	assert.Equal(t, velerov1api.PodVolumeBackupPhaseFailed, updated.Status.Phase)
+	assert.Contains(t, updated.Status.Message, "data path backup failed")
+	assert.Contains(t, updated.Status.Message, "data path error")
+	require.NotNil(t, updated.Status.CompletionTimestamp)
+	assert.True(t, updated.Status.CompletionTimestamp.Time.Equal(now))
+	assert.NotContains(t, updated.Labels, exposer.ExposeOnGoingLabel)
+}
+
+func TestUpdatePVBStatusToFailed_CanceledContextStopsRetry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+	c := &pvbConflictingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb).Build(),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	errOut := errors.New("data path error")
+	done := make(chan error, 1)
+	go func() {
+		done <- UpdatePVBStatusToFailed(ctx, c, pvb, errOut, "data path backup failed", time.Now(), logrus.New())
+	}()
+
+	select {
+	case err := <-done:
+		assert.Equal(t, errOut, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("UpdatePVBStatusToFailed kept retrying the PVB update after its context was canceled")
 	}
 }
 

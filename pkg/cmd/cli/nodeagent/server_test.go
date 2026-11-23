@@ -32,13 +32,13 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/exposer"
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	testutil "github.com/vmware-tanzu/velero/pkg/test"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/exposer"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	testutil "github.com/velero-io/velero/pkg/test"
+	velerotypes "github.com/velero-io/velero/pkg/types"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func Test_validatePodVolumesHostPath(t *testing.T) {

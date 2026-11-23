@@ -25,8 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/e2e/test"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 type MultiNSBackup struct {

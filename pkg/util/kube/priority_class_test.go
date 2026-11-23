@@ -27,7 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	velerotesting "github.com/vmware-tanzu/velero/pkg/test"
+	velerotesting "github.com/velero-io/velero/pkg/test"
 )
 
 func TestValidatePriorityClass(t *testing.T) {

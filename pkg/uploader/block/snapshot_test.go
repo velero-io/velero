@@ -33,12 +33,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/ptr"
 
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	cbtservicemocks "github.com/vmware-tanzu/velero/pkg/cbtservice/mocks"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	udmrepomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	cbttypes "github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	cbtservicemocks "github.com/velero-io/velero/pkg/cbtservice/mocks"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	udmrepomocks "github.com/velero-io/velero/pkg/repository/udmrepo/mocks"
+	"github.com/velero-io/velero/pkg/uploader"
+	cbttypes "github.com/velero-io/velero/pkg/uploader/cbt/types"
 )
 
 type mockUploader struct {

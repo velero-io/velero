@@ -43,18 +43,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/datapath"
-	datapathmockes "github.com/vmware-tanzu/velero/pkg/datapath/mocks"
-	"github.com/vmware-tanzu/velero/pkg/exposer"
-	exposermockes "github.com/vmware-tanzu/velero/pkg/exposer/mocks"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/datapath"
+	datapathmockes "github.com/velero-io/velero/pkg/datapath/mocks"
+	"github.com/velero-io/velero/pkg/exposer"
+	exposermockes "github.com/velero-io/velero/pkg/exposer/mocks"
+	"github.com/velero-io/velero/pkg/metrics"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 const dataDownloadName string = "datadownload-1"
@@ -321,12 +321,12 @@ func TestDataDownloadReconcile(t *testing.T) {
 			dd:             dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Result(),
 			constrained:    true,
 			expected:       dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Result(),
-			expectedResult: &ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5},
+			expectedResult: &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:           "new dd but no target PVC",
 			dd:             dataDownloadBuilder().Finalizers([]string{DataUploadDownloadFinalizer}).Result(),
-			expectedResult: &ctrl.Result{Requeue: true},
+			expectedResult: &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:                     "new dd but accept failed",
@@ -406,7 +406,7 @@ func TestDataDownloadReconcile(t *testing.T) {
 			dataMgr:        datapath.NewManager(0),
 			notNilExpose:   true,
 			notMockCleanUp: true,
-			expectedResult: &ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5},
+			expectedResult: &ctrl.Result{RequeueAfter: time.Second * 5},
 		},
 		{
 			name:         "data path init error",

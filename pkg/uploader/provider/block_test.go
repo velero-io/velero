@@ -27,15 +27,15 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/credentials/mocks"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	udmrepomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/uploader/block"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/credentials/mocks"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	"github.com/velero-io/velero/pkg/repository"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	udmrepomocks "github.com/velero-io/velero/pkg/repository/udmrepo/mocks"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/uploader/block"
 )
 
 func TestNewBlockUploaderProvider(t *testing.T) {
@@ -54,7 +54,7 @@ func TestNewBlockUploaderProvider(t *testing.T) {
 			name: "Success",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", nil)
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", nil)
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
@@ -69,7 +69,7 @@ func TestNewBlockUploaderProvider(t *testing.T) {
 			name: "Error to get repo options",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", errors.New("failed to get password"))
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", errors.New("failed to get password"))
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
@@ -84,7 +84,7 @@ func TestNewBlockUploaderProvider(t *testing.T) {
 			name: "Error open repository service",
 			mockCredGetter: func() *mocks.SecretStore {
 				mockCredGetter := &mocks.SecretStore{}
-				mockCredGetter.On("Get", mock.Anything).Return("test", nil)
+				mockCredGetter.On("Get", mock.Anything, mock.Anything).Return("test", nil)
 				return mockCredGetter
 			}(),
 			mockBackupRepoService: func() udmrepo.BackupRepoService {
@@ -150,7 +150,7 @@ func TestBlockProviderGetPassword(t *testing.T) {
 		{
 			name: "valid credentials interface",
 			credGetterFunc: func(ss *mocks.SecretStore, selector *corev1api.SecretKeySelector) {
-				ss.On("Get", selector).Return("test", nil)
+				ss.On("Get", mock.Anything, selector).Return("test", nil)
 			},
 			expectError:  false,
 			expectedPass: "test",
@@ -164,7 +164,7 @@ func TestBlockProviderGetPassword(t *testing.T) {
 		{
 			name: "ErrorGettingPassword",
 			credGetterFunc: func(ss *mocks.SecretStore, selector *corev1api.SecretKeySelector) {
-				ss.On("Get", selector).Return("", errors.New("error getting password"))
+				ss.On("Get", mock.Anything, selector).Return("", errors.New("error getting password"))
 			},
 			expectError:  true,
 			expectedPass: "",

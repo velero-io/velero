@@ -1,1 +1,0 @@
-Fix panic in ChangeImageNameAction when a restored container image field is not a string

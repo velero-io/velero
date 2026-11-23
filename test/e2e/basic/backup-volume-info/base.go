@@ -27,11 +27,11 @@ import (
 	. "github.com/onsi/gomega"
 	corev1api "k8s.io/api/core/v1"
 
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/e2e/test"
+	"github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 type BackupVolumeInfo struct {
@@ -70,6 +70,10 @@ func (v *BackupVolumeInfo) Init() error {
 		"--wait",
 	}
 
+	if v.SnapshotMoveData && v.VeleroCfg.DataMover != "" {
+		v.BackupArgs = append(v.BackupArgs, "--data-mover", v.VeleroCfg.DataMover)
+	}
+
 	v.RestoreArgs = []string{
 		"create", "--namespace", v.VeleroCfg.VeleroNamespace, "restore", v.RestoreName,
 		"--from-backup", v.BackupName, "--wait",
@@ -78,7 +82,7 @@ func (v *BackupVolumeInfo) Init() error {
 }
 
 func (v *BackupVolumeInfo) Start() error {
-	if strings.Contains(v.VeleroCfg.Features, FeatureCSI) {
+	if FeatureEnabled(v.VeleroCfg.Features, FeatureCSI) {
 		if strings.Contains(v.CaseBaseName, "native-snapshot") {
 			fmt.Printf("Skip native snapshot case %s when the CSI feature is enabled.\n", v.CaseBaseName)
 			Skip("Skip native snapshot case due to CSI feature is enabled.")
@@ -144,7 +148,7 @@ func (v *BackupVolumeInfo) CreateResources() error {
 
 		for _, pod := range podList.Items {
 			for i := 0; i <= pvcCount-1; i++ {
-				// Hitting issue https://github.com/vmware-tanzu/velero/issues/7388
+				// Hitting issue https://github.com/velero-io/velero/issues/7388
 				// So populate data only to some of pods, leave other pods empty to verify empty PV datamover
 				if i%2 == 0 {
 					Expect(CreateFileToPod(

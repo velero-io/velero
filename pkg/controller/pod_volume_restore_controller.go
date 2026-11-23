@@ -44,17 +44,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/datapath"
-	"github.com/vmware-tanzu/velero/pkg/exposer"
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	repository "github.com/vmware-tanzu/velero/pkg/repository/manager"
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/util"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/datapath"
+	"github.com/velero-io/velero/pkg/exposer"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	repository "github.com/velero-io/velero/pkg/repository/manager"
+	"github.com/velero-io/velero/pkg/restorehelper"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 func NewPodVolumeRestoreReconciler(
@@ -257,7 +257,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 		if r.vgdpCounter != nil && r.vgdpCounter.IsConstrained(ctx, r.logger) {
 			log.Debug("Data path initiation is constrained, requeue later")
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 		}
 
 		log.Info("Accepting PVR")
@@ -333,7 +333,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if err != nil {
 			if err == datapath.ConcurrentLimitExceed {
 				log.Debug("Data path instance is concurrent limited requeue later")
-				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+				return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 			} else {
 				return r.errorOut(ctx, pvr, err, "error to create data path", log)
 			}
@@ -363,7 +363,7 @@ func (r *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			log.WithError(err).Warnf("Failed to update PVR %s to InProgress, will data path close and retry", pvr.Name)
 
 			r.closeDataPath(ctx, pvr.Name)
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 5}, nil
+			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 		}
 
 		if terminated {
@@ -550,7 +550,7 @@ func (r *PodVolumeRestoreReconciler) errorOut(ctx context.Context, pvr *velerov1
 func UpdatePVRStatusToFailed(ctx context.Context, c client.Client, pvr *velerov1api.PodVolumeRestore, err error, msg string, time time.Time, log logrus.FieldLogger) error {
 	log.Info("update PVR status to Failed")
 
-	if patchErr := UpdatePVRWithRetry(context.Background(), c, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
+	if patchErr := UpdatePVRWithRetry(ctx, c, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
 		func(pvr *velerov1api.PodVolumeRestore) bool {
 			if isPVRInFinalState(pvr) {
 				return false
@@ -707,7 +707,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForTargetPod(ctx context.Context, po
 			velerov1api.PodUIDLabel: string(pod.GetUID()),
 		}).AsSelector(),
 	}
-	if err := r.client.List(context.TODO(), list, options); err != nil {
+	if err := r.client.List(ctx, list, options); err != nil {
 		r.logger.WithField("pod", fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName())).WithError(err).
 			Error("unable to list PodVolumeRestores")
 		return []reconcile.Request{}
@@ -731,7 +731,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForTargetPod(ctx context.Context, po
 
 func (r *PodVolumeRestoreReconciler) findPVRForRestorePod(ctx context.Context, podObj client.Object) []reconcile.Request {
 	pod := podObj.(*corev1api.Pod)
-	pvr, err := findPVRByRestorePod(r.client, *pod)
+	pvr, err := findPVRByRestorePod(ctx, r.client, *pod)
 
 	log := r.logger.WithField("pod", pod.Name)
 	if err != nil {
@@ -757,7 +757,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForRestorePod(ctx context.Context, p
 	if pod.Status.Phase == corev1api.PodRunning {
 		log.Info("Preparing PVR")
 
-		if err = UpdatePVRWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
+		if err = UpdatePVRWithRetry(ctx, r.client, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
 			func(pvr *velerov1api.PodVolumeRestore) bool {
 				if isPVRInFinalState(pvr) {
 					log.Warnf("PVR %s is terminated, abort setting it to prepared", pvr.Name)
@@ -771,7 +771,7 @@ func (r *PodVolumeRestoreReconciler) findPVRForRestorePod(ctx context.Context, p
 			return []reconcile.Request{}
 		}
 	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
-		err := UpdatePVRWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
+		err := UpdatePVRWithRetry(ctx, r.client, types.NamespacedName{Namespace: pvr.Namespace, Name: pvr.Name}, log,
 			func(pvr *velerov1api.PodVolumeRestore) bool {
 				if pvr.Spec.Cancel {
 					return false
@@ -1016,10 +1016,10 @@ func getPVROwnerObject(pvr *velerov1api.PodVolumeRestore) corev1api.ObjectRefere
 	}
 }
 
-func findPVRByRestorePod(client client.Client, pod corev1api.Pod) (*velerov1api.PodVolumeRestore, error) {
+func findPVRByRestorePod(ctx context.Context, client client.Client, pod corev1api.Pod) (*velerov1api.PodVolumeRestore, error) {
 	if label, exist := pod.Labels[velerov1api.PVRLabel]; exist {
 		pvr := &velerov1api.PodVolumeRestore{}
-		err := client.Get(context.Background(), types.NamespacedName{
+		err := client.Get(ctx, types.NamespacedName{
 			Namespace: pod.Namespace,
 			Name:      label,
 		}, pvr)

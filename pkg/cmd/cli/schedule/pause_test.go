@@ -24,13 +24,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	"github.com/velero-io/velero/pkg/cmd/cli"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func scheduleIsPaused(t *testing.T, crClient ctrlclient.Client, namespace, name string) bool {

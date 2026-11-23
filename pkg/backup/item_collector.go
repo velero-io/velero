@@ -35,11 +35,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/pager"
 
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/util/collections"
 )
 
 // itemCollector collects items from the Kubernetes API according to
@@ -150,7 +150,7 @@ func (nt *nsTracker) init(
 		// Skip the backup when the backup's namespace filter has
 		// default value, and the namespace doesn't match backup
 		// LabelSelector and OrLabelSelector.
-		// https://github.com/vmware-tanzu/velero/issues/7105
+		// https://github.com/velero-io/velero/issues/7105
 		if nt.namespaceFilter.IncludeEverything() &&
 			(nt.singleLabelSelector != nil || len(nt.orLabelSelector) > 0) {
 			continue

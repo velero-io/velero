@@ -1,1 +1,0 @@
-Fix VolumeGroupSnapshot restore failure with Ceph RBD CSI driver by creating stub VolumeGroupSnapshotContent during restore and looking up VolumeSnapshotClass by driver for credential support

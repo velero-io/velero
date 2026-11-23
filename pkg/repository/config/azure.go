@@ -19,7 +19,7 @@ package config
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/util/azure"
+	"github.com/velero-io/velero/pkg/util/azure"
 )
 
 // GetAzureResticEnvVars gets the environment variables that restic

@@ -1,1 +1,0 @@
-Fix: Strip ServiceAccount token volume mounts from EphemeralContainers during restore

@@ -5,18 +5,18 @@ import (
 	"strings"
 	"time"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	podvolumeconfigs "github.com/vmware-tanzu/velero/pkg/podvolume/configs"
-	"github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/pkg/constant"
+	podvolumeconfigs "github.com/velero-io/velero/pkg/podvolume/configs"
+	"github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 const (

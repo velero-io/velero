@@ -27,15 +27,15 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/install"
-	. "github.com/vmware-tanzu/velero/test"
-	"github.com/vmware-tanzu/velero/test/perf/backup"
-	"github.com/vmware-tanzu/velero/test/perf/basic"
-	"github.com/vmware-tanzu/velero/test/perf/restore"
-	"github.com/vmware-tanzu/velero/test/perf/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	"github.com/vmware-tanzu/velero/test/util/report"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	"github.com/velero-io/velero/pkg/cmd/cli/install"
+	. "github.com/velero-io/velero/test"
+	"github.com/velero-io/velero/test/perf/backup"
+	"github.com/velero-io/velero/test/perf/basic"
+	"github.com/velero-io/velero/test/perf/restore"
+	"github.com/velero-io/velero/test/perf/test"
+	. "github.com/velero-io/velero/test/util/k8s"
+	"github.com/velero-io/velero/test/util/report"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 func init() {

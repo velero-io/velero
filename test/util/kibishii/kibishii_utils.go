@@ -35,12 +35,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/yaml"
 
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
-	. "github.com/vmware-tanzu/velero/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	. "github.com/vmware-tanzu/velero/test/util/providers"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
+	. "github.com/velero-io/velero/test"
+	"github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/providers"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 const (
@@ -284,6 +284,24 @@ func RunKibishiiTests(
 	return nil
 }
 
+// KibishiiVolumesAreHostPath reports whether Kibishii's PVs on this cluster are
+// hostPath volumes, which Velero can neither snapshot nor file system back up.
+// It is the inverse of the Kind branch in installKibishii below: the cases that
+// need a snapshot or a PodVolumeBackup skip exactly when that branch does not
+// swap in the CSI-backed overlay, so the two have to agree on what "CSI is on"
+// means.
+//
+// Kibishii brings its own StorageClass rather than using the suite's, so
+// --storage-class-file does not reach it. Its kind overlay defines that class on
+// rancher.io/local-path, so the PVs it provisions are hostPath: CSI snapshots
+// skip them because pkg/backup/actions/csi/pvc_action.go requires pv.Spec.CSI,
+// and PodVolumeBackups skip them because isHostPathVolume in
+// pkg/podvolume/backupper.go matches pv.Spec.HostPath. The kind-csi overlay
+// produces pv.Spec.CSI instead and neither applies.
+func KibishiiVolumesAreHostPath(cfg VeleroConfig) bool {
+	return cfg.CloudProvider == Kind && !FeatureEnabled(cfg.Features, FeatureCSI)
+}
+
 func installKibishii(
 	ctx context.Context,
 	namespace,
@@ -295,12 +313,18 @@ func installKibishii(
 	workerOS string,
 ) error {
 	if strings.EqualFold(cloudPlatform, Azure) &&
-		strings.EqualFold(veleroFeatures, FeatureCSI) {
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
 		cloudPlatform = AzureCSI
 	}
 	if strings.EqualFold(cloudPlatform, AWS) &&
-		strings.EqualFold(veleroFeatures, FeatureCSI) {
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
 		cloudPlatform = AwsCSI
+	}
+	// Keep this in step with KibishiiVolumesAreHostPath above, which is its
+	// inverse: the cases skip exactly when this branch does not fire.
+	if strings.EqualFold(cloudPlatform, Kind) &&
+		FeatureEnabled(veleroFeatures, FeatureCSI) {
+		cloudPlatform = KindCSI
 	}
 
 	targetKustomizeDir := path.Join(kibishiiDirectory, cloudPlatform)

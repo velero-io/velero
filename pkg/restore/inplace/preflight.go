@@ -25,12 +25,13 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
+	"github.com/velero-io/velero/pkg/restorehelper"
 )
 
 // CheckPVCNotInUse verifies the target PVC is not used by any active pod,
@@ -148,11 +149,17 @@ func gatedByThisRestore(pod *corev1api.Pod, restoreUID types.UID) bool {
 // skipped when the PVC is restored into a different namespace, where it is
 // necessarily bound to a different volume (the documented cross-namespace
 // clone-and-restore workflow), and when the backed-up volume is unknown.
+//
+// When allowExistingVolumeMismatch is true, a detected mismatch in volume
+// handle or PV name logs a warning instead of returning an error, allowing
+// the restore to proceed.
 func CheckPVCBoundToBackedUpVolume(
 	ctx context.Context,
 	cli crclient.Client,
 	existingPVC *corev1api.PersistentVolumeClaim,
 	backedUpPVName, backedUpVolumeHandle, sourceNamespace string,
+	allowExistingVolumeMismatch bool,
+	log logrus.FieldLogger,
 ) error {
 	if existingPVC == nil {
 		return errors.New("existing PVC cannot be nil")
@@ -172,6 +179,13 @@ func CheckPVCBoundToBackedUpVolume(
 		}
 		if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
 			if pv.Spec.CSI.VolumeHandle != backedUpVolumeHandle {
+				if allowExistingVolumeMismatch {
+					if log != nil {
+						log.Warnf("in-place restore pre-flight check: PVC %s/%s is bound to volume %s (PV %s), but was bound to volume %s (PV %s) at backup time",
+							existingPVC.Namespace, existingPVC.Name, pv.Spec.CSI.VolumeHandle, pv.Name, backedUpVolumeHandle, backedUpPVName)
+					}
+					return nil
+				}
 				return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is bound to volume %s (PV %s), but was bound to volume %s (PV %s) at backup time",
 					existingPVC.Namespace, existingPVC.Name, pv.Spec.CSI.VolumeHandle, pv.Name, backedUpVolumeHandle, backedUpPVName)
 			}
@@ -180,6 +194,13 @@ func CheckPVCBoundToBackedUpVolume(
 	}
 
 	if existingPVC.Spec.VolumeName != backedUpPVName {
+		if allowExistingVolumeMismatch {
+			if log != nil {
+				log.Warnf("in-place restore pre-flight check: PVC %s/%s is bound to PV %s, but was bound to PV %s at backup time",
+					existingPVC.Namespace, existingPVC.Name, existingPVC.Spec.VolumeName, backedUpPVName)
+			}
+			return nil
+		}
 		return errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: PVC %s/%s is bound to PV %s, but was bound to PV %s at backup time",
 			existingPVC.Namespace, existingPVC.Name, existingPVC.Spec.VolumeName, backedUpPVName)
 	}

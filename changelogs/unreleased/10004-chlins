@@ -1,1 +1,0 @@
-Support selecting the data mover type (velero-fs or velero-block) through the volume policy snapshot action's dataMover parameter

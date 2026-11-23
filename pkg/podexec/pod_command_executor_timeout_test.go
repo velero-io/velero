@@ -30,8 +30,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	v1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 const timeoutTestPodJSON = `{

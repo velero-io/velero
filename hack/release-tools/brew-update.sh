@@ -13,7 +13,7 @@ then
 fi
 
 # GitHub URL which contains the source code archive for the tagged release
-URL=https://github.com/vmware-tanzu/velero/archive/$VELERO_VERSION.tar.gz
+URL=https://github.com/velero-io/velero/archive/$VELERO_VERSION.tar.gz
 
 # Update brew so we're sure we have the latest Velero formula
 brew update

@@ -54,34 +54,34 @@ import (
 	"k8s.io/client-go/util/retry"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/archive"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/features"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
-	"github.com/vmware-tanzu/velero/pkg/podexec"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/podvolume/configs"
-	"github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	csiutil "github.com/vmware-tanzu/velero/pkg/util/csi"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
-	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/archive"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	riav2 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v2"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/podexec"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/podvolume/configs"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
+	"github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/collections"
+	csiutil "github.com/velero-io/velero/pkg/util/csi"
+	"github.com/velero-io/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/results"
+	"github.com/velero-io/velero/pkg/util/wildcard"
 )
 
 const ObjectStatusRestoreAnnotationKey = "velero.io/restore-status"
@@ -706,7 +706,11 @@ func getOrderedResources(resourcePriorities types.Priorities, backupResources ma
 	// alphabetize resources in the backup
 	sort.Strings(orderedBackupResources)
 
-	list := append(resourcePriorities.HighPriorities, orderedBackupResources...)
+	// Build a new slice: appending to HighPriorities can write into a backing
+	// array it shares with LowPriorities (see types.Priorities.Set).
+	list := make([]string, 0, len(resourcePriorities.HighPriorities)+len(orderedBackupResources)+len(resourcePriorities.LowPriorities))
+	list = append(list, resourcePriorities.HighPriorities...)
+	list = append(list, orderedBackupResources...)
 	return append(list, resourcePriorities.LowPriorities...)
 }
 
@@ -1006,18 +1010,6 @@ func (ctx *restoreContext) processSelectedResource(
 				}
 			}
 
-			// Make sure the resource in the "resourceMustHave" set will always be created in the namespace where velero is installed.
-			if ctx.resourceMustHave.Has(groupResource.String()) && targetNS != "" && targetNS != ctx.restore.Namespace {
-				err := fmt.Errorf("resource %s/%s is must-have per velero internal setting, and is namespace-scoped, but its target namespace %q is not Velero's namespace %q", groupResource.String(), selectedItem.name, targetNS, ctx.restore.Namespace)
-				ctx.log.WithFields(logrus.Fields{
-					"resource":        groupResource.String(),
-					"name":            selectedItem.name,
-					"targetNamespace": targetNS,
-					"veleroNamespace": ctx.restore.Namespace,
-				}).Error(err.Error())
-				errs.Add(targetNS, err)
-				continue
-			}
 			// If we don't know whether this namespace exists yet, attempt to create
 			// it in order to ensure it exists. Try to get it from the backup tarball
 			// (in order to get any backed-up metadata), but if we don't find it there,
@@ -1033,6 +1025,7 @@ func (ctx *restoreContext) processSelectedResource(
 
 				ns := getNamespace(logger, nsPath, targetNS)
 				_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(
+					go_context.Background(),
 					ns,
 					ctx.namespaceClient,
 					ctx.resourceTerminatingTimeout,
@@ -1463,7 +1456,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		}
 
 		nsToEnsure := getNamespace(restoreLogger, nsPath, namespace)
-		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
+		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(go_context.Background(), nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
 		if err != nil {
 			errs.AddVeleroError(err)
 			return warnings, errs, itemExists
@@ -1772,12 +1765,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 				continue
 			}
 
-			additionalItemNamespace := additionalItem.Namespace
-			if additionalItemNamespace != "" {
-				if remapped, ok := ctx.restore.Spec.NamespaceMapping[additionalItemNamespace]; ok {
-					additionalItemNamespace = remapped
-				}
-			}
+			additionalItemNamespace := ctx.getTargetNamespace(additionalItem.GroupResource.String(), additionalItem.Namespace)
 
 			w, e, additionalItemExists := ctx.restoreItem(additionalObj, additionalItem.GroupResource, additionalItemNamespace, mustIncludeAdditionalItems)
 			if additionalItemExists {
@@ -1962,11 +1950,31 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 					err := errors.Errorf("in-place restore pre-flight check failed, skipping volume data restore: pod %s already exists and is still using the backed-up volumes: delete the pod and its owning workload and retry", kube.NamespaceAndName(obj))
 					restoreLogger.Error(err.Error())
 					errs.Add(namespace, err)
+					return warnings, errs, itemExists
 				} else {
 					err := errors.Errorf("skipping volume data restore: pod %s already exists, its PodVolumeBackups will not be restored", kube.NamespaceAndName(obj))
 					restoreLogger.Warn(err.Error())
 					warnings.Add(namespace, err)
 				}
+			}
+		}
+
+		// Snapshot-based volume data is never restored into an existing volume:
+		// the existing PVC (CSI snapshot) or PV (native snapshot) is left untouched.
+		// Warn so the user knows the volume data was not restored rather than assuming it was.
+		if newGR == kuberesource.PersistentVolumeClaims {
+			if info, ok := backupVolumeInfoForPVC(ctx.backupVolumeInfoMap, originalNamespace, obj.GetName()); ok &&
+				info.BackupMethod == volume.CSISnapshot {
+				err := errors.Errorf("skipping volume data restore: PVC %s already exists, its backed-up volume data will not be restored to it", kube.NamespaceAndName(obj))
+				restoreLogger.Warn(err.Error())
+				warnings.Add(namespace, err)
+			}
+		}
+		if newGR == kuberesource.PersistentVolumes {
+			if info, ok := ctx.backupVolumeInfoMap[backupResourceName]; ok && info.BackupMethod == volume.NativeSnapshot {
+				err := errors.Errorf("skipping volume data restore: PV %s already exists, its backed-up volume data will not be restored to it", obj.GetName())
+				restoreLogger.Warn(err.Error())
+				warnings.Add(namespace, err)
 			}
 		}
 
@@ -2203,7 +2211,7 @@ func isAlreadyExistsError(ctx *restoreContext, obj *unstructured.Unstructured, e
 	// 1. For NodePort service, the service has nodePort preservation while the same nodePort service already exists. - Get invalid value error
 	// 2. For LoadBalancer service, the "healthCheckNodePort" already exists. - Get internal error
 	// If this is the case, the function returns true to avoid reporting error.
-	// Refer to https://github.com/vmware-tanzu/velero/issues/2308 for more details
+	// Refer to https://github.com/velero-io/velero/issues/2308 for more details
 	if obj.GetKind() != "Service" {
 		return false, nil
 	}
@@ -2304,6 +2312,17 @@ func remapClaimRefNS(ctx *restoreContext, obj *unstructured.Unstructured) (bool,
 	}
 	ctx.log.Debug("Persistent volume's namespace was updated")
 	return true, nil
+}
+
+// backupVolumeInfoForPVC returns the backup volume info of the PV the given
+// source-namespace PVC was bound to at backup time.
+func backupVolumeInfoForPVC(infos map[string]volume.BackupVolumeInfo, pvcNamespace, pvcName string) (volume.BackupVolumeInfo, bool) {
+	for _, info := range infos {
+		if info.PVCNamespace == pvcNamespace && info.PVCName == pvcName {
+			return info, true
+		}
+	}
+	return volume.BackupVolumeInfo{}, false
 }
 
 // restorePodVolumeBackups restores the PodVolumeBackups for the given restored pod
@@ -2737,6 +2756,22 @@ func (ctx *restoreContext) getOrderedResourceCollection(
 	return restoreResourceCollection, processedResources, warnings, errs
 }
 
+// getTargetNamespace returns the namespace that an item backed up in originalNamespace is restored into.
+// The resources in the "resourceMustHave" set are always restored into the namespace where velero is installed,
+// which may differ from the velero namespace of the cluster where the backup was taken.
+func (ctx *restoreContext) getTargetNamespace(resource string, originalNamespace string) string {
+	if originalNamespace == "" {
+		return ""
+	}
+	if ctx.resourceMustHave.Has(resource) {
+		return ctx.restore.Namespace
+	}
+	if target, ok := ctx.restore.Spec.NamespaceMapping[originalNamespace]; ok {
+		return target
+	}
+	return originalNamespace
+}
+
 // getSelectedRestoreableItems applies Kubernetes selectors on individual items
 // of each resource type to create a list of items which will be actually
 // restored.
@@ -2751,15 +2786,15 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 		restorable.selectedItemsByNamespace = make(map[string][]restoreableItem)
 	}
 
-	targetNamespace := originalNamespace
-	if target, ok := ctx.restore.Spec.NamespaceMapping[originalNamespace]; ok {
-		targetNamespace = target
-	}
+	targetNamespace := ctx.getTargetNamespace(resource, originalNamespace)
 
-	if targetNamespace != "" {
-		ctx.log.Infof("Resource '%s' will be restored into namespace '%s'", resource, targetNamespace)
-	} else {
+	switch {
+	case targetNamespace == "":
 		ctx.log.Infof("Resource '%s' will be restored at cluster scope", resource)
+	case ctx.resourceMustHave.Has(resource) && targetNamespace != originalNamespace:
+		ctx.log.Infof("Resource '%s' is must-have per velero internal setting, it will be restored into velero's namespace '%s' instead of '%s'", resource, targetNamespace, originalNamespace)
+	default:
+		ctx.log.Infof("Resource '%s' will be restored into namespace '%s'", resource, targetNamespace)
 	}
 
 	resourceForPath := resource

@@ -46,7 +46,10 @@ spec:
     # WriteSparseFiles is a flag to indicate whether write files sparsely or not
     writeSparseFiles: true
     # ParallelFilesDownload is the concurrency number setting for restore
+    # Omitted or 0 uses GOMAXPROCS in the data mover process.
     parallelFilesDownload: 10
+    # DeleteExtraFiles specifies whether to delete the extra files in the target volume that do not exist in the backup. This setting is only applicable to File System restores (PodVolumeBackup or CSI File System Data Move) and has no effect on Block Data Move restores.
+    deleteExtraFiles: false
   # Array of namespaces to include in the restore. Accepts glob patterns (*, ?, [abc]).
   # If unspecified, all namespaces are included. Optional.
   includedNamespaces:
@@ -113,6 +116,12 @@ spec:
   # existingResourcePolicy specifies the restore behaviour
   # for the Kubernetes resource to be restored. Optional
   existingResourcePolicy: none
+  # existingVolumeDataPolicy specifies the restore behavior for the volume data to be restored. Optional
+  existingVolumeDataPolicy: none
+  # allowExistingVolumeMismatch specifies whether to bypass the in-place restore pre-flight check
+  # that verifies the existing PVC is bound to the original volume handle from the backup.
+  # When true, in-place restore is permitted even if the existing volume handle does not match.
+  allowExistingVolumeMismatch: false
   # ResourceModifier specifies the reference to JSON resource patches
   # that should be applied to resources before restoration. Optional
   resourceModifier:

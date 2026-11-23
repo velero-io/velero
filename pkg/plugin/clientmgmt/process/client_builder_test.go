@@ -25,12 +25,12 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/backupitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/framework/itemblockaction/v1"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/restoreitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	biav2 "github.com/velero-io/velero/pkg/plugin/framework/backupitemaction/v2"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/framework/itemblockaction/v1"
+	riav2 "github.com/velero-io/velero/pkg/plugin/framework/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 func TestNewClientBuilder(t *testing.T) {

@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 func GetClients() (*kubernetes.Clientset, *snapshotterClientSet.Clientset, error) {

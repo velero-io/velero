@@ -19,7 +19,7 @@ package collections
 import (
 	"strings"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/resourcepolicies"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gobwas/glob"
@@ -28,11 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/wildcard"
 )
 
 type globStringSet struct {
@@ -66,6 +66,9 @@ type NamespaceIncludesExcludes struct {
 	includesExcludes *IncludesExcludes
 	wildcardExpanded bool
 	wildcardResult   []string
+	// excludedByLabel holds the namespaces labeled velero.io/exclude-from-backup=true.
+	// Excluding them doesn't make a backup any less of an "all namespaces" backup.
+	excludedByLabel sets.Set[string]
 }
 
 func NewNamespaceIncludesExcludes() *NamespaceIncludesExcludes {
@@ -77,6 +80,13 @@ func NewNamespaceIncludesExcludes() *NamespaceIncludesExcludes {
 
 func (nie *NamespaceIncludesExcludes) ActiveNamespaces(activeNamespaces []string) *NamespaceIncludesExcludes {
 	nie.activeNamespaces = activeNamespaces
+	return nie
+}
+
+// ExcludedByLabel records the namespaces labeled velero.io/exclude-from-backup=true.
+// IncludeEverything ignores excludes of these namespaces.
+func (nie *NamespaceIncludesExcludes) ExcludedByLabel(namespaces ...string) *NamespaceIncludesExcludes {
+	nie.excludedByLabel = sets.New(namespaces...)
 	return nie
 }
 
@@ -147,9 +157,31 @@ func (nie *NamespaceIncludesExcludes) ShouldInclude(s string) bool {
 }
 
 // IncludeEverything returns true if the includes list is empty or '*'
-// and the excludes list is empty, or false otherwise.
+// and the excludes list is empty, or false otherwise. Excludes of namespaces
+// labeled velero.io/exclude-from-backup=true are ignored, so that labeling a
+// namespace (such as Velero's own) doesn't stop a backup of all namespaces
+// from including cluster-scoped resources.
 func (nie *NamespaceIncludesExcludes) IncludeEverything() bool {
-	return nie.includesExcludes.IncludeEverything()
+	if nie.includesExcludes.IncludeEverything() {
+		return true
+	}
+
+	if nie.wildcardExpanded || nie.excludedByLabel.Len() == 0 {
+		return false
+	}
+
+	includes := nie.includesExcludes.includes
+	if includes.Len() > 1 || (includes.Len() == 1 && !includes.Has("*")) {
+		return false
+	}
+
+	for _, exclude := range nie.includesExcludes.excludes.List() {
+		if !nie.excludedByLabel.Has(exclude) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Attempts to expand wildcard patterns, if any, in the includes and excludes lists.
@@ -274,7 +306,7 @@ func GetResourceIncludesExcludes(helper discovery.Helper, includes, excludes []s
 			if err != nil {
 				// If we can't resolve it, return it as-is. This prevents the generated
 				// includes-excludes list from including *everything*, if none of the includes
-				// can be resolved. ref. https://github.com/vmware-tanzu/velero/issues/2461
+				// can be resolved. ref. https://github.com/velero-io/velero/issues/2461
 				return item
 			}
 
@@ -579,6 +611,11 @@ func scopeResourceMapFunc(helper discovery.Helper) func(string, bool) string {
 // ValidateIncludesExcludes checks provided lists of included and excluded
 // items to ensure they are a valid set of IncludesExcludes data.
 func ValidateIncludesExcludes(includesList, excludesList []string) []error {
+	errs := validateIncludesExcludes(includesList, excludesList)
+	return append(errs, validateGlobPatterns(includesList, excludesList)...)
+}
+
+func validateIncludesExcludes(includesList, excludesList []string) []error {
 	// TODO we should not allow an IncludesExcludes object to be created that
 	// does not meet these criteria. Do a more significant refactoring to embed
 	// this logic in object creation/modification.
@@ -608,7 +645,9 @@ func ValidateIncludesExcludes(includesList, excludesList []string) []error {
 // ValidateNamespaceIncludesExcludes checks provided lists of included and
 // excluded namespaces to ensure they are a valid set of IncludesExcludes data.
 func ValidateNamespaceIncludesExcludes(includesList, excludesList []string) []error {
-	errs := ValidateIncludesExcludes(includesList, excludesList)
+	// Namespace names are validated as wildcard patterns by validateNamespaceName,
+	// so skip the generic glob pattern check here.
+	errs := validateIncludesExcludes(includesList, excludesList)
 
 	includes := sets.NewString(includesList...)
 	excludes := sets.NewString(excludesList...)
@@ -650,6 +689,27 @@ func ValidateScopedIncludesExcludes(includesList, excludesList []string) []error
 	for _, itm := range excludes.List() {
 		if includes.Has(itm) {
 			errs = append(errs, errors.Errorf("excludes list cannot contain an item in the includes list: %v", itm))
+		}
+	}
+
+	return append(errs, validateGlobPatterns(includesList, excludesList)...)
+}
+
+// validateGlobPatterns returns an error for each item that is not a valid glob pattern.
+// An invalid pattern can never be matched, so reject it instead of letting the filter
+// silently drop resources. Includes and excludes are checked separately so the error
+// says which list the bad pattern came from.
+func validateGlobPatterns(includesList, excludesList []string) []error {
+	var errs []error
+
+	for _, itm := range sets.NewString(includesList...).List() {
+		if _, err := glob.Compile(itm); err != nil {
+			errs = append(errs, errors.Errorf("invalid glob pattern %q in includes list: %v", itm, err))
+		}
+	}
+	for _, itm := range sets.NewString(excludesList...).List() {
+		if _, err := glob.Compile(itm); err != nil {
+			errs = append(errs, errors.Errorf("invalid glob pattern %q in excludes list: %v", itm, err))
 		}
 	}
 

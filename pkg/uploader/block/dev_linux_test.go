@@ -20,6 +20,8 @@ limitations under the License.
 package block
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -29,6 +31,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 type fakeBlockDevFileInfo struct{}
@@ -383,4 +386,86 @@ func TestBlkZeroOut(t *testing.T) {
 		isEINVAL := errors.Is(err, syscall.EINVAL)
 		assert.True(t, isENOTTY || isEINVAL, "expected error to be ENOTTY or EINVAL, got: %v", err)
 	})
+
+	t.Run("loop device range is zeroed", func(t *testing.T) {
+		const (
+			devSize   = 4 << 20
+			zeroStart = 1 << 20
+			zeroLen   = 1 << 20
+		)
+
+		devPath := setupLoopDevice(t, devSize, 0xab)
+
+		dev, err := openBlockDevice(devPath, false)
+		require.NoError(t, err)
+		defer dev.Close()
+
+		require.NoError(t, blkZeroOut(dev, zeroStart, zeroLen))
+
+		// Read back without O_DIRECT, BLKZEROOUT invalidates the page cache of the range
+		data, err := os.ReadFile(devPath)
+		require.NoError(t, err)
+		require.Len(t, data, devSize)
+
+		assert.Equal(t, bytes.Repeat([]byte{0xab}, zeroStart), data[:zeroStart], "data before the range is changed")
+		assert.Equal(t, make([]byte, zeroLen), data[zeroStart:zeroStart+zeroLen], "range is not zeroed")
+		assert.Equal(t, bytes.Repeat([]byte{0xab}, devSize-zeroStart-zeroLen), data[zeroStart+zeroLen:], "data after the range is changed")
+	})
+}
+
+func TestBlkZeroOutIoctl(t *testing.T) {
+	// BLKZEROOUT is _IO(0x12, 127), only the direction bits vary by arch
+	assert.Equal(t, uint32(0x12), uint32(blkZeroOutIoctl>>8)&0xff, "ioctl type")
+	assert.Equal(t, uint32(127), uint32(blkZeroOutIoctl)&0xff, "ioctl number")
+}
+
+// setupLoopDevice attaches a loop device backed by a file of the given size filled with fill,
+// the test is skipped if loop devices are not available
+func setupLoopDevice(t *testing.T, size int, fill byte) string {
+	t.Helper()
+
+	if os.Geteuid() != 0 {
+		t.Skip("loop device setup requires root")
+	}
+
+	ctl, err := os.OpenFile("/dev/loop-control", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("loop device is not available: %v", err)
+	}
+	defer ctl.Close()
+
+	backing, err := os.CreateTemp(t.TempDir(), "blkzeroout-loop-*")
+	require.NoError(t, err)
+	defer backing.Close()
+
+	_, err = backing.Write(bytes.Repeat([]byte{fill}, size))
+	require.NoError(t, err)
+	require.NoError(t, backing.Sync())
+
+	num, err := unix.IoctlRetInt(int(ctl.Fd()), unix.LOOP_CTL_GET_FREE)
+	if err != nil {
+		t.Skipf("unable to get free loop device: %v", err)
+	}
+
+	devPath := fmt.Sprintf("/dev/loop%d", num)
+	if _, err := os.Stat(devPath); os.IsNotExist(err) {
+		// Containers may not have the device node, create it on our own
+		devPath = filepath.Join(t.TempDir(), fmt.Sprintf("loop%d", num))
+		if err := unix.Mknod(devPath, unix.S_IFBLK|0600, int(unix.Mkdev(7, uint32(num)))); err != nil {
+			t.Skipf("unable to create loop device node %s: %v", devPath, err)
+		}
+	}
+
+	loop, err := os.OpenFile(devPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("unable to open loop device %s: %v", devPath, err)
+	}
+
+	require.NoError(t, unix.IoctlSetInt(int(loop.Fd()), unix.LOOP_SET_FD, int(backing.Fd())))
+	t.Cleanup(func() {
+		_ = unix.IoctlSetInt(int(loop.Fd()), unix.LOOP_CLR_FD, 0)
+		loop.Close()
+	})
+
+	return devPath
 }

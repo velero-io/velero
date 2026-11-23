@@ -1,1 +1,0 @@
-Fix service restore with null healthCheckNodePort in last-applied-configuration label

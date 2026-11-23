@@ -42,26 +42,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/resourcemodifiers"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
-	veleroutil "github.com/vmware-tanzu/velero/pkg/util/velero"
-	pkgrestoreUtil "github.com/vmware-tanzu/velero/pkg/util/velero/restore"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/resourcemodifiers"
+	pkgrestore "github.com/velero-io/velero/pkg/restore"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/collections"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/logging"
+	"github.com/velero-io/velero/pkg/util/results"
+	veleroutil "github.com/velero-io/velero/pkg/util/velero"
+	pkgrestoreUtil "github.com/velero-io/velero/pkg/util/velero/restore"
 )
 
 // nonRestorableResources is an exclusion list  for the restoration process. Any resources
@@ -72,22 +73,22 @@ var nonRestorableResources = []string{
 	"events.events.k8s.io",
 
 	// Don't ever restore backups - if appropriate, they'll be synced in from object storage.
-	// https://github.com/vmware-tanzu/velero/issues/622
+	// https://github.com/velero-io/velero/issues/622
 	"backups.velero.io",
 
 	// Restores are cluster-specific, and don't have value moving across clusters.
-	// https://github.com/vmware-tanzu/velero/issues/622
+	// https://github.com/velero-io/velero/issues/622
 	"restores.velero.io",
 
 	// TODO: Remove this in v1.11 or v1.12
 	// Restic repositories are automatically managed by Velero and will be automatically
 	// created as needed if they don't exist.
-	// https://github.com/vmware-tanzu/velero/issues/1113
+	// https://github.com/velero-io/velero/issues/1113
 	"resticrepositories.velero.io",
 
 	// CSINode delegates cluster node for CSI operation.
 	// VolumeAttachement records PV mounts to which node.
-	// https://github.com/vmware-tanzu/velero/issues/4823
+	// https://github.com/velero-io/velero/issues/4823
 	"csinodes.storage.k8s.io",
 	"volumeattachments.storage.k8s.io",
 
@@ -424,6 +425,11 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors,
 			fmt.Sprintf("backup %q is in phase %q and cannot be used as a restore source",
 				info.backup.Name, info.backup.Status.Phase))
+		return backupInfo{}, nil, nil
+	}
+
+	if err := podvolume.ValidateBackupUploadersIfAny(ctx, r.kbClient, info.backup); err != nil {
+		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Cannot restore backup %q: %v", info.backup.Name, err))
 		return backupInfo{}, nil, nil
 	}
 

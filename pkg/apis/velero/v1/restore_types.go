@@ -120,6 +120,13 @@ type RestoreSpec struct {
 	// +nullable
 	ExistingVolumeDataPolicy VolumeDataPolicyType `json:"existingVolumeDataPolicy,omitempty"`
 
+	// AllowExistingVolumeMismatch specifies whether to bypass the in-place restore pre-flight check
+	// that verifies the existing PVC is bound to the original volume handle from the backup.
+	// When true, in-place restore is permitted even if the existing volume handle does not match.
+	// +optional
+	// +nullable
+	AllowExistingVolumeMismatch *bool `json:"allowExistingVolumeMismatch,omitempty"`
+
 	// CSISnapshotTimeout specifies the time used to wait for CSI VolumeSnapshot ready to use during creation, before returning error as timeout.
 	// The default value is 30 minute.
 	// +optional
@@ -475,6 +482,10 @@ func (r *Restore) IsVolumeDataInplaceFullRestore() bool {
 
 func (r *Restore) IsVolumeDataInplaceIncrementalRestore() bool {
 	return r.Spec.ExistingVolumeDataPolicy == VolumeDataPolicyTypeIncremental
+}
+
+func (r *Restore) AllowExistingVolumeMismatch() bool {
+	return r.Spec.AllowExistingVolumeMismatch != nil && *r.Spec.AllowExistingVolumeMismatch
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

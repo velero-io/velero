@@ -21,7 +21,7 @@ We will update the public Slack channel's topic to indicate that you are the poi
 
 ### Where we will monitor
 - `#velero-users` and `#velero-dev` public Slack channels in Kubernetes org
-- [all Velero-related repos][0] in GitHub (`velero`, `velero-plugin-for-[aws|gcp|microsoft-azure|csi]`, `helm-charts`)
+- [all Velero-related repos][0] in GitHub (`velero`, `velero-plugin-for-[aws|gcp|microsoft-azure]`)
 
 ### GitHub issue flow
 

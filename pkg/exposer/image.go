@@ -24,7 +24,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
+	"github.com/velero-io/velero/pkg/nodeagent"
 )
 
 const (

@@ -19,7 +19,7 @@ package velero
 import (
 	"fmt"
 
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/buildinfo"
 )
 
 // Use Dockerhub as the default registry if the build process didn't supply a registry

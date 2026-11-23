@@ -25,11 +25,11 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/vmware-tanzu/velero/pkg/install"
+	"github.com/velero-io/velero/pkg/install"
 )
 
 // veleroDeployment returns a Velero deployment object, selected with label and container name,
-// refer to https://github.com/vmware-tanzu/velero/issues/3961 for more information
+// refer to https://github.com/velero-io/velero/issues/3961 for more information
 func veleroDeployment(ctx context.Context, kubeClient kubernetes.Interface, namespace string) (*appsv1api.Deployment, error) {
 	veleroLabels := labels.FormatLabels(install.Labels())
 

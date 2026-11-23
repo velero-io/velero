@@ -36,7 +36,8 @@ type Priorities struct {
 
 // String returns a string representation of Priority.
 func (p *Priorities) String() string {
-	priorities := p.HighPriorities
+	priorities := make([]string, 0, len(p.HighPriorities)+1+len(p.LowPriorities))
+	priorities = append(priorities, p.HighPriorities...)
 	if len(p.LowPriorities) > 0 {
 		priorities = append(priorities, prioritySeparator)
 		priorities = append(priorities, p.LowPriorities...)
@@ -75,12 +76,14 @@ func (p *Priorities) Set(s string) error {
 	}
 	// end with separator
 	if separatorIndex == len(strs)-1 {
-		p.HighPriorities = strs[:len(strs)-1]
+		p.HighPriorities = strs[: len(strs)-1 : len(strs)-1]
 		return nil
 	}
 
-	// separator in the middle
-	p.HighPriorities = strs[:separatorIndex]
+	// separator in the middle. Cap HighPriorities at its length so that
+	// appending to it cannot overwrite the separator or LowPriorities, which
+	// share the same backing array.
+	p.HighPriorities = strs[:separatorIndex:separatorIndex]
 	p.LowPriorities = strs[separatorIndex+1:]
 
 	return nil

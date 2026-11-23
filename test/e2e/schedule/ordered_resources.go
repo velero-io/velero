@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//the ordered resources test related to https://github.com/vmware-tanzu/velero/issues/4561
+//the ordered resources test related to https://github.com/velero-io/velero/issues/4561
 import (
 	"context"
 	"fmt"
@@ -30,11 +30,11 @@ import (
 	waitutil "k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	framework "github.com/vmware-tanzu/velero/test/e2e/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	k8sutil "github.com/vmware-tanzu/velero/test/util/k8s"
-	veleroutil "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	framework "github.com/velero-io/velero/test/e2e/test"
+	"github.com/velero-io/velero/test/util/common"
+	k8sutil "github.com/velero-io/velero/test/util/k8s"
+	veleroutil "github.com/velero-io/velero/test/util/velero"
 )
 
 var ScheduleOrderedResources func() = framework.TestFunc(&OrderedResources{})

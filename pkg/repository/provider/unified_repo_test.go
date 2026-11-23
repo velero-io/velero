@@ -30,12 +30,12 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	velerocredentials "github.com/vmware-tanzu/velero/internal/credentials"
-	credmock "github.com/vmware-tanzu/velero/internal/credentials/mocks"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	reposervicenmocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerocredentials "github.com/velero-io/velero/internal/credentials"
+	credmock "github.com/velero-io/velero/internal/credentials/mocks"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	reposervicenmocks "github.com/velero-io/velero/pkg/repository/udmrepo/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestGetStorageCredentials(t *testing.T) {
@@ -938,7 +938,7 @@ func TestForget(t *testing.T) {
 			}
 
 			if tc.backupRepo != nil {
-				backupRepo.On("DeleteManifest", mock.Anything, mock.Anything).Return(tc.retFuncDelete)
+				backupRepo.On("DeleteSnapshot", mock.Anything, mock.Anything).Return(tc.retFuncDelete)
 				backupRepo.On("Flush", mock.Anything).Return(tc.retFuncFlush)
 				backupRepo.On("Close", mock.Anything).Return(nil)
 			}
@@ -1124,7 +1124,7 @@ func TestBatchForget(t *testing.T) {
 			}
 
 			if tc.backupRepo != nil {
-				backupRepo.On("DeleteManifest", mock.Anything, mock.Anything).Return(tc.retFuncDelete)
+				backupRepo.On("DeleteSnapshot", mock.Anything, mock.Anything).Return(tc.retFuncDelete)
 				backupRepo.On("Flush", mock.Anything).Return(tc.retFuncFlush)
 				backupRepo.On("Close", mock.Anything).Return(nil)
 			}

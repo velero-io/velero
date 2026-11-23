@@ -13,7 +13,7 @@ import (
 
 // test that this package do not import cloud provider
 
-// Prevent https://github.com/vmware-tanzu/velero/issues/8207 and https://github.com/vmware-tanzu/velero/issues/8157
+// Prevent https://github.com/velero-io/velero/issues/8207 and https://github.com/velero-io/velero/issues/8157
 func TestPkgImportNoCloudProvider(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

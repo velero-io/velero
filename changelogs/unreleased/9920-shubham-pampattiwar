@@ -1,1 +1,0 @@
-Support copying namespace-scoped secrets and configmaps for backup and restore PVC provisioning to enable datamover backup/restore of encrypted CSI volumes

@@ -19,7 +19,7 @@ package client
 import (
 	"os"
 
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -35,8 +35,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 )
 
 //go:generate mockery --name Factory
@@ -170,7 +170,7 @@ func (f *factory) KubebuilderClient() (kbclient.Client, error) {
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	kubebuilderClient, err := kbclient.New(clientConfig, kbclient.Options{
@@ -209,7 +209,7 @@ func (f *factory) KubebuilderWatchClient() (kbclient.WithWatch, error) {
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	kubebuilderWatchClient, err := kbclient.NewWithWatch(clientConfig, kbclient.Options{

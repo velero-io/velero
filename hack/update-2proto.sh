@@ -23,7 +23,7 @@ protoc \
   -I pkg/plugin/proto/ \
   -I /usr/include \
   --go_out=pkg/plugin/generated/ \
-  --go_opt=module=github.com/vmware-tanzu/velero/pkg/plugin/generated \
+  --go_opt=module=github.com/velero-io/velero/pkg/plugin/generated \
   --go-grpc_out=pkg/plugin/generated \
   --go-grpc_opt=paths=source_relative \
   --go-grpc_opt=require_unimplemented_servers=false \

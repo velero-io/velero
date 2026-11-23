@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
 )
 
 func TestNewCommand(t *testing.T) {

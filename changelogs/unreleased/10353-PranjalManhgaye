@@ -1,1 +1,0 @@
-Reject velero backup delete when backup storage location is read-only

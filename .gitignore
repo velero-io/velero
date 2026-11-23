@@ -61,6 +61,6 @@ debug.test*
 .cache/
 
 # Go telemetry directory created when container sets HOME to working directory
-# This happens because Makefile uses 'docker run -w /github.com/vmware-tanzu/velero'
+# This happens because Makefile uses 'docker run -w /github.com/velero-io/velero'
 # and Go's os.UserConfigDir() falls back to $HOME/.config when XDG_CONFIG_HOME is unset
 .config/

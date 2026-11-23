@@ -17,13 +17,14 @@ limitations under the License.
 package kube
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/builder"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestGetSecretKey(t *testing.T) {
@@ -83,7 +84,7 @@ func TestGetSecretKey(t *testing.T) {
 				require.NoError(t, fakeClient.Create(t.Context(), secret))
 			}
 
-			data, err := GetSecretKey(fakeClient, tc.namespace, tc.selector)
+			data, err := GetSecretKey(context.Background(), fakeClient, tc.namespace, tc.selector)
 			if tc.expectedErr != "" {
 				require.Nil(t, data)
 				require.EqualError(t, err, tc.expectedErr)

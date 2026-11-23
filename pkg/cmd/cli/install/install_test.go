@@ -27,8 +27,8 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestPriorityClassNameFlag(t *testing.T) {
@@ -322,6 +322,38 @@ func TestWaitFlag(t *testing.T) {
 			err = o.Validate(c, []string{}, f)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedWait, o.Wait)
+		})
+	}
+}
+
+func TestExcludeNamespaceFromBackupFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected bool
+	}{
+		{
+			name:     "default: namespace is excluded from backups",
+			args:     []string{},
+			expected: true,
+		},
+		{
+			name:     "--exclude-namespace-from-backup=false opts out",
+			args:     []string{"--exclude-namespace-from-backup=false"},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := NewInstallOptions()
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			o.BindFlags(flags)
+			require.NoError(t, flags.Parse(tc.args))
+
+			veleroOptions, err := o.AsVeleroOptions()
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, veleroOptions.ExcludeNamespaceFromBackup)
 		})
 	}
 }

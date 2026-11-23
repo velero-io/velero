@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/kuberesource"
 )
 
 func TestPVCMustInclusionTracker_IsPVCIncluded(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 	plugin "github.com/hashicorp/go-plugin"
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
 )
 
 type Factory interface {

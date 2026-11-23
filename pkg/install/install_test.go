@@ -21,8 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	v1crds "github.com/vmware-tanzu/velero/config/crd/v1"
-	"github.com/vmware-tanzu/velero/pkg/test"
+	v1crds "github.com/velero-io/velero/config/crd/v1"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 func TestInstall(t *testing.T) {

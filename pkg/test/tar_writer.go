@@ -29,7 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/util/encode"
+	"github.com/velero-io/velero/pkg/util/encode"
 )
 
 type TarWriter struct {

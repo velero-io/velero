@@ -1,0 +1,1 @@
+Skip reading and logging backup items that no DeleteItemAction applies to during backup deletion

@@ -22,7 +22,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/uploader"
 
 	"github.com/kopia/kopia/snapshot/upload"
 )

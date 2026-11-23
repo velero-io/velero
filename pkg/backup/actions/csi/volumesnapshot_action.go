@@ -30,16 +30,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	plugincommon "github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/csi"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/label"
+	plugincommon "github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/csi"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
 // volumeSnapshotBackupItemAction is a backup item action plugin to backup
@@ -88,6 +88,13 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 
 	if backup.Status.Phase == velerov1api.BackupPhaseFinalizing ||
 		backup.Status.Phase == velerov1api.BackupPhaseFinalizingPartiallyFailed {
+		// External-snapshotter blocks finalization of group members while their
+		// parent VGS exists. Terminal VGS cleanup deletes the parent and releases
+		// the member snapshot finalizers.
+		if vs.Status != nil && vs.Status.VolumeGroupSnapshotName != nil &&
+			vs.Labels[velerov1api.BackupUIDLabel] == string(backup.UID) && backup.UID != "" {
+			return item, nil, "", nil, nil
+		}
 		p.log.
 			WithField("Backup", fmt.Sprintf("%s/%s", backup.Namespace, backup.Name)).
 			WithField("BackupPhase", backup.Status.Phase).Debugf("Cleaning VolumeSnapshots.")
@@ -183,6 +190,7 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 			&vsc.ObjectMeta,
 			map[string]string{
 				velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
+				velerov1api.BackupUIDLabel:  string(backup.UID),
 			},
 		)
 

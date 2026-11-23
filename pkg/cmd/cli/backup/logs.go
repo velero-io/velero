@@ -27,12 +27,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/downloadrequest"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/cmd/cli"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
+	"github.com/velero-io/velero/pkg/cmd/util/downloadrequest"
 )
 
 type LogsOptions struct {
@@ -72,8 +72,9 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 
 	switch backup.Status.Phase {
-	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed, velerov1api.BackupPhaseWaitingForPluginOperations, velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed:
-		// terminal and waiting for plugin operations phases, do nothing.
+	case velerov1api.BackupPhaseCompleted, velerov1api.BackupPhasePartiallyFailed, velerov1api.BackupPhaseFailed, velerov1api.BackupPhaseWaitingForPluginOperations, velerov1api.BackupPhaseWaitingForPluginOperationsPartiallyFailed, velerov1api.BackupPhaseFinalizing, velerov1api.BackupPhaseFinalizingPartiallyFailed:
+		// terminal, waiting for plugin operations and finalizing phases, do nothing.
+		// The log is uploaded before a backup enters any of the non-terminal ones.
 	default:
 		return fmt.Errorf("logs for backup %q are not available until it's finished processing, please wait "+
 			"until the backup has a phase of Completed or Failed and try again", l.BackupName)

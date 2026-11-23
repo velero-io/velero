@@ -27,8 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	common "github.com/vmware-tanzu/velero/test/util/common"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	common "github.com/velero-io/velero/test/util/common"
 )
 
 func CreatePod(

@@ -1,1 +1,0 @@
-Add readWriteOncePod backupPVC config to enable mount-level SELinux labeling

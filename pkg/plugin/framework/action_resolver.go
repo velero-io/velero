@@ -23,14 +23,14 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v1"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/itemblockaction/v1"
-	riav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v1"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav1 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v1"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/velero/itemblockaction/v1"
+	riav1 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v1"
+	riav2 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/util/collections"
 )
 
 /*

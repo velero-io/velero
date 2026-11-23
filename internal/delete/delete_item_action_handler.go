@@ -19,7 +19,7 @@ package delete
 import (
 	"io"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/plugin/framework"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -28,11 +28,11 @@ import (
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/archive"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/archive"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/util/filesystem"
 )
 
 // Context provides the necessary environment to run DeleteItemAction plugins
@@ -106,11 +106,15 @@ func InvokeDeleteActions(ctx *Context) error {
 
 		// Iterate over all items, grouped by namespace.
 		for namespace, items := range resourceList.ItemsByNamespace {
-			nsLog := ctx.Log.WithField("namespace", namespace)
-			nsLog.Info("Starting to check for items in namespace")
-
 			// Filter applicable actions based on namespace only once per namespace.
 			actions := ctx.getApplicableActions(groupResource, namespace)
+			// No action can run for these items, so don't read or log every one of them.
+			if len(actions) == 0 {
+				continue
+			}
+
+			nsLog := ctx.Log.WithField("namespace", namespace)
+			nsLog.Info("Starting to check for items in namespace")
 
 			// Process individual items from the backup
 			for _, item := range items {
@@ -126,7 +130,7 @@ func InvokeDeleteActions(ctx *Context) error {
 				}
 
 				itemLog := nsLog.WithField("item", obj.GetName())
-				itemLog.Infof("invoking DeleteItemAction plugins")
+				itemLog.Debug("invoking DeleteItemAction plugins")
 
 				for _, action := range actions {
 					if !action.Selector.Matches(labels.Set(obj.GetLabels())) {

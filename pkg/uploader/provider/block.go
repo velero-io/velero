@@ -24,12 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	repokeys "github.com/vmware-tanzu/velero/pkg/repository/keys"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/uploader/block"
+	"github.com/velero-io/velero/internal/credentials"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	repokeys "github.com/velero-io/velero/pkg/repository/keys"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/uploader/block"
 )
 
 var blockBackupFunc = block.Backup
@@ -85,7 +85,7 @@ func (bp *blockProvider) GetPassword(param any) (string, error) {
 	if bp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
-	rawPass, err := bp.credGetter.FromSecret.Get(repokeys.RepoKeySelector())
+	rawPass, err := bp.credGetter.FromSecret.Get(context.TODO(), repokeys.RepoKeySelector())
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}

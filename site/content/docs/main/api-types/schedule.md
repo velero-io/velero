@@ -55,7 +55,9 @@ spec:
   # Schedule is a Cron expression defining when to run the Backup
   schedule: 0 7 * * *
   # Specifies whether to use OwnerReferences on backups created by this Schedule. 
-  # Notice: if set to true, when schedule is deleted, backups will be deleted too. Optional.
+  # Notice: if set to true, when the schedule is deleted, Kubernetes garbage collects the Backup CRs it created.
+  # Backup data and snapshots are not deleted, and the backups are synced back from the backup storage location.
+  # Use `velero backup delete` to delete backups. Optional.
   useOwnerReferencesInBackup: false
   # Template is the spec that should be used for each backup triggered by this schedule.
   template:
@@ -153,8 +155,12 @@ spec:
     datamover: velero
     # UploaderConfig specifies the configuration for the uploader
     uploaderConfig:
-        # ParallelFilesUpload is the number of files parallel uploads to perform when using the uploader.
+        # Concurrent file uploads per volume for the Kopia filesystem uploader.
+        # Omitted or 0 uses GOMAXPROCS in the data mover process.
         parallelFilesUpload: 10
+        # Concurrent 1 MiB block writes per volume for Velero block uploader.
+        # Omitted or 0 uses GOMAXPROCS in the data mover process.
+        parallelBlocksUpload: 10
     # The labels/annotations you want on backup objects, created from this schedule (instead of copying the labels/annotations you have on schedule object itself).
     # When this field is set, the labels/annotations from the Schedule resource are not copied to the Backup resource.
     metadata:

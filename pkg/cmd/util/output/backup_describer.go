@@ -34,16 +34,16 @@ import (
 	"github.com/fatih/color"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	veleroapishared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/downloadrequest"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
+	veleroapishared "github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
+	"github.com/velero-io/velero/pkg/cmd/util/downloadrequest"
+	"github.com/velero-io/velero/pkg/itemoperation"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	"github.com/velero-io/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 // DescribeBackup describes a backup in human-readable format.
@@ -96,7 +96,7 @@ func DescribeBackup(
 
 		DescribeGlobalVolumePolicy(d, backup)
 
-		if backup.Spec.UploaderConfig != nil && backup.Spec.UploaderConfig.ParallelFilesUpload > 0 {
+		if backup.Spec.UploaderConfig != nil {
 			d.Println()
 			DescribeUploaderConfigForBackup(d, backup.Spec)
 		}
@@ -150,6 +150,7 @@ func DescribeGlobalVolumePolicy(d *Describer, backup *velerov1api.Backup) {
 func DescribeUploaderConfigForBackup(d *Describer, spec velerov1api.BackupSpec) {
 	d.Printf("Uploader config:\n")
 	d.Printf("\tParallel files upload:\t%d\n", spec.UploaderConfig.ParallelFilesUpload)
+	d.Printf("\tParallel blocks upload:\t%d\n", spec.UploaderConfig.ParallelBlocksUpload)
 }
 
 // DescribeBackupSpec describes a backup spec in human-readable format.

@@ -1,0 +1,1 @@
+Some of these diagrams (for instance backup-process.png), have been created on [draw.io](https://www.draw.io), using the "Include a copy of my diagram" option.  If you want to make changes to these diagrams, try importing them into draw.io, and you should have access to the original shapes/text that went into the originals.

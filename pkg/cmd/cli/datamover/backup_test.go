@@ -25,12 +25,12 @@ import (
 	"github.com/stretchr/testify/require"
 	ctlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	cacheMock "github.com/vmware-tanzu/velero/pkg/cmd/cli/datamover/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	cacheMock "github.com/velero-io/velero/pkg/cmd/cli/datamover/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/filesystem"
 )
 
 func TestNewBackupCommandCBTSANameFlag(t *testing.T) {

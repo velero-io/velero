@@ -22,12 +22,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // AdmissionWebhookConfigurationAction is a RestoreItemAction plugin applicable to mutatingwebhookconfiguration and
 // validatingwebhookconfiguration to reset the invalid value for "sideEffects" of the webhooks.
-// More background please refer to https://github.com/vmware-tanzu/velero/issues/3516
+// More background please refer to https://github.com/velero-io/velero/issues/3516
 type AdmissionWebhookConfigurationAction struct {
 	logger logrus.FieldLogger
 }

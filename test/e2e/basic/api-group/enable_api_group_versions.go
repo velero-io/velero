@@ -34,11 +34,11 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	"github.com/velero-io/velero/pkg/builder"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 var veleroCfg VeleroConfig

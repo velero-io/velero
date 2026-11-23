@@ -34,12 +34,12 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/repository"
+	"github.com/velero-io/velero/pkg/restorehelper"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestGetVolumesRepositoryType(t *testing.T) {
@@ -200,6 +200,7 @@ func TestRestorePodVolumes(t *testing.T) {
 		sourceNamespace string
 		volumeInfos     map[string]volume.BackupVolumeInfo
 		inplace         bool
+		allowMismatch   bool
 		errs            []expectError
 	}{
 		{
@@ -510,6 +511,36 @@ func TestRestorePodVolumes(t *testing.T) {
 			},
 		},
 		{
+			name: "in-place restore proceeds when the PVC is bound to a different CSI volume with allowExistingVolumeMismatch",
+			pvbs: []*velerov1api.PodVolumeBackup{
+				createPVBObj(true, true, 1, "kopia"),
+			},
+			inplace:       true,
+			allowMismatch: true,
+			kubeClientObj: []runtime.Object{
+				createNodeAgentDaemonset(),
+				func() *corev1api.PersistentVolume {
+					pv := createPVObj(1, false)
+					pv.Spec.CSI = &corev1api.CSIPersistentVolumeSource{Driver: "fake.csi", VolumeHandle: "vol-other"}
+					return pv
+				}(),
+				createPVCObj(1),
+			},
+			ctlClientObj: []runtime.Object{
+				createBackupRepoObj(),
+			},
+			restoredPod:     createPodObj(true, true, true, 1),
+			sourceNamespace: "fake-ns",
+			bsl:             "fake-bsl",
+			volumeInfos: map[string]volume.BackupVolumeInfo{
+				"fake-pv-1": {PVCNamespace: "fake-ns", PVCName: "fake-pvc-1", PVInfo: &volume.PVInfo{VolumeHandle: "vol-1"}},
+			},
+			runtimeScheme: scheme,
+			retPVRs: []*velerov1api.PodVolumeRestore{
+				completedPVR,
+			},
+		},
+		{
 			name: "in-place restore blocked when the PVC is too small for the source volume",
 			pvbs: []*velerov1api.PodVolumeBackup{
 				createPVBObj(true, true, 1, "kopia"),
@@ -592,6 +623,9 @@ func TestRestorePodVolumes(t *testing.T) {
 				ObjectMeta(builder.WithUID("fake-restore-uid"))
 			if test.inplace {
 				restoreBuilder = restoreBuilder.ExistingVolumeDataPolicy(string(velerov1api.VolumeDataPolicyTypeFull))
+			}
+			if test.allowMismatch {
+				restoreBuilder = restoreBuilder.AllowExistingVolumeMismatch(true)
 			}
 			restoreObj := restoreBuilder.Result()
 

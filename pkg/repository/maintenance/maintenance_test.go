@@ -38,15 +38,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	velerolabel "github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/repository/provider"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	velerolabel "github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/repository/provider"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 func TestGenerateJobName(t *testing.T) {
@@ -128,7 +128,7 @@ func TestDeleteOldJobs(t *testing.T) {
 	require.NoError(t, cli.Create(t.Context(), newJob))
 
 	// Call the function
-	require.NoError(t, DeleteOldJobs(cli, *repo, keep, velerotest.NewLogger()))
+	require.NoError(t, DeleteOldJobs(t.Context(), cli, *repo, keep, velerotest.NewLogger()))
 
 	// Get the remaining jobs
 	jobList := &batchv1api.JobList{}
@@ -293,14 +293,14 @@ func TestGetResultFromJob(t *testing.T) {
 	cli := fake.NewClientBuilder().Build()
 
 	// test an error should be returned
-	result, err := getResultFromJob(cli, job)
+	result, err := getResultFromJob(t.Context(), cli, job)
 	require.EqualError(t, err, "no pod found for job test-job")
 	assert.Empty(t, result)
 
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
 
 	// test an error should be returned
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.EqualError(t, err, "no container statuses found for job test-job")
 	assert.Empty(t, result)
 
@@ -315,7 +315,7 @@ func TestGetResultFromJob(t *testing.T) {
 
 	// Test an error should be returned
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.EqualError(t, err, "container for job test-job is not terminated")
 	assert.Empty(t, result)
 
@@ -332,7 +332,7 @@ func TestGetResultFromJob(t *testing.T) {
 
 	// This call should return the termination message with no error
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 
@@ -350,7 +350,7 @@ func TestGetResultFromJob(t *testing.T) {
 	}
 
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.EqualError(t, err, "error to locate repo maintenance error indicator from termination message")
 	assert.Empty(t, result)
 
@@ -368,7 +368,7 @@ func TestGetResultFromJob(t *testing.T) {
 	}
 
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.EqualError(t, err, "nothing after repo maintenance error indicator in termination message")
 	assert.Empty(t, result)
 
@@ -386,7 +386,7 @@ func TestGetResultFromJob(t *testing.T) {
 	}
 
 	cli = fake.NewClientBuilder().WithObjects(job, pod).Build()
-	result, err = getResultFromJob(cli, job)
+	result, err = getResultFromJob(t.Context(), cli, job)
 	require.NoError(t, err)
 	assert.Equal(t, "fake-error", result)
 }
@@ -2425,4 +2425,111 @@ func TestBuildJobWithTolerationsInheritance(t *testing.T) {
 			assert.Equal(t, tc.expectedTolerations, job.Spec.Template.Spec.Tolerations)
 		})
 	}
+}
+
+type maintenanceCtxKey struct{}
+
+// maintenanceContextTrackingClient records the context passed to the List and
+// Delete calls made by the maintenance helpers.
+type maintenanceContextTrackingClient struct {
+	client.Client
+	jobListCtxs []context.Context
+	podListCtxs []context.Context
+	deleteCtxs  []context.Context
+}
+
+func (c *maintenanceContextTrackingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	switch list.(type) {
+	case *batchv1api.JobList:
+		c.jobListCtxs = append(c.jobListCtxs, ctx)
+	case *corev1api.PodList:
+		c.podListCtxs = append(c.podListCtxs, ctx)
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+func (c *maintenanceContextTrackingClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	c.deleteCtxs = append(c.deleteCtxs, ctx)
+	return c.Client.Delete(ctx, obj, opts...)
+}
+
+func requireSentinelCtx(t *testing.T, ctxs []context.Context, call string) {
+	t.Helper()
+	require.NotEmpty(t, ctxs, "expected at least one %s call", call)
+	for _, ctx := range ctxs {
+		assert.Equal(t, "sentinel", ctx.Value(maintenanceCtxKey{}), "%s should use the caller's context", call)
+	}
+}
+
+func TestMaintenanceHelpers_ContextPropagation(t *testing.T) {
+	repo := &velerov1api.BackupRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: velerov1api.DefaultNamespace,
+		},
+	}
+	repoLabels := map[string]string{RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name)}
+
+	newFailedJob := func(name string, created time.Time) *batchv1api.Job {
+		return &batchv1api.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				Namespace:         velerov1api.DefaultNamespace,
+				Labels:            repoLabels,
+				CreationTimestamp: metav1.Time{Time: created},
+			},
+			Status: batchv1api.JobStatus{Failed: 1},
+		}
+	}
+	newJobPod := func(job *batchv1api.Job) *corev1api.Pod {
+		return &corev1api.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      job.Name + "-pod",
+				Namespace: job.Namespace,
+				Labels:    map[string]string{"job-name": job.Name},
+			},
+		}
+	}
+
+	now := time.Now()
+	job1 := newFailedJob("job-1", now.Add(-2*time.Hour))
+	job2 := newFailedJob("job-2", now.Add(-time.Hour))
+
+	newTrackingClient := func() *maintenanceContextTrackingClient {
+		return &maintenanceContextTrackingClient{
+			Client: fake.NewClientBuilder().WithObjects(job1, job2, newJobPod(job1), newJobPod(job2)).Build(),
+		}
+	}
+
+	t.Run("DeleteOldJobs", func(t *testing.T) {
+		cli := newTrackingClient()
+		ctx := context.WithValue(t.Context(), maintenanceCtxKey{}, "sentinel")
+
+		require.NoError(t, DeleteOldJobs(ctx, cli, *repo, 1, velerotest.NewLogger()))
+
+		requireSentinelCtx(t, cli.jobListCtxs, "job List")
+		requireSentinelCtx(t, cli.deleteCtxs, "job Delete")
+	})
+
+	t.Run("WaitJobComplete", func(t *testing.T) {
+		cli := newTrackingClient()
+		ctx := context.WithValue(t.Context(), maintenanceCtxKey{}, "sentinel")
+
+		_, err := WaitJobComplete(cli, ctx, job1.Name, job1.Namespace, velerotest.NewLogger())
+		require.NoError(t, err)
+
+		requireSentinelCtx(t, cli.podListCtxs, "pod List")
+	})
+
+	t.Run("WaitAllJobsComplete", func(t *testing.T) {
+		cli := newTrackingClient()
+		ctx := context.WithValue(t.Context(), maintenanceCtxKey{}, "sentinel")
+
+		history, err := WaitAllJobsComplete(ctx, cli, repo, 3, velerotest.NewLogger())
+		require.NoError(t, err)
+		require.Len(t, history, 2)
+
+		requireSentinelCtx(t, cli.jobListCtxs, "job List")
+		requireSentinelCtx(t, cli.podListCtxs, "pod List")
+	})
 }

@@ -39,14 +39,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/repository/maintenance"
-	repomanager "github.com/vmware-tanzu/velero/pkg/repository/manager"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/repository/maintenance"
+	repomanager "github.com/velero-io/velero/pkg/repository/manager"
+	"github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 const (
@@ -146,7 +146,7 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 			velerov1api.StorageLocationLabel: label.GetValidName(bsl.Name),
 		}).AsSelector(),
 	}
-	if err := r.List(context.TODO(), list, options); err != nil {
+	if err := r.List(ctx, list, options); err != nil {
 		r.logger.WithField("BSL", bsl.Name).WithError(err).Error("unable to list BackupRepositories")
 		return []reconcile.Request{}
 	}
@@ -154,7 +154,7 @@ func (r *BackupRepoReconciler) invalidateBackupReposForBSL(ctx context.Context, 
 	requests := []reconcile.Request{}
 	for i := range list.Items {
 		r.logger.WithField("BSL", bsl.Name).Infof("Invalidating Backup Repository %s", list.Items[i].Name)
-		if err := r.patchBackupRepository(context.Background(), &list.Items[i], repoNotReady("re-establish on BSL change, create or delete")); err != nil {
+		if err := r.patchBackupRepository(ctx, &list.Items[i], repoNotReady("re-establish on BSL change, create or delete")); err != nil {
 			r.logger.WithField("BSL", bsl.Name).WithError(err).Errorf("fail to patch BackupRepository %s", list.Items[i].Name)
 			continue
 		}
@@ -295,7 +295,7 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.WithError(err).Warn("Failed to get keepLatestMaintenanceJobs from ConfigMap, using CLI parameter value")
 		}
 
-		if err := maintenance.DeleteOldJobs(r.Client, *backupRepo, keepJobs, log); err != nil {
+		if err := maintenance.DeleteOldJobs(ctx, r.Client, *backupRepo, keepJobs, log); err != nil {
 			log.WithError(err).Warn("Failed to delete old maintenance jobs")
 		}
 	}

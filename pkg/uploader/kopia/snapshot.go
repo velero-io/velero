@@ -38,10 +38,10 @@ import (
 	"github.com/kopia/kopia/snapshot/restore"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 
-	"github.com/vmware-tanzu/velero/pkg/kopia"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	uploaderutil "github.com/vmware-tanzu/velero/pkg/uploader/util"
+	"github.com/velero-io/velero/pkg/kopia"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/uploader"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 )
 
 // All function mainly used to make testing more convenient
@@ -114,15 +114,17 @@ func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snap
 	// some internal operations from Kopia code retrieves policies from repo directly, so we need to persist the policy to repo
 	curPolicy := getDefaultPolicy()
 
+	maxParallelFileReads := runtime.GOMAXPROCS(0)
+
 	if len(uploaderCfg) > 0 {
-		parallelUpload, err := uploaderutil.GetParallelFilesUpload(uploaderCfg)
-		if err != nil {
+		if parallelUpload, err := uploaderutil.GetParallelFilesUpload(uploaderCfg); err != nil {
 			return nil, errors.Wrap(err, "failed to get uploader config")
-		}
-		if parallelUpload > 0 {
-			curPolicy.UploadPolicy.MaxParallelFileReads = newOptionalInt(parallelUpload)
+		} else if parallelUpload > 0 {
+			maxParallelFileReads = parallelUpload
 		}
 	}
+
+	curPolicy.UploadPolicy.MaxParallelFileReads = newOptionalInt(maxParallelFileReads)
 
 	if _, ok := uploaderCfg[UploaderConfigMultipartKey]; ok {
 		curPolicy.UploadPolicy.ParallelUploadAboveSize = newOptionalInt64(2 << 30)
@@ -299,6 +301,14 @@ func SnapshotSource(
 		return "", 0, fallback, errors.Wrapf(err, "failed to upload the kopia snapshot for si %v", sourceInfo)
 	}
 
+	if manifest.IncompleteReason != "" {
+		if _, _, _, err := reportSnapshotStatus(manifest, policyTree, fallback); err != nil {
+			return "", 0, fallback, err
+		}
+
+		return "", 0, fallback, errors.Errorf("kopia upload incomplete: %s", manifest.IncompleteReason)
+	}
+
 	manifest.Tags = snapshotTags
 
 	manifest.Description = description
@@ -437,7 +447,7 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 		IgnorePermissionErrors: true,
 	}
 
-	restoreConcurrency := runtime.NumCPU()
+	restoreConcurrency := runtime.GOMAXPROCS(0)
 	deleteExtra := false
 	if len(uploaderCfg) > 0 {
 		writeSparseFiles, err := uploaderutil.GetWriteSparseFiles(uploaderCfg)

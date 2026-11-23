@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/perf/test"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/perf/test"
 )
 
 type BackupTest struct {

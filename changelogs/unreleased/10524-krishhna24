@@ -1,1 +1,0 @@
-Use the Kind constant instead of the kind string literal in the e2e tests

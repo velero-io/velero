@@ -31,9 +31,9 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/datamover"
 )
 
 func pvcVolumeMode(mode corev1api.PersistentVolumeMode) *corev1api.PersistentVolumeMode {
@@ -724,7 +724,7 @@ volumePolicies:
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			resPolicies, err := GetResourcePoliciesFromBackup(tc.backup, client, logger)
+			resPolicies, err := getResourcePoliciesFromBackup(tc.backup, client, logger)
 			if tc.expectedErr == "" {
 				require.NoError(t, err)
 				if tc.backup.Spec.ResourcePolicy != nil && tc.backup.Spec.ResourcePolicy.Kind == ConfigmapRefType {
@@ -2579,6 +2579,49 @@ func TestIncludeExcludePolicyValidateNamespacesByLabel(t *testing.T) {
 	}
 }
 
+func TestIncludeExcludePolicyValidateGlobPatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  IncludeExcludePolicy
+		wantErr string
+	}{
+		{
+			name: "valid glob patterns",
+			policy: IncludeExcludePolicy{
+				IncludedClusterScopedResources:   []string{"persistentvolumes", "*.storage.k8s.io"},
+				IncludedNamespaceScopedResources: []string{"config[mM]aps"},
+				ExcludedNamespaceScopedResources: []string{"secret?"},
+			},
+		},
+		{
+			name: "malformed cluster-scoped glob pattern is rejected",
+			policy: IncludeExcludePolicy{
+				IncludedClusterScopedResources: []string{"persistentvolumes", "foo["},
+			},
+			wantErr: `invalid glob pattern "foo[" in includes list`,
+		},
+		{
+			name: "malformed namespace-scoped glob pattern is rejected",
+			policy: IncludeExcludePolicy{
+				ExcludedNamespaceScopedResources: []string{"[bar"},
+			},
+			wantErr: `invalid glob pattern "[bar" in excludes list`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.Validate()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolveNamespacesByLabel(t *testing.T) {
 	nsWith := func(name string, labels map[string]string) *corev1api.Namespace {
 		return &corev1api.Namespace{
@@ -3146,6 +3189,8 @@ volumePolicies:
 		globalCMName        string
 		globalCM            *corev1api.ConfigMap
 		backupRef           string
+		backupAnnotations   map[string]string
+		installNamespace    string
 		expectErr           bool
 		expectedGp2Action   VolumeActionType
 		expectedNumPolicies int
@@ -3184,6 +3229,15 @@ volumePolicies:
 			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
 			globalCMName:        "global",
 			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			expectedGp2Action:   Skip, // only global matches gp2
+			expectedNumPolicies: 2,
+		},
+		{
+			name:                "merge - global from backup annotation with empty params",
+			backupRef:           "backup01",
+			backupCM:            globalPolicyConfigMap("backup01", otherFsBackup),
+			globalCM:            globalPolicyConfigMap("global", gp2Skip),
+			backupAnnotations:   map[string]string{velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global"},
 			expectedGp2Action:   Skip, // only global matches gp2
 			expectedNumPolicies: 2,
 		},
@@ -3227,8 +3281,15 @@ volumePolicies:
 			}
 
 			b := backupWithPolicy(tc.backupRef)
+			if tc.backupAnnotations != nil {
+				b.Annotations = tc.backupAnnotations
+			}
 
-			p, err := GetResourcePoliciesFromBackupWithGlobal(b, client, tc.globalCMName, "velero", logrus.New())
+			ns := tc.installNamespace
+			if ns == "" && tc.backupAnnotations == nil {
+				ns = "velero"
+			}
+			p, err := GetResourcePoliciesFromBackupWithGlobal(b, client, tc.globalCMName, ns, logrus.New())
 			if tc.expectErr {
 				require.Error(t, err)
 				return

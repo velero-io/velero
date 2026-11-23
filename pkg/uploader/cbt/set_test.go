@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/cbtservice"
-	cbtservicemocks "github.com/vmware-tanzu/velero/pkg/cbtservice/mocks"
+	"github.com/velero-io/velero/pkg/cbtservice"
+	cbtservicemocks "github.com/velero-io/velero/pkg/cbtservice/mocks"
 )
 
 func TestSetBitmapOrFull(t *testing.T) {

@@ -26,11 +26,11 @@ import (
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestMostRecentBackup(t *testing.T) {
@@ -69,6 +69,7 @@ func TestCreateCommand(t *testing.T) {
 		excludeNamespaces := "pod1,pod2,pod3"
 		existingResourcePolicy := "none"
 		existingVolumeDataPolicy := "none"
+		allowExistingVolumeMismatch := "true"
 		includeResources := "sc,sts"
 		excludeResources := "job"
 		statusIncludeResources := "sc,sts"
@@ -95,6 +96,7 @@ func TestCreateCommand(t *testing.T) {
 		flags.Parse([]string{"--annotations", annotations})
 		flags.Parse([]string{"--existing-resource-policy", existingResourcePolicy})
 		flags.Parse([]string{"--existing-volume-data-policy", existingVolumeDataPolicy})
+		flags.Parse([]string{"--allow-existing-volume-mismatch", allowExistingVolumeMismatch})
 		flags.Parse([]string{"--include-namespaces", includeNamespaces})
 		flags.Parse([]string{"--exclude-namespaces", excludeNamespaces})
 		flags.Parse([]string{"--include-resources", includeResources})
@@ -139,6 +141,7 @@ func TestCreateCommand(t *testing.T) {
 		require.Equal(t, excludeNamespaces, o.ExcludeNamespaces.String())
 		require.Equal(t, existingResourcePolicy, o.ExistingResourcePolicy)
 		require.Equal(t, existingVolumeDataPolicy, o.ExistingVolumeDataPolicy)
+		require.Equal(t, allowExistingVolumeMismatch, o.AllowExistingVolumeMismatch.String())
 		require.Equal(t, includeResources, o.IncludeResources.String())
 		require.Equal(t, excludeResources, o.ExcludeResources.String())
 

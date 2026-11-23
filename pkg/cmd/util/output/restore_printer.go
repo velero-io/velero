@@ -20,7 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	v1 "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 var (

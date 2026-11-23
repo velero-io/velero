@@ -1,1 +1,0 @@
-Issue #9544: Add test coverage for S3 bucket name in MRAP ARN notation and fix bucket validation to accept ARN format

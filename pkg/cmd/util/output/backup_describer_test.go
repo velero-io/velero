@@ -27,11 +27,11 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/itemoperation"
 )
 
 func TestDescribeUploaderConfig(t *testing.T) {
@@ -45,7 +45,8 @@ func TestDescribeUploaderConfig(t *testing.T) {
 	DescribeUploaderConfigForBackup(d, input)
 	d.out.Flush()
 	expect := `Uploader config:
-  Parallel files upload:  10
+  Parallel files upload:   10
+  Parallel blocks upload:  0
 `
 	assert.Equal(t, expect, d.buf.String())
 }

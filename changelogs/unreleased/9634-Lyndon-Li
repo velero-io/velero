@@ -1,1 +1,0 @@
-Fix issue #9626, let go for uninitialized repo under readonly mode

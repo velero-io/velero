@@ -71,8 +71,8 @@ These configuration parameters are expected as values to the following command l
 1. `--default-cluster-context`: Default (source) cluster's kube config context, it's for migration test.
 1. `--standby-cluster-context`: Standby (destination) cluster's kube config context, it's for migration test.
 1. `--uploader-type`: Type of uploader for persistent volume backup.
-1. `--snapshot-move-data`: A Switch for taking backup with Velero's data mover, if data-mover-plugin is not provided, using built-in plugin.
-1. `--data-mover-plugin`: Customized plugin for data mover.
+1. `--snapshot-move-data`: Enable snapshot data movement for backups.
+1. `--data-mover`: Data mover name for snapshot data movement. Empty or `velero` selects the built-in data mover. Custom movers must be installed separately.
 1. `--standby-cluster-cloud-provider`: Cloud provider for standby cluster.
 1. `--standby-cluster-plugins`: Plugins provider for standby cluster.
 1. `--standby-cluster-object-store-provider`: Object store provider for standby cluster.
@@ -106,6 +106,7 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `PLUGINS `: the `-plugins`. Optional.
 1. `BSL_PREFIX`: `-prefix`. Optional.
 1. `BSL_CONFIG`: `-bsl-config`. Optional. Example: BSL_CONFIG="region=us-east-1". May be required for some object store provider
+1. `BSL_CA_CERT_FILE`: `-bsl-ca-cert-file`. Optional. Certificate bundle used to verify TLS connections to the object store, e.g. when MinIO serves HTTPS with a self-signed certificate
 1. `VSL_CONFIG`: `-vsl-config`. Optional.
 1. `UPGRADE_FROM_VELERO_CLI `: `-upgrade-from-velero-cli`. Optional.
 1. `UPGRADE_FROM_VELERO_VERSION `: `-upgrade-from-velero-version`. Optional.
@@ -125,7 +126,7 @@ Below is a mapping between `make` variables to E2E configuration flags.
 1. `STANDBY_CLUSTER`: `-standby-cluster-context`. Optional.
 1. `UPLOADER_TYPE`: `-uploader-type`. Optional.
 1. `SNAPSHOT_MOVE_DATA`: `-snapshot-move-data`. Optional.
-1. `DATA_MOVER_plugin`: `-data-mover-plugin`. Optional.
+1. `DATA_MOVER`: `--data-mover`. Optional; used by snapshot data movement backups and does not enable `SNAPSHOT_MOVE_DATA` automatically.
 1. `STANDBY_CLUSTER_CLOUD_PROVIDER`: `-standby-cluster-cloud-provider`. Optional.
 1. `STANDBY_CLUSTER_PLUGINS`: `-standby-cluster-plugins`. Optional.
 1. `STANDBY_CLUSTER_OBJECT_STORE_PROVIDER`: `-standby-cluster-object-store-provider`. Optional.
@@ -160,6 +161,87 @@ Stop kind cluster
 ``` bash
 kind delete cluster
 ```
+
+#### CSI snapshots on kind
+
+kind has no CSI driver that can take snapshots: its default storage is the
+local-path provisioner, which no CSI snapshotter can act on. The CSI cases are
+therefore skipped on a plain kind cluster.
+
+`hack/install-csi-hostpath.sh` installs what they need: the snapshot CRDs, the
+snapshot controller, the CSI sidecar RBAC and csi-driver-host-path, plus a
+`csi-hostpath-sc` StorageClass. Versions are pinned in the script.
+
+``` bash
+kind create cluster
+./hack/install-csi-hostpath.sh
+```
+
+The script also turns on the `CSIVolumeGroupSnapshot` feature gate, which has to
+be set on both the snapshot controller and the `csi-snapshotter` sidecar, and is
+not enabled by either project's own manifests. Set
+`ENABLE_VOLUME_GROUP_SNAPSHOT=false` to leave the group snapshot CRDs and gates
+out.
+
+Then run the CSI cases with `FEATURES=EnableCSI`:
+
+``` bash
+CLOUD_PROVIDER=kind \
+OBJECT_STORE_PROVIDER=aws \
+FEATURES=EnableCSI \
+BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+CREDS_FILE=/path/to/minio-creds \
+BSL_BUCKET=bucket \
+GINKGO_LABELS="BackupVolumeInfo && (CSISnapshot || CSIDataMover)" \
+make -C test/ run-e2e
+```
+
+`$(hostname -i)` is what CI uses, but it resolves to an address the cluster
+cannot reach under WSL2, which leaves the BackupStorageLocation unreachable and
+every backup failing to upload. Use the kind network's gateway instead:
+
+``` bash
+docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}'
+```
+
+Every CSI label has to be named in the filter. A Ginkgo label filter matches a
+bare token by exact equality and not as a substring, so `CSISnapshot` does not
+select a case labelled `CSIVolumeGroupSnapshot`.
+
+The PVCs those cases create have to land on a CSI-backed StorageClass. The kind
+provider file uses the local-path provisioner, so point the suite at a CSI
+definition rather than editing the shared file, which every other kind job reads:
+
+``` yaml
+# /tmp/kind-csi-sc.yaml
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: e2e-storage-class
+provisioner: hostpath.csi.k8s.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+```
+
+``` bash
+STORAGE_CLASS_FILE=/tmp/kind-csi-sc.yaml
+```
+
+`STORAGE_CLASS_FILE` changes only the definition. The class is still named
+`e2e-storage-class`, so no spec needs to know about it, and a relative path is
+resolved from `test/e2e` like the default provider file.
+
+Kibishii brings its own StorageClass for the cases that use it
+(`kubernetes/yaml/kind/kibishiiKINDStorageClass.yaml` in
+`vmware-tanzu-experiments/distributed-data-generator`), which is also local-path,
+so those cases need the same change in the clone that `KIBISHII_DIRECTORY` points
+at.
+
+`GINKGO_LABELS="BackupVolumeInfo && CSIVolumeGroupSnapshot"` runs the
+VolumeGroupSnapshot case, which additionally needs a VolumeGroupSnapshotClass;
+the suite installs one for providers that have the test data under
+`test/testdata/volume-group-snapshot-class/`.
 
 1. Run Velero tests in an AWS cluster:
 ```bash
@@ -418,6 +500,25 @@ Look for the ⛵ emoji printed at the end of each install and uninstall log. The
 
 ## `Failed to get bucket region` error
 If velero log shows `level=error msg="Failed to get bucket region, bucket: xbucket, error: operation error S3: HeadBucket, failed to resolve service endpoint, endpoint rule error, A region must be set when sending requests to S3." backup-storage-location=velero/default cmd=/plugins/velero-plugin-for-aws controller=backup-storage-location logSource="/go/src/velero-plugin-for-aws/velero-plugin-for-aws/object_store.go:136" pluginName=velero-plugin-for-aws`, it means you need to set `BSL_CONFIG` to include `region=<region>`.
+
+## `multiple VolumeGroupSnapshotClasses found` error
+
+If a VolumeGroupSnapshot backup fails with `failed to determine
+VolumeGroupSnapshotClass for CSI driver ...: multiple VolumeGroupSnapshotClasses
+found`, the cluster has more than one VolumeGroupSnapshotClass carrying the
+`velero.io/csi-volumegroupsnapshot-class=true` label and Velero cannot choose
+between them. The suite removes the class it installs, so this usually means one
+was left behind by hand. `kubectl get volumegroupsnapshotclass` shows them.
+
+## snapshots that never become ready
+
+If VolumeSnapshots stay `readyToUse: false` with nothing in the logs, check that
+the `csi-snapshotter` sidecar synced its caches:
+`kubectl logs csi-hostpathplugin-0 -c csi-snapshotter | grep "Caches populated"`.
+A sidecar watching an API the cluster does not serve, for instance the
+VolumeGroupSnapshot feature gate is on while the group snapshot CRDs are
+missing, waits on a cache that never syncs rather than failing.
+`hack/install-csi-hostpath.sh` checks for this at the end of its run.
 
 ## fail fast
 If need to debug the failed test case, please set the `FAIL_FAST=true` for the `make test-e2e` CLI.

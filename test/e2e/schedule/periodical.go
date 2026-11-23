@@ -10,10 +10,10 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	framework "github.com/vmware-tanzu/velero/test/e2e/test"
-	k8sutil "github.com/vmware-tanzu/velero/test/util/k8s"
-	veleroutil "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	framework "github.com/velero-io/velero/test/e2e/test"
+	k8sutil "github.com/velero-io/velero/test/util/k8s"
+	veleroutil "github.com/velero-io/velero/test/util/velero"
 )
 
 type PeriodicalCase struct {

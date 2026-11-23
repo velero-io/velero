@@ -3,7 +3,7 @@ package schedule
 import (
 	"github.com/spf13/pflag"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
 )
 
 type SkipOptions struct {

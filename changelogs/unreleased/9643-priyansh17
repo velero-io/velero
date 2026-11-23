@@ -1,1 +1,0 @@
-Fix issue #9641, Remove redundant ReadyToUse polling in CSI VolumeSnapshotContent delete plugin

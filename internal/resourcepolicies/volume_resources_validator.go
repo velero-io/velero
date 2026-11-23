@@ -22,7 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.yaml.in/yaml/v3"
 
-	datamover "github.com/vmware-tanzu/velero/pkg/util/datamover"
+	datamover "github.com/velero-io/velero/pkg/util/datamover"
 )
 
 const currentSupportDataVersion = "v1"

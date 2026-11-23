@@ -1,6 +1,6 @@
 syntax = "proto3";
 package generated;
-option go_package = "github.com/vmware-tanzu/velero/pkg/plugin/generated";
+option go_package = "github.com/velero-io/velero/pkg/plugin/generated";
 
 import "Shared.proto";
 

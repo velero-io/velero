@@ -30,8 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // TestChangeStorageClassActionExecute runs the ChangeStorageClassAction's Execute

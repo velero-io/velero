@@ -17,7 +17,7 @@ limitations under the License.
 package itemoperation
 
 import (
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // RestoreOperation stores information about an async item operation

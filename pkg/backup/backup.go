@@ -45,29 +45,29 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	"github.com/vmware-tanzu/velero/internal/volumehelper"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/itemblock"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/itemblockaction/v1"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
-	"github.com/vmware-tanzu/velero/pkg/podexec"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	"github.com/velero-io/velero/internal/volumehelper"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/itemblock"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/velero/itemblockaction/v1"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/podexec"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 // BackupVersion is the current backup major version for Velero.
@@ -180,13 +180,18 @@ func getNamespaceIncludesExcludes(backup *velerov1api.Backup, kbClient kbclient.
 	}
 
 	activeNamespaces := []string{}
+	excludedByLabel := []string{}
 	for _, ns := range nsList.Items {
 		activeNamespaces = append(activeNamespaces, ns.Name)
+		if ns.Labels[velerov1api.ExcludeFromBackupLabel] == "true" {
+			excludedByLabel = append(excludedByLabel, ns.Name)
+		}
 	}
 
 	// Set ActiveNamespaces first, then set includes/excludes
 	includesExcludes := collections.NewNamespaceIncludesExcludes().
 		ActiveNamespaces(activeNamespaces).
+		ExcludedByLabel(excludedByLabel...).
 		Includes(backup.Spec.IncludedNamespaces...).
 		Excludes(backup.Spec.ExcludedNamespaces...)
 
@@ -331,7 +336,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 	// check if there are any namespaces included in the backup which are managed by argoCD
 	// We will check for the existence of a ArgoCD label in the includedNamespaces and add a warning
 	// so that users are at least aware about the existence of argoCD managed ns in their backup
-	// Related Issue: https://github.com/vmware-tanzu/velero/issues/7905
+	// Related Issue: https://github.com/velero-io/velero/issues/7905
 	if len(nsManagedByArgoCD) > 0 {
 		log.Warnf("backup operation may encounter complications and potentially produce undesirable results due to the inclusion of namespaces %v managed by ArgoCD in the backup.", nsManagedByArgoCD)
 	}

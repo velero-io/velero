@@ -34,17 +34,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	providermocks "github.com/vmware-tanzu/velero/pkg/plugin/velero/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/encode"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	providermocks "github.com/velero-io/velero/pkg/plugin/velero/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/encode"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 type objectBackupStoreTestHarness struct {
@@ -412,6 +412,91 @@ func TestGetBackupMetadata(t *testing.T) {
 				assert.Equal(t, tc.obj.GetNamespace(), res.Namespace)
 				assert.Equal(t, tc.obj.GetName(), res.Name)
 			}
+		})
+	}
+}
+
+func TestGetObjectLists(t *testing.T) {
+	t.Run("GetBackupVolumeSnapshots", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetBackupVolumeSnapshots, (*ObjectStoreLayout).getBackupVolumeSnapshotsKey,
+			&volume.Snapshot{Spec: volume.SnapshotSpec{BackupName: "first"}}, &volume.Snapshot{Spec: volume.SnapshotSpec{BackupName: "second"}}, false)
+	})
+	t.Run("GetBackupItemOperations", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetBackupItemOperations, (*ObjectStoreLayout).getBackupItemOperationsKey,
+			&itemoperation.BackupOperation{Spec: itemoperation.BackupOperationSpec{BackupName: "first"}}, &itemoperation.BackupOperation{Spec: itemoperation.BackupOperationSpec{BackupName: "second"}}, false)
+	})
+	t.Run("GetRestoreItemOperations", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetRestoreItemOperations, (*ObjectStoreLayout).getRestoreItemOperationsKey,
+			&itemoperation.RestoreOperation{Spec: itemoperation.RestoreOperationSpec{RestoreName: "first"}}, &itemoperation.RestoreOperation{Spec: itemoperation.RestoreOperationSpec{RestoreName: "second"}}, false)
+	})
+	t.Run("GetCSIVolumeSnapshotClasses", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetCSIVolumeSnapshotClasses, (*ObjectStoreLayout).getCSIVolumeSnapshotClassesKey,
+			&snapshotv1api.VolumeSnapshotClass{ObjectMeta: metav1.ObjectMeta{Name: "first"}}, &snapshotv1api.VolumeSnapshotClass{ObjectMeta: metav1.ObjectMeta{Name: "second"}}, false)
+	})
+	t.Run("GetCSIVolumeSnapshots", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetCSIVolumeSnapshots, (*ObjectStoreLayout).getCSIVolumeSnapshotKey,
+			&snapshotv1api.VolumeSnapshot{ObjectMeta: metav1.ObjectMeta{Name: "first"}}, &snapshotv1api.VolumeSnapshot{ObjectMeta: metav1.ObjectMeta{Name: "second"}}, false)
+	})
+	t.Run("GetCSIVolumeSnapshotContents", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetCSIVolumeSnapshotContents, (*ObjectStoreLayout).getCSIVolumeSnapshotContentsKey,
+			&snapshotv1api.VolumeSnapshotContent{ObjectMeta: metav1.ObjectMeta{Name: "first"}}, &snapshotv1api.VolumeSnapshotContent{ObjectMeta: metav1.ObjectMeta{Name: "second"}}, false)
+	})
+	t.Run("GetPodVolumeBackups", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetPodVolumeBackups, (*ObjectStoreLayout).getPodVolumeBackupsKey,
+			&velerov1api.PodVolumeBackup{ObjectMeta: metav1.ObjectMeta{Name: "first"}}, &velerov1api.PodVolumeBackup{ObjectMeta: metav1.ObjectMeta{Name: "second"}}, false)
+	})
+	t.Run("GetBackupVolumeInfos", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetBackupVolumeInfos, (*ObjectStoreLayout).getBackupVolumeInfoKey,
+			&volume.BackupVolumeInfo{PVCName: "first"}, &volume.BackupVolumeInfo{PVCName: "second"}, true)
+	})
+	t.Run("GetRestoreVolumeInfos", func(t *testing.T) {
+		testGetObjectList(t, (*objectBackupStore).GetRestoreVolumeInfos, (*ObjectStoreLayout).getRestoreVolumeInfoKey,
+			&volume.RestoreVolumeInfo{PVCName: "first"}, &volume.RestoreVolumeInfo{PVCName: "second"}, true)
+	})
+}
+
+func testGetObjectList[T any](t *testing.T, get func(*objectBackupStore, string) ([]*T, error), key func(*ObjectStoreLayout, string) string, first, second *T, emptyWhenMissing bool) {
+	t.Helper()
+	var missingWant []*T
+	if emptyWhenMissing {
+		missingWant = []*T{}
+	}
+	for _, tc := range []struct {
+		name    string
+		input   []*T
+		want    []*T
+		missing bool
+		invalid bool
+	}{
+		{name: "missing file", missing: true, want: missingWant},
+		{name: "invalid JSON", invalid: true},
+		{name: "null list"},
+		{name: "empty list", input: []*T{}, want: []*T{}},
+		{name: "only null entries", input: []*T{nil, nil}, want: []*T{}},
+		{name: "valid entries", input: []*T{first, second}, want: []*T{first, second}},
+		{name: "mixed entries", input: []*T{nil, first, nil, second, nil}, want: []*T{first, second}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newObjectBackupStoreTestHarness("test-bucket", "")
+			if !tc.missing {
+				var buf bytes.Buffer
+				gzw := gzip.NewWriter(&buf)
+				if tc.invalid {
+					_, err := gzw.Write([]byte("invalid JSON"))
+					require.NoError(t, err)
+				} else {
+					require.NoError(t, json.NewEncoder(gzw).Encode(tc.input))
+				}
+				require.NoError(t, gzw.Close())
+				require.NoError(t, harness.objectStore.PutObject(harness.bucket, key(harness.layout, "test-object"), &buf))
+			}
+			actual, err := get(harness.objectBackupStore, "test-object")
+			if tc.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, actual)
 		})
 	}
 }

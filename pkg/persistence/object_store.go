@@ -18,8 +18,10 @@ package persistence
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,13 +32,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/util"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 type BackupInfo struct {
@@ -179,7 +181,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	// Prefer caCertRef (from Secret) over inline caCert (deprecated).
 	if location.Spec.ObjectStorage.CACertRef != nil {
 		if b.secretStore != nil {
-			caCertString, err := b.secretStore.Get(location.Spec.ObjectStorage.CACertRef)
+			caCertString, err := b.secretStore.Get(context.TODO(), location.Spec.ObjectStorage.CACertRef)
 			if err != nil {
 				return nil, errors.Wrap(err, "error getting CA certificate from secret")
 			}
@@ -192,7 +194,7 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 	// If the BSL specifies a credential, fetch its path on disk and pass to
 	// plugin via the config.
 	if location.Spec.Credential != nil {
-		credsFile, err := b.credentialStore.Path(location.Spec.Credential)
+		credsFile, err := b.credentialStore.Path(context.TODO(), location.Spec.Credential)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get credentials")
 		}
@@ -365,7 +367,7 @@ func (s *objectBackupStore) GetBackupVolumeSnapshots(name string) ([]*volume.Sna
 	defer res.Close()
 
 	var volumeSnapshots []*volume.Snapshot
-	if err := decode(res, &volumeSnapshots); err != nil {
+	if err := decodeObjectList(res, &volumeSnapshots); err != nil {
 		return nil, err
 	}
 
@@ -386,7 +388,7 @@ func (s *objectBackupStore) GetBackupItemOperations(name string) ([]*itemoperati
 	defer res.Close()
 
 	var backupItemOperations []*itemoperation.BackupOperation
-	if err := decode(res, &backupItemOperations); err != nil {
+	if err := decodeObjectList(res, &backupItemOperations); err != nil {
 		return nil, err
 	}
 
@@ -407,7 +409,7 @@ func (s *objectBackupStore) GetRestoreItemOperations(name string) ([]*itemoperat
 	defer res.Close()
 
 	var restoreItemOperations []*itemoperation.RestoreOperation
-	if err := decode(res, &restoreItemOperations); err != nil {
+	if err := decodeObjectList(res, &restoreItemOperations); err != nil {
 		return nil, err
 	}
 
@@ -446,6 +448,18 @@ func decode(jsongzReader io.Reader, into any) error {
 	return nil
 }
 
+// decodeObjectList decodes an object-store JSON list and removes null entries.
+// Callers receive only non-nil objects, in their original order.
+func decodeObjectList[T any](reader io.Reader, into *[]*T) error {
+	if err := decode(reader, into); err != nil {
+		return err
+	}
+	*into = slices.DeleteFunc(*into, func(item *T) bool {
+		return item == nil
+	})
+	return nil
+}
+
 func (s *objectBackupStore) GetCSIVolumeSnapshotClasses(name string) ([]*snapshotv1api.VolumeSnapshotClass, error) {
 	res, err := tryGet(s.objectStore, s.bucket, s.layout.getCSIVolumeSnapshotClassesKey(name))
 	if err != nil {
@@ -458,7 +472,7 @@ func (s *objectBackupStore) GetCSIVolumeSnapshotClasses(name string) ([]*snapsho
 	defer res.Close()
 
 	var csiVSClasses []*snapshotv1api.VolumeSnapshotClass
-	if err := decode(res, &csiVSClasses); err != nil {
+	if err := decodeObjectList(res, &csiVSClasses); err != nil {
 		return nil, err
 	}
 	return csiVSClasses, nil
@@ -476,7 +490,7 @@ func (s *objectBackupStore) GetCSIVolumeSnapshots(name string) ([]*snapshotv1api
 	defer res.Close()
 
 	var csiSnaps []*snapshotv1api.VolumeSnapshot
-	if err := decode(res, &csiSnaps); err != nil {
+	if err := decodeObjectList(res, &csiSnaps); err != nil {
 		return nil, err
 	}
 	return csiSnaps, nil
@@ -494,7 +508,7 @@ func (s *objectBackupStore) GetCSIVolumeSnapshotContents(name string) ([]*snapsh
 	defer res.Close()
 
 	var snapConts []*snapshotv1api.VolumeSnapshotContent
-	if err := decode(res, &snapConts); err != nil {
+	if err := decodeObjectList(res, &snapConts); err != nil {
 		return nil, err
 	}
 	return snapConts, nil
@@ -514,7 +528,7 @@ func (s *objectBackupStore) GetPodVolumeBackups(name string) ([]*velerov1api.Pod
 	defer res.Close()
 
 	var podVolumeBackups []*velerov1api.PodVolumeBackup
-	if err := decode(res, &podVolumeBackups); err != nil {
+	if err := decodeObjectList(res, &podVolumeBackups); err != nil {
 		return nil, err
 	}
 
@@ -533,7 +547,7 @@ func (s *objectBackupStore) GetBackupVolumeInfos(name string) ([]*volume.BackupV
 	}
 	defer res.Close()
 
-	if err := decode(res, &volumeInfos); err != nil {
+	if err := decodeObjectList(res, &volumeInfos); err != nil {
 		return volumeInfos, err
 	}
 
@@ -641,7 +655,7 @@ func (s *objectBackupStore) GetRestoreVolumeInfos(name string) ([]*volume.Restor
 	}
 	defer res.Close()
 
-	if err := decode(res, &volumeInfos); err != nil {
+	if err := decodeObjectList(res, &volumeInfos); err != nil {
 		return volumeInfos, err
 	}
 

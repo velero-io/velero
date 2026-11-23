@@ -26,7 +26,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 )
 
 func KubectlDeleteIAMServiceAcount(ctx context.Context, name, namespace, cluster string) error {

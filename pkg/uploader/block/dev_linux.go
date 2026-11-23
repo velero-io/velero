@@ -26,7 +26,15 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sys/unix"
 )
+
+// blkZeroOutIoctl is the BLKZEROOUT request number, _IO(0x12, 127). The value is
+// arch dependent (e.g. 0x127f on amd64/arm64, 0x2000127f on ppc64le), so take it
+// from x/sys/unix rather than hard coding it. A hand written literal was once
+// wrong (0x127b is BLKPBSZGET), which made the ioctl succeed without zeroing
+// anything.
+const blkZeroOutIoctl = unix.BLKZEROOUT
 
 var lstatFunc = os.Lstat
 var openFileFunc = os.OpenFile
@@ -79,8 +87,6 @@ func resolveSymlink(path string) (string, error) {
 }
 
 func blkZeroOut(dest *os.File, start int64, length int64) error {
-	const BLKZEROOUT = 0x127b
-
 	zeroRange := [2]uint64{uint64(start), uint64(length)}
 
 	rawConn, err := dest.SyscallConn()
@@ -90,7 +96,7 @@ func blkZeroOut(dest *os.File, start int64, length int64) error {
 
 	ioctlErr := syscall.Errno(0)
 	if err := rawConn.Control(func(fd uintptr) {
-		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, BLKZEROOUT, uintptr(unsafe.Pointer(&zeroRange[0]))); errno != 0 {
+		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, blkZeroOutIoctl, uintptr(unsafe.Pointer(&zeroRange[0]))); errno != 0 {
 			ioctlErr = errno
 		}
 	}); err != nil {

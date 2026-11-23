@@ -19,7 +19,7 @@ package datapath
 import (
 	"context"
 
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/uploader"
 )
 
 // Result represents the result of a backup/restore

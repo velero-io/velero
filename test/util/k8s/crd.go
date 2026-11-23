@@ -26,7 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 )
 
 func InstallCRD(ctx context.Context, yaml string) error {

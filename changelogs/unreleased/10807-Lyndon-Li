@@ -1,0 +1,1 @@
+Fix issue #10303, add pod deletion handler for VGDP watcher and prevent deadlock for event or pod update in corner cases

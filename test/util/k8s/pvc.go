@@ -57,6 +57,11 @@ func (p *PVCBuilder) WithAnnotation(ann map[string]string) *PVCBuilder {
 	return p
 }
 
+func (p *PVCBuilder) WithLabels(labels map[string]string) *PVCBuilder {
+	p.Labels = labels
+	return p
+}
+
 func (p *PVCBuilder) WithStorageClass(sc string) *PVCBuilder {
 	p.Spec.StorageClassName = &sc
 	return p

@@ -1,1 +1,0 @@
-Cap the unzip of metadata download to avoid OOM kill

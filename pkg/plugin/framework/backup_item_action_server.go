@@ -24,11 +24,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v1"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	proto "github.com/velero-io/velero/pkg/plugin/generated"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav1 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v1"
 )
 
 // BackupItemActionGRPCServer implements the proto-generated BackupItemAction interface, and accepts

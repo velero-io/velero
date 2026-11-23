@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vmware-tanzu/velero/internal/volume"
+	"github.com/velero-io/velero/internal/volume"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -33,15 +33,15 @@ import (
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	"github.com/vmware-tanzu/velero/pkg/restore/inplace"
-	uploaderutil "github.com/vmware-tanzu/velero/pkg/uploader/util"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	veleroclient "github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	"github.com/velero-io/velero/pkg/repository"
+	"github.com/velero-io/velero/pkg/restore/inplace"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 type RestoreData struct {
@@ -194,7 +194,7 @@ func (r *restorer) RestorePodVolumes(data RestoreData, tracker *volume.RestoreVo
 			if info := data.BackupVolumeInfos[pvName].PVInfo; info != nil {
 				volumeHandle = info.VolumeHandle
 			}
-			if err := inplace.CheckPVCBoundToBackedUpVolume(r.ctx, r.crClient, pvc, pvName, volumeHandle, data.SourceNamespace); err != nil {
+			if err := inplace.CheckPVCBoundToBackedUpVolume(r.ctx, r.crClient, pvc, pvName, volumeHandle, data.SourceNamespace, data.Restore.AllowExistingVolumeMismatch(), r.log); err != nil {
 				errs = append(errs, err)
 				continue
 			}

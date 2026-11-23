@@ -34,13 +34,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/podexec"
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/podexec"
+	"github.com/velero-io/velero/pkg/restorehelper"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 type HookPhase string
@@ -147,7 +147,7 @@ func (i *InitContainerRestoreHookHandler) HandleRestoreHooks(
 		labels := labels.Set(metadata.GetLabels())
 
 		// Apply the hook according to the target namespace in which the pod will be restored
-		// more details see https://github.com/vmware-tanzu/velero/issues/4720
+		// more details see https://github.com/velero-io/velero/issues/4720
 		if namespaceMapping != nil {
 			if n, ok := namespaceMapping[namespace]; ok {
 				namespace = n

@@ -19,7 +19,7 @@ package types
 import (
 	corev1api "k8s.io/api/core/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 type JobConfigs struct {

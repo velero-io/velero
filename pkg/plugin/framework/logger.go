@@ -19,7 +19,7 @@ package framework
 import (
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 // newLogger returns a logger that is suitable for use within an

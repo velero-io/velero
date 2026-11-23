@@ -22,7 +22,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	veleroPkgClient "github.com/vmware-tanzu/velero/pkg/client"
+	veleroPkgClient "github.com/velero-io/velero/pkg/client"
 )
 
 func PatchResource(original, updated client.Object, kbClient client.Client) error {

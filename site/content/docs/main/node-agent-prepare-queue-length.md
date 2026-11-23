@@ -18,7 +18,9 @@ Velero allows you to configure the `prepareQueueLength` in node-agent Configurat
 Here is a sample of the configMap with ```prepareQueueLength```:  
 ```json
 {
-    "prepareQueueLength": 10
+    "loadConcurrency": {
+        "prepareQueueLength": 10
+    }
 }
 ``` 
 

@@ -19,7 +19,7 @@ package client
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/client/config"
+	"github.com/velero-io/velero/pkg/cmd/cli/client/config"
 )
 
 func NewCommand() *cobra.Command {

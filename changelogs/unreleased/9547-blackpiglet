@@ -1,1 +1,0 @@
-If BIA return updateObj with SkipFromBackupAnnotation, treat it as skip the resource from backup.

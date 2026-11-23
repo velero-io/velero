@@ -31,8 +31,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	waitutil "k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	"github.com/velero-io/velero/pkg/builder"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 )
 
 func CreateNamespace(ctx context.Context, client TestClient, namespace string) error {
@@ -257,10 +257,4 @@ func GetMappingNamespaces(ctx context.Context, client TestClient, excludeNS []st
 		joinedNsMapping = joinedNsMapping[:len(joinedNsMapping)-1]
 	}
 	return joinedNsMapping, nil
-}
-
-func KubectlCreateNamespace(ctx context.Context, name string) error {
-	args := []string{"create", "namespace", name}
-	fmt.Println(args)
-	return exec.CommandContext(ctx, "kubectl", args...).Run()
 }

@@ -39,13 +39,13 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/install"
-	velerexec "github.com/vmware-tanzu/velero/pkg/util/exec"
-	"github.com/vmware-tanzu/velero/test"
-	common "github.com/vmware-tanzu/velero/test/util/common"
-	eksutil "github.com/vmware-tanzu/velero/test/util/eks"
-	"github.com/vmware-tanzu/velero/test/util/k8s"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/cmd/cli/install"
+	velerexec "github.com/velero-io/velero/pkg/util/exec"
+	"github.com/velero-io/velero/test"
+	common "github.com/velero-io/velero/test/util/common"
+	eksutil "github.com/velero-io/velero/test/util/eks"
+	"github.com/velero-io/velero/test/util/k8s"
 )
 
 // we provide more install options other than the standard install.InstallOptions in E2E test
@@ -144,7 +144,7 @@ func VeleroInstall(ctx context.Context, veleroCfg *test.VeleroConfig, isStandbyC
 	}
 
 	// If velero namespace does not exist, we should create it for service account creation
-	if err := k8s.KubectlCreateNamespace(ctx, veleroCfg.VeleroNamespace); err != nil {
+	if err := k8s.CreateNamespace(ctx, *veleroCfg.ClientToInstallVelero, veleroCfg.VeleroNamespace); err != nil {
 		return errors.Wrapf(err, "Failed to create namespace %s to install Velero", veleroCfg.VeleroNamespace)
 	}
 
@@ -180,10 +180,10 @@ func VeleroInstall(ctx context.Context, veleroCfg *test.VeleroConfig, isStandbyC
 		if veleroCfg.EKSPolicyARN == "" {
 			return errors.New("Please provide EKSPolicyARN for IRSA test.")
 		}
-		if err := k8s.KubectlDeleteClusterRoleBinding(ctx, "velero-cluster-role"); err != nil {
+		if err := k8s.DeleteClusterRoleBinding(ctx, *veleroCfg.ClientToInstallVelero, "velero-cluster-role"); err != nil {
 			return errors.Wrapf(err, "Failed to delete clusterrolebinding %s to %s namespace", "velero-cluster-role", veleroCfg.VeleroNamespace)
 		}
-		if err := k8s.KubectlCreateClusterRoleBinding(ctx, "velero-cluster-role", "cluster-admin", veleroCfg.VeleroNamespace, veleroInstallOptions.ServiceAccountName); err != nil {
+		if err := k8s.CreateClusterRoleBinding(ctx, *veleroCfg.ClientToInstallVelero, "velero-cluster-role", "cluster-admin", veleroCfg.VeleroNamespace, veleroInstallOptions.ServiceAccountName); err != nil {
 			return errors.Wrapf(err, "Failed to create clusterrolebinding %s to %s namespace", "velero-cluster-role", veleroCfg.VeleroNamespace)
 		}
 
@@ -437,6 +437,9 @@ func installVeleroServer(
 	}
 	if len(options.Prefix) > 0 {
 		args = append(args, "--prefix", options.Prefix)
+	}
+	if len(options.CACertFile) > 0 {
+		args = append(args, "--cacert", options.CACertFile)
 	}
 	//Treat ServiceAccountName priority higher than SecretFile
 	if len(options.ServiceAccountName) > 0 {

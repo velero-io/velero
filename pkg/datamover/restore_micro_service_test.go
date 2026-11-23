@@ -31,15 +31,15 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/datapath"
-	datapathmockes "github.com/vmware-tanzu/velero/pkg/datapath/mocks"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/datapath"
+	datapathmockes "github.com/velero-io/velero/pkg/datapath/mocks"
+	"github.com/velero-io/velero/pkg/uploader"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestOnDataDownloadFailed(t *testing.T) {

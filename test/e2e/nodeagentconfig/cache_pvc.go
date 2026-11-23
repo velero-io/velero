@@ -29,13 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	k8sutil "github.com/vmware-tanzu/velero/test/util/k8s"
-	veleroutil "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/e2e/test"
+	k8sutil "github.com/velero-io/velero/test/util/k8s"
+	veleroutil "github.com/velero-io/velero/test/util/velero"
 )
 
 type CachePVCTestCase struct {
@@ -69,6 +69,9 @@ func (c *CachePVCTestCase) Init() error {
 		"create", "--namespace", c.VeleroCfg.VeleroNamespace, "backup", c.BackupName,
 		"--include-namespaces", strings.Join(*c.NSIncluded, ","),
 		"--snapshot-volumes=true", "--snapshot-move-data",
+	}
+	if c.VeleroCfg.DataMover != "" {
+		c.BackupArgs = append(c.BackupArgs, "--data-mover", c.VeleroCfg.DataMover)
 	}
 
 	c.RestoreArgs = []string{

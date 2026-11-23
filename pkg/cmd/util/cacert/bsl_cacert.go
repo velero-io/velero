@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // GetCACertFromBackup fetches the BackupStorageLocation for a backup and returns its cacert

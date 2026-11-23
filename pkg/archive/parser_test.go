@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 func TestParse(t *testing.T) {

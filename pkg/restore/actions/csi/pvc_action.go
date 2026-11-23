@@ -37,21 +37,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	kuberesource "github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	plugincommon "github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/restore/inplace"
-	uploaderUtil "github.com/vmware-tanzu/velero/pkg/uploader/util"
-	"github.com/vmware-tanzu/velero/pkg/util"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/csi"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/client"
+	kuberesource "github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/label"
+	plugincommon "github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	riav2 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/restore/inplace"
+	uploaderUtil "github.com/velero-io/velero/pkg/uploader/util"
+	"github.com/velero-io/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/csi"
+	"github.com/velero-io/velero/pkg/util/datamover"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 const (
@@ -246,7 +246,7 @@ func (p *pvcRestoreItemAction) executeWithDataMove(logger *logrus.Entry, input *
 	cleanUpVolumeSnapshot := false
 	if pvcExists {
 		// Pre-flight checks must pass before any side effect on the existing PVC/PV.
-		if err := inplace.CheckPVCBoundToBackedUpVolume(ctx, p.crClient, existingPVC, pvcFromBackup.Spec.VolumeName, pvc.Annotations[velerov1api.InplaceRestoreVolumeHandleAnnotation], pvcFromBackup.Namespace); err != nil {
+		if err := inplace.CheckPVCBoundToBackedUpVolume(ctx, p.crClient, existingPVC, pvcFromBackup.Spec.VolumeName, pvc.Annotations[velerov1api.InplaceRestoreVolumeHandleAnnotation], pvcFromBackup.Namespace, input.Restore.AllowExistingVolumeMismatch(), logger); err != nil {
 			return nil, errors.WithStack(err)
 		}
 		if err := inplace.CheckPVCCapacity(existingPVC, sourceSizeFromCarrier(pvc)); err != nil {

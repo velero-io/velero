@@ -82,8 +82,8 @@ If you would like to add your logo to a future `Adopters of Velero` section on [
 
 [1]: #adding-a-logo-to-veleroio
 [2]: https://velero.io
-[3]: https://github.com/vmware-tanzu/velero/pulls
-[4]: https://github.com/vmware-tanzu/velero/pull/2242
+[3]: https://github.com/velero-io/velero/pulls
+[4]: https://github.com/velero-io/velero/pull/2242
 
 [10]: https://www.nirmata.com/2019/08/14/kubernetes-disaster-recovery-using-velero-and-nirmata/
 [11]: https://nirmata.com

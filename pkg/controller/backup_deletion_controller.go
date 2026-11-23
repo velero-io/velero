@@ -37,27 +37,27 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/delete"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	repomanager "github.com/vmware-tanzu/velero/pkg/repository/manager"
-	repotypes "github.com/vmware-tanzu/velero/pkg/repository/types"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/csi"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	veleroutil "github.com/vmware-tanzu/velero/pkg/util/velero"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/delete"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/repository"
+	repomanager "github.com/velero-io/velero/pkg/repository/manager"
+	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/csi"
+	"github.com/velero-io/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/pkg/util/kube"
+	veleroutil "github.com/velero-io/velero/pkg/util/velero"
 )
 
 const (
@@ -183,10 +183,9 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	} else if err != nil {
 		return ctrl.Result{}, errors.Wrap(err, "error getting backup")
 	}
-
 	// Don't allow deleting backups in read-only storage locations
 	location := &velerov1api.BackupStorageLocation{}
-	if err := r.Get(context.Background(), client.ObjectKey{
+	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: backup.Namespace,
 		Name:      backup.Spec.StorageLocation,
 	}, location); err != nil {
@@ -205,6 +204,10 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !veleroutil.BSLIsAvailable(*location) {
 		err := r.patchDeleteBackupRequestWithError(ctx, dbr, fmt.Errorf("cannot delete backup because backup storage location %s is currently in Unavailable state", location.Name))
 		return ctrl.Result{}, err
+	}
+
+	if err := podvolume.ValidateBackupUploadersIfAny(ctx, r.Client, backup); err != nil {
+		return ctrl.Result{}, r.patchDeleteBackupRequestWithError(ctx, dbr, err)
 	}
 
 	// if the request object has no labels defined, initialize an empty map since
@@ -299,6 +302,12 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				return ctrl.Result{}, err2
 			}
 		}
+	}
+
+	// VGS/VGSC resources are not stored in the Backup tarball, so clean them
+	// independently of whether DeleteItemActions used the tarball.
+	if err := csi.CleanupBackupVolumeGroupSnapshots(ctx, backup, r.Client, log); err != nil {
+		log.WithError(err).Warn("Could not clean up VolumeGroupSnapshots")
 	}
 
 	if backupStore != nil {
@@ -726,9 +735,11 @@ func isTarballNotFoundError(err error) bool {
 	//   - "nosuchkey":                    AWS S3
 	//   - "blobnotfound":                 Azure Blob Storage
 	//   - "objectnotexist":               GCS
+	//   - "doesn't exist":                GCS
 	return strings.Contains(msg, "not found") ||
 		strings.Contains(msg, "does not exist") ||
 		strings.Contains(msg, "nosuchkey") ||
 		strings.Contains(msg, "blobnotfound") ||
-		strings.Contains(msg, "objectnotexist")
+		strings.Contains(msg, "objectnotexist") ||
+		strings.Contains(msg, "doesn't exist")
 }

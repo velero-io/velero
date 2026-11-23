@@ -824,6 +824,11 @@ func (m *ServerMetrics) RegisterBackupFailed(backupSchedule string) {
 	}
 }
 
+// GetBackupFailureTotal returns the backup failure counter collector (used in tests).
+func (m *ServerMetrics) GetBackupFailureTotal() prometheus.Collector {
+	return m.metrics[backupFailureTotal]
+}
+
 // RegisterBackupValidationFailure records a validation failed backup.
 func (m *ServerMetrics) RegisterBackupValidationFailure(backupSchedule string) {
 	if c, ok := m.metrics[backupValidationFailureTotal].(*prometheus.CounterVec); ok {
@@ -927,6 +932,11 @@ func (m *ServerMetrics) RegisterRestoreFailed(backupSchedule string) {
 	if c, ok := m.metrics[restoreFailedTotal].(*prometheus.CounterVec); ok {
 		c.WithLabelValues(backupSchedule).Inc()
 	}
+}
+
+// GetRestoreFailedTotal returns the restore failure counter collector (used in tests).
+func (m *ServerMetrics) GetRestoreFailedTotal() prometheus.Collector {
+	return m.metrics[restoreFailedTotal]
 }
 
 // RegisterRestoreValidationFailed records a restore that failed validation.

@@ -32,8 +32,8 @@ import (
 	"github.com/google/uuid"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	veleroV1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
+	veleroV1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
 )
 
 // ErrNotFound is exported for external packages to check for when a file is

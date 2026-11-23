@@ -19,7 +19,7 @@ package metrics
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/test/util/metrics"
+	"github.com/velero-io/velero/test/util/metrics"
 )
 
 const MinioDesc = "Minio disk usage"

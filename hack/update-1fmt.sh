@@ -47,7 +47,7 @@ else
 fi
 
 echo "${ACTION} goimports"
-output=$(goimports "${MODE}" -local github.com/vmware-tanzu/velero ${files})
+output=$(goimports "${MODE}" -local github.com/velero-io/velero ${files})
 if [[ -n "${output}" ]]; then
   VERIFY_IMPORTS_FAILED=1
   echo "${output}"

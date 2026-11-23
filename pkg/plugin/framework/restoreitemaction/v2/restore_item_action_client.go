@@ -26,11 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	protoriav2 "github.com/vmware-tanzu/velero/pkg/plugin/generated/restoreitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/restoreitemaction/v2"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	protoriav2 "github.com/velero-io/velero/pkg/plugin/generated/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	riav2 "github.com/velero-io/velero/pkg/plugin/velero/restoreitemaction/v2"
 )
 
 var _ riav2.RestoreItemAction = &RestoreItemActionGRPCClient{}

@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	ctlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	cacheMock "github.com/vmware-tanzu/velero/pkg/cmd/cli/datamover/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/internal/credentials"
+	cacheMock "github.com/velero-io/velero/pkg/cmd/cli/datamover/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/filesystem"
 )
 
 func fakeCreateDataPathServiceWithErr(_ *podVolumeBackup) (dataPathService, error) {

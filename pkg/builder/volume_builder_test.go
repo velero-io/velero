@@ -21,8 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func TestDataDownloadBuilder_Bytes(t *testing.T) {

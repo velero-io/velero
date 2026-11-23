@@ -26,13 +26,13 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/backup"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/cmd/cli"
+	"github.com/velero-io/velero/pkg/cmd/cli/backup"
+	"github.com/velero-io/velero/pkg/cmd/util/output"
 )
 
 func NewCreateCommand(f client.Factory, use string) *cobra.Command {
@@ -177,9 +177,10 @@ func (o *CreateOptions) Run(c *cobra.Command, f client.Factory) error {
 		schedule.Spec.Template.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: resourcepolicies.ConfigmapRefType, Name: o.BackupOptions.ResPoliciesConfigmap}
 	}
 
-	if o.BackupOptions.ParallelFilesUpload > 0 {
+	if o.BackupOptions.ParallelFilesUpload > 0 || o.BackupOptions.ParallelBlocksUpload > 0 {
 		schedule.Spec.Template.UploaderConfig = &api.UploaderConfigForBackup{
-			ParallelFilesUpload: o.BackupOptions.ParallelFilesUpload,
+			ParallelFilesUpload:  o.BackupOptions.ParallelFilesUpload,
+			ParallelBlocksUpload: o.BackupOptions.ParallelBlocksUpload,
 		}
 	}
 

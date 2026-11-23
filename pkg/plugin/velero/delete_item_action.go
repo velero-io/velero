@@ -19,7 +19,7 @@ package velero
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // DeleteItemAction is an actor that performs an operation on an individual item being restored.

@@ -30,20 +30,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/datapath"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/datapath"
+	"github.com/velero-io/velero/pkg/uploader"
 
-	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	veleroshared "github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	datapathmockes "github.com/vmware-tanzu/velero/pkg/datapath/mocks"
+	datapathmockes "github.com/velero-io/velero/pkg/datapath/mocks"
 )
 
 type backupMsTestHelper struct {

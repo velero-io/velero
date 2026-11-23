@@ -42,28 +42,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/storage"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/features"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/collections"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
-	"github.com/vmware-tanzu/velero/pkg/util/encode"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
-	veleroutil "github.com/vmware-tanzu/velero/pkg/util/velero"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/storage"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	pkgbackup "github.com/velero-io/velero/pkg/backup"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/plugin/framework"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/collections"
+	"github.com/velero-io/velero/pkg/util/datamover"
+	"github.com/velero-io/velero/pkg/util/encode"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/logging"
+	"github.com/velero-io/velero/pkg/util/results"
+	veleroutil "github.com/velero-io/velero/pkg/util/velero"
 )
 
 const (
@@ -462,7 +462,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 		// TODO(2.0) b.defaultBackupLocation will be deprecated
 		request.Spec.StorageLocation = b.defaultBackupLocation
 
-		locationList, err := storage.ListBackupStorageLocations(context.Background(), b.kbClient, request.Namespace)
+		locationList, err := storage.ListBackupStorageLocations(ctx, b.kbClient, request.Namespace)
 		if err == nil {
 			for _, location := range locationList.Items {
 				if location.Spec.Default {
@@ -476,7 +476,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 
 	// get the storage location, and store the BackupStorageLocation API obj on the request
 	storageLocation := &velerov1api.BackupStorageLocation{}
-	if err := b.kbClient.Get(context.Background(), kbclient.ObjectKey{
+	if err := b.kbClient.Get(ctx, kbclient.ObjectKey{
 		Namespace: request.Namespace,
 		Name:      request.Spec.StorageLocation,
 	}, storageLocation); err != nil {
@@ -514,7 +514,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 
 	// validate and get the backup's VolumeSnapshotLocations, and store the
 	// VolumeSnapshotLocation API objs on the request
-	if locs, errs := b.validateAndGetSnapshotLocations(request.Backup); len(errs) > 0 {
+	if locs, errs := b.validateAndGetSnapshotLocations(ctx, request.Backup); len(errs) > 0 {
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, errs...)
 	} else {
 		request.Spec.VolumeSnapshotLocations = nil
@@ -536,7 +536,7 @@ func (b *backupReconciler) prepareBackupRequest(ctx context.Context, backup *vel
 	// Add namespaces with label velero.io/exclude-from-backup=true into request.Spec.ExcludedNamespaces
 	// Essentially, adding the label velero.io/exclude-from-backup=true to a namespace would be equivalent to setting spec.ExcludedNamespaces
 	namespaces := corev1api.NamespaceList{}
-	if err := b.kbClient.List(context.Background(), &namespaces, kbclient.MatchingLabels{velerov1api.ExcludeFromBackupLabel: "true"}); err == nil {
+	if err := b.kbClient.List(ctx, &namespaces, kbclient.MatchingLabels{velerov1api.ExcludeFromBackupLabel: "true"}); err == nil {
 		for _, ns := range namespaces.Items {
 			request.Spec.ExcludedNamespaces = append(request.Spec.ExcludedNamespaces, ns.Name)
 		}
@@ -778,14 +778,14 @@ func mergeNamespacesByLabel(
 //     it will automatically be used)
 //
 // if backup has snapshotVolume disabled then it returns empty VSL
-func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.Backup) (map[string]*velerov1api.VolumeSnapshotLocation, []string) {
+func (b *backupReconciler) validateAndGetSnapshotLocations(ctx context.Context, backup *velerov1api.Backup) (map[string]*velerov1api.VolumeSnapshotLocation, []string) {
 	errors := []string{}
 	providerLocations := make(map[string]*velerov1api.VolumeSnapshotLocation)
 
 	for _, locationName := range backup.Spec.VolumeSnapshotLocations {
 		// validate each locationName exists as a VolumeSnapshotLocation
 		location := &velerov1api.VolumeSnapshotLocation{}
-		if err := b.kbClient.Get(context.Background(), kbclient.ObjectKey{Namespace: backup.Namespace, Name: locationName}, location); err != nil {
+		if err := b.kbClient.Get(ctx, kbclient.ObjectKey{Namespace: backup.Namespace, Name: locationName}, location); err != nil {
 			if apierrors.IsNotFound(err) {
 				errors = append(errors, fmt.Sprintf("a VolumeSnapshotLocation CRD for the location %s with the name specified in the backup spec needs to be created before this snapshot can be executed. Error: %v", locationName, err))
 			} else {
@@ -811,7 +811,7 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 		return nil, errors
 	}
 	volumeSnapshotLocations := &velerov1api.VolumeSnapshotLocationList{}
-	err := b.kbClient.List(context.Background(), volumeSnapshotLocations, &kbclient.ListOptions{Namespace: backup.Namespace, LabelSelector: labels.Everything()})
+	err := b.kbClient.List(ctx, volumeSnapshotLocations, &kbclient.ListOptions{Namespace: backup.Namespace, LabelSelector: labels.Everything()})
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("error listing volume snapshot locations: %v", err))
 		return nil, errors
@@ -841,7 +841,7 @@ func (b *backupReconciler) validateAndGetSnapshotLocations(backup *velerov1api.B
 				continue
 			}
 			location := &velerov1api.VolumeSnapshotLocation{}
-			if err := b.kbClient.Get(context.Background(), kbclient.ObjectKey{Namespace: backup.Namespace, Name: defaultLocation}, location); err != nil {
+			if err := b.kbClient.Get(ctx, kbclient.ObjectKey{Namespace: backup.Namespace, Name: defaultLocation}, location); err != nil {
 				errors = append(errors, fmt.Sprintf("error getting volume snapshot location named %s: %v", defaultLocation, err))
 				continue
 			}
@@ -936,7 +936,7 @@ func (b *backupReconciler) runBackup(backup *pkgbackup.Request) error {
 	}
 
 	// native snapshots phase will either be failed or completed right away
-	// https://github.com/vmware-tanzu/velero/blob/de3ea52f0cc478e99efa7b9524c7f353514261a4/pkg/backup/item_backupper.go#L632-L639
+	// https://github.com/velero-io/velero/blob/de3ea52f0cc478e99efa7b9524c7f353514261a4/pkg/backup/item_backupper.go#L632-L639
 	backup.Status.VolumeSnapshotsAttempted = len(backup.VolumeSnapshots.Get())
 	for _, snap := range backup.VolumeSnapshots.Get() {
 		if snap.Status.Phase == volume.SnapshotPhaseCompleted {

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	mock "github.com/stretchr/testify/mock"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
 )
 
 // NewBackupRepo creates a new instance of BackupRepo. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

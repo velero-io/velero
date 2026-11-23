@@ -19,7 +19,7 @@ package collections
 import (
 	"testing"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/resourcepolicies"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -29,9 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 func TestShouldInclude(t *testing.T) {
@@ -156,6 +156,22 @@ func TestValidateIncludesExcludes(t *testing.T) {
 			includes: []string{"foo", "bar"},
 			excludes: []string{"bar"},
 			want:     []error{errors.New("excludes list cannot contain an item in the includes list: bar")},
+		},
+		{
+			name:     "valid glob patterns are allowed",
+			includes: []string{"pods", "*.apps", "config[mM]aps"},
+			excludes: []string{"secret?"},
+		},
+		{
+			name:     "malformed glob pattern in includes is not allowed",
+			includes: []string{"pods", "foo["},
+			want:     []error{errors.New(`invalid glob pattern "foo[" in includes list: unexpected end of input`)},
+		},
+		{
+			name:     "malformed glob pattern in excludes is not allowed",
+			includes: []string{"pods"},
+			excludes: []string{"[bar"},
+			want:     []error{errors.New(`invalid glob pattern "[bar" in excludes list: unexpected end of input`)},
 		},
 	}
 
@@ -405,6 +421,15 @@ func TestValidateScopedIncludesExcludes(t *testing.T) {
 			includes: []string{"foo", "bar"},
 			excludes: []string{"bar"},
 			wantErr:  []error{errors.New("excludes list cannot contain an item in the includes list: bar")},
+		},
+		{
+			name:     "malformed glob patterns are not allowed",
+			includes: []string{"pods", "foo["},
+			excludes: []string{"[]"},
+			wantErr: []error{
+				errors.New(`invalid glob pattern "foo[" in includes list: unexpected end of input`),
+				errors.New(`invalid glob pattern "[]" in excludes list: could not parse range`),
+			},
 		},
 	}
 
@@ -1427,4 +1452,66 @@ func setupDiscoveryClientWithResources(APIResources []*test.APIResource) *test.F
 	discoveryHelper := test.NewFakeDiscoveryHelper(false, resourcesMap)
 	discoveryHelper.ResourceList = resourceList
 	return discoveryHelper
+}
+
+func TestNamespaceIncludesExcludesIncludeEverythingWithExcludedByLabel(t *testing.T) {
+	tests := []struct {
+		name            string
+		includes        []string
+		excludes        []string
+		excludedByLabel []string
+		want            bool
+	}{
+		{
+			name: "no includes or excludes",
+			want: true,
+		},
+		{
+			name:     "user excludes without labeled namespaces",
+			excludes: []string{"ns-1"},
+			want:     false,
+		},
+		{
+			name:            "only labeled namespaces excluded, empty includes",
+			excludes:        []string{"velero"},
+			excludedByLabel: []string{"velero"},
+			want:            true,
+		},
+		{
+			name:            "only labeled namespaces excluded, wildcard includes",
+			includes:        []string{"*"},
+			excludes:        []string{"velero", "other-velero"},
+			excludedByLabel: []string{"velero", "other-velero"},
+			want:            true,
+		},
+		{
+			name:            "labeled and user excludes",
+			excludes:        []string{"velero", "ns-1"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+		{
+			name:            "labeled namespace excluded but specific namespaces included",
+			includes:        []string{"ns-1"},
+			excludes:        []string{"velero"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+		{
+			name:            "glob exclude is not a labeled namespace",
+			excludes:        []string{"vel*"},
+			excludedByLabel: []string{"velero"},
+			want:            false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nie := NewNamespaceIncludesExcludes().
+				ExcludedByLabel(tc.excludedByLabel...).
+				Includes(tc.includes...).
+				Excludes(tc.excludes...)
+			assert.Equal(t, tc.want, nie.IncludeEverything())
+		})
+	}
 }

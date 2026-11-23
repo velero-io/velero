@@ -19,8 +19,8 @@ package service
 import (
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo/kopialib"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo/kopialib"
 )
 
 // Create creates an instance of BackupRepoService

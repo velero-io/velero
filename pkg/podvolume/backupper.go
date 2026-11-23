@@ -33,18 +33,18 @@ import (
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	veleroclient "github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	"github.com/vmware-tanzu/velero/pkg/podvolume/configs"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	uploaderutil "github.com/vmware-tanzu/velero/pkg/uploader/util"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	veleroshared "github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	veleroclient "github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	"github.com/velero-io/velero/pkg/podvolume/configs"
+	"github.com/velero-io/velero/pkg/repository"
+	"github.com/velero-io/velero/pkg/uploader"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 const (
@@ -375,7 +375,7 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			continue
 		}
 		// similar with above: the PVB may be handled very quickly by the controller and the informer handler will call "b.wg.Done()" before "b.wg.Add(1)" runs which causes panic
-		// see https://github.com/vmware-tanzu/velero/issues/8657
+		// see https://github.com/velero-io/velero/issues/8657
 		b.wg.Add(1)
 		if err := veleroclient.CreateRetryGenerateName(b.crClient, b.ctx, volumeBackup); err != nil {
 			b.wg.Done()
@@ -401,7 +401,7 @@ func (b *backupper) WaitAllPodVolumesProcessed(log logrus.FieldLogger) []*velero
 
 	var podVolumeBackups []*velerov1api.PodVolumeBackup
 	// if no pod volume backups are tracked, return directly to avoid issue mentioned in
-	// https://github.com/vmware-tanzu/velero/issues/8723
+	// https://github.com/velero-io/velero/issues/8723
 	if len(b.pvbIndexer.List()) == 0 {
 		return podVolumeBackups
 	}

@@ -15,7 +15,7 @@ limitations under the License.
 */
 package logging
 
-import "github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
+import "github.com/velero-io/velero/pkg/cmd/util/flag"
 
 // Format is a string representation of the desired output format for logs
 type Format string

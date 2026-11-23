@@ -5,7 +5,7 @@ layout: docs
 
 This guide explains how to use Velero's **fine-grained restore filters**: per-namespace, per-kind rules with independent label selectors and resource name patterns. Configuration lives in a **ResourcePolicy ConfigMap**, using the exact same format introduced for fine-grained backup filters.
 
-For architecture and pipeline details, see the [design document](https://github.com/velero-io/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md).
+For architecture and pipeline details, see the [design document](https://github.com/velero-io/velero/blob/main/design/Implemented/restore-filter-enhancement/fine-grained-restore-filters-design.md).
 
 ---
 
@@ -723,4 +723,4 @@ Velero validates the ResourcePolicy when a restore starts. Common errors:
 
 ## Related links
 
-- [Fine-grained restore filters design](https://github.com/velero-io/velero/blob/main/design/restore-filter-enhancement/fine-grained-restore-filters-design.md)
+- [Fine-grained restore filters design](https://github.com/velero-io/velero/blob/main/design/Implemented/restore-filter-enhancement/fine-grained-restore-filters-design.md)

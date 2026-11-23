@@ -45,26 +45,26 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/features"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/kuberesource"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/itemblockaction/v1"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/test"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/volume"
+	"github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/kuberesource"
+	"github.com/velero-io/velero/pkg/persistence"
+	persistencemocks "github.com/velero-io/velero/pkg/persistence/mocks"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	biav2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/velero/itemblockaction/v1"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/test"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
 func TestBackedUpItemsMatchesTarballContents(t *testing.T) {
@@ -901,6 +901,65 @@ func TestBackupOldResourceFiltering(t *testing.T) {
 	}
 }
 
+// TestBackupClusterScopedResourcesWithNamespaceExcludedByLabel verifies that excluding
+// namespaces labeled velero.io/exclude-from-backup=true (which the backup controller adds to
+// spec.excludedNamespaces) doesn't stop a backup of all namespaces from including
+// cluster-scoped resources, while excluding other namespaces still does.
+func TestBackupClusterScopedResourcesWithNamespaceExcludedByLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		backup *velerov1.Backup
+		want   []string
+	}{
+		{
+			name:   "excluding only the labeled namespace still includes cluster-scoped resources",
+			backup: defaultBackup().ExcludedNamespaces("velero").Result(),
+			want: []string{
+				"resources/pods/namespaces/ns-1/pod-1.json",
+				"resources/pods/v1-preferredversion/namespaces/ns-1/pod-1.json",
+				"resources/persistentvolumes/cluster/pv-1.json",
+				"resources/persistentvolumes/v1-preferredversion/cluster/pv-1.json",
+			},
+		},
+		{
+			name:   "excluding an unlabeled namespace does not include cluster-scoped resources",
+			backup: defaultBackup().ExcludedNamespaces("velero", "ns-1").Result(),
+			want:   []string{},
+		},
+	}
+
+	itemBlockPool := StartItemBlockWorkerPool(t.Context(), 1, logrus.StandardLogger())
+	defer itemBlockPool.Stop()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				h   = newHarness(t, itemBlockPool)
+				req = &Request{
+					Backup:               tc.backup,
+					SkippedVolumeTracker: NewSkipVolumeTracker(),
+					BackedUpItems:        NewBackedUpItemsMap(),
+					WorkerPool:           itemBlockPool,
+				}
+				backupFile = bytes.NewBuffer([]byte{})
+			)
+
+			require.NoError(t, h.backupper.kbClient.Create(t.Context(), builder.ForNamespace("ns-1").Result()))
+			require.NoError(t, h.backupper.kbClient.Create(t.Context(),
+				builder.ForNamespace("velero").ObjectMeta(builder.WithLabels(velerov1.ExcludeFromBackupLabel, "true")).Result()))
+
+			h.addItems(t, test.Pods(
+				builder.ForPod("ns-1", "pod-1").Result(),
+				builder.ForPod("velero", "velero-pod").Result(),
+			))
+			h.addItems(t, test.PVs(builder.ForPersistentVolume("pv-1").Result()))
+
+			h.backupper.Backup(h.log, req, backupFile, nil, nil, nil)
+
+			assertTarballContents(t, backupFile, append(tc.want, "metadata/version")...)
+		})
+	}
+}
+
 // TestCRDInclusion tests whether related CRDs are included, based on
 // backed-up resources and "include cluster resources" flag, and
 // verifies that the set of items written to the backup tarball are
@@ -1184,7 +1243,7 @@ func TestBackupResourceCohabitation(t *testing.T) {
 // TestBackupUsesNewCohabitatingResourcesForEachBackup ensures that when two backups are
 // run that each include cohabiting resources, one copy of the relevant resources is
 // backed up in each backup. Verification is done by looking at the contents of the backup
-// tarball. This covers a specific issue that was fixed by https://github.com/vmware-tanzu/velero/pull/485.
+// tarball. This covers a specific issue that was fixed by https://github.com/velero-io/velero/pull/485.
 func TestBackupUsesNewCohabitatingResourcesForEachBackup(t *testing.T) {
 	h := newHarness(t, nil)
 	defer h.itemBlockPool.Stop()

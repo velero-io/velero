@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Velero binary build section
-FROM --platform=$BUILDPLATFORM golang:1.26-trixie AS velero-builder
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS velero-builder
 
 ARG GOPROXY
 ARG BIN
@@ -34,9 +34,9 @@ ENV CGO_ENABLED=0 \
     GOARM=${TARGETVARIANT} \
     LDFLAGS="-X ${PKG}/pkg/buildinfo.Version=${VERSION} -X ${PKG}/pkg/buildinfo.GitSHA=${GIT_SHA} -X ${PKG}/pkg/buildinfo.GitTreeState=${GIT_TREE_STATE} -X ${PKG}/pkg/buildinfo.ImageRegistry=${REGISTRY}"
 
-WORKDIR /go/src/github.com/vmware-tanzu/velero
+WORKDIR /go/src/github.com/velero-io/velero
 
-COPY . /go/src/github.com/vmware-tanzu/velero
+COPY . /go/src/github.com/velero-io/velero
 
 RUN mkdir -p /output/usr/bin && \
     export GOARM=$( echo "${GOARM}" | cut -c2-) && \

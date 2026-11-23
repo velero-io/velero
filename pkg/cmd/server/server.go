@@ -28,7 +28,7 @@ import (
 
 	logrusr "github.com/bombsimon/logrusr/v3"
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -55,40 +55,40 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	"github.com/vmware-tanzu/velero/internal/storage"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/archive"
-	"github.com/vmware-tanzu/velero/pkg/backup"
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/cmd/server/config"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/controller"
-	velerodiscovery "github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/features"
-	"github.com/vmware-tanzu/velero/pkg/itemoperationmap"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/nodeagent"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	"github.com/vmware-tanzu/velero/pkg/podexec"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/repository"
-	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
-	repomanager "github.com/vmware-tanzu/velero/pkg/repository/manager"
-	"github.com/vmware-tanzu/velero/pkg/restore"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	"github.com/velero-io/velero/internal/storage"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1api "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/archive"
+	"github.com/velero-io/velero/pkg/backup"
+	"github.com/velero-io/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/cmd/server/config"
+	"github.com/velero-io/velero/pkg/cmd/util/signals"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/controller"
+	velerodiscovery "github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/itemoperationmap"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/nodeagent"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	"github.com/velero-io/velero/pkg/podexec"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/repository"
+	repokey "github.com/velero-io/velero/pkg/repository/keys"
+	repomanager "github.com/velero-io/velero/pkg/repository/manager"
+	"github.com/velero-io/velero/pkg/restore"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 func NewCommand(f client.Factory) *cobra.Command {
@@ -249,7 +249,7 @@ func newServer(f client.Factory, config *config.Config, logger *logrus.Logger) (
 		cancelFunc()
 		return nil, err
 	}
-	if err := volumegroupsnapshotv1beta2.AddToScheme(scheme); err != nil {
+	if err := volumegroupsnapshotv1.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
@@ -368,6 +368,11 @@ func (s *server) run() error {
 		return err
 	}
 
+	s.metrics = metrics.NewServerMetrics()
+	s.metrics.RegisterAllMetrics()
+	// Initialize manual backup metrics
+	s.metrics.InitSchedule("")
+
 	if err := s.setupBeforeControllerRun(); err != nil {
 		return err
 	}
@@ -387,7 +392,7 @@ func (s *server) setupBeforeControllerRun() error {
 		return errors.WithStack(err)
 	}
 
-	markInProgressCRsFailed(s.ctx, client, s.namespace, s.logger)
+	markInProgressCRsFailed(s.ctx, client, s.namespace, s.logger, s.metrics)
 
 	if err := setDefaultBackupLocation(s.ctx, client, s.namespace, s.config.DefaultBackupLocation, s.logger); err != nil {
 		return err
@@ -559,10 +564,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.logger.Fatalf("Failed to start metric server at [%s]: %v", s.metricsAddress, err)
 		}
 	}()
-	s.metrics = metrics.NewServerMetrics()
-	s.metrics.RegisterAllMetrics()
-	// Initialize manual backup metrics
-	s.metrics.InitSchedule("")
 
 	newPluginManager := func(logger logrus.FieldLogger) clientmgmt.Manager {
 		return clientmgmt.NewManager(logger, s.logLevel, s.pluginRegistry)
@@ -986,13 +987,13 @@ func (s *server) runProfiler() {
 
 // if there is a restarting during the reconciling of backups/restores/etc, these CRs may be stuck in progress status
 // markInProgressCRsFailed tries to mark the in progress CRs as failed when starting the server to avoid the issue
-func markInProgressCRsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
-	markInProgressBackupsFailed(ctx, client, namespace, log)
+func markInProgressCRsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
+	markInProgressBackupsFailed(ctx, client, namespace, log, m)
 
-	markInProgressRestoresFailed(ctx, client, namespace, log)
+	markInProgressRestoresFailed(ctx, client, namespace, log, m)
 }
 
-func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
+func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
 	backups := &velerov1api.BackupList{}
 	if err := client.List(ctx, backups, &ctrlclient.ListOptions{Namespace: namespace}); err != nil {
 		log.WithError(errors.WithStack(err)).Error("failed to list backups")
@@ -1013,12 +1014,17 @@ func markInProgressBackupsFailed(ctx context.Context, client ctrlclient.Client, 
 			continue
 		}
 		log.WithField("backup", backup.GetName()).Warn(updated.Status.FailureReason)
+		// Metrics are labeled by schedule name (empty for manual backups), matching
+		// the normal completion path in backup_controller.go.
+		backupScheduleName := backup.GetLabels()[velerov1api.ScheduleNameLabel]
+		m.RegisterBackupFailed(backupScheduleName)
+		m.RegisterBackupLastStatus(backupScheduleName, metrics.BackupLastStatusFailure)
 		markDataUploadsCancel(ctx, client, backup, log)
 		markPodVolumeBackupsCancel(ctx, client, backup, log)
 	}
 }
 
-func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger) {
+func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client, namespace string, log logrus.FieldLogger, m *metrics.ServerMetrics) {
 	restores := &velerov1api.RestoreList{}
 	if err := client.List(ctx, restores, &ctrlclient.ListOptions{Namespace: namespace}); err != nil {
 		log.WithError(errors.WithStack(err)).Error("failed to list restores")
@@ -1037,8 +1043,10 @@ func markInProgressRestoresFailed(ctx context.Context, client ctrlclient.Client,
 			log.WithError(errors.WithStack(err)).Errorf("failed to patch restore %q", restore.GetName())
 			continue
 		}
-
 		log.WithField("restore", restore.GetName()).Warn(updated.Status.FailureReason)
+		// Metrics are labeled by schedule name (empty for manual restores), matching
+		// the normal completion path in restore_controller.go.
+		m.RegisterRestoreFailed(restore.Spec.ScheduleName)
 		markDataDownloadsCancel(ctx, client, restore, log)
 		markPodVolumeRestoresCancel(ctx, client, restore, log)
 	}

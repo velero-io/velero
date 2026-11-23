@@ -1,7 +1,7 @@
 package restore
 
 import (
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func IsResourcePolicyValid(resourcePolicy string) bool {

@@ -28,7 +28,7 @@ const (
 	logSourceField          = "logSource"
 	logSourceSetMarkerField = "@logSourceSetBy"
 	logrusPackage           = "github.com/sirupsen/logrus"
-	veleroPackage           = "github.com/vmware-tanzu/velero/"
+	veleroPackage           = "github.com/velero-io/velero/"
 	veleroPackageLen        = len(veleroPackage)
 )
 
@@ -60,7 +60,7 @@ func (h *LogLocationHook) Fire(entry *logrus.Entry) error {
 
 	// skip 2 frames:
 	//   runtime.Callers
-	//   github.com/vmware-tanzu/velero/pkg/util/logging/(*LogLocationHook).Fire
+	//   github.com/velero-io/velero/pkg/util/logging/(*LogLocationHook).Fire
 	n := runtime.Callers(2, pcs)
 
 	// re-slice pcs based on the number of entries written
@@ -122,7 +122,7 @@ func getLogSourceSetMarker(entry *logrus.Entry) string {
 
 func removeVeleroPackagePrefix(file string) string {
 	if index := strings.Index(file, veleroPackage); index != -1 {
-		// strip off .../github.com/vmware-tanzu/velero/ so we just have pkg/...
+		// strip off .../github.com/velero-io/velero/ so we just have pkg/...
 		return file[index+veleroPackageLen:]
 	}
 

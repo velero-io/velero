@@ -17,12 +17,13 @@ limitations under the License.
 package test
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/install"
-	"github.com/vmware-tanzu/velero/test/util/k8s"
+	"github.com/velero-io/velero/pkg/cmd/cli/install"
+	"github.com/velero-io/velero/test/util/k8s"
 )
 
 // e2e-storage-class is the default StorageClass for E2E.
@@ -31,12 +32,62 @@ const StorageClassName = "e2e-storage-class"
 // e2e-storage-class-2 is used for the StorageClass mapping test case.
 const StorageClassName2 = "e2e-storage-class-2"
 
+// StorageClassFile and StorageClassFile2 are the manifests the two StorageClasses
+// are created from, which is how a cluster whose volumes come from a different
+// provisioner is targeted. Empty means the provider's own file under
+// testdata/storage-class, and an empty StorageClassFile2 runs without a second
+// StorageClass at all. Set by --storage-class-file and --storage-class-file-2.
+var (
+	StorageClassFile  = ""
+	StorageClassFile2 = ""
+	// StorageClassFile2Set records that --storage-class-file-2 was given, since
+	// an empty value means "run without a second StorageClass" and has to be
+	// told apart from the flag not being used at all.
+	StorageClassFile2Set = false
+)
+
+// SecondStorageClassInstalled reports whether the suite created a second
+// StorageClass. The cases that map between two of them have nothing to map
+// when it did not.
+func SecondStorageClassInstalled() bool {
+	return !(StorageClassFile2Set && StorageClassFile2 == "")
+}
+
+// FeatureEnabled reports whether name is one of the features in a --features
+// value. The flag takes a comma-separated list, so comparing the whole value
+// against a single feature name stops matching as soon as a second feature is
+// enabled, and comparing with strings.Contains matches any feature whose name
+// merely starts with this one.
+func FeatureEnabled(features, name string) bool {
+	for _, f := range strings.Split(features, ",") {
+		if strings.EqualFold(strings.TrimSpace(f), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// SnapshotsAreRemote reports whether the provider's snapshots are taken by a
+// remote cloud service, rather than locally in the cluster.
+//
+// The suite has a few fixed waits that exist only because of those services: a
+// snapshot that is still pending once the backup reports it done
+// (velero-io/velero#1799), and a snapshot creation API that is rate limited.
+// Neither applies to kind, which takes CSI snapshots locally through
+// csi-driver-host-path, and where the backup already waits for the
+// VolumeSnapshot to become ReadyToUse before completing
+// (pkg/backup/actions/csi/pvc_action.go). Those waits are dead time there.
+func SnapshotsAreRemote(cloudProvider string) bool {
+	return cloudProvider != Kind && cloudProvider != KindCSI
+}
+
 const FeatureCSI = "EnableCSI"
 const VanillaZFS = "vanilla-zfs"
 const Kind = "kind"
 const Azure = "azure"
 const AzureCSI = "azure-csi"
 const AwsCSI = "aws-csi"
+const KindCSI = "kind-csi"
 const AWS = "aws"
 const GCP = "gcp"
 const Vsphere = "vsphere"
@@ -117,7 +168,7 @@ type VeleroConfig struct {
 	ProvideSnapshotsVolumeParam       bool
 	VeleroServerDebugMode             bool
 	SnapshotMoveData                  bool
-	DataMoverPlugin                   string
+	DataMover                         string
 	StandbyClusterCloudProvider       string
 	StandbyClusterPlugins             string
 	StandbyClusterObjectStoreProvider string
@@ -167,6 +218,7 @@ type BackupConfig struct {
 	OrderedResources            string
 	DefaultVolumesToFsBackup    bool
 	SnapshotMoveData            bool
+	DataMover                   string
 }
 
 type VeleroCLI2Version struct {

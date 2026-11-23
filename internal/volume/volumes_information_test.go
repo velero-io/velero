@@ -18,6 +18,7 @@ package volume
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -33,15 +34,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 
-	veleroshared "github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/features"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	veleroshared "github.com/velero-io/velero/pkg/apis/velero/shared"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 func TestGenerateVolumeInfoForSkippedVolume(t *testing.T) {
@@ -1402,6 +1403,85 @@ func stringPtr(str string) *string {
 func int64Ptr(val int) *int64 {
 	i := int64(val)
 	return &i
+}
+
+func TestInsertPVMapConcurrent(t *testing.T) {
+	// Velero backs up ItemBlocks on a pool of worker goroutines that all share
+	// the same BackupVolumesInformation, so InsertPVMap must be safe for
+	// concurrent use. Before the pvcPvMap lock was added this test reproduced
+	// the "fatal error: concurrent map writes" crash reported in #10634.
+	const (
+		workers    = 10
+		pvsPerWork = 50
+	)
+
+	volumesInfo := new(BackupVolumesInformation)
+	volumesInfo.Init()
+
+	wg := new(sync.WaitGroup)
+	start := make(chan struct{})
+
+	for i := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for j := range pvsPerWork {
+				pvName := fmt.Sprintf("pv-%d-%d", worker, j)
+				volumesInfo.InsertPVMap(
+					*builder.ForPersistentVolume(pvName).ClaimRef("ns", "pvc-"+pvName).Result(),
+					"pvc-"+pvName,
+					"ns",
+				)
+				// Read concurrently as well, to exercise the RLock path.
+				volumesInfo.pvMap.retrieve(pvName, "", "")
+			}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	require.Len(t, volumesInfo.pvMap.data, workers*pvsPerWork)
+	for i := range workers {
+		for j := range pvsPerWork {
+			pvName := fmt.Sprintf("pv-%d-%d", i, j)
+			info := volumesInfo.pvMap.retrieve(pvName, "", "")
+			require.NotNil(t, info, "PV %s missing from the map", pvName)
+			require.Equal(t, "pvc-"+pvName, info.PVCName)
+			require.Equal(t, "ns", info.PVCNamespace)
+		}
+	}
+}
+
+func TestInsertPVMapLazyInitConcurrent(t *testing.T) {
+	// InsertPVMap lazily initializes pvMap when Init has not been called.
+	// Concurrent callers must not each install their own map and lose entries.
+	const workers = 20
+
+	volumesInfo := new(BackupVolumesInformation)
+
+	wg := new(sync.WaitGroup)
+	start := make(chan struct{})
+
+	for i := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			pvName := fmt.Sprintf("pv-%d", worker)
+			volumesInfo.InsertPVMap(
+				*builder.ForPersistentVolume(pvName).ClaimRef("ns", "pvc-"+pvName).Result(),
+				"pvc-"+pvName,
+				"ns",
+			)
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	require.Len(t, volumesInfo.pvMap.data, workers)
 }
 
 func TestGetVolumeSnapshotClasses(t *testing.T) {

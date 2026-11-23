@@ -27,12 +27,13 @@ import (
 	"github.com/stretchr/testify/require"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/cacert"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
+	"github.com/velero-io/velero/pkg/cmd/util/downloadrequest"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestNewLogsCommand(t *testing.T) {
@@ -180,4 +181,49 @@ func TestNewLogsCommand(t *testing.T) {
 			return
 		}
 	})
+}
+
+func TestLogsAvailabilityByPhase(t *testing.T) {
+	tests := []struct {
+		phase     velerov1api.RestorePhase
+		available bool
+	}{
+		{phase: velerov1api.RestorePhaseNew, available: false},
+		{phase: velerov1api.RestorePhaseInProgress, available: false},
+		{phase: velerov1api.RestorePhaseFailedValidation, available: false},
+		{phase: velerov1api.RestorePhaseWaitingForPluginOperations, available: true},
+		{phase: velerov1api.RestorePhaseWaitingForPluginOperationsPartiallyFailed, available: true},
+		{phase: velerov1api.RestorePhaseFinalizing, available: true},
+		{phase: velerov1api.RestorePhaseFinalizingPartiallyFailed, available: true},
+		{phase: velerov1api.RestorePhaseCompleted, available: true},
+		{phase: velerov1api.RestorePhasePartiallyFailed, available: true},
+		{phase: velerov1api.RestorePhaseFailed, available: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.phase), func(t *testing.T) {
+			restoreName := "rs-logs-phase"
+
+			kbClient := velerotest.NewFakeControllerRuntimeClient(t)
+			restore := builder.ForRestore(cmdtest.VeleroNameSpace, restoreName).Phase(tc.phase).Result()
+			require.NoError(t, kbClient.Create(t.Context(), restore, &kbclient.CreateOptions{}))
+
+			f := &factorymocks.Factory{}
+			f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+			f.On("KubebuilderClient").Return(kbClient, nil)
+
+			l := NewLogsOptions()
+			require.NoError(t, l.Complete([]string{restoreName}, f))
+			// Nothing processes the DownloadRequest here, so a phase that passes the
+			// check ends in the download URL timeout instead of the phase error.
+			l.Timeout = 100 * time.Millisecond
+
+			err := l.Run(NewLogsCommand(f), f)
+			if tc.available {
+				require.ErrorIs(t, err, downloadrequest.ErrDownloadRequestDownloadURLTimeout)
+			} else {
+				require.ErrorContains(t, err, fmt.Sprintf("logs for restore %q are not available until it's finished processing", restoreName))
+			}
+		})
+	}
 }

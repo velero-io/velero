@@ -26,9 +26,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/vmware-tanzu/velero/internal/velero"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	"github.com/velero-io/velero/internal/velero"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 type podTemplateOption func(*podTemplateConfig)

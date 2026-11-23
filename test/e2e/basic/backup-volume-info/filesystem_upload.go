@@ -21,9 +21,9 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	. "github.com/vmware-tanzu/velero/test/util/providers"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	. "github.com/velero-io/velero/test/e2e/test"
+	. "github.com/velero-io/velero/test/util/providers"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 var FilesystemUploadVolumeInfoTest func() = TestFunc(&FilesystemUploadVolumeInfo{

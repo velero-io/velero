@@ -423,7 +423,7 @@ formatters:
       simplify: true
     goimports:
       local-prefixes:
-        - github.com/vmware-tanzu/velero
+        - github.com/velero-io/velero
 
 severity:
   default: error

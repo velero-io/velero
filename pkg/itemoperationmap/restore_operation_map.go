@@ -22,9 +22,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/util/encode"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/util/encode"
 )
 
 type RestoreItemOperationsMap struct {

@@ -30,12 +30,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	repoconfig "github.com/vmware-tanzu/velero/pkg/repository/config"
-	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	reposervice "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/service"
+	"github.com/velero-io/velero/internal/credentials"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	repoconfig "github.com/velero-io/velero/pkg/repository/config"
+	repokey "github.com/velero-io/velero/pkg/repository/keys"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	reposervice "github.com/velero-io/velero/pkg/repository/udmrepo/service"
 )
 
 type unifiedRepoProvider struct {
@@ -327,7 +327,7 @@ func (urp *unifiedRepoProvider) Forget(ctx context.Context, snapshotID string, p
 		}
 	}()
 
-	err = bkRepo.DeleteManifest(ctx, udmrepo.ID(snapshotID))
+	err = bkRepo.DeleteSnapshot(ctx, udmrepo.ID(snapshotID))
 	if err != nil {
 		return errors.Wrap(err, "error to delete manifest")
 	}
@@ -376,7 +376,7 @@ func (urp *unifiedRepoProvider) BatchForget(ctx context.Context, snapshotIDs []s
 
 	errs := []error{}
 	for _, snapshotID := range snapshotIDs {
-		err = bkRepo.DeleteManifest(ctx, udmrepo.ID(snapshotID))
+		err = bkRepo.DeleteSnapshot(ctx, udmrepo.ID(snapshotID))
 		if err != nil {
 			errs = append(errs, errors.Wrapf(err, "error to delete manifest %s", snapshotID))
 		}
@@ -463,7 +463,7 @@ func getRepoPassword(secretStore credentials.SecretStore) (string, error) {
 		return "", errors.New("invalid credentials interface")
 	}
 
-	rawPass, err := secretStore.Get(repokey.RepoKeySelector())
+	rawPass, err := secretStore.Get(context.TODO(), repokey.RepoKeySelector())
 	if err != nil {
 		return "", errors.Wrap(err, "error to get password")
 	}
@@ -512,7 +512,7 @@ func getStorageCredentials(backupLocation *velerov1api.BackupStorageLocation, cr
 	delete(config, repoconfig.CredentialsFileKey)
 
 	if backupLocation.Spec.Credential != nil {
-		config[repoconfig.CredentialsFileKey], err = credentialsFileStore.Path(backupLocation.Spec.Credential)
+		config[repoconfig.CredentialsFileKey], err = credentialsFileStore.Path(context.TODO(), backupLocation.Spec.Credential)
 		if err != nil {
 			return map[string]string{}, errors.Wrap(err, "error get credential file in bsl")
 		}
@@ -620,7 +620,7 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
 
 		// Try CACertRef first (new method), then fall back to CACert (deprecated)
 		if backupLocation.Spec.ObjectStorage.CACertRef != nil {
-			caCertString, err := credGetter.FromSecret.Get(backupLocation.Spec.ObjectStorage.CACertRef)
+			caCertString, err := credGetter.FromSecret.Get(context.TODO(), backupLocation.Spec.ObjectStorage.CACertRef)
 			if err != nil {
 				return nil, errors.Wrap(err, "error getting CA certificate from secret")
 			}

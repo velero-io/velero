@@ -21,7 +21,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 
-	"github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
+	"github.com/velero-io/velero/pkg/uploader/cbt/types"
 )
 
 const (

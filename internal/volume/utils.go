@@ -20,7 +20,7 @@ import (
 	"regexp"
 )
 
-// it has to have the same value as "github.com/vmware-tanzu/velero/pkg/restore".ItemRestoreResultCreated
+// it has to have the same value as "github.com/velero-io/velero/pkg/restore".ItemRestoreResultCreated
 const itemRestoreResultCreated = "created"
 
 // RestoredPVCFromRestoredResourceList returns a set of PVCs that were restored from the given restoredResourceList.

@@ -27,9 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 // TestCompleteNames exercises the core completeNames helper with various list

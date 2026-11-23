@@ -29,15 +29,15 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	velerokubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	k8sutil "github.com/vmware-tanzu/velero/test/util/k8s"
-	veleroutil "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/util/kube"
+	velerokubeutil "github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/e2e/test"
+	k8sutil "github.com/velero-io/velero/test/util/k8s"
+	veleroutil "github.com/velero-io/velero/test/util/velero"
 )
 
 type RepoMaintenanceTestCase struct {
@@ -114,6 +114,9 @@ func (r *RepoMaintenanceTestCase) Init() error {
 		"create", "--namespace", r.VeleroCfg.VeleroNamespace, "backup", r.BackupName,
 		"--include-namespaces", strings.Join(*r.NSIncluded, ","),
 		"--snapshot-volumes=true", "--snapshot-move-data", "--wait",
+	}
+	if r.VeleroCfg.DataMover != "" {
+		r.BackupArgs = append(r.BackupArgs, "--data-mover", r.VeleroCfg.DataMover)
 	}
 
 	// Message output by ginkgo

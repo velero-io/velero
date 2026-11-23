@@ -19,7 +19,7 @@ package v2alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/apis/velero/shared"
+	"github.com/velero-io/velero/pkg/apis/velero/shared"
 )
 
 // DataUploadSpec is the specification for a DataUpload.

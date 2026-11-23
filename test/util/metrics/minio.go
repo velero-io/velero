@@ -19,7 +19,7 @@ package metrics
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/test/util/providers"
+	"github.com/velero-io/velero/test/util/providers"
 )
 
 func GetMinioDiskUsage(cloudCredentialsFile string, bslBucket string, bslPrefix string, bslConfig string) (int64, error) {

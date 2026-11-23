@@ -33,12 +33,12 @@ import (
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	"github.com/vmware-tanzu/velero/pkg/test"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	"github.com/velero-io/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestCreateOptions_BuildBackup(t *testing.T) {
@@ -279,6 +279,7 @@ func TestCreateCommand(t *testing.T) {
 		resPoliciesConfigmap := "cm-name-2"
 		dataMover := "velero"
 		parallelFilesUpload := 10
+		parallelBlocksUpload := 7
 		backupType := "Incremental"
 		flags := new(flag.FlagSet)
 		o := NewCreateOptions()
@@ -309,6 +310,7 @@ func TestCreateCommand(t *testing.T) {
 		flags.Parse([]string{"--resource-policies-configmap", resPoliciesConfigmap})
 		flags.Parse([]string{"--data-mover", dataMover})
 		flags.Parse([]string{"--parallel-files-upload", strconv.Itoa(parallelFilesUpload)})
+		require.NoError(t, flags.Parse([]string{"--parallel-blocks-upload", strconv.Itoa(parallelBlocksUpload)}))
 		flags.Parse([]string{"--backup-type", backupType})
 		//flags.Parse([]string{"--wait"})
 
@@ -360,6 +362,7 @@ func TestCreateCommand(t *testing.T) {
 		require.Equal(t, resPoliciesConfigmap, o.ResPoliciesConfigmap)
 		require.Equal(t, dataMover, o.DataMover)
 		require.Equal(t, parallelFilesUpload, o.ParallelFilesUpload)
+		require.Equal(t, parallelBlocksUpload, o.ParallelBlocksUpload)
 		require.Equal(t, backupType, o.BackupType)
 		//assert.Equal(t, true, o.Wait)
 

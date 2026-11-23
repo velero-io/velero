@@ -196,6 +196,13 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
+              activities:
+                description: Activities contains one or more messages about what have
+                  been done for this pod volume restore.
+                items:
+                  type: string
+                nullable: true
+                type: array
               completionTimestamp:
                 description: |-
                   CompletionTimestamp records the time a restore was completed.
@@ -213,7 +220,8 @@ spec:
                 format: int64
                 type: integer
               message:
-                description: Message is a message about the pod volume restore's status.
+                description: Message is a message describing the pod volume restore
+                  when it reaches to a terminal status.
                 type: string
               node:
                 description: Node is name of the node where the pod volume restore

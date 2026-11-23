@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 
-	"github.com/vmware-tanzu/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/client"
 )
 
 type FakeDynamicFactory struct {

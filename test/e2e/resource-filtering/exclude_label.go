@@ -24,10 +24,10 @@ import (
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	. "github.com/velero-io/velero/test/e2e/test"
+	"github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 /*

@@ -1,1 +1,0 @@
-Reset the PVC binding information in pvc_action.go when it references PVB.

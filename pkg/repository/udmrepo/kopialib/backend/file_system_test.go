@@ -19,13 +19,13 @@ package backend
 import (
 	"testing"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 
 	"github.com/kopia/kopia/repo/blob/filesystem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
 )
 
 func TestFSSetup(t *testing.T) {

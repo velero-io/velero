@@ -29,13 +29,13 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/builder"
 
 	kubeClientFake "k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestIsLinuxNode(t *testing.T) {

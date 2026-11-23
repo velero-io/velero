@@ -20,7 +20,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/test"
 )
 
 func TestClientLogger(t *testing.T) {

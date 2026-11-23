@@ -27,12 +27,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/meta"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/discovery"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/test"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/discovery"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/test"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
 func TestInvokeDeleteItemActionsRunForCorrectItems(t *testing.T) {
@@ -242,6 +242,30 @@ func TestInvokeDeleteItemActionsWithNoPlugins(t *testing.T) {
 	}
 	err := InvokeDeleteActions(c)
 	require.NoError(t, err)
+}
+
+// Items that no DeleteItemAction applies to must not be read at all. The
+// persistent volume below is not valid JSON, so reading it would fail.
+func TestInvokeDeleteActionsSkipsItemsWithNoApplicableActions(t *testing.T) {
+	h, dh := newHarness(t)
+	h.AddResource(t, dh, test.Pods())
+	h.AddResource(t, dh, test.PVs())
+
+	action := new(recordResourcesAction).ForResource("pods")
+	c := &Context{
+		Backup: builder.ForBackup("velero", "velero").Result(),
+		BackupReader: test.NewTarWriter(t).
+			AddItems("pods", builder.ForPod("ns-1", "pod-1").Result()).
+			Add("resources/persistentvolumes/cluster/pv-1.json", []byte("not json")).
+			Done(),
+		Filesystem:      test.NewFakeFileSystem(),
+		DiscoveryHelper: dh,
+		Actions:         []velero.DeleteItemAction{action},
+		Log:             logrus.StandardLogger(),
+	}
+
+	require.NoError(t, InvokeDeleteActions(c))
+	assert.Equal(t, []string{"ns-1/pod-1"}, action.ids)
 }
 
 // failingAction is a DeleteItemAction that always returns an error from Execute.

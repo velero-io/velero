@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
@@ -39,20 +38,21 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/hook"
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	serverconfig "github.com/vmware-tanzu/velero/pkg/cmd/server/config"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/internal/hook"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	velerov2alpha1 "github.com/velero-io/velero/pkg/apis/velero/v2alpha1"
+	serverconfig "github.com/velero-io/velero/pkg/cmd/server/config"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	csiutil "github.com/velero-io/velero/pkg/util/csi"
+	kubeutil "github.com/velero-io/velero/pkg/util/kube"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 type restoreFinalizerReconciler struct {
@@ -496,15 +496,19 @@ func (ctx *finalizerContext) hasVolumeGroupSnapshotHandles() bool {
 func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 	ctx.logger.Info("cleaning up stub VolumeGroupSnapshotContents")
 
-	vgscList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContentList{}
-	err := ctx.crClient.List(
+	vgscList, err := csiutil.ListVGSC(
 		context.Background(),
-		vgscList,
-		client.MatchingLabels{velerov1api.RestoreNameLabel: ctx.restore.Name},
+		ctx.crClient,
+		map[string]string{velerov1api.RestoreNameLabel: ctx.restore.Name},
 	)
 	if err != nil {
-		// If the CRD is not installed, listing will fail. This is expected
-		// on clusters without VolumeGroupSnapshot support, so treat as warning.
+		if errors.Is(err, csiutil.ErrVGSAPINotAvailable) {
+			// Cluster does not serve the VolumeGroupSnapshot API, so there is
+			// nothing to clean up.
+			ctx.logger.Info("VolumeGroupSnapshot API not available, skipping stub VGSC cleanup")
+			return warnings
+		}
+		// Any other listing failure is unexpected; treat as warning.
 		ctx.logger.WithError(err).Warn("failed to list stub VolumeGroupSnapshotContents, skipping cleanup")
 		warnings.Add("cluster", errors.Wrap(err, "failed to list stub VolumeGroupSnapshotContents"))
 		return warnings
@@ -560,7 +564,7 @@ func (ctx *finalizerContext) cleanupStubVGSC() (warnings results.Result) {
 		}
 
 		log.Info("deleting stub VolumeGroupSnapshotContent")
-		if err := ctx.crClient.Delete(context.Background(), vgsc); err != nil {
+		if err := csiutil.DeleteVGSC(context.Background(), ctx.crClient, vgsc.Name); err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("stub VolumeGroupSnapshotContent already deleted")
 				continue

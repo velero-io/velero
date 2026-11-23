@@ -11,10 +11,37 @@ It is possible to exclude individual items from being backed up, even if they ma
 kubectl label -n <ITEM_NAMESPACE> <RESOURCE>/<NAME> velero.io/exclude-from-backup=true
 ```
 ## Parallel Files Upload
-If using fs-backup with Kopia uploader or CSI snapshot data movements, it's allowed to configure the option for parallel files upload, which could accelerate the backup:
+
+`--parallel-files-upload` controls how many files are processed concurrently within each volume backup using Kopia uploader. It applies to file-system backup and CSI snapshot data movement using the file system data mover (`velero-fs`). Set a positive integer to override the default:
+
 ```bash
-velero backup create <BACKUP_NAME> --include-namespaces <NAMESPACE> --parallel-files-upload <NUM> --wait
+velero backup create fs-backup --default-volumes-to-fs-backup --parallel-files-upload=8
+velero backup create fs-snapshot-backup --snapshot-move-data --data-mover=velero-fs --parallel-files-upload=8
 ```
+
+## Parallel Blocks Upload
+
+`--parallel-blocks-upload` controls how many block writes can run concurrently within each volume backup using the block data mover (`velero-block`). Set a positive integer to override the default:
+
+```bash
+velero backup create block-backup --snapshot-move-data --data-mover=velero-block --parallel-blocks-upload=8
+```
+
+### Defaults and scope
+
+When either flag is omitted or set to `0`, its uploader defaults to `runtime.GOMAXPROCS(0)` in the data mover process when backup processing starts. This is the Go runtime's execution parallelism, which can reflect the pod CPU limit; it is not always the node's CPU count. An explicit positive value overrides this default, even when greater than `GOMAXPROCS`.
+
+Both settings apply per volume uploader, not across the entire backup. They do not control the number of concurrent data mover pods; use [node-agent concurrency configuration](node-agent-concurrency.md) for that. They affect backups only. File restore concurrency is configured separately with `--parallel-files-download`; neither upload flag changes block restore behavior.
+
+Higher concurrency can improve throughput when CPU, disk, and backup storage can keep up, but also increases buffered data and memory usage. Slow storage can leave more packs buffered while uploads finish. Lower concurrency can reduce this memory pressure. Neither setting guarantees a total pod memory limit, and a larger value does not always improve throughput. See [Memory usage and upload concurrency](data-movement-pod-resource-configuration.md#memory-usage-and-upload-concurrency) for tuning guidance.
+
+The flags are also available on `velero schedule create`. For a backup or schedule that uses both data movers, set both flags; each mover uses its corresponding setting:
+
+```bash
+velero schedule create nightly --schedule="0 2 * * *" --snapshot-move-data --parallel-files-upload=8 --parallel-blocks-upload=8
+```
+
+For YAML configuration, use `spec.uploaderConfig.parallelFilesUpload` and `spec.uploaderConfig.parallelBlocksUpload` on a Backup, or the corresponding fields under `spec.template.uploaderConfig` on a Schedule. There is no dedicated global setting for either upload parameter.
 
 ## Specify Backup Orders of Resources of Specific Kind
 
@@ -104,7 +131,7 @@ velero schedule create --use-owner-references-in-backup <backup-name>
 ```
 By this way, schedule is the owner of it created backups. This is useful for some GitOps scenarios, or the resource tree of k8s synchronized from other places.
 
-Please do notice there is also side effect that may not be expected. Because schedule is the owner, when the schedule is deleted, the related backups CR (Just backup CR is deleted. Backup data still exists in object store and snapshots) will be deleted by k8s GC controller, too, but Velero controller will sync these backups from object store's metadata into k8s. Then k8s GC controller and Velero controller will fight over whether these backups should exist all through.
+Please do notice there is also side effect that may not be expected. Because schedule is the owner, when the schedule is deleted, the related Backup CRs are deleted by the k8s GC controller. This is not a Velero backup deletion: no DeleteBackupRequest is created, and the backup data in the object store and the volume snapshots are kept. The backup sync controller then syncs these backups from the object store's metadata back into k8s, without the owner reference to the deleted schedule. To delete the backups and their data, use `velero backup delete` (for example `velero backup delete --selector velero.io/schedule-name=<schedule-name>`) before or after deleting the schedule.
 
 If there is possibility the schedule will be disable to not create backup anymore, and the created backups are still useful. Please do not enable this option. For detail, please reference to [Backups created by a schedule with useOwnerReferenceInBackup set do not get synced properly](https://github.com/velero-io/velero/issues/4093).
 

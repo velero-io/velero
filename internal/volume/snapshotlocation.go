@@ -17,10 +17,12 @@ limitations under the License.
 package volume
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/internal/credentials"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/internal/credentials"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // UpdateVolumeSnapshotLocationWithCredentialConfig adds the credentials file path to the config
@@ -36,7 +38,7 @@ func UpdateVolumeSnapshotLocationWithCredentialConfig(location *velerov1api.Volu
 	// If the VSL specifies a credential, fetch its path on disk and pass to
 	// plugin via the config.
 	if location.Spec.Credential != nil && credentialStore != nil {
-		credsFile, err := credentialStore.Path(location.Spec.Credential)
+		credsFile, err := credentialStore.Path(context.TODO(), location.Spec.Credential)
 		if err != nil {
 			return errors.Wrap(err, "unable to get credentials")
 		}

@@ -33,7 +33,7 @@ limitations under the License.
 package basic
 
 import (
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
+	. "github.com/velero-io/velero/test/e2e/test"
 )
 
 func GetResourcesCheckTestCases() []VeleroBackupRestoreTest {

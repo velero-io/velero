@@ -27,11 +27,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	. "github.com/vmware-tanzu/velero/test/util/kibishii"
-	. "github.com/vmware-tanzu/velero/test/util/providers"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/kibishii"
+	. "github.com/velero-io/velero/test/util/providers"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 func BackupDeletionWithSnapshots() {
@@ -47,8 +47,8 @@ func backup_deletion_test(useVolumeSnapshots bool) {
 	veleroCfg.UseNodeAgent = !useVolumeSnapshots
 
 	BeforeEach(func() {
-		if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-			Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+		if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 		}
 		var err error
 		flag.Parse()
@@ -88,8 +88,8 @@ func runBackupDeletionTests(client TestClient, veleroCfg VeleroConfig, backupLoc
 	nsCount := len(workloadNamespaceList)
 	workloadNamespaces := strings.Join(workloadNamespaceList[:], ",")
 
-	if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-		Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+	if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+		Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 	}
 	oneHourTimeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*60)
 	defer ctxCancel()
@@ -261,8 +261,11 @@ func runBackupDeletionTests(client TestClient, veleroCfg VeleroConfig, backupLoc
 	}
 
 	// Hit issue: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#:~:text=SnapshotCreationPerVolumeRateExceeded
-	// Sleep for more than 15 seconds to avoid this issue.
-	time.Sleep(1 * time.Minute)
+	// Sleep for more than 15 seconds to avoid this issue. Only providers whose
+	// snapshot API is rate limited need it; kind takes CSI snapshots locally.
+	if SnapshotsAreRemote(veleroCfg.CloudProvider) {
+		time.Sleep(1 * time.Minute)
+	}
 
 	backupName = "backup-1-" + UUIDgen.String()
 	BackupCfg.BackupName = backupName

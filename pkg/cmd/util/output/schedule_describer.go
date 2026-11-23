@@ -21,7 +21,7 @@ import (
 
 	"github.com/fatih/color"
 
-	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	v1 "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func DescribeSchedule(schedule *v1.Schedule) string {
@@ -48,7 +48,7 @@ func DescribeSchedule(schedule *v1.Schedule) string {
 			DescribeResourcePolicies(d, schedule.Spec.Template.ResourcePolicy)
 		}
 
-		if schedule.Spec.Template.UploaderConfig != nil && schedule.Spec.Template.UploaderConfig.ParallelFilesUpload > 0 {
+		if schedule.Spec.Template.UploaderConfig != nil {
 			d.Println()
 			DescribeUploaderConfigForBackup(d, schedule.Spec.Template)
 		}

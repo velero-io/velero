@@ -1,1 +1,0 @@
-Wait restorePV detached before binding the cloned PV to avoid confusing the CSI driver

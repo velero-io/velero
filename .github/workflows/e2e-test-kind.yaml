@@ -7,8 +7,8 @@ env:
   # Bump them deliberately after reviewing the upstream changes.
   # bitnami/containers: [bitnami/minio] Release 2026.7.17-debian-12-r0
   BITNAMI_CONTAINERS_COMMIT: 19fb570e551f15ab0c8264aafa93774266761b8d
-  # vmware-tanzu-experiments/distributed-data-generator: main as of 2025-07-15
-  KIBISHII_COMMIT: bce0469e5f9dd33f31432fab22ff90ad6f2b45ca
+  # vmware-tanzu-experiments/distributed-data-generator: main as of 2026-10-15
+  KIBISHII_COMMIT: f81fc67f52b9cafe945f7d44ca0507ff65ea4cbd
 on:
   push:
   pull_request:
@@ -34,9 +34,27 @@ jobs:
         uses: actions/checkout@v7
       
       - name: Set up Go version
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.1.0
         with:
           go-version: ${{ needs.get-go-version.outputs.version }}
+          cache: false
+
+      # One Go module cache for this job and the e2e jobs. The key leaves out the
+      # Go patch version, which differs between runner images in the same run.
+      - name: Restore Go module cache
+        id: go-mod-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.mod', '**/go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-${{ runner.arch }}-
+      # Download everything the e2e jobs need, including the ginkgo CLI's own
+      # dependencies, so they can run from the cache.
+      - name: Download Go modules
+        if: steps.go-mod-cache.outputs.cache-hit != 'true'
+        run: |
+          go mod download
+          make -C test/ ginkgo
 
       # Look for a CLI that's made for this PR
       - name: Fetch built CLI
@@ -105,7 +123,13 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ./minio-image.tar
-          key: minio-bitnami-${{ steps.minio-version.outputs.dockerfile_sha }}
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
+      - name: Save Go module cache
+        if: steps.go-mod-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.go-mod-cache.outputs.cache-primary-key }}
   # Create json of k8s versions to test
   # from guide: https://stackoverflow.com/a/65094398/4590470
   setup-test-matrix:
@@ -114,6 +138,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      csi-matrix: ${{ steps.set-matrix.outputs.csi-matrix }}
     steps:
       - name: Set k8s versions
         id: set-matrix
@@ -161,6 +186,39 @@ jobs:
               \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
             ]}" >> $GITHUB_OUTPUT
 
+          # The CSI cases need a snapshot stack installed per job, which the
+          # other label sets do not, so they run as their own job rather than
+          # adding that cost to all of them.
+          #
+          # The newest three versions rather than every one. csi-driver-host-path
+          # ships deploy manifests only for recent Kubernetes releases, so the
+          # older end of the matrix has nothing to install, and running every
+          # version would add about a quarter to the matrix for coverage of a
+          # driver that is only used by this job.
+          csi_k8s_json=$(printf '%s\n' "${valid[@]+"${valid[@]}"}" | jq -R -c -s '
+            split("\n") | map(select(length > 0))
+            | sort_by(split(".") | map(tonumber))
+            | .[-3:]')
+          # Every CSI label is listed explicitly. A Ginkgo label filter matches a
+          # bare token by exact equality, not as a substring, so CSISnapshot does
+          # not select CSIVolumeGroupSnapshot. A new CSI label has to be added
+          # here or its cases silently never run.
+          #
+          # The Kibishii-backed Snapshot cases run here rather than in
+          # run-e2e-test because Kibishii brings its own StorageClass, and only
+          # the kind-csi overlay this job reaches defines it on a CSI driver.
+          echo "csi-matrix={\
+            \"k8s\":${csi_k8s_json},\
+            \"labels\":[\
+              \"BackupVolumeInfo && (CSISnapshot || CSIDataMover || CSIVolumeGroupSnapshot)\", \
+              \"Basic && Snapshot\", \
+              \"Backups && Deletion && Snapshot\", \
+              \"NamespaceMapping && Snapshot\", \
+              \"Basic && FSBackup\", \
+              \"BSL && Deletion && Snapshot\", \
+              \"Backups && Deletion && FSBackup\"\
+            ]}" >> $GITHUB_OUTPUT
+
   # Run E2E test against all Kubernetes versions on kind
   run-e2e-test:
     needs:
@@ -176,9 +234,16 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go version
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.1.0
         with:
           go-version: ${{ needs.get-go-version.outputs.version }}
+          cache: false
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.mod', '**/go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-${{ runner.arch }}-
 
       # Fetch the pre-built MinIO image from the build job
       - name: Fetch built MinIO Image
@@ -191,10 +256,42 @@ jobs:
         run: |
           echo "Loading MinIO image..."
           docker load < ./minio-image.tar
+      # Serve MinIO over TLS so the E2E suite exercises Velero's HTTPS object
+      # store path (BSL caCert / plugin TLS handshake) instead of plain HTTP.
+      - name: Generate MinIO TLS certificate
+        run: |
+          set -euo pipefail
+          # hostname -i can return several addresses; the certificate SAN needs exactly one.
+          MINIO_HOST_IP=$(hostname -i | awk '{print $1}')
+          echo "MINIO_HOST_IP=${MINIO_HOST_IP}" >> $GITHUB_ENV
+          mkdir -p /tmp/minio-certs
+          openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+            -keyout /tmp/minio-certs/private.key \
+            -out /tmp/minio-certs/public.crt \
+            -subj "/CN=${MINIO_HOST_IP}" \
+            -addext "subjectAltName=IP:${MINIO_HOST_IP},IP:127.0.0.1,DNS:localhost"
+          # The certificate is public, but the key must not be world-readable.
+          # The bitnami/minio image runs as uid 1001, so give that uid ownership
+          # of the key; 0600 is then still readable inside the container.
+          chmod 600 /tmp/minio-certs/private.key
+          chmod 644 /tmp/minio-certs/public.crt
+          sudo chown 1001:1001 /tmp/minio-certs/private.key
       - name: Install MinIO
         run: |
-          docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
+          set -euo pipefail
+          # SSL_CERT_FILE / CURL_CA_BUNDLE let the container's own readiness probe
+          # (curl) and bucket bootstrap (mc) trust the self-signed certificate.
+          docker run -d --rm -p 9000:9000 \
+            -e "MINIO_ROOT_USER=minio" \
+            -e "MINIO_ROOT_PASSWORD=minio123" \
+            -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" \
+            -e "MINIO_SCHEME=https" \
+            -e "MINIO_SERVER_URL=https://${MINIO_HOST_IP}:9000" \
+            -e "SSL_CERT_FILE=/certs/public.crt" \
+            -e "CURL_CA_BUNDLE=/certs/public.crt" \
+            -v /tmp/minio-certs:/certs:ro \
+            bitnami/minio:local
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
         with:
           cluster_name: "kind"
           version: "v0.32.0"
@@ -234,11 +331,12 @@ jobs:
           GOPATH=~/go \
               CLOUD_PROVIDER=kind \
               OBJECT_STORE_PROVIDER=aws \
-              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=https://${MINIO_HOST_IP}:9000 \
+              BSL_CA_CERT_FILE=/tmp/minio-certs/public.crt \
               CREDS_FILE=/tmp/credential \
               BSL_BUCKET=bucket \
               ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
-              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=https://${MINIO_HOST_IP}:9000 \
               ADDITIONAL_CREDS_FILE=/tmp/credential \
               ADDITIONAL_BSL_BUCKET=additional-bucket \
               VELERO_IMAGE=velero:pr-test-linux-amd64 \
@@ -252,4 +350,114 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: DebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
+          path: /home/runner/work/velero/velero/test/e2e/debug-bundle*
+
+  # The CSI cases need a driver that can take snapshots, which kind does not
+  # have, so they run as their own job with the snapshot stack installed and the
+  # StorageClass pointed at it. Everything else mirrors run-e2e-test.
+  run-csi-e2e-test:
+    needs:
+      - build
+      - setup-test-matrix
+      - get-go-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.setup-test-matrix.outputs.csi-matrix)}}
+      fail-fast: false
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Go version
+        uses: actions/setup-go@v7.1.0
+        with:
+          go-version: ${{ needs.get-go-version.outputs.version }}
+          cache: false
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/go.mod', '**/go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-${{ runner.arch }}-
+
+      # Fetch the pre-built MinIO image from the build job
+      - name: Fetch built MinIO Image
+        uses: actions/cache/restore@v6
+        id: minio-cache
+        with:
+          path: ./minio-image.tar
+          key: minio-bitnami-${{ env.BITNAMI_CONTAINERS_COMMIT }}
+      - name: Load MinIO Image
+        run: |
+          echo "Loading MinIO image..."
+          docker load < ./minio-image.tar
+      - name: Install MinIO
+        run: |
+          docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1 + fix: add curl retry flags (https://github.com/helm/kind-action/pull/165)
+        with:
+          cluster_name: "kind"
+          version: "v0.32.0"
+          node_image: "kindest/node:v${{ matrix.k8s }}"
+
+      # Match kubectl to the server version before the installer uses it
+      - name: Install kubectl
+        run: |
+          curl -fLO https://dl.k8s.io/release/v${{ matrix.k8s }}/bin/linux/amd64/kubectl
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - name: Install CSI snapshot support
+        run: ./hack/install-csi-hostpath.sh
+        timeout-minutes: 10
+
+      - name: Fetch built CLI
+        id: cli-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ./_output/bin/linux/amd64/velero
+          key: velero-cli-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Fetch built Image
+        id: image-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ./velero.tar
+          key: velero-image-${{ github.event.pull_request.number }}-${{ github.sha }}
+      - name: Load Velero Image
+        run:
+          kind load image-archive velero.tar
+      - name: Run CSI E2E test
+        run: |
+          cat << EOF > /tmp/credential
+          [default]
+          aws_access_key_id=minio
+          aws_secret_access_key=minio123
+          EOF
+
+          git init -q /tmp/kibishii
+          git -C /tmp/kibishii remote add origin https://github.com/vmware-tanzu-experiments/distributed-data-generator.git
+          git -C /tmp/kibishii fetch --depth 1 origin "${KIBISHII_COMMIT}"
+          git -C /tmp/kibishii checkout -q "${KIBISHII_COMMIT}"
+
+          GOPATH=~/go \
+              CLOUD_PROVIDER=kind \
+              OBJECT_STORE_PROVIDER=aws \
+              FEATURES=EnableCSI \
+              BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              CREDS_FILE=/tmp/credential \
+              BSL_BUCKET=bucket \
+              ADDITIONAL_OBJECT_STORE_PROVIDER=aws \
+              ADDITIONAL_BSL_CONFIG=region=minio,s3ForcePathStyle="true",s3Url=http://$(hostname -i):9000 \
+              ADDITIONAL_CREDS_FILE=/tmp/credential \
+              ADDITIONAL_BSL_BUCKET=additional-bucket \
+              VELERO_IMAGE=velero:pr-test-linux-amd64 \
+              PLUGINS=velero/velero-plugin-for-aws:latest \
+              STORAGE_CLASS_FILE=../testdata/storage-class/kind-csi.yaml \
+              GINKGO_LABELS="${{ matrix.labels }}" \
+              KIBISHII_DIRECTORY=/tmp/kibishii/kubernetes/yaml/ \
+              make -C test/ run-e2e
+        timeout-minutes: 30
+      - name: Upload debug bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: CSIDebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
           path: /home/runner/work/velero/velero/test/e2e/debug-bundle*

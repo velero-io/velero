@@ -35,15 +35,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientTesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/test"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
-	"github.com/vmware-tanzu/velero/pkg/util/stringptr"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/logging"
+	"github.com/velero-io/velero/pkg/util/stringptr"
 )
 
 type reactor struct {
@@ -314,6 +315,11 @@ func TestEnsureDeleteVS(t *testing.T) {
 			Finalizers: []string{"fake-finalizer-1", "fake-finalizer-2"},
 		},
 	}
+	groupMemberName := "group"
+	vsGroupMember := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "fake-vs", Namespace: "fake-ns"},
+		Status:     &snapshotv1api.VolumeSnapshotStatus{VolumeGroupSnapshotName: &groupMemberName},
+	}
 
 	tests := []struct {
 		name      string
@@ -343,7 +349,7 @@ func TestEnsureDeleteVS(t *testing.T) {
 					},
 				},
 			},
-			err: "error to assure VolumeSnapshot is deleted, fake-vs: error to get VolumeSnapshot fake-vs: fake-get-error",
+			err: "checking VGS membership before deleting VolumeSnapshot: fake-get-error",
 		},
 		{
 			name:      "wait timeout",
@@ -398,13 +404,19 @@ func TestEnsureDeleteVS(t *testing.T) {
 					},
 				},
 			},
-			err: "timeout to assure VolumeSnapshot fake-vs is deleted",
+			err: "checking VGS membership before deleting VolumeSnapshot: context deadline exceeded",
 		},
 		{
 			name:      "success",
 			vsName:    "fake-vs",
 			namespace: "fake-ns",
 			clientObj: []runtime.Object{vsObj},
+		},
+		{
+			name:      "defer VGS member",
+			vsName:    "fake-vs",
+			namespace: "fake-ns",
+			clientObj: []runtime.Object{vsGroupMember},
 		},
 	}
 
@@ -438,6 +450,10 @@ func TestEnsureDeleteVSC(t *testing.T) {
 			Name:       "fake-vsc",
 			Finalizers: []string{"fake-finalizer-1", "fake-finalizer-2"},
 		},
+	}
+	vscGroupMember := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: "fake-vsc"},
+		Status:     &snapshotv1api.VolumeSnapshotContentStatus{VolumeGroupSnapshotHandle: ptr.To("group-handle")},
 	}
 
 	tests := []struct {
@@ -479,7 +495,7 @@ func TestEnsureDeleteVSC(t *testing.T) {
 					},
 				},
 			},
-			err: "error to assure VolumeSnapshotContent is deleted, fake-vsc: error to get VolumeSnapshotContent fake-vsc: fake-get-error",
+			err: "checking VGS membership before deleting VolumeSnapshotContent: fake-get-error",
 		},
 		{
 			name:      "wait timeout",
@@ -531,12 +547,17 @@ func TestEnsureDeleteVSC(t *testing.T) {
 					},
 				},
 			},
-			err: "timeout to assure VolumeSnapshotContent fake-vsc is deleted",
+			err: "checking VGS membership before deleting VolumeSnapshotContent: context deadline exceeded",
 		},
 		{
 			name:      "success",
 			vscName:   "fake-vsc",
 			clientObj: []runtime.Object{vscObj},
+		},
+		{
+			name:      "defer group member",
+			vscName:   "fake-vsc",
+			clientObj: []runtime.Object{vscGroupMember},
 		},
 	}
 
@@ -636,6 +657,23 @@ func TestDeleteVolumeSnapshotIfAny(t *testing.T) {
 			vsNamespace: "fake-ns",
 			logMessage:  "Abort deleting volume snapshot, it doesn't exist fake-ns/fake-vs",
 			logLevel:    "level=debug",
+		},
+		{
+			name:        "membership lookup fails",
+			vsName:      "fake-vs",
+			vsNamespace: "fake-ns",
+			reactors: []reactor{
+				{
+					verb:     "get",
+					resource: "volumesnapshots",
+					reactorFunc: func(action clientTesting.Action) (handled bool, ret runtime.Object, err error) {
+						return true, nil, errors.New("fake-get-error")
+					},
+				},
+			},
+			logMessage: "Unable to check VGS membership for VolumeSnapshot fake-ns/fake-vs",
+			logLevel:   "level=warning",
+			logError:   "error=fake-get-error",
 		},
 		{
 			name:        "delete fail",
@@ -1578,7 +1616,7 @@ func TestSetVolumeSnapshotContentDeletionPolicy(t *testing.T) {
 			fakeClient := velerotest.NewFakeControllerRuntimeClient(t, tc.objs...)
 			_, err := SetVolumeSnapshotContentDeletionPolicy(context.TODO(), tc.inputVSCName, fakeClient, tc.policy)
 			if tc.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				actual := new(snapshotv1api.VolumeSnapshotContent)
@@ -1623,7 +1661,18 @@ func TestDeleteVolumeSnapshots(t *testing.T) {
 				Status(&snapshotv1api.VolumeSnapshotContentStatus{}).Result(),
 			keepVSAndVSC: true,
 		},
+		{
+			name: "VGS member is deferred until group cleanup",
+			vs: *builder.ForVolumeSnapshot("velero", "vs1").
+				Status().BoundVolumeSnapshotContentName("vsc1").
+				Result(),
+			vsc: *builder.ForVolumeSnapshotContent("vsc1").
+				DeletionPolicy(snapshotv1api.VolumeSnapshotContentDelete).
+				Status(&snapshotv1api.VolumeSnapshotContentStatus{}).Result(),
+			keepVSAndVSC: true,
+		},
 	}
+	tests[2].vs.Status.VolumeGroupSnapshotName = ptr.To("group")
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2250,6 +2299,21 @@ func TestCleanupVolumeSnapshot(t *testing.T) {
 			},
 			expectDeleted: true,
 			expectedVSC:   "retain-vsc",
+		},
+		{
+			name: "should defer deletion for a VGS member",
+			volSnap: &snapshotv1api.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{Name: "vgs-member", Namespace: "velero"},
+			},
+			objs: []runtime.Object{
+				&snapshotv1api.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{Name: "vgs-member", Namespace: "velero"},
+					Status: &snapshotv1api.VolumeSnapshotStatus{
+						VolumeGroupSnapshotName: ptr.To("group"),
+					},
+				},
+			},
+			expectDeleted: false,
 		},
 	}
 

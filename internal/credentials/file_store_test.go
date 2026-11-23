@@ -17,13 +17,14 @@ limitations under the License.
 package credentials
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/builder"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestNamespacedFileStore(t *testing.T) {
@@ -74,7 +75,7 @@ func TestNamespacedFileStore(t *testing.T) {
 			fileStore, err := NewNamespacedFileStore(client, tc.namespace, tc.fsRoot, fs)
 			require.NoError(t, err)
 
-			path, err := fileStore.Path(tc.secretSelector)
+			path, err := fileStore.Path(context.Background(), tc.secretSelector)
 
 			if tc.wantErr != "" {
 				require.EqualError(t, err, tc.wantErr)

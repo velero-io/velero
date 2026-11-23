@@ -30,9 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
-	"github.com/vmware-tanzu/velero/pkg/util/wildcard"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/util/datamover"
+	"github.com/velero-io/velero/pkg/util/wildcard"
 )
 
 type VolumeActionType string
@@ -421,6 +421,16 @@ func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList
 			return fmt.Errorf("excludes list cannot contain an item in the includes list: %s", itm)
 		}
 	}
+	for _, itm := range includes.List() {
+		if _, err := glob.Compile(itm); err != nil {
+			return fmt.Errorf("invalid glob pattern %q in includes list: %v", itm, err)
+		}
+	}
+	for _, itm := range excludes.List() {
+		if _, err := glob.Compile(itm); err != nil {
+			return fmt.Errorf("invalid glob pattern %q in excludes list: %v", itm, err)
+		}
+	}
 	return nil
 }
 
@@ -650,7 +660,7 @@ func (p *Policies) GetNamespacedFilterPolicies() []NamespacedFilterPolicy {
 	return p.namespacedFilterPolicies
 }
 
-func GetResourcePoliciesFromBackup(
+func getResourcePoliciesFromBackup(
 	backup velerov1api.Backup,
 	client crclient.Client,
 	logger logrus.FieldLogger,
@@ -728,7 +738,7 @@ func GetGlobalResourcePolicies(
 
 // GetResourcePoliciesFromBackupWithGlobal builds the effective resource policies for a backup
 // by merging the backup-referenced resource policies with the global backup volume policies
-// (when globalConfigMapName is set). The merged volumePolicies list is the backup-level
+// (when globalConfigMapName is set or specified via backup annotations). The merged volumePolicies list is the backup-level
 // policies followed by the global ones, so the first match wins and a backup can override the
 // global baseline for a specific volume while still inheriting the rest of the global rules.
 func GetResourcePoliciesFromBackupWithGlobal(
@@ -738,9 +748,16 @@ func GetResourcePoliciesFromBackupWithGlobal(
 	installNamespace string,
 	logger logrus.FieldLogger,
 ) (*Policies, error) {
-	backupPolicies, err := GetResourcePoliciesFromBackup(backup, client, logger)
+	backupPolicies, err := getResourcePoliciesFromBackup(backup, client, logger)
 	if err != nil {
 		return nil, err
+	}
+
+	if globalConfigMapName == "" && backup.Annotations != nil {
+		globalConfigMapName = backup.Annotations[velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation]
+	}
+	if installNamespace == "" {
+		installNamespace = backup.Namespace
 	}
 
 	if globalConfigMapName == "" {

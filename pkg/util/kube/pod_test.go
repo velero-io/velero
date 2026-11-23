@@ -39,7 +39,7 @@ import (
 
 	clientTesting "k8s.io/client-go/testing"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
 )
 
 func TestDescribeSchedule(t *testing.T) {
@@ -70,7 +70,8 @@ Annotations:  <none>
 Phase:  Enabled
 
 Uploader config:
-  Parallel files upload:  10
+  Parallel files upload:   10
+  Parallel blocks upload:  0
 
 Paused:  false
 

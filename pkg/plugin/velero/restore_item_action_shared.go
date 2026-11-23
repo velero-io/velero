@@ -21,7 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 // RestoreItemActionExecuteInput contains the input parameters for the ItemAction's Execute function.

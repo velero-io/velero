@@ -33,8 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/vmware-tanzu/velero/internal/storage"
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/internal/storage"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
 
 func TestStart(t *testing.T) {

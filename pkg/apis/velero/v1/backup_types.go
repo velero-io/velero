@@ -195,9 +195,13 @@ type BackupSpec struct {
 
 // UploaderConfigForBackup defines the configuration for the uploader when doing backup.
 type UploaderConfigForBackup struct {
-	// ParallelFilesUpload is the number of files parallel uploads to perform when using the uploader.
+	// ParallelFilesUpload is the number of files parallel uploads to perform when using the Velero fs uploader.
 	// +optional
 	ParallelFilesUpload int `json:"parallelFilesUpload,omitempty"`
+
+	// ParallelBlocksUpload is the number of blocks parallel uploads to perform when using Velero block uploader.
+	// +optional
+	ParallelBlocksUpload int `json:"parallelBlocksUpload,omitempty"`
 }
 
 // BackupHooks contains custom behaviors that should be executed at different phases of the backup.

@@ -23,7 +23,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 // LogHook is a logrus hook that counts the number of log

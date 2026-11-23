@@ -6,7 +6,7 @@ package mocks
 
 import (
 	mock "github.com/stretchr/testify/mock"
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
 )
 
 // NewObjectWriter creates a new instance of ObjectWriter. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

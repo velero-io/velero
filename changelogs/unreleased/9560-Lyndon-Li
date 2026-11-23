@@ -1,1 +1,0 @@
-Fix issue #9475, use node-selector instead of nodName for generic restore

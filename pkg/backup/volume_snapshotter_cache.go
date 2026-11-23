@@ -3,8 +3,8 @@ package backup
 import (
 	"sync"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	vsv1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/volumesnapshotter/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	vsv1 "github.com/velero-io/velero/pkg/plugin/velero/volumesnapshotter/v1"
 )
 
 type VolumeSnapshotterCache struct {

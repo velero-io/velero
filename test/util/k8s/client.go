@@ -21,7 +21,7 @@ import (
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/test/pkg/client"
+	"github.com/velero-io/velero/test/pkg/client"
 )
 
 // TestClient contains different API clients that are in use throughout

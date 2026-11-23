@@ -1,6 +1,6 @@
 ![100]
 
-[![Build Status][1]][2] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3811/badge)](https://bestpractices.coreinfrastructure.org/projects/3811)
+[![Build Status][1]][2] [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/3811/badge)](https://www.bestpractices.dev/projects/3811)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/velero-io/velero/badge)](https://scorecard.dev/viewer/?uri=github.com/velero-io/velero)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/velero-io/velero)](https://github.com/velero-io/velero/releases)
 [![GitHub stars](https://img.shields.io/github/stars/velero-io/velero)](https://github.com/velero-io/velero/stargazers)
@@ -24,6 +24,8 @@ Velero consists of:
 ## Documentation
 
 [The documentation][29] provides a getting started guide and information about building from source, architecture, extending Velero and more.
+
+For a high-level overview of Velero's components, goals, and design process, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Please use the version selector at the top of the site to ensure you are using the appropriate documentation for your version of Velero.
 
@@ -59,11 +61,11 @@ The following is a list of the supported Kubernetes versions for each Velero ver
 
 | Velero version | Expected Kubernetes version compatibility | Tested on Kubernetes version        |
 |----------------|-------------------------------------------|-------------------------------------|
+| 1.19           | 1.18-latest                               | 1.36.5 and 1.37.1                   |
 | 1.18           | 1.18-latest                               | 1.33.7, 1.34.1, and 1.35.0          |
 | 1.17           | 1.18-latest                               | 1.31.7, 1.32.3, 1.33.1, and 1.34.0  |
 | 1.16           | 1.18-latest                               | 1.31.4, 1.32.3, and 1.33.0          |
 | 1.15           | 1.18-latest                               | 1.28.8, 1.29.8, 1.30.4 and 1.31.1   |
-| 1.14           | 1.18-latest                               | 1.27.9, 1.28.9, and 1.29.4          |
 
 Velero supports IPv4, IPv6, and dual stack environments. Support for this was tested against Velero v1.8.
 

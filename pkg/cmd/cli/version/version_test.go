@@ -1,5 +1,5 @@
 /*
-Copyright 2020 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/buildinfo"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestPrintVersion(t *testing.T) {
@@ -56,6 +56,7 @@ func TestPrintVersion(t *testing.T) {
 		clientOnly          bool
 		serverStatusRequest *velerov1.ServerStatusRequest
 		getterError         error
+		clientVersion       string
 		want                string
 	}{
 		{
@@ -77,10 +78,25 @@ func TestPrintVersion(t *testing.T) {
 			getterError:         nil,
 			want:                clientVersion + "Server:\n\tVersion: v1.0.1\n",
 		},
+		{
+			name:                "older client warns to update the client",
+			serverStatusRequest: builder.ForServerStatusRequest("velero", "ssr-1", "0").ServerVersion("v1.1.0").Result(),
+			want:                clientVersion + "Server:\n\tVersion: v1.1.0\n# WARNING: client version v1.0.0 and server version v1.1.0 have different major or minor versions. Compatibility is not guaranteed. Please update client to match the server's major and minor version.\n",
+		},
+		{
+			name:                "newer client warns to update the server",
+			clientVersion:       "v1.1.0",
+			serverStatusRequest: builder.ForServerStatusRequest("velero", "ssr-1", "0").ServerVersion("v1.0.0").Result(),
+			want:                "Client:\n\tVersion: v1.1.0\n\tGit commit: somegitsha-dirty\nServer:\n\tVersion: v1.0.0\n# WARNING: client version v1.1.0 and server version v1.0.0 have different major or minor versions. Compatibility is not guaranteed. Please update server to match the client's major and minor version.\n",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			buildinfo.Version = "v1.0.0"
+			if tc.clientVersion != "" {
+				buildinfo.Version = tc.clientVersion
+			}
 			var (
 				kbClient           = velerotest.NewFakeControllerRuntimeClient(t)
 				serverStatusGetter = new(mockServerStatusGetter)

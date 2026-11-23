@@ -21,6 +21,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +32,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	udmrepomocks "github.com/vmware-tanzu/velero/pkg/repository/udmrepo/mocks"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	cbt "github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
-	cbtmocks "github.com/vmware-tanzu/velero/pkg/uploader/cbt/types/mocks"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
+	udmrepomocks "github.com/velero-io/velero/pkg/repository/udmrepo/mocks"
+	"github.com/velero-io/velero/pkg/uploader"
+	cbt "github.com/velero-io/velero/pkg/uploader/cbt/types"
+	cbtmocks "github.com/velero-io/velero/pkg/uploader/cbt/types/mocks"
 )
 
 type mockProgressUpdater struct {
@@ -537,6 +538,36 @@ func TestFlushZeroBlocks(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, make([]byte, 2048), data)
 	})
+
+	t.Run("fallback zeroes only the requested range of a non-zero file", func(t *testing.T) {
+		const (
+			size  = 4096
+			start = 1024
+			// not a multiple of the zero block size, so the last write is partial
+			length = 2500
+		)
+
+		f, err := os.CreateTemp(t.TempDir(), "zerotest-*")
+		require.NoError(t, err)
+		defer f.Close()
+
+		_, err = f.Write(bytes.Repeat([]byte{0xab}, size))
+		require.NoError(t, err)
+
+		log := logrus.New()
+		log.Out = io.Discard
+
+		// the ioctl fails on a regular file, so the range must be zeroed by the write fallback
+		require.NoError(t, flushZeroBlocks(f, start, length, make([]byte, 1024), f.Name(), log))
+
+		data, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		require.Len(t, data, size)
+
+		assert.Equal(t, bytes.Repeat([]byte{0xab}, start), data[:start], "data before the range is changed")
+		assert.Equal(t, make([]byte, length), data[start:start+length], "range is not zeroed")
+		assert.Equal(t, bytes.Repeat([]byte{0xab}, size-start-length), data[start+length:], "data after the range is changed")
+	})
 }
 
 type errReader struct {
@@ -744,4 +775,47 @@ func TestBlockUploaderRestore(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "dest dev(/dev/small) size is too small")
 	})
+}
+
+func TestBlockUploadConcurrency(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	for _, tc := range []struct {
+		name    string
+		config  map[string]string
+		want    int
+		invalid bool
+	}{
+		{name: "nil config", want: 2},
+		{name: "empty config", config: map[string]string{}, want: 2},
+		{name: "unrelated option", config: map[string]string{"ParallelFilesUpload": "9"}, want: 2},
+		{name: "zero", config: map[string]string{"ParallelBlocksUpload": "0"}, want: 2},
+		{name: "negative", config: map[string]string{"ParallelBlocksUpload": "-1"}, want: 2},
+		{name: "explicit one", config: map[string]string{"ParallelBlocksUpload": "1"}, want: 1},
+		{name: "explicit above GOMAXPROCS", config: map[string]string{"ParallelBlocksUpload": "9"}, want: 9},
+		{name: "invalid", config: map[string]string{"ParallelBlocksUpload": "bad"}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := udmrepomocks.NewBackupRepo(t)
+			rep.On("Time").Return(time.Now()).Once()
+			bitmap := cbtmocks.NewIterator(t)
+			bitmap.On("Errors").Return(nil).Once()
+			stop := errors.New("stop before writing data")
+			if !tc.invalid {
+				rep.On("NewObjectWriter", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					opt := args.Get(1).(udmrepo.ObjectWriteOptions)
+					assert.Equal(t, tc.want, opt.AsyncWrites)
+					assert.Equal(t, udmrepo.ObjectDataAccessModeBlock, opt.AccessMode)
+				}).Return(nil, stop).Once()
+			}
+			up := NewUploader(t.Context(), rep, nil, logrus.New())
+			_, _, err := up.Backup(sourceInfo{}, "", bitmap, tc.config)
+			if tc.invalid {
+				require.ErrorContains(t, err, "failed to get uploader config")
+				rep.AssertNotCalled(t, "NewObjectWriter", mock.Anything, mock.Anything)
+			} else {
+				require.ErrorIs(t, err, stop)
+			}
+		})
+	}
 }

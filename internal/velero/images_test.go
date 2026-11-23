@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/buildinfo"
 )
 
 func TestImageTag(t *testing.T) {

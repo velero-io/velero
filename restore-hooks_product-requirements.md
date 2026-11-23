@@ -2,7 +2,7 @@ Velero Restore Hooks - PRD (Product Requirements Document)
 
 MVP Feature Set
 
-Relates to:  [https://github.com/vmware-tanzu/velero/issues/2116](https://github.com/vmware-tanzu/velero/issues/2116)
+Relates to:  [https://github.com/velero-io/velero/issues/2116](https://github.com/velero-io/velero/issues/2116)
 
 
 # **Change tracking**
@@ -24,8 +24,8 @@ _This is a live document, you can reach me on the following channels for more in
 
 
 *   [https://app.zenhub.com/workspaces/velero-5c59c15e39d47b774b5864e3/issues/vmware-tanzu/velero/2465](https://app.zenhub.com/workspaces/velero-5c59c15e39d47b774b5864e3/issues/vmware-tanzu/velero/2465)
-    *   [https://github.com/vmware-tanzu/velero/pull/2465/files?short_path=140e0c6#diff-140e0c6b370f250ee97f6ecafc8dbb7a](https://github.com/vmware-tanzu/velero/pull/2465/files?short_path=140e0c6#diff-140e0c6b370f250ee97f6ecafc8dbb7a)
-*   [https://github.com/vmware-tanzu/velero/issues/1150](https://github.com/vmware-tanzu/velero/issues/1150)
+    *   [https://github.com/velero-io/velero/pull/2465/files?short_path=140e0c6#diff-140e0c6b370f250ee97f6ecafc8dbb7a](https://github.com/velero-io/velero/pull/2465/files?short_path=140e0c6#diff-140e0c6b370f250ee97f6ecafc8dbb7a)
+*   [https://github.com/velero-io/velero/issues/1150](https://github.com/velero-io/velero/issues/1150)
 
 Background
 
@@ -79,7 +79,7 @@ MVP Use Cases
 
 The following use cases must be included as part of the Velero restore hooks MVP (minimum viable product). 
 
-**Note: **Processing of concurrent vs sequential workloads is slated later in the Velero roadmap (see [https://github.com/vmware-tanzu/velero/pull/2548/files](https://github.com/vmware-tanzu/velero/pull/2548/files)). The MVP for this feature set will align with restore of single workloads vs concurrent workload restores. A second epic will be created to address the concurrent restore operations and will be added to the backlog for priority visibility. 
+**Note: **Processing of concurrent vs sequential workloads is slated later in the Velero roadmap (see [https://github.com/velero-io/velero/pull/2548/files](https://github.com/velero-io/velero/pull/2548/files)). The MVP for this feature set will align with restore of single workloads vs concurrent workload restores. A second epic will be created to address the concurrent restore operations and will be added to the backlog for priority visibility. 
 
 **Note: **Please refer to the Requirements section of this document for more details on what items are P0 (must have in the MVP), P1 (should not ship without for the MVP), P2 (nice to haves).
 

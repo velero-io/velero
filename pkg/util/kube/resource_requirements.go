@@ -21,7 +21,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/vmware-tanzu/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/constant"
 )
 
 // ParseCPUAndMemoryResources is a helper function that parses CPU and memory requests and limits,

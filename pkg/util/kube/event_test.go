@@ -30,7 +30,7 @@ import (
 
 	corev1api "k8s.io/api/core/v1"
 
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 func TestEvent(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/boolptr"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -33,16 +33,16 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	veleroimage "github.com/vmware-tanzu/velero/internal/velero"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/label"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/podvolume"
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
-	veleroutil "github.com/vmware-tanzu/velero/pkg/util/velero"
+	veleroimage "github.com/velero-io/velero/internal/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/podvolume"
+	"github.com/velero-io/velero/pkg/restorehelper"
+	"github.com/velero-io/velero/pkg/util/kube"
+	veleroutil "github.com/velero-io/velero/pkg/util/velero"
 )
 
 const (

@@ -23,7 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
 
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"

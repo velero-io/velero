@@ -8,7 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	common "github.com/vmware-tanzu/velero/test/util/common"
+	common "github.com/velero-io/velero/test/util/common"
 )
 
 func GetWorkerNodes(ctx context.Context, workerOS string) ([]string, error) {

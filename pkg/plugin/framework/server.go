@@ -24,11 +24,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/server/config"
-	biav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/backupitemaction/v2"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/framework/itemblockaction/v1"
-	riav2 "github.com/vmware-tanzu/velero/pkg/plugin/framework/restoreitemaction/v2"
+	"github.com/velero-io/velero/pkg/cmd/server/config"
+	biav2 "github.com/velero-io/velero/pkg/plugin/framework/backupitemaction/v2"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/framework/itemblockaction/v1"
+	riav2 "github.com/velero-io/velero/pkg/plugin/framework/restoreitemaction/v2"
 )
 
 // Server serves registered plugin implementations.

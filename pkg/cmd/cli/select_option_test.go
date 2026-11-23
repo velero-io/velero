@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
 )
 
 func TestCompleteOfSelectOption(t *testing.T) {

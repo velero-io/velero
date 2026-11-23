@@ -31,13 +31,13 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	v1crds "github.com/vmware-tanzu/velero/config/crd/v1"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	persistencemocks "github.com/vmware-tanzu/velero/pkg/persistence/mocks"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	pluginmocks "github.com/vmware-tanzu/velero/pkg/plugin/mocks"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	v1crds "github.com/velero-io/velero/config/crd/v1"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	persistencemocks "github.com/velero-io/velero/pkg/persistence/mocks"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	pluginmocks "github.com/velero-io/velero/pkg/plugin/mocks"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 // Expectations are declared once and reused by both the behavior tests and the coverage

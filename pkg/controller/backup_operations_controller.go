@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	v2 "github.com/vmware-tanzu/velero/pkg/plugin/velero/backupitemaction/v2"
+	v2 "github.com/velero-io/velero/pkg/plugin/velero/backupitemaction/v2"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -34,15 +34,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/constant"
-	"github.com/vmware-tanzu/velero/pkg/itemoperation"
-	"github.com/vmware-tanzu/velero/pkg/itemoperationmap"
-	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/persistence"
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
-	"github.com/vmware-tanzu/velero/pkg/util/encode"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/constant"
+	"github.com/velero-io/velero/pkg/itemoperation"
+	"github.com/velero-io/velero/pkg/itemoperationmap"
+	"github.com/velero-io/velero/pkg/metrics"
+	"github.com/velero-io/velero/pkg/persistence"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
+	"github.com/velero-io/velero/pkg/util/encode"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 const (
@@ -229,7 +229,7 @@ func (c *backupOperationsReconciler) updateBackupAndOperationsJSON(
 
 	if len(operations.ErrsSinceUpdate) > 0 {
 		c.metrics.RegisterBackupItemsErrorsGauge(backupScheduleName, backup.Status.Errors)
-		// FIXME: download/upload results once https://github.com/vmware-tanzu/velero/pull/5576 is merged
+		// FIXME: download/upload results once https://github.com/velero-io/velero/pull/5576 is merged
 	}
 	removeIfComplete := true
 	defer func() {

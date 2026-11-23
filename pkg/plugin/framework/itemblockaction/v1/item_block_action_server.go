@@ -24,12 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	proto "github.com/vmware-tanzu/velero/pkg/plugin/generated"
-	protoibav1 "github.com/vmware-tanzu/velero/pkg/plugin/generated/itemblockaction/v1"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	ibav1 "github.com/vmware-tanzu/velero/pkg/plugin/velero/itemblockaction/v1"
+	api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	proto "github.com/velero-io/velero/pkg/plugin/generated"
+	protoibav1 "github.com/velero-io/velero/pkg/plugin/generated/itemblockaction/v1"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	ibav1 "github.com/velero-io/velero/pkg/plugin/velero/itemblockaction/v1"
 )
 
 // ItemBlockActionGRPCServer implements the proto-generated ItemBlockAction interface, and accepts

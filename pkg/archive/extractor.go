@@ -26,7 +26,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
+	"github.com/velero-io/velero/pkg/util/filesystem"
 )
 
 // Extractor unzips/extracts a backup tarball to a local
@@ -84,11 +84,20 @@ func (e *Extractor) writeFile(target string, tarRdr *tar.Reader) error {
 // sanitizeArchivePath sanitizes archive file path from "G305: Zip Slip vulnerability"
 func sanitizeArchivePath(destDir, sourcePath string) (targetPath string, err error) {
 	targetPath = filepath.Join(destDir, sourcePath)
-	if strings.HasPrefix(targetPath, filepath.Clean(destDir)) {
-		return targetPath, nil
+
+	// filepath.Rel reports targetPath relative to destDir; a result of ".." or one that
+	// starts with "../" means the joined path landed outside destDir. A plain
+	// strings.HasPrefix check has no separator boundary, so a sibling directory whose
+	// name begins with destDir's (e.g. "<destDir>-evil") would wrongly be accepted.
+	rel, err := filepath.Rel(destDir, targetPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid archive path %q: %w", sourcePath, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid archive path %q: escapes target directory", sourcePath)
 	}
 
-	return "", fmt.Errorf("invalid archive path %q: escapes target directory", sourcePath)
+	return targetPath, nil
 }
 
 func (e *Extractor) readBackup(tarRdr *tar.Reader) (string, error) {

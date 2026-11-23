@@ -18,6 +18,7 @@ package kopia
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,9 +37,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	repomocks "github.com/vmware-tanzu/velero/pkg/repository/mocks"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
-	uploadermocks "github.com/vmware-tanzu/velero/pkg/uploader/mocks"
+	repomocks "github.com/velero-io/velero/pkg/repository/mocks"
+	"github.com/velero-io/velero/pkg/uploader"
+	uploadermocks "github.com/velero-io/velero/pkg/uploader/mocks"
 )
 
 type snapshotMockes struct {
@@ -206,6 +207,98 @@ func TestSnapshotSource(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 			}
+		})
+	}
+}
+
+func TestSnapshotSourceIncomplete(t *testing.T) {
+	// Restore the package-level hooks after exercising the mocked repository.
+	originalSave, originalLoad := saveSnapshotFunc, loadSnapshotFunc
+	originalSetPolicy, originalTree := setPolicyFunc, treeForSourceFunc
+	originalRetention := applyRetentionPolicyFunc
+	t.Cleanup(func() {
+		saveSnapshotFunc, loadSnapshotFunc = originalSave, originalLoad
+		setPolicyFunc, treeForSourceFunc = originalSetPolicy, originalTree
+		applyRetentionPolicyFunc = originalRetention
+	})
+
+	rootDir, err := getLocalFSEntry(t.TempDir())
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name          string
+		reason        string
+		failedEntries []*fs.EntryWithError
+		fallback      bool
+		expectedError string
+	}{
+		{
+			name:          "canceled without entry errors",
+			reason:        "canceled",
+			expectedError: "kopia upload incomplete: canceled",
+		},
+		{
+			name:   "canceled with entry errors preserves cause and fallback",
+			reason: "canceled",
+			failedEntries: []*fs.EntryWithError{
+				{EntryPath: "data/file.txt", Error: "no such file or directory"},
+			},
+			fallback:      true,
+			expectedError: "Error when processing data/file.txt: no such file or directory",
+		},
+		{
+			name:   "canceled with only ignored unknown type errors",
+			reason: "canceled",
+			failedEntries: []*fs.EntryWithError{
+				{EntryPath: "data/socket", Error: fs.ErrUnknown.Error()},
+			},
+			expectedError: "kopia upload incomplete: canceled",
+		},
+		{
+			name:          "other incomplete reason",
+			reason:        "limit reached",
+			expectedError: "kopia upload incomplete: limit reached",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := injectSnapshotFuncs()
+			ctx := t.Context()
+			sourceInfo := snapshot.SourceInfo{UserName: "user", Host: "host", Path: "/data"}
+			policyTree := policy.BuildTree(nil, getDefaultPolicy())
+			incomplete := &snapshot.Manifest{
+				ID:               "unsaved-snapshot",
+				IncompleteReason: tc.reason,
+				Stats:            snapshot.Stats{TotalFileSize: 1024},
+				RootEntry: &snapshot.DirEntry{
+					DirSummary: &fs.DirectorySummary{FailedEntries: tc.failedEntries},
+				},
+			}
+			if tc.fallback {
+				s.snapshotMock.On("LoadSnapshot", mock.Anything, mock.Anything, mock.Anything).
+					Return(nil, errors.New("parent snapshot unavailable")).Once()
+			}
+			s.policyMock.On("SetPolicy", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			s.policyMock.On("TreeForSource", mock.Anything, mock.Anything, mock.Anything).Return(policyTree, nil).Once()
+			// Policy setup flushes once; an incomplete snapshot must not be flushed again.
+			s.repoWriterMock.On("Flush", mock.Anything).Return(nil).Once()
+			s.uploderMock.On("Upload", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return(incomplete, nil).Once()
+
+			id, size, fallback, err := SnapshotSource(ctx, s.repoWriterMock, s.uploderMock,
+				sourceInfo, rootDir, !tc.fallback, "parent", nil, nil,
+				&fakeProgressUpdater{}, logrus.New(), "test")
+
+			require.EqualError(t, err, tc.expectedError)
+			assert.Empty(t, id)
+			assert.Zero(t, size)
+			assert.Equal(t, tc.fallback, fallback)
+			assert.Empty(t, incomplete.Pins)
+			s.snapshotMock.AssertNotCalled(t, "SaveSnapshot", mock.Anything, mock.Anything, mock.Anything)
+			s.policyMock.AssertNotCalled(t, "ApplyRetentionPolicy", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+			s.snapshotMock.AssertExpectations(t)
+			s.policyMock.AssertExpectations(t)
+			s.repoWriterMock.AssertExpectations(t)
+			s.uploderMock.AssertExpectations(t)
 		})
 	}
 }
@@ -841,6 +934,104 @@ func TestRestore(t *testing.T) {
 			// Check the number of files restored
 			assert.Equal(t, tc.expectedCount, fileCount)
 			assert.False(t, fallback)
+		})
+	}
+}
+
+func TestFileUploadConcurrency(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	originalSetPolicy := setPolicyFunc
+	t.Cleanup(func() { setPolicyFunc = originalSetPolicy })
+	for _, tc := range []struct {
+		name    string
+		config  map[string]string
+		want    int
+		invalid bool
+	}{
+		{name: "nil config", want: 2},
+		{name: "empty config", config: map[string]string{}, want: 2},
+		{name: "unrelated option", config: map[string]string{"ParallelBlocksUpload": "9"}, want: 2},
+		{name: "zero", config: map[string]string{"ParallelFilesUpload": "0"}, want: 2},
+		{name: "negative", config: map[string]string{"ParallelFilesUpload": "-1"}, want: 2},
+		{name: "explicit one", config: map[string]string{"ParallelFilesUpload": "1"}, want: 1},
+		{name: "explicit above GOMAXPROCS", config: map[string]string{"ParallelFilesUpload": "9"}, want: 9},
+		{name: "invalid", config: map[string]string{"ParallelFilesUpload": "bad"}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			stop := errors.New("stop before persisting policy")
+			setPolicyFunc = func(ctx context.Context, rep repo.RepositoryWriter, source snapshot.SourceInfo, pol *policy.Policy) error {
+				called = true
+				assert.Equal(t, tc.want, pol.UploadPolicy.MaxParallelFileReads.OrDefault(0))
+				return stop
+			}
+			_, err := setupPolicy(t.Context(), nil, snapshot.SourceInfo{}, tc.config)
+			if tc.invalid {
+				require.ErrorContains(t, err, "failed to get uploader config")
+				require.False(t, called)
+			} else {
+				require.ErrorIs(t, err, stop)
+				require.True(t, called)
+			}
+		})
+	}
+}
+
+func TestFileRestoreConcurrency(t *testing.T) {
+	// Deliberately differ from NumCPU so the previous default fails this test.
+	defaultParallel := 2
+	if runtime.NumCPU() == defaultParallel {
+		defaultParallel = 1
+	}
+	previous := runtime.GOMAXPROCS(defaultParallel)
+	originalFilesystemEntry, originalRestoreEntry := filesystemEntryFunc, restoreEntryFunc
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(previous)
+		filesystemEntryFunc, restoreEntryFunc = originalFilesystemEntry, originalRestoreEntry
+	})
+
+	for _, tc := range []struct {
+		name    string
+		config  map[string]string
+		want    int
+		invalid bool
+	}{
+		{name: "nil config", want: defaultParallel},
+		{name: "empty config", config: map[string]string{}, want: defaultParallel},
+		{name: "unrelated option", config: map[string]string{"WriteSparseFiles": "true"}, want: defaultParallel},
+		{name: "zero", config: map[string]string{"ParallelFilesDownload": "0"}, want: defaultParallel},
+		{name: "negative", config: map[string]string{"ParallelFilesDownload": "-1"}, want: defaultParallel},
+		{name: "explicit one", config: map[string]string{"ParallelFilesDownload": "1"}, want: 1},
+		{name: "explicit above GOMAXPROCS", config: map[string]string{"ParallelFilesDownload": "9"}, want: 9},
+		{name: "invalid", config: map[string]string{"ParallelFilesDownload": "bad"}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := &repomocks.RepositoryWriter{}
+			rep.On("GetManifest", mock.Anything, mock.Anything, mock.Anything).Return(&manifest.EntryMetadata{
+				ID:     "test",
+				Labels: map[string]string{manifest.TypeLabelKey: snapshot.ManifestType},
+			}, nil).Once()
+			t.Cleanup(func() { rep.AssertExpectations(t) })
+			filesystemEntryFunc = func(ctx context.Context, rep repo.Repository, rootID string, consistentAttributes bool) (fs.Entry, error) {
+				return virtualfs.NewStaticDirectory("root", nil), nil
+			}
+			called := false
+			stop := errors.New("stop before restoring data")
+			restoreEntryFunc = func(ctx context.Context, rep repo.Repository, output restore.Output, rootEntry fs.Entry, options restore.Options) (restore.Stats, error) {
+				called = true
+				assert.Equal(t, tc.want, options.Parallel)
+				return restore.Stats{}, stop
+			}
+			_, _, _, err := Restore(t.Context(), rep, new(Progress), "test", t.TempDir(), false,
+				uploader.PersistentVolumeFilesystem, tc.config, logrus.New(), nil)
+			if tc.invalid {
+				require.ErrorContains(t, err, "failed to get parallel restore uploader config")
+				require.False(t, called)
+			} else {
+				require.ErrorIs(t, err, stop)
+				require.True(t, called)
+			}
 		})
 	}
 }

@@ -27,10 +27,10 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	"github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/e2e/test"
+	"github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 const FileName = "test-data.txt"
@@ -58,6 +58,10 @@ var ResourcePoliciesTest func() = TestFunc(&ResourcePoliciesCase{})
 func (r *ResourcePoliciesCase) Init() error {
 	// generate random number as UUIDgen and set one default timeout duration
 	r.TestCase.Init()
+
+	if !SecondStorageClassInstalled() {
+		Skip("this case maps between two StorageClasses; it needs --storage-class-file-2")
+	}
 
 	// generate variable names based on CaseBaseName + UUIDgen
 	r.CaseBaseName = "resource-policies-" + r.UUIDgen

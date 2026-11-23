@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/vmware-tanzu/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util"
 )
 
 // CBTInfo define the info for CBT

@@ -27,7 +27,7 @@ import (
 	"github.com/kopia/kopia/repo/splitter"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
+	"github.com/velero-io/velero/pkg/repository/udmrepo"
 )
 
 func TestSetupNewRepositoryOptions(t *testing.T) {
@@ -113,7 +113,7 @@ func TestSetupConnectOptions(t *testing.T) {
 		MetadataCacheSizeBytes:      800 << 20,
 		ContentCacheSizeLimitBytes:  4000 << 20,
 		MetadataCacheSizeLimitBytes: 1000 << 20,
-		MaxListCacheDuration:        content.DurationSeconds(time.Duration(30) * time.Second),
+		MaxListCacheDuration:        content.DurationSeconds(maxCacheDurationSecond),
 	}
 
 	testCases := []struct {
@@ -193,6 +193,7 @@ func TestSetupConnectOptions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ret := SetupConnectOptions(t.Context(), tc.repoOptions)
 			assert.Equal(t, tc.expected, ret)
+			assert.Equal(t, time.Duration(maxCacheDurationSecond)*time.Second, ret.CachingOptions.MaxListCacheDuration.DurationOrDefault(0))
 		})
 	}
 }

@@ -42,15 +42,15 @@ import (
 	"k8s.io/utils/ptr"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	datamovercli "github.com/vmware-tanzu/velero/pkg/cmd/cli/datamover"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
-	"github.com/vmware-tanzu/velero/pkg/util"
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/csi"
-	"github.com/vmware-tanzu/velero/pkg/util/datamover"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
+	datamovercli "github.com/velero-io/velero/pkg/cmd/cli/datamover"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	velerotypes "github.com/velero-io/velero/pkg/types"
+	"github.com/velero-io/velero/pkg/util"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/csi"
+	"github.com/velero-io/velero/pkg/util/datamover"
+	"github.com/velero-io/velero/pkg/util/kube"
 )
 
 type reactor struct {
@@ -1222,7 +1222,7 @@ func TestExpose(t *testing.T) {
 
 				assert.Equal(t, anno, backupVSC.Annotations)
 				assert.Equal(t, vscObj.Labels, backupVSC.Labels)
-				assert.Equal(t, vscObj.Spec.DeletionPolicy, backupVSC.Spec.DeletionPolicy)
+				assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, backupVSC.Spec.DeletionPolicy)
 				assert.Equal(t, vscObj.Spec.Driver, backupVSC.Spec.Driver)
 				assert.Equal(t, *vscObj.Spec.VolumeSnapshotClassName, *backupVSC.Spec.VolumeSnapshotClassName)
 
@@ -2575,17 +2575,16 @@ func TestCreateBackupVSCDeletionPolicy(t *testing.T) {
 		expectedPolicy snapshotv1api.DeletionPolicy
 	}{
 		{
-			name:           "Delete policy is inherited",
+			name:           "Delete source policy uses Delete",
 			sourcePolicy:   snapshotv1api.VolumeSnapshotContentDelete,
 			expectedPolicy: snapshotv1api.VolumeSnapshotContentDelete,
 		},
 		{
-			// The backup VSC points at the same snapshot handle as the source
-			// VSC, so forcing Delete here would destroy a snapshot the user
-			// asked to keep.
-			name:           "Retain policy is inherited",
+			// Data mover cleanup must delete the underlying snapshot even when
+			// the source SnapshotClass uses Retain.
+			name:           "Retain source policy is overridden with Delete",
 			sourcePolicy:   snapshotv1api.VolumeSnapshotContentRetain,
-			expectedPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+			expectedPolicy: snapshotv1api.VolumeSnapshotContentDelete,
 		},
 	}
 

@@ -17,16 +17,19 @@ limitations under the License.
 package podvolume
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/podvolume/configs"
-	repotypes "github.com/vmware-tanzu/velero/pkg/repository/types"
-	"github.com/vmware-tanzu/velero/pkg/uploader"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/podvolume/configs"
+	repotypes "github.com/velero-io/velero/pkg/repository/types"
+	"github.com/velero-io/velero/pkg/uploader"
 )
 
 const (
@@ -87,8 +90,8 @@ func getVolumeBackupInfoForPod(podVolumeBackups []*velerov1api.PodVolumeBackup, 
 		}
 
 		// If the volume came from a projected or DownwardAPI source, skip its restore.
-		// This allows backups affected by https://github.com/vmware-tanzu/velero/issues/3863
-		// or https://github.com/vmware-tanzu/velero/issues/4053 to be restored successfully.
+		// This allows backups affected by https://github.com/velero-io/velero/issues/3863
+		// or https://github.com/velero-io/velero/issues/4053 to be restored successfully.
 		if volumeHasNonRestorableSource(pvb.Spec.Volume, pod.Spec.Volumes) {
 			continue
 		}
@@ -154,7 +157,7 @@ func GetRealSource(pvb *velerov1api.PodVolumeBackup) string {
 	}
 
 	if pvcName != "" {
-		return fmt.Sprintf("%s/%s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvcName)
+		return fmt.Sprintf("%s/%s", pvb.Spec.Pod.Namespace, pvcName)
 	} else {
 		return fmt.Sprintf("%s/%s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Spec.Volume)
 	}
@@ -214,4 +217,30 @@ func getPodSnapshotAnnotations(obj metav1.Object) map[string]string {
 	}
 
 	return res
+}
+
+// ValidateUploaders checks that every PVB uses a supported uploader.
+func ValidateUploaders(pvbs []*velerov1api.PodVolumeBackup) error {
+	for _, pvb := range pvbs {
+		if _, err := uploader.ValidateUploaderType(pvb.Spec.UploaderType); err != nil {
+			return fmt.Errorf("pod volume backup %q: %w", pvb.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// ValidateBackupUploadersIfAny checks the backup's in-cluster PVBs before processing.
+func ValidateBackupUploadersIfAny(ctx context.Context, kbClient client.Client, backup *velerov1api.Backup) error {
+	var pvbList velerov1api.PodVolumeBackupList
+	if err := kbClient.List(ctx, &pvbList, client.InNamespace(backup.Namespace), client.MatchingLabels{velerov1api.BackupNameLabel: label.GetValidName(backup.Name)}); err != nil {
+		return fmt.Errorf("error listing pod volume backups for backup %q: %w", backup.Name, err)
+	}
+
+	pvbs := make([]*velerov1api.PodVolumeBackup, 0, len(pvbList.Items))
+	for i := range pvbList.Items {
+		pvbs = append(pvbs, &pvbList.Items[i])
+	}
+
+	return ValidateUploaders(pvbs)
 }

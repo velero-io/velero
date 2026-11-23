@@ -19,9 +19,9 @@ package clientmgmt
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt/process"
-	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	"github.com/velero-io/velero/pkg/plugin/clientmgmt/process"
+	"github.com/velero-io/velero/pkg/plugin/framework/common"
+	"github.com/velero-io/velero/pkg/plugin/velero"
 )
 
 // restartableDeleteItemAction is a delete item action for a given implementation (such as "pod"). It is associated with

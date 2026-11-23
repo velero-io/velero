@@ -31,7 +31,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/util/dotenv"
+	"github.com/velero-io/velero/pkg/util/dotenv"
 )
 
 const (

@@ -19,18 +19,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	. "github.com/vmware-tanzu/velero/test/util/kibishii"
-	. "github.com/vmware-tanzu/velero/test/util/providers"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	. "github.com/velero-io/velero/test"
+	"github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/kibishii"
+	. "github.com/velero-io/velero/test/util/providers"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 var upgradeNamespace string
@@ -38,16 +38,47 @@ var veleroCfg VeleroConfig
 
 func BackupUpgradeRestoreWithSnapshots() {
 	veleroCfg = VeleroCfg
-	for _, upgradeFromVelero := range GetVersionList(veleroCfg.UpgradeFromVeleroCLI, veleroCfg.UpgradeFromVeleroVersion) {
+	versions, err := getUpgradeVersionList(veleroCfg, true)
+	Expect(err).To(Succeed())
+	for _, upgradeFromVelero := range versions {
 		BackupUpgradeRestoreTest(true, upgradeFromVelero)
 	}
 }
 
 func BackupUpgradeRestoreWithFSBackup() {
 	veleroCfg = VeleroCfg
-	for _, upgradeFromVelero := range GetVersionList(veleroCfg.UpgradeFromVeleroCLI, veleroCfg.UpgradeFromVeleroVersion) {
+	versions, err := getUpgradeVersionList(veleroCfg, false)
+	Expect(err).To(Succeed())
+	for _, upgradeFromVelero := range versions {
 		BackupUpgradeRestoreTest(false, upgradeFromVelero)
 	}
+}
+
+func getUpgradeVersionList(cfg VeleroConfig, useVolumeSnapshots bool) ([]VeleroCLI2Version, error) {
+	versions := GetVersionList(cfg.UpgradeFromVeleroCLI, cfg.UpgradeFromVeleroVersion)
+	if cfg.WorkerOS != common.WorkerOSWindows || cfg.UpgradeFromVeleroVersion == "" {
+		return versions, nil
+	}
+
+	// Windows CSI snapshot data movement requires v1.16; filesystem backup requires v1.17.
+	minimumVersion := "v1.16"
+	if !useVolumeSnapshots {
+		minimumVersion = "v1.17"
+	}
+
+	var supportedVersions []VeleroCLI2Version
+	for _, version := range versions {
+		supported, err := VersionNoOlderThan(version.VeleroVersion, minimumVersion)
+		if err != nil {
+			return nil, err
+		}
+		if !supported {
+			fmt.Printf("Excluding Windows upgrade from %s: this backup method requires Velero %s or later\n", version.VeleroVersion, minimumVersion)
+			continue
+		}
+		supportedVersions = append(supportedVersions, version)
+	}
+	return supportedVersions, nil
 }
 
 func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroCLI2Version) {
@@ -67,8 +98,8 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 		if (len(veleroCfg.UpgradeFromVeleroVersion)) == 0 {
 			Skip("An original velero version is required to run upgrade test, please run test with upgrade-from-velero-version=<version>")
 		}
-		if useVolumeSnapshots && veleroCfg.CloudProvider == Kind {
-			Skip(fmt.Sprintf("Volume snapshots not supported on %s", Kind))
+		if useVolumeSnapshots && KibishiiVolumesAreHostPath(veleroCfg) {
+			Skip("Kibishii's PVs on kind are hostPath without EnableCSI, so there is nothing to snapshot")
 		}
 		if veleroCfg.VeleroCLI == "" {
 			Skip("VeleroCLI should be provide")
@@ -224,7 +255,7 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 					fmt.Sprintf("failed to delete namespace %s", upgradeNamespace))
 			})
 
-			if useVolumeSnapshots && veleroCfg.CloudProvider == Azure && strings.EqualFold(veleroCfg.Features, FeatureCSI) {
+			if useVolumeSnapshots && veleroCfg.CloudProvider == Azure && FeatureEnabled(veleroCfg.Features, FeatureCSI) {
 				// Upgrade test is not running daily since no CSI plugin v1.0 released, because builds before
 				//   v1.0 have issues to fail upgrade case.
 				By("Sleep 5 minutes to avoid snapshot recreated by unknown reason ", func() {
@@ -232,8 +263,8 @@ func BackupUpgradeRestoreTest(useVolumeSnapshots bool, veleroCLI2Version VeleroC
 				})
 			}
 			// the snapshots of AWS may be still in pending status when do the restore, wait for a while
-			// to avoid this https://github.com/vmware-tanzu/velero/issues/1799
-			// TODO remove this after https://github.com/vmware-tanzu/velero/issues/3533 is fixed
+			// to avoid this https://github.com/velero-io/velero/issues/1799
+			// TODO remove this after https://github.com/velero-io/velero/issues/3533 is fixed
 			if tmpCfg.CloudProvider == AWS && useVolumeSnapshots {
 				fmt.Println("Waiting 5 minutes to make sure the snapshots are ready...")
 				time.Sleep(5 * time.Minute)

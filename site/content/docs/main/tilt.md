@@ -19,8 +19,8 @@ files in this directory are gitignored so you may configure your setup according
 
 ## Prerequisites
 1. [Docker](https://docs.docker.com/install/) v19.03 or newer
-1. A Kubernetes cluster v1.16 or greater (does not have to be Kind)
-1. [Tilt](https://docs.tilt.dev/install.html) v0.12.0 or newer
+1. A Kubernetes cluster (does not have to be Kind)
+1. [Tilt](https://docs.tilt.dev/install.html) v0.30.0 or newer, for `docker_build(platform=...)`
 1. Clone the [Velero project](https://github.com/velero-io/velero) repository
    locally
 1. Access to an S3 object storage
@@ -54,7 +54,7 @@ Here is an example:
     "providers": {
         "aws": "../velero-plugin-for-aws",
         "gcp": "../velero-plugin-for-gcp",
-        "azure": "../velero-plugin-for-microsoft-azure",
+        "azure": "../velero-plugin-for-microsoft-azure"
     },
     "allowed_contexts": [
         "development"
@@ -69,10 +69,12 @@ Here is an example:
 
 #### tilt-settings.json fields
 **default_registry** (String, default=""): The image registry to use if you need to push images. See the [Tilt
-*documentation](https://docs.tilt.dev/api.html#api.default_registry) for more details.
+*documentation](https://docs.tilt.dev/api.html#api.default_registry) for more details. Leave it empty for a local cluster
+(kind, minikube, Docker Desktop), where Tilt loads the image into the cluster directly and nothing is pushed.
 
-**provider_repos** (Array[]String, default=[]): A list of paths to all the provider plugins you want to make changes to. Each provider must have a
-`tilt-provider.json` file describing how to build the provider.
+**cluster_goarch** (String, default=detected): The node architecture of the cluster, `amd64` or `arm64`. It is detected from
+`kubectl get nodes`, falling back to the local architecture, which is correct for a cluster that shares your machine. Set it
+only to override.
 
 **enable_providers** (Array[]String, default=[]): A list of the provider plugins to enable. See [provider plugins](provider-plugins)
 for more details. Note: when not making changes to a plugin, it is not necessary to load them into

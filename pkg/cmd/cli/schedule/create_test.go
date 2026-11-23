@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	factorymocks "github.com/vmware-tanzu/velero/pkg/client/mocks"
-	cmdtest "github.com/vmware-tanzu/velero/pkg/cmd/test"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
+	cmdtest "github.com/velero-io/velero/pkg/cmd/test"
+	velerotest "github.com/velero-io/velero/pkg/test"
 )
 
 // TestCreateScheduleAppliesAnnotations verifies that --annotations reaches the created
@@ -57,4 +57,35 @@ func TestCreateScheduleAppliesAnnotations(t *testing.T) {
 
 	assert.Equal(t, map[string]string{"env": "prod"}, created.Labels)
 	assert.Equal(t, map[string]string{"owner": "team-a", "purpose": "nightly"}, created.Annotations)
+}
+
+func TestCreateScheduleUploadConcurrency(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		files, blocks int
+	}{
+		{name: "files", args: []string{"--parallel-files-upload=3"}, files: 3},
+		{name: "blocks", args: []string{"--parallel-blocks-upload=7"}, blocks: 7},
+		{name: "both", args: []string{"--parallel-files-upload=3", "--parallel-blocks-upload=7"}, files: 3, blocks: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			crClient := velerotest.NewFakeControllerRuntimeClient(t)
+			f := &factorymocks.Factory{}
+			f.On("Namespace").Return(cmdtest.VeleroNameSpace)
+			f.On("KubebuilderClient").Return(crClient, nil)
+			o := NewCreateOptions()
+			cmd := &cobra.Command{}
+			o.BindFlags(cmd.Flags())
+			require.NoError(t, cmd.Flags().Parse(tc.args))
+			o.Schedule = "@daily"
+			o.BackupOptions.Name = "test-concurrency"
+			require.NoError(t, o.Run(cmd, f))
+			created := new(velerov1api.Schedule)
+			require.NoError(t, crClient.Get(t.Context(), ctrlclient.ObjectKey{Namespace: cmdtest.VeleroNameSpace, Name: "test-concurrency"}, created))
+			require.NotNil(t, created.Spec.Template.UploaderConfig)
+			assert.Equal(t, tc.files, created.Spec.Template.UploaderConfig.ParallelFilesUpload)
+			assert.Equal(t, tc.blocks, created.Spec.Template.UploaderConfig.ParallelBlocksUpload)
+		})
+	}
 }

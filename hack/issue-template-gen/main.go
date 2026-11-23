@@ -24,7 +24,7 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/bug"
+	"github.com/velero-io/velero/pkg/cmd/cli/bug"
 )
 
 func main() {

@@ -23,13 +23,13 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/internal/resourcepolicies"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
-	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	"github.com/velero-io/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/logging"
 )
 
 /*
@@ -327,12 +327,21 @@ func (b *BackupBuilder) DataMover(name string) *BackupBuilder {
 	return b
 }
 
-// ParallelFilesUpload sets the Backup's uploader parallel uploads
+// ParallelFilesUpload sets the Backup's uploader parallel files upload
 func (b *BackupBuilder) ParallelFilesUpload(parallel int) *BackupBuilder {
 	if b.object.Spec.UploaderConfig == nil {
 		b.object.Spec.UploaderConfig = &velerov1api.UploaderConfigForBackup{}
 	}
 	b.object.Spec.UploaderConfig.ParallelFilesUpload = parallel
+	return b
+}
+
+// ParallelBlocksUpload sets the Backup's uploader parallel blocks upload
+func (b *BackupBuilder) ParallelBlocksUpload(parallel int) *BackupBuilder {
+	if b.object.Spec.UploaderConfig == nil {
+		b.object.Spec.UploaderConfig = &velerov1api.UploaderConfigForBackup{}
+	}
+	b.object.Spec.UploaderConfig.ParallelBlocksUpload = parallel
 	return b
 }
 

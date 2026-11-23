@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/vmware-tanzu/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/builder"
 )
 
 func WaitUntilServiceAccountCreated(ctx context.Context, client TestClient, namespace, serviceAccount string, timeout time.Duration) error {

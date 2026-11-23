@@ -15,6 +15,8 @@ Only specific resources are included, all others are excluded.
 
 Wildcard takes precedence when both a wildcard and specific resource are included.
 
+Resource include and exclude lists accept glob patterns. A malformed pattern (for example `foo[`) is rejected when the backup or restore is validated, rather than silently skipping resources.
+
 ### --include-namespaces
 
 Namespaces to include. Accepts glob patterns (`*`, `?`, `[abc]`). Default is `*`, all namespaces.
@@ -221,6 +223,27 @@ Kubernetes resources to exclude, formatted as resource.group, such as storagecla
 ### velero.io/exclude-from-backup=true
 
 * Resources with the label `velero.io/exclude-from-backup=true` are not included in backup, even if it contains a matching selector label.
+* Namespaces with this label are excluded from backup entirely. Excluding them doesn't count as filtering namespaces, so a backup of all namespaces still includes cluster-scoped resources.
+
+#### Velero's own namespace
+
+Velero does not support backing up its own namespace, so `velero install` adds this label to the Velero namespace.
+
+* **Existing installations:** re-run `velero install --apply` with your usual options to add the label, or add it manually:
+
+  ```bash
+  kubectl label namespace <velero-namespace> velero.io/exclude-from-backup=true
+  ```
+
+  Installations that use other methods (such as Helm) also need to add the label themselves.
+* **Opting out:** install with `--exclude-namespace-from-backup=false` so the label isn't added. If the label is already there, remove it:
+
+  ```bash
+  kubectl label namespace <velero-namespace> velero.io/exclude-from-backup-
+  ```
+
+  `velero install --apply` adds the label back unless you also pass `--exclude-namespace-from-backup=false`.
+* **Multiple Velero instances:** the label isn't tied to a Velero instance. Every Velero instance in the cluster skips every namespace with this label, so by default one instance doesn't back up another instance's namespace. To back up another instance's namespace, remove the label from that namespace, and add `--exclude-namespaces <namespace>` to that instance's own backups and schedules so it doesn't back up its own namespace. Because an explicit `--exclude-namespaces` counts as filtering namespaces, also set `--include-cluster-resources=true` on those backups if they should include cluster-scoped resources.
 
 ### --exclude-cluster-scoped-resources
 Kubernetes cluster-scoped resources to exclude from the backup, formatted as resource.group, such as `storageclasses.storage.k8s.io`(use '*' for all resources). Cannot work with `--include-resources`, `--exclude-resources` and `--include-cluster-resources`. This parameter only works for backup, not for restore.
@@ -264,7 +287,7 @@ Resource policies support both **Backup** and **Restore** operations, though cer
 | --- | --- | --- | --- |
 | `namespacedFilterPolicies` | Fine-grained per-namespace and per-kind filters with label selectors and resource name patterns. | **Backup** & **Restore** | [Fine-Grained Backup Filters](fine-grained-backup-filters.md) / [Fine-Grained Restore Filters](fine-grained-restore-filters.md) |
 | `clusterScopedFilterPolicy` | Fine-grained cluster-scoped filter overlays with per-kind label selectors and resource name patterns. | **Backup** & **Restore** | [Fine-Grained Backup Filters](fine-grained-backup-filters.md) / [Fine-Grained Restore Filters](fine-grained-restore-filters.md) |
-| `volumePolicies` | Rules to control volume data backup methods (`skip`, `snapshot`, `fs-backup`) based on conditions. | **Backup** only | See [VolumePolicy](#volumepolicy-backup-only) |
+| `volumePolicies` | Rules to control volume data backup methods (`skip`, `snapshot`, `fs-backup`, `custom`) based on conditions. | **Backup** only | See [VolumePolicy](#volumepolicy-backup-only) |
 | `includeExcludePolicy` | Reusable scoped resource include/exclude filters. | **Backup** only | See [IncludeExcludePolicy](#includeexcludepolicy-backup-only) |
 | `includeExcludePolicy.includedNamespacesByLabel` / `excludedNamespacesByLabel` / `labelSelectorLogic` | Dynamically include/exclude whole namespaces by label selector; `labelSelectorLogic` picks OR (default, any entry matches) or AND (every entry must match) across multiple entries in the same list. | **Backup** only | See [Namespace selection by label](#namespace-selection-by-label-backup-only) |
 
@@ -524,10 +547,11 @@ guaranteed to match nothing, not a sign anything went wrong.
 VolumePolicy is a data structure to control how velero handle the volumes matching certain conditions.
 
 #### Supported VolumePolicy actions
-There are three actions supported via the VolumePolicy feature:
+There are four actions supported via the VolumePolicy feature:
 * skip: don't back up the action matching volume's data.
 * snapshot: back up the action matching volume's data by the snapshot way.
 * fs-backup: back up the action matching volumes' data by the fs-backup way.
+* custom: use a compatible third-party BackupItemAction plugin to back up matching volumes. See [Custom volume policy actions](#custom-volume-policy-actions).
 
 #### Supported conditions
 
@@ -883,6 +907,42 @@ volumePolicies:
 ```
 2. User creates a backup using this volume policy
 3. The outcome would be that velero would use `vsc-array-1` VolumeSnapshotClass for volumes on storage class `array-1-sc` and `vsc-array-2` VolumeSnapshotClass for volumes on storage class `array-2-sc`, even though both storage classes use the same CSI driver.
+
+### Custom volume policy actions
+
+Starting with Velero 1.19, you can set `action.type: custom` to select volumes for backup by a third-party BackupItemAction plugin. This lets you use a plugin's backup method for selected volumes alongside `snapshot` and `fs-backup` policies for other volumes.
+
+Install a plugin that supports custom volume policy actions before using this action. The plugin defines the keys and values it expects in `action.parameters`; consult the plugin's documentation for the required configuration. Setting `type: custom` does not install or register a plugin.
+
+For example, save the following policy as `custom-volume-policy.yaml`. This example assumes your plugin recognizes `myCustomAction: true`; replace that parameter with the configuration required by your plugin.
+
+```yaml
+version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - custom-storage
+  action:
+    type: custom
+    parameters:
+      myCustomAction: true
+- conditions:
+    storageClass:
+    - standard-storage
+  action:
+    type: snapshot
+```
+
+Create the ConfigMap in the Velero installation namespace and reference it when creating a backup:
+
+```bash
+kubectl create configmap custom-volume-policy --from-file=custom-volume-policy.yaml -n velero
+velero backup create custom-volume-backup --resource-policies-configmap custom-volume-policy
+```
+
+Volumes using `custom-storage` are selected for custom handling, while volumes using `standard-storage` use the snapshot workflow. Replace these storage class names with those used in your cluster. As with other volume policy actions, the first matching policy takes precedence.
+
+For a volume matching a `custom` action, Velero does not perform a built-in snapshot or file system backup. If no plugin handles that action, the volume's data is not backed up; Velero does not fall back to another backup method.
 
 ### Global backup volume policies
 

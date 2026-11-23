@@ -23,8 +23,8 @@ import (
 	"github.com/cockroachdb/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	. "github.com/vmware-tanzu/velero/test/e2e/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/e2e/test"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 /*

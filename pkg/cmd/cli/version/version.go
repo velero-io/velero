@@ -1,5 +1,5 @@
 /*
-Copyright 2020 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,10 +27,10 @@ import (
 	"golang.org/x/mod/semver"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
-	"github.com/vmware-tanzu/velero/pkg/client"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/cmd/cli/serverstatus"
+	"github.com/velero-io/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/client"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/cmd/cli/serverstatus"
 )
 
 func NewCommand(f client.Factory) *cobra.Command {
@@ -87,10 +87,12 @@ func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, server
 	cliSemVer := semver.MajorMinor(buildinfo.Version)
 	if serverSemVer != cliSemVer {
 		upgrade := "client"
+		match := "server"
 		cmp := semver.Compare(cliSemVer, serverSemVer)
 		if cmp == 1 {
 			upgrade = "server"
+			match = "client"
 		}
-		fmt.Fprintf(w, "# WARNING: the client version does not match the server version. Please update %s\n", upgrade)
+		fmt.Fprintf(w, "# WARNING: client version %s and server version %s have different major or minor versions. Compatibility is not guaranteed. Please update %s to match the %s's major and minor version.\n", buildinfo.Version, serverStatus.Status.ServerVersion, upgrade, match)
 	}
 }

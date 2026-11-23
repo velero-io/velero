@@ -39,21 +39,23 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/mod/semver"
 	schedulingv1api "k8s.io/api/scheduling/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/vmware-tanzu/velero/internal/volume"
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	cliinstall "github.com/vmware-tanzu/velero/pkg/cmd/cli/install"
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
-	"github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test"
-	common "github.com/vmware-tanzu/velero/test/util/common"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
+	"github.com/velero-io/velero/internal/volume"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	cliinstall "github.com/velero-io/velero/pkg/cmd/cli/install"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	veleroexec "github.com/velero-io/velero/pkg/util/exec"
+	"github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test"
+	common "github.com/velero-io/velero/test/util/common"
+	. "github.com/velero-io/velero/test/util/k8s"
 )
 
 const BackupObjectsPrefix = "backups"
@@ -64,55 +66,57 @@ var ImagesMatrix = map[string]map[string][]string{
 	"v1.13": {
 		"aws":                   {"velero/velero-plugin-for-aws:v1.9.2"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.9.2"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.9.2"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:v1.9.2"},
 		"csi":                   {"velero/velero-plugin-for-csi:v0.7.1"},
-		"datamover":             {"velero/velero-plugin-for-aws:v1.9.2"},
 		"velero":                {"velero/velero:v1.13.2"},
 		"velero-restore-helper": {"velero/velero-restore-helper:v1.13.2"},
 	},
 	"v1.14": {
 		"aws":                   {"velero/velero-plugin-for-aws:v1.10.1"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.10.1"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.10.1"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:v1.10.1"},
-		"datamover":             {"velero/velero-plugin-for-aws:v1.10.1"},
 		"velero":                {"velero/velero:v1.14.1"},
 		"velero-restore-helper": {"velero/velero-restore-helper:v1.14.1"},
 	},
 	"v1.15": {
 		"aws":                   {"velero/velero-plugin-for-aws:v1.11.0"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.11.0"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.11.0"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:v1.11.0"},
-		"datamover":             {"velero/velero-plugin-for-aws:v1.11.0"},
 		"velero":                {"velero/velero:v1.15.2"},
 		"velero-restore-helper": {"velero/velero-restore-helper:v1.15.2"},
 	},
 	"v1.16": {
 		"aws":                   {"velero/velero-plugin-for-aws:v1.12.2"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.12.2"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.12.2"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:v1.12.2"},
-		"datamover":             {"velero/velero-plugin-for-aws:v1.12.2"},
 		"velero":                {"velero/velero:v1.16.2"},
 		"velero-restore-helper": {"velero/velero:v1.16.2"},
 	},
 	"v1.17": {
 		"aws":                   {"velero/velero-plugin-for-aws:v1.13.2"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.13.2"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.13.2"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:v1.13.2"},
-		"datamover":             {"velero/velero-plugin-for-aws:v1.13.2"},
 		"velero":                {"velero/velero:v1.17.2"},
 		"velero-restore-helper": {"velero/velero:v1.17.2"},
+	},
+	"v1.18": {
+		"aws":                   {"velero/velero-plugin-for-aws:v1.14.4"},
+		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.14.4"},
+		"vsphere":               {"velero/velero-plugin-for-aws:v1.14.4"},
+		"gcp":                   {"velero/velero-plugin-for-gcp:v1.14.4"},
+		"velero":                {"velero/velero:v1.18.4"},
+		"velero-restore-helper": {"velero/velero:v1.18.4"},
 	},
 	"main": {
 		"aws":                   {"velero/velero-plugin-for-aws:main"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:main"},
-		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"vsphere":               {"velero/velero-plugin-for-aws:main"},
 		"gcp":                   {"velero/velero-plugin-for-gcp:main"},
-		"datamover":             {"velero/velero-plugin-for-aws:main"},
 		"velero":                {"velero/velero:main"},
 		"velero-restore-helper": {"velero/velero-restore-helper:main"},
 	},
@@ -154,12 +158,9 @@ func SetImagesToDefaultValues(config VeleroConfig, version string) (VeleroConfig
 	if ret.CloudProvider == AWS {
 		ret.Plugins = images[AWS][0]
 	}
-	// If HasVspherePlugin is false, only install the AWS plugin.
-	// If do nothing here, the default behavior is
-	// installing both AWS and vSphere plugins.
-	if ret.CloudProvider == Vsphere &&
-		!ret.HasVspherePlugin {
-		ret.Plugins = images[AWS][0]
+	// vSphere tests use the AWS plugin for S3-compatible backup storage.
+	if ret.CloudProvider == Vsphere {
+		ret.Plugins = images[Vsphere][0]
 	}
 
 	if ret.SnapshotMoveData && ret.CloudProvider == Azure {
@@ -190,7 +191,7 @@ func getVersionWithoutPatch(version string) string {
 	return versionWithoutPatch
 }
 
-func getPluginsByVersion(version string, cloudProvider string, needDataMoverPlugin bool) ([]string, error) {
+func getPluginsByVersion(version string, cloudProvider string) ([]string, error) {
 	var cloudMap map[string][]string
 	arr := strings.Split(version, ".")
 	if len(arr) >= 3 {
@@ -217,17 +218,6 @@ func getPluginsByVersion(version string, cloudProvider string, needDataMoverPlug
 		}
 	}
 
-	if needDataMoverPlugin {
-		pluginsForDatamover, ok := cloudMap["datamover"]
-		if !ok {
-			return nil, errors.Errorf("fail to get plugins by for datamover")
-		}
-		for _, p := range pluginsForDatamover {
-			if !slices.Contains(plugins, p) {
-				plugins = append(plugins, p)
-			}
-		}
-	}
 	return plugins, nil
 }
 
@@ -268,6 +258,17 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	io.Prefix = veleroCfg.BSLPrefix
 	io.BackupStorageConfig = flag.NewMap()
 	io.BackupStorageConfig.Set(veleroCfg.BSLConfig)
+
+	// CACertFile is the CA bundle used to verify TLS connections to the object
+	// store. It is passed through to `velero install --cacert`, which stores it
+	// in the BSL's spec.objectStorage.caCert.
+	if veleroCfg.CACertFile != "" {
+		realPath, err := filepath.Abs(veleroCfg.CACertFile)
+		if err != nil {
+			return nil, err
+		}
+		io.CACertFile = realPath
+	}
 
 	io.VolumeSnapshotConfig = flag.NewMap()
 	io.VolumeSnapshotConfig.Set(veleroCfg.VSLConfig)
@@ -462,6 +463,9 @@ func VeleroBackupNamespace(ctx context.Context, veleroCLI, veleroNamespace strin
 
 	if backupCfg.SnapshotMoveData {
 		args = append(args, "--snapshot-move-data")
+		if backupCfg.DataMover != "" {
+			args = append(args, "--data-mover", backupCfg.DataMover)
+		}
 	}
 
 	if backupCfg.UseVolumeSnapshots {
@@ -643,6 +647,7 @@ func RunDebug(ctx context.Context, veleroCLI, veleroNamespace, backup, restore s
 }
 
 func VeleroCreateBackupLocation(ctx context.Context,
+	client kbclient.Client,
 	veleroCLI,
 	veleroNamespace,
 	name,
@@ -653,6 +658,79 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	secretName,
 	secretKey string,
 ) error {
+	// An additional location pointing at the same object store as the default
+	// one needs the same CA bundle. `velero install --cacert` already stored it
+	// in the default BSL, so take it from there instead of asking for the path
+	// a second time.
+	caCert, err := cacert.GetCACertFromBSL(ctx, client, veleroNamespace, common.DefaultBSLName)
+	if err != nil {
+		return err
+	}
+
+	var caCertFile string
+	cleanup := func() {}
+	if caCert != "" {
+		caCertFile, cleanup, err = writeTempCACert([]byte(caCert))
+		if err != nil {
+			return err
+		}
+	}
+	defer cleanup()
+
+	args := createBackupLocationArgs(
+		veleroNamespace,
+		name,
+		objectStoreProvider,
+		bucket,
+		prefix,
+		config,
+		secretName,
+		secretKey,
+		caCertFile,
+	)
+
+	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
+		return err
+	}
+
+	return CheckBSL(ctx, veleroNamespace, name)
+}
+
+// writeTempCACert writes a CA bundle to a temporary file so it can be handed to
+// a Velero CLI flag that takes a path. The second return value removes the
+// file; it is always safe to call.
+func writeTempCACert(data []byte) (string, func(), error) {
+	noop := func() {}
+
+	f, err := os.CreateTemp("", "bsl-ca-cert-*.crt")
+	if err != nil {
+		return "", noop, errors.Wrap(err, "failed to create a temporary file for the BSL CA bundle")
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", noop, errors.Wrap(err, "failed to write the BSL CA bundle to a temporary file")
+	}
+
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
+// createBackupLocationArgs builds the argument list for
+// `velero backup-location create`. It is separated from
+// VeleroCreateBackupLocation so that the argument construction can be verified
+// without invoking the Velero CLI.
+func createBackupLocationArgs(
+	veleroNamespace,
+	name,
+	objectStoreProvider,
+	bucket,
+	prefix,
+	config,
+	secretName,
+	secretKey,
+	caCertFile string,
+) []string {
 	args := []string{
 		"--namespace", veleroNamespace,
 		"create", "backup-location", name,
@@ -668,15 +746,15 @@ func VeleroCreateBackupLocation(ctx context.Context,
 		args = append(args, "--config", config)
 	}
 
+	if caCertFile != "" {
+		args = append(args, "--cacert", caCertFile)
+	}
+
 	if secretName != "" && secretKey != "" {
 		args = append(args, "--credential", fmt.Sprintf("%s=%s", secretName, secretKey))
 	}
 
-	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
-		return err
-	}
-
-	return CheckBSL(ctx, veleroNamespace, name)
+	return args
 }
 
 func VeleroVersion(ctx context.Context, veleroCLI, veleroNamespace string) error {
@@ -691,13 +769,12 @@ func VeleroVersion(ctx context.Context, veleroCLI, veleroNamespace string) error
 
 // GetPlugins will collect all kinds plugins for VeleroInstall, such as provider
 // plugins(cloud provider/object store provider, if object store provider is not
-// provided, it should be set to value as cloud provider's), feature plugins (CSI/Datamover)
+// provided, it should be set to value as cloud provider's), feature plugins
 func GetPlugins(ctx context.Context, veleroCfg VeleroConfig, defaultBSL bool) ([]string, error) {
 	veleroCLI := veleroCfg.VeleroCLI
 	cloudProvider := veleroCfg.CloudProvider
 	objectStoreProvider := veleroCfg.ObjectStoreProvider
 	providerPlugins := veleroCfg.Plugins
-	needDataMoverPlugin := false
 	var plugins []string
 
 	version, err := GetVeleroVersion(ctx, veleroCLI, true)
@@ -715,7 +792,7 @@ func GetPlugins(ctx context.Context, veleroCfg VeleroConfig, defaultBSL bool) ([
 				return []string{}, errors.New("AdditionalBSLProvider should be provided.")
 			}
 
-			plugins, err = getPluginsByVersion(version, veleroCfg.AdditionalBSLProvider, false)
+			plugins, err = getPluginsByVersion(version, veleroCfg.AdditionalBSLProvider)
 			if err != nil {
 				return nil, errors.WithMessagef(err, "Fail to get plugin by provider %s and version %s", veleroCfg.AdditionalBSLProvider, version)
 			}
@@ -741,11 +818,7 @@ func GetPlugins(ctx context.Context, veleroCfg VeleroConfig, defaultBSL bool) ([
 			version = veleroCfg.VeleroVersion
 		}
 
-		if veleroCfg.SnapshotMoveData && veleroCfg.DataMoverPlugin == "" && !veleroCfg.IsUpgradeTest {
-			needDataMoverPlugin = true
-		}
-
-		plugins, err = getPluginsByVersion(version, cloudProvider, needDataMoverPlugin)
+		plugins, err = getPluginsByVersion(version, cloudProvider)
 		if err != nil {
 			return nil, errors.WithMessagef(err, "Fail to get plugin by provider %s and version %s", objectStoreProvider, version)
 		}
@@ -932,7 +1005,7 @@ func InstallVeleroCLI(ctx context.Context, version string) (string, error) {
 	postfix := ".tar.gz"
 	tarball := name + postfix
 	err := wait.PollUntilContextTimeout(ctx, time.Second*5, time.Minute*5, true, func(ctx context.Context) (bool, error) {
-		tempFile, err := getVeleroCliTarball("https://github.com/vmware-tanzu/velero/releases/download/" + version + "/" + tarball)
+		tempFile, err := getVeleroCliTarball("https://github.com/velero-io/velero/releases/download/" + version + "/" + tarball)
 		if err != nil {
 			return false, errors.WithMessagef(err, "failed to get Velero CLI tarball")
 		}
@@ -1316,7 +1389,8 @@ func BuildSnapshotCheckPointFromVolumeInfo(
 	snapshotCheckPoint.NamespaceBackedUp = namespaceBackedUp
 	snapshotCheckPoint.PodName = KibishiiPVCNameList
 
-	if (veleroCfg.CloudProvider == Azure || veleroCfg.CloudProvider == AWS) && strings.EqualFold(veleroCfg.Features, FeatureCSI) {
+	if (veleroCfg.CloudProvider == Azure || veleroCfg.CloudProvider == AWS ||
+		veleroCfg.CloudProvider == Kind) && FeatureEnabled(veleroCfg.Features, FeatureCSI) {
 		snapshotCheckPoint.EnableCSI = true
 
 		var VscCount = 0
@@ -1507,37 +1581,49 @@ func GetVeleroPodName(ctx context.Context) ([]string, error) {
 // e2e-storage-class is the default StorageClass for E2E.
 // e2e-storage-class-2 is used for the StorageClass mapping test case.
 // Kibishii StorageClass is not covered here.
-func InstallStorageClasses(provider string) error {
+func InstallStorageClasses(provider string, clients ...TestClient) error {
+	var client TestClient
+	if len(clients) > 0 {
+		client = clients[0]
+	} else if VeleroCfg.ClientToInstallVelero != nil {
+		client = *VeleroCfg.ClientToInstallVelero
+	} else {
+		return errors.New("no client available to install storage classes")
+	}
+
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Minute*5)
 	defer ctxCancel()
 
-	storageClassFilePath := fmt.Sprintf("../testdata/storage-class/%s.yaml", provider)
+	// The names stay fixed, since every spec refers to them. What a caller can
+	// choose is the definition they are created from, so a cluster whose volumes
+	// need a different provisioner or parameters can be targeted without editing
+	// the shared test data.
+	providerFile := fmt.Sprintf("../testdata/storage-class/%s.yaml", provider)
 
-	if err := InstallStorageClass(ctx, storageClassFilePath); err != nil {
+	firstFile := StorageClassFile
+	if firstFile == "" {
+		firstFile = providerFile
+	}
+
+	fmt.Printf("Install storage class %s with %s.\n", StorageClassName, firstFile)
+	if err := CreateStorageClassFromYaml(ctx, client, firstFile, StorageClassName); err != nil {
 		return err
 	}
-	content, err := os.ReadFile(storageClassFilePath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get %s when install storage class", storageClassFilePath)
+
+	// An explicitly empty second file runs the suite without a second
+	// StorageClass. The cases that map between two of them skip.
+	if !SecondStorageClassInstalled() {
+		fmt.Printf("Skip installing %s, no StorageClass definition was given for it.\n", StorageClassName2)
+		return nil
 	}
 
-	// Replace the name to e2e-storage-class-2
-	newContent := strings.ReplaceAll(
-		string(content),
-		fmt.Sprintf("name: %s", StorageClassName),
-		fmt.Sprintf("name: %s", StorageClassName2),
-	)
-
-	tmpFile, err := os.CreateTemp("", "sc-file")
-	if err != nil {
-		return errors.Wrapf(err, "failed to create temp file  when install storage class")
+	secondFile := StorageClassFile2
+	if secondFile == "" {
+		secondFile = providerFile
 	}
 
-	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.WriteString(newContent); err != nil {
-		return errors.Wrapf(err, "failed to write content into temp file %s when install storage class", tmpFile.Name())
-	}
-	return InstallStorageClass(ctx, tmpFile.Name())
+	fmt.Printf("Install storage class %s with %s.\n", StorageClassName2, secondFile)
+	return CreateStorageClassFromYaml(ctx, client, secondFile, StorageClassName2)
 }
 
 func GetPvName(ctx context.Context, client TestClient, pvcName, namespace string) (string, error) {
@@ -1562,38 +1648,12 @@ func GetPvName(ctx context.Context, client TestClient, pvcName, namespace string
 }
 func DeletePVs(ctx context.Context, client TestClient, pvList []string) error {
 	for _, pv := range pvList {
-		args := []string{"delete", "pv", pv, "--timeout=0s"}
-		fmt.Println(args)
-		err := exec.CommandContext(ctx, "kubectl", args...).Run()
-		if err != nil {
-			return errors.New(fmt.Sprintf("Deleted PV  %s ", pv))
+		err := client.ClientGo.CoreV1().PersistentVolumes().Delete(ctx, pv, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return errors.Wrapf(err, "Failed to delete PV %s", pv)
 		}
 	}
 	return nil
-}
-
-func CleanAllRetainedPV(ctx context.Context, client TestClient) {
-	pvNameList, err := GetAllPVNames(ctx, client)
-	if err != nil {
-		fmt.Println("fail to list PV")
-	}
-	for _, pv := range pvNameList {
-		args := []string{"patch", "pv", pv, "-p", "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}"}
-		fmt.Println(args)
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err := veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to patch PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-
-		args = []string{"delete", "pv", pv, "--timeout=60s"}
-		fmt.Println(args)
-		cmd = exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err = veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to delete PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-	}
 }
 
 func KubectlGetBackupRepository(ctx context.Context, uploaderType, veleroNamespace string) ([]string, error) {

@@ -38,9 +38,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/cockroachdb/errors"
 
-	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
-	"github.com/vmware-tanzu/velero/pkg/util/dotenv"
-	. "github.com/vmware-tanzu/velero/test"
+	"github.com/velero-io/velero/pkg/cmd/util/flag"
+	"github.com/velero-io/velero/pkg/util/dotenv"
+	. "github.com/velero-io/velero/test"
 )
 
 type AzureStorage string

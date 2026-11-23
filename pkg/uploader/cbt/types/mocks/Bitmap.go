@@ -6,7 +6,7 @@ package mocks
 
 import (
 	mock "github.com/stretchr/testify/mock"
-	"github.com/vmware-tanzu/velero/pkg/uploader/cbt/types"
+	"github.com/velero-io/velero/pkg/uploader/cbt/types"
 )
 
 // NewBitmap creates a new instance of Bitmap. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

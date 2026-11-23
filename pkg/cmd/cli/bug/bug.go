@@ -31,16 +31,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
-	"github.com/vmware-tanzu/velero/pkg/cmd"
-	"github.com/vmware-tanzu/velero/pkg/features"
+	"github.com/velero-io/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/cmd"
+	"github.com/velero-io/velero/pkg/features"
 )
 
 const (
 	// kubectlTimeout is how long we wait in seconds for `kubectl version`
 	// before killing the process
 	kubectlTimeout = 5 * time.Second
-	issueURL       = "https://github.com/vmware-tanzu/velero/issues/new"
+	issueURL       = "https://github.com/velero-io/velero/issues/new"
 	// IssueTemplate is used to generate .github/ISSUE_TEMPLATE/bug_report.md
 	// as well as the initial text that's place in a new Github issue as
 	// the result of running `velero bug`.
@@ -95,7 +95,7 @@ Please provide the output of the following commands (Pasting long output into a 
 
 **Vote on this issue!**
 
-This is an invitation to the Velero community to vote on issues, you can see the project's [top voted issues listed here](https://github.com/vmware-tanzu/velero/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc).  
+This is an invitation to the Velero community to vote on issues, you can see the project's [top voted issues listed here](https://github.com/velero-io/velero/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc).  
 Use the "reaction smiley face" up to the right of this comment to vote.
 
 - :+1: for "I would like to see this bug fixed as soon as possible"

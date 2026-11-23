@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/vmware-tanzu/velero/pkg/util/results"
+	"github.com/velero-io/velero/pkg/util/results"
 )
 
 func TestLogHook_Fire(t *testing.T) {

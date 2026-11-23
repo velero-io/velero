@@ -1,0 +1,137 @@
+toc:
+  - title: Introduction
+    subfolderitems:
+      - page: About Velero
+        url: /index.html
+      - page: How Velero works
+        url: /how-velero-works
+      - page: About locations
+        url: /locations
+  - title: Install
+    subfolderitems:
+      - page: Basic Install
+        url: /basic-install
+      - page: Customize Installation
+        url: /customize-installation
+      - page: Upgrade to 1.19
+        url: /upgrade-to-1.19
+      - page: Supported providers
+        url: /supported-providers
+      - page: Evaluation install
+        url: /contributions/minio
+      - page: Examples
+        url: /examples
+      - page: Uninstalling
+        url: /uninstalling
+  - title: Use
+    subfolderitems:
+      - page: Disaster recovery
+        url: /disaster-case
+      - page: Cluster migration
+        url: /migration-case
+      - page: Enable API group versions
+        url: /enable-api-group-versions-feature
+      - page: Resource filtering
+        url: /resource-filtering
+      - page: Fine-Grained Backup Filters
+        url: /fine-grained-backup-filters
+      - page: Fine-grained restore filters
+        url: /fine-grained-restore-filters
+      - page: Namespace glob patterns
+        url: /namespace-glob-patterns
+      - page: Backup reference
+        url: /backup-reference
+      - page: Backup hooks
+        url: /backup-hooks
+      - page: Restore reference
+        url: /restore-reference
+      - page: Volume data in-place restore
+        url: /volume-data-inplace-restore
+      - page: Restore hooks
+        url: /restore-hooks
+      - page: Restore Resource Modifiers
+        url: /restore-resource-modifiers
+      - page: Run in any namespace
+        url: /namespace       
+      - page: CSI Support
+        url: /csi
+      - page: Volume Group Snapshots
+        url: /volume-group-snapshots
+      - page: Backup Repository Configuration
+        url: /backup-repository-configuration
+      - page: Verifying Self-signed Certificates
+        url: /self-signed-certificates
+      - page: Changing RBAC permissions
+        url: /rbac
+      - page: Behind proxy
+        url: /proxy
+      - page: Repository Maintenance
+        url: /repository-maintenance
+      - page: Backup Restore Windows Workloads
+        url: /backup-restore-windows        
+  - title: Data Mover
+    subfolderitems:
+      - page: CSI Snapshot Data Mover
+        url: /csi-snapshot-data-movement
+      - page: File system backup
+        url: /file-system-backup        
+      - page: Data Movement Backup PVC Configuration
+        url: /data-movement-backup-pvc-configuration
+      - page: Data Movement Restore PVC Configuration
+        url: /data-movement-restore-pvc-configuration        
+      - page: Data Movement Pod Resource Configuration
+        url: /data-movement-pod-resource-configuration        
+      - page: Data Movement Node Selection Configuration
+        url: /data-movement-node-selection
+      - page: Data Movement Cache PVC Configuration
+        url: /data-movement-cache-volume
+      - page: Node-agent Concurrency
+        url: /node-agent-concurrency
+      - page: Node-agent Prepare Queue Length
+        url: /node-agent-prepare-queue-length        
+  - title: Plugins
+    subfolderitems:
+      - page: Overview
+        url: /overview-plugins
+      - page: Custom plugins
+        url: /custom-plugins
+  - title: Troubleshoot
+    subfolderitems:
+      - page: Troubleshooting
+        url: /troubleshooting
+      - page: Troubleshoot an install or setup
+        url: /debugging-install
+      - page: Troubleshoot a restore
+        url: /debugging-restores
+      - page: Troubleshoot file system backup
+        url: /file-system-backup#troubleshooting
+  - title: Contribute
+    subfolderitems:
+      - page: Start Contributing
+        url: /start-contributing
+      - page: Development
+        url: /development
+      - page: Rapid development with Tilt
+        url: /tilt
+      - page: Build from source
+        url: /build-from-source
+      - page: Run locally
+        url: /run-locally
+      - page: Code standards
+        url: /code-standards
+      - page: Website guidelines
+        url: /website-guidelines
+      - page: Documentation style guide
+        url: /style-guide
+  - title: More information
+    subfolderitems:
+      - page: Backup file format
+        url: /output-file-format
+      - page: API types
+        url: /api-types
+      - page: Supported ConfigMap
+        url: /supported-configmaps
+      - page: Support process
+        url: /support-process
+      - page: For maintainers
+        url: /maintainers

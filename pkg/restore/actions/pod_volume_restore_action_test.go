@@ -20,7 +20,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
+	"github.com/velero-io/velero/pkg/util/boolptr"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -33,16 +33,16 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/builder"
-	"github.com/vmware-tanzu/velero/pkg/buildinfo"
-	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	velerotest "github.com/vmware-tanzu/velero/pkg/test"
-	"github.com/vmware-tanzu/velero/pkg/util/kube"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/buildinfo"
+	"github.com/velero-io/velero/pkg/plugin/velero"
+	velerotest "github.com/velero-io/velero/pkg/test"
+	"github.com/velero-io/velero/pkg/util/kube"
 
 	"k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/vmware-tanzu/velero/pkg/restorehelper"
+	"github.com/velero-io/velero/pkg/restorehelper"
 )
 
 func TestGetImage(t *testing.T) {

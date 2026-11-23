@@ -24,7 +24,7 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/vmware-tanzu/velero/pkg/install"
+	"github.com/velero-io/velero/pkg/install"
 )
 
 // TestInheritedPodInfoAgainstRealDaemonSet guards the exclusion against the node-agent

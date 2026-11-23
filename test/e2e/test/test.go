@@ -27,10 +27,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	. "github.com/vmware-tanzu/velero/test"
-	. "github.com/vmware-tanzu/velero/test/util/k8s"
-	. "github.com/vmware-tanzu/velero/test/util/velero"
+	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
+	. "github.com/velero-io/velero/test"
+	. "github.com/velero-io/velero/test/util/k8s"
+	. "github.com/velero-io/velero/test/util/velero"
 )
 
 /*
@@ -146,13 +146,13 @@ func (t *TestCase) Restore() error {
 	veleroCfg := t.GetTestCase().VeleroCfg
 
 	// the snapshots of AWS may be still in pending status when do the restore, wait for a while
-	// to avoid this https://github.com/vmware-tanzu/velero/issues/1799
-	// TODO remove this after https://github.com/vmware-tanzu/velero/issues/3533 is fixed
-	By("Waiting 5 minutes to make sure the snapshots are ready...", func() {
-		if t.UseVolumeSnapshots && veleroCfg.CloudProvider != Vsphere {
+	// to avoid this https://github.com/velero-io/velero/issues/1799
+	// TODO remove this after https://github.com/velero-io/velero/issues/3533 is fixed
+	if t.UseVolumeSnapshots && veleroCfg.CloudProvider != Vsphere && SnapshotsAreRemote(veleroCfg.CloudProvider) {
+		By("Waiting 5 minutes to make sure the snapshots are ready...", func() {
 			time.Sleep(5 * time.Minute)
-		}
-	})
+		})
+	}
 
 	By("Start to restore ......", func() {
 		if t.RestorePhaseExpect == "" {

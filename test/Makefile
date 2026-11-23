@@ -77,7 +77,7 @@ HAS_VSPHERE_PLUGIN ?= false
 RESTORE_HELPER_IMAGE ?=
 
 #Released version only
-UPGRADE_FROM_VELERO_VERSION ?= v1.15.2,v1.16.2,v1.17.2
+UPGRADE_FROM_VELERO_VERSION ?= v1.16.2,v1.17.2,v1.18.4
 
 # UPGRADE_FROM_VELERO_CLI can has the same format(a list divided by comma) with UPGRADE_FROM_VELERO_VERSION
 # Upgrade tests will be executed sequently according to the list by UPGRADE_FROM_VELERO_VERSION
@@ -96,6 +96,10 @@ STANDBY_CLS_SERVICE_ACCOUNT_NAME ?=
 BSL_BUCKET ?=
 BSL_PREFIX ?=
 BSL_CONFIG ?=
+# Path to a PEM certificate bundle used to verify TLS connections to the object
+# store. Required when the object store (e.g. MinIO) serves HTTPS with a
+# certificate that is not signed by a publicly trusted CA.
+BSL_CA_CERT_FILE ?=
 VSL_CONFIG ?=
 CLOUD_PROVIDER ?=
 STANDBY_CLUSTER_CLOUD_PROVIDER ?=
@@ -136,7 +140,7 @@ STANDBY_CLUSTER ?=
 UPLOADER_TYPE ?=
 
 SNAPSHOT_MOVE_DATA ?= false
-DATA_MOVER_PLUGIN ?=
+DATA_MOVER ?=
 DISABLE_INFORMER_CACHE ?= false
 
 DEFAULT_CLUSTER_NAME ?=
@@ -179,7 +183,22 @@ COMMON_ARGS := --velerocli=$(VELERO_CLI) \
 	--debug-velero-pod-restart=$(DEBUG_VELERO_POD_RESTART) \
 	--fail-fast=$(FAIL_FAST) \
 	--has-vsphere-plugin=$(HAS_VSPHERE_PLUGIN) \
-	--item-block-worker-count=$(ITEM_BLOCK_WORKER_COUNT)
+	--item-block-worker-count=$(ITEM_BLOCK_WORKER_COUNT) \
+	--storage-class-file=$(STORAGE_CLASS_FILE)
+
+# StorageClass manifests to run against. Unset means the provider's own file
+# under testdata/storage-class, which is the default behaviour. STORAGE_CLASS_FILE_2
+# is only passed through when it is actually set, because an empty value means
+# "run without a second StorageClass" and a flag that is always passed cannot
+# express "not set".
+STORAGE_CLASS_FILE ?=
+ifneq ($(origin STORAGE_CLASS_FILE_2),undefined)
+COMMON_ARGS += --storage-class-file-2=$(STORAGE_CLASS_FILE_2)
+endif
+
+.PHONY: run-e2e-kind
+run-e2e-kind:  ## Run the e2e tests against a kind cluster and MinIO that this target creates and removes
+	@$(REPO_ROOT)/hack/run-e2e-kind.sh
 
 # Make sure ginkgo is in $GOBIN
 .PHONY:ginkgo
@@ -201,6 +220,7 @@ run-e2e: ginkgo
 		-v \
 		--junit-report e2e/report.xml \
 		--label-filter="$(GINKGO_LABELS)" \
+		--fail-on-empty \
 		--timeout=5h \
 		--fail-fast=$(FAIL_FAST) \
 		./e2e \
@@ -218,7 +238,7 @@ run-e2e: ginkgo
 		--default-cluster-context=$(DEFAULT_CLUSTER) \
 		--standby-cluster-context=$(STANDBY_CLUSTER) \
 		--snapshot-move-data=$(SNAPSHOT_MOVE_DATA) \
-		--data-mover-plugin=$(DATA_MOVER_PLUGIN) \
+		--data-mover=$(DATA_MOVER) \
 		--standby-cluster-cloud-provider=$(STANDBY_CLUSTER_CLOUD_PROVIDER) \
 		--standby-cluster-plugins=$(STANDBY_CLUSTER_PLUGINS) \
 		--standby-cluster-object-store-provider=$(STANDBY_CLUSTER_OBJECT_STORE_PROVIDER) \
@@ -232,7 +252,8 @@ run-e2e: ginkgo
 		--image-registry-proxy=$(IMAGE_REGISTRY_PROXY) \
 		--worker-os=$(WORKER_OS) \
 		--pod-labels=$(POD_LABELS) \
-		--sa-annotations=$(SA_ANNOTATIONS)
+		--sa-annotations=$(SA_ANNOTATIONS) \
+		--bsl-ca-cert-file=$(BSL_CA_CERT_FILE)
 
 .PHONY: run-perf
 run-perf: ginkgo
