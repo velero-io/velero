@@ -1268,3 +1268,59 @@ func TestDeletionRejectsUnsupportedUploaderBeforeMutation(t *testing.T) {
 		})
 	}
 }
+
+// bslContextTrackingClient records the context used to get a BackupStorageLocation.
+type bslContextTrackingClient struct {
+	client.Client
+	gotBSLGetCtx context.Context
+}
+
+func (c *bslContextTrackingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*velerov1api.BackupStorageLocation); ok {
+		c.gotBSLGetCtx = ctx
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func TestBackupDeletionControllerReconcile_BSLLookupUsesRequestContext(t *testing.T) {
+	backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").StorageLocation("default").Result()
+	location := builder.ForBackupStorageLocation("velero", "default").Phase(velerov1api.BackupStorageLocationPhaseAvailable).AccessMode(velerov1api.BackupStorageLocationAccessModeReadOnly).Result()
+	dbr := defaultTestDbr()
+
+	trackingClient := &bslContextTrackingClient{
+		Client: velerotest.NewFakeControllerRuntimeClient(t, location, backup, dbr),
+	}
+	pluginManager := &pluginmocks.Manager{}
+	pluginManager.On("CleanupClients").Return(nil)
+
+	r := NewBackupDeletionReconciler(
+		velerotest.NewLogger(),
+		trackingClient,
+		NewBackupTracker(),
+		nil, // repository manager
+		metrics.NewServerMetrics(),
+		nil, // discovery helper
+		func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+		NewFakeSingleObjectBackupStoreGetter(&persistencemocks.BackupStore{}),
+		velerotest.NewFakeCredentialsFileStore("", nil),
+		nil,
+	)
+
+	type ctxKeyType string
+	key := ctxKeyType("test-context-key")
+	sentinel := "sentinel-bsl-lookup"
+	ctx := context.WithValue(t.Context(), key, sentinel)
+
+	_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: dbr.Namespace, Name: dbr.Name}})
+	require.NoError(t, err)
+
+	require.NotNil(t, trackingClient.gotBSLGetCtx, "the BackupStorageLocation was never fetched")
+	assert.Equal(t, sentinel, trackingClient.gotBSLGetCtx.Value(key))
+
+	// The read-only location still stops the deletion.
+	res := &velerov1api.DeleteBackupRequest{}
+	require.NoError(t, trackingClient.Client.Get(t.Context(), types.NamespacedName{Namespace: dbr.Namespace, Name: dbr.Name}, res))
+	assert.Equal(t, velerov1api.DeleteBackupRequestPhaseProcessed, res.Status.Phase)
+	require.Len(t, res.Status.Errors, 1)
+	assert.Contains(t, res.Status.Errors[0], "read-only mode")
+}
