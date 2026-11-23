@@ -426,10 +426,11 @@ type BackupStorageLocationSpec struct {
 }
 
 type BSLEncryptionConfig struct {
-    // SecretKeyRef specifies the Kubernetes Secret containing the passphrase.
-    // Fallback to bsl-encryption secret if not specified.
+    // SecretName specifies the Kubernetes Secret containing the passphrase.
+    // The Secret must be in the Velero namespace; its data key is always the BSL name.
+    // Defaults to bsl-encryption if not specified.
     // +optional
-    SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+    SecretName string `json:"secretName,omitempty"`
 
     // AuxiliaryDataEncryptionConfig specifies initialization-time encryption settings for auxiliary data.
     // Configured by the user when creating the BSL CR.
@@ -701,8 +702,9 @@ type BSLKeyRotationRequestSpec struct {
     // BackupStorageLocation is the name of the BackupStorageLocation whose 
     // encryption password will be rotated.
     BackupStorageLocation string `json:"backupStorageLocation"`
-    // TargetSecretKeyRef references the new encryption credential to rotate to.
-    TargetSecretKeyRef corev1.SecretKeySelector `json:"targetSecretKeyRef"`
+    // TargetSecretName references the new encryption credential in the Velero namespace.
+    // It must differ from the active Secret name. Its data key is always BackupStorageLocation.
+    TargetSecretName string `json:"targetSecretName"`
 }
 
 type BSLKeyRotationRequestPhase string
