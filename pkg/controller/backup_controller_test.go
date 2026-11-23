@@ -44,6 +44,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+<<<<<<< HEAD
+=======
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+>>>>>>> 10765840f (Fix ReadyToStart backup recovery after restart (#10629))
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -166,6 +171,26 @@ func TestProcessBackupNonProcessedItems(t *testing.T) {
 			// is what we expect.
 		})
 	}
+}
+
+func TestBackupControllerPredicatesAcceptReadyToStartCreate(t *testing.T) {
+	predicates := backupControllerPredicates()
+
+	readyToStart := defaultBackup().Result()
+	newBackup := defaultBackup().Phase(velerov1api.BackupPhaseNew).Result()
+
+	require.True(t, predicates.CreateFunc(event.CreateEvent{Object: readyToStart}))
+	require.False(t, predicates.CreateFunc(event.CreateEvent{Object: newBackup}))
+	require.True(t, predicates.UpdateFunc(event.UpdateEvent{
+		ObjectOld: newBackup,
+		ObjectNew: readyToStart,
+	}))
+	require.False(t, predicates.UpdateFunc(event.UpdateEvent{
+		ObjectOld: readyToStart,
+		ObjectNew: newBackup,
+	}))
+	require.False(t, predicates.DeleteFunc(event.DeleteEvent{Object: readyToStart}))
+	require.False(t, predicates.GenericFunc(event.GenericEvent{Object: readyToStart}))
 }
 
 func TestProcessBackupValidationFailures(t *testing.T) {
