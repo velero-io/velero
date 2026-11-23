@@ -946,6 +946,66 @@ func TestFindPVBForPod_CanceledContextStopsRetry(t *testing.T) {
 	}
 }
 
+func TestUpdatePVBStatusToFailed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+	pvb.Labels = map[string]string{exposer.ExposeOnGoingLabel: "true"}
+
+	trackingClient := &pvbContextTrackingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb).Build(),
+	}
+
+	sentinel := "sentinel-status-failed"
+	ctx := context.WithValue(t.Context(), pvbTestCtxKey, sentinel)
+	now := time.Now().Truncate(time.Second)
+	errOut := errors.New("data path error")
+
+	err := UpdatePVBStatusToFailed(ctx, trackingClient, pvb, errOut, "data path backup failed", now, logrus.New())
+	assert.Equal(t, errOut, err)
+
+	require.NotNil(t, trackingClient.gotGetCtx)
+	assert.Equal(t, sentinel, trackingClient.gotGetCtx.Value(pvbTestCtxKey))
+	require.NotNil(t, trackingClient.gotUpdateCtx)
+	assert.Equal(t, sentinel, trackingClient.gotUpdateCtx.Value(pvbTestCtxKey))
+
+	updated := &velerov1api.PodVolumeBackup{}
+	require.NoError(t, trackingClient.Client.Get(t.Context(), types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, updated))
+	assert.Equal(t, velerov1api.PodVolumeBackupPhaseFailed, updated.Status.Phase)
+	assert.Contains(t, updated.Status.Message, "data path backup failed")
+	assert.Contains(t, updated.Status.Message, "data path error")
+	require.NotNil(t, updated.Status.CompletionTimestamp)
+	assert.True(t, updated.Status.CompletionTimestamp.Time.Equal(now))
+	assert.NotContains(t, updated.Labels, exposer.ExposeOnGoingLabel)
+}
+
+func TestUpdatePVBStatusToFailed_CanceledContextStopsRetry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, velerov1api.AddToScheme(scheme))
+
+	pvb := pvbBuilder().Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+	c := &pvbConflictingClient{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvb).Build(),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	errOut := errors.New("data path error")
+	done := make(chan error, 1)
+	go func() {
+		done <- UpdatePVBStatusToFailed(ctx, c, pvb, errOut, "data path backup failed", time.Now(), logrus.New())
+	}()
+
+	select {
+	case err := <-done:
+		assert.Equal(t, errOut, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("UpdatePVBStatusToFailed kept retrying the PVB update after its context was canceled")
+	}
+}
+
 func TestAcceptPvb(t *testing.T) {
 	tests := []struct {
 		name        string

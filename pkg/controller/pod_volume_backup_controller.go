@@ -789,7 +789,7 @@ func (r *PodVolumeBackupReconciler) errorOut(ctx context.Context, pvb *velerov1a
 func UpdatePVBStatusToFailed(ctx context.Context, c client.Client, pvb *velerov1api.PodVolumeBackup, errOut error, msg string, time time.Time, log logrus.FieldLogger) error {
 	log.Info("update PVB status to Failed")
 
-	if patchErr := UpdatePVBWithRetry(context.Background(), c, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
+	if patchErr := UpdatePVBWithRetry(ctx, c, types.NamespacedName{Namespace: pvb.Namespace, Name: pvb.Name}, log,
 		func(pvb *velerov1api.PodVolumeBackup) bool {
 			if isPVBInFinalState(pvb) {
 				return false
