@@ -45,3 +45,35 @@ func TestFeatureEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotsAreRemote(t *testing.T) {
+	tests := []struct {
+		name          string
+		cloudProvider string
+		want          bool
+	}{
+		// The point of the helper: kind takes snapshots locally, so the fixed
+		// waits the cloud providers need are dead time there.
+		{"kind", Kind, false},
+		{"kind with CSI", KindCSI, false},
+		{"aws", AWS, true},
+		{"aws with CSI", AwsCSI, true},
+		{"azure", Azure, true},
+		{"gcp", GCP, true},
+		// vSphere is excluded from the pending-snapshot wait at its call site,
+		// not here, so this helper must still report it as remote.
+		{"vsphere", Vsphere, true},
+		// An unrecognized provider keeps the waits rather than silently
+		// dropping them.
+		{"unknown", "some-new-provider", true},
+		{"empty", "", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SnapshotsAreRemote(tc.cloudProvider); got != tc.want {
+				t.Errorf("SnapshotsAreRemote(%q) = %v, want %v", tc.cloudProvider, got, tc.want)
+			}
+		})
+	}
+}

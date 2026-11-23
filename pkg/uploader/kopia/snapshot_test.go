@@ -211,6 +211,98 @@ func TestSnapshotSource(t *testing.T) {
 	}
 }
 
+func TestSnapshotSourceIncomplete(t *testing.T) {
+	// Restore the package-level hooks after exercising the mocked repository.
+	originalSave, originalLoad := saveSnapshotFunc, loadSnapshotFunc
+	originalSetPolicy, originalTree := setPolicyFunc, treeForSourceFunc
+	originalRetention := applyRetentionPolicyFunc
+	t.Cleanup(func() {
+		saveSnapshotFunc, loadSnapshotFunc = originalSave, originalLoad
+		setPolicyFunc, treeForSourceFunc = originalSetPolicy, originalTree
+		applyRetentionPolicyFunc = originalRetention
+	})
+
+	rootDir, err := getLocalFSEntry(t.TempDir())
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name          string
+		reason        string
+		failedEntries []*fs.EntryWithError
+		fallback      bool
+		expectedError string
+	}{
+		{
+			name:          "canceled without entry errors",
+			reason:        "canceled",
+			expectedError: "kopia upload incomplete: canceled",
+		},
+		{
+			name:   "canceled with entry errors preserves cause and fallback",
+			reason: "canceled",
+			failedEntries: []*fs.EntryWithError{
+				{EntryPath: "data/file.txt", Error: "no such file or directory"},
+			},
+			fallback:      true,
+			expectedError: "Error when processing data/file.txt: no such file or directory",
+		},
+		{
+			name:   "canceled with only ignored unknown type errors",
+			reason: "canceled",
+			failedEntries: []*fs.EntryWithError{
+				{EntryPath: "data/socket", Error: fs.ErrUnknown.Error()},
+			},
+			expectedError: "kopia upload incomplete: canceled",
+		},
+		{
+			name:          "other incomplete reason",
+			reason:        "limit reached",
+			expectedError: "kopia upload incomplete: limit reached",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := injectSnapshotFuncs()
+			ctx := t.Context()
+			sourceInfo := snapshot.SourceInfo{UserName: "user", Host: "host", Path: "/data"}
+			policyTree := policy.BuildTree(nil, getDefaultPolicy())
+			incomplete := &snapshot.Manifest{
+				ID:               "unsaved-snapshot",
+				IncompleteReason: tc.reason,
+				Stats:            snapshot.Stats{TotalFileSize: 1024},
+				RootEntry: &snapshot.DirEntry{
+					DirSummary: &fs.DirectorySummary{FailedEntries: tc.failedEntries},
+				},
+			}
+			if tc.fallback {
+				s.snapshotMock.On("LoadSnapshot", mock.Anything, mock.Anything, mock.Anything).
+					Return(nil, errors.New("parent snapshot unavailable")).Once()
+			}
+			s.policyMock.On("SetPolicy", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			s.policyMock.On("TreeForSource", mock.Anything, mock.Anything, mock.Anything).Return(policyTree, nil).Once()
+			// Policy setup flushes once; an incomplete snapshot must not be flushed again.
+			s.repoWriterMock.On("Flush", mock.Anything).Return(nil).Once()
+			s.uploderMock.On("Upload", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return(incomplete, nil).Once()
+
+			id, size, fallback, err := SnapshotSource(ctx, s.repoWriterMock, s.uploderMock,
+				sourceInfo, rootDir, !tc.fallback, "parent", nil, nil,
+				&fakeProgressUpdater{}, logrus.New(), "test")
+
+			require.EqualError(t, err, tc.expectedError)
+			assert.Empty(t, id)
+			assert.Zero(t, size)
+			assert.Equal(t, tc.fallback, fallback)
+			assert.Empty(t, incomplete.Pins)
+			s.snapshotMock.AssertNotCalled(t, "SaveSnapshot", mock.Anything, mock.Anything, mock.Anything)
+			s.policyMock.AssertNotCalled(t, "ApplyRetentionPolicy", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+			s.snapshotMock.AssertExpectations(t)
+			s.policyMock.AssertExpectations(t)
+			s.repoWriterMock.AssertExpectations(t)
+			s.uploderMock.AssertExpectations(t)
+		})
+	}
+}
+
 func TestReportSnapshotStatus(t *testing.T) {
 	testCases := []struct {
 		fallback         bool

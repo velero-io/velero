@@ -45,6 +45,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	kubetesting "k8s.io/client-go/testing"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -909,13 +910,14 @@ func TestRestoreResourceFiltering(t *testing.T) {
 
 func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
 	tests := []struct {
-		name         string
-		restore      *velerov1api.Restore
-		backup       *velerov1api.Backup
-		apiResources []*test.APIResource
-		tarball      io.Reader
-		want         map[*test.APIResource][]string
-		expectError  bool
+		name             string
+		restore          *velerov1api.Restore
+		backup           *velerov1api.Backup
+		apiResources     []*test.APIResource
+		tarball          io.Reader
+		want             map[*test.APIResource][]string
+		wantNoNamespaces []string
+		expectError      bool
 	}{
 		{
 			name:    "resourceMustHave item in velero namespace is restored",
@@ -935,7 +937,7 @@ func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:    "resourceMustHave item outside velero namespace is rejected and produces error",
+			name:    "resourceMustHave item outside velero namespace is restored into velero namespace",
 			restore: defaultRestore().IncludedNamespaces("app-foo").Result(),
 			backup:  defaultBackup().Result(),
 			tarball: test.NewTarWriter(t).
@@ -947,9 +949,46 @@ func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
 				test.DataUploads(),
 			},
 			want: map[*test.APIResource][]string{
-				test.DataUploads(): {},
+				test.DataUploads(): {"velero/du-2"},
 			},
-			expectError: true,
+			wantNoNamespaces: []string{"attacker-ns"},
+			expectError:      false,
+		},
+		{
+			name:    "resourceMustHave item from a backup taken by velero in another namespace is restored into velero namespace",
+			restore: builder.ForRestore("velero-b", "restore-1").Backup("backup-1").IncludedNamespaces("app-foo").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("datauploads.velero.io",
+					builder.ForDataUpload("velero", "du-1").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.DataUploads(),
+			},
+			want: map[*test.APIResource][]string{
+				test.DataUploads(): {"velero-b/du-1"},
+			},
+			wantNoNamespaces: []string{"velero"},
+			expectError:      false,
+		},
+		{
+			name:    "resourceMustHave item ignores namespace mappings and is restored into velero namespace",
+			restore: defaultRestore().NamespaceMappings("velero", "mapped-ns").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).
+				AddItems("datauploads.velero.io",
+					builder.ForDataUpload("velero", "du-1").Result(),
+				).
+				Done(),
+			apiResources: []*test.APIResource{
+				test.DataUploads(),
+			},
+			want: map[*test.APIResource][]string{
+				test.DataUploads(): {"velero/du-1"},
+			},
+			wantNoNamespaces: []string{"mapped-ns"},
+			expectError:      false,
 		},
 	}
 
@@ -984,8 +1023,108 @@ func TestRestoreMustHaveResourceNamespaceEnforcement(t *testing.T) {
 				assert.True(t, errs.IsEmpty(), "expected no errors but got %v", errs)
 			}
 			assertAPIContents(t, h, tc.want)
+
+			for _, ns := range tc.wantNoNamespaces {
+				_, err := h.KubeClient.CoreV1().Namespaces().Get(t.Context(), ns, metav1.GetOptions{})
+				assert.True(t, apierrors.IsNotFound(err), "expected namespace %q not to be created, got err: %v", ns, err)
+			}
 		})
 	}
+}
+
+// TestRestoreDataUploadResultInVeleroNamespace verifies that a DataUpload backed up by velero
+// installed in another namespace is turned into a DataUploadResult ConfigMap in the namespace
+// of the restoring velero, which is where the CSI PVC restore action looks for it.
+func TestRestoreDataUploadResultInVeleroNamespace(t *testing.T) {
+	h := newHarness(t)
+	h.DiscoveryClient.WithAPIResource(test.DataUploads())
+	h.DiscoveryClient.WithAPIResource(test.Pods())
+	require.NoError(t, h.discoveryHelper.Refresh())
+
+	require.NoError(t, h.restorer.kbClient.Create(t.Context(),
+		builder.ForBackup("velero-b", "backup-1").StorageLocation("default").Result()))
+
+	dataUploadAction := riav1.NewDataUploadRetrieveAction(h.log, h.restorer.kbClient)
+	selector, err := dataUploadAction.AppliesTo()
+	require.NoError(t, err)
+	// The restore deletes the DataUploadResult ConfigMaps when it finishes, so list them right after the action runs.
+	cmList := new(corev1api.ConfigMapList)
+	action := &pluggableAction{
+		selector: selector,
+		executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+			output, err := dataUploadAction.Execute(input)
+			assert.NoError(t, h.restorer.kbClient.List(t.Context(), cmList, crclient.MatchingLabels{
+				velerov1api.RestoreUIDLabel:       "restore-uid",
+				velerov1api.PVCNamespaceNameLabel: "app.pvc-1",
+				velerov1api.ResourceUsageLabel:    string(velerov1api.VeleroResourceUsageDataUploadResult),
+			}))
+			return output, err
+		},
+	}
+
+	data := &Request{
+		Log: h.log,
+		Restore: builder.ForRestore("velero-b", "restore-1").
+			ObjectMeta(builder.WithUID("restore-uid")).
+			Backup("backup-1").
+			IncludedNamespaces("app").
+			Result(),
+		Backup: defaultBackup().Result(),
+		BackupReader: test.NewTarWriter(t).
+			AddItems("pods", builder.ForPod("app", "pod-1").Result()).
+			AddItems("datauploads.velero.io",
+				builder.ForDataUpload("velero", "du-1").SourceNamespace("app").SourcePVC("pvc-1").Result(),
+			).
+			Done(),
+	}
+	_, errs := h.restorer.Restore(data, []riav2.RestoreItemAction{action}, nil)
+	require.True(t, errs.IsEmpty(), "expected no errors but got %v", errs)
+
+	require.Len(t, cmList.Items, 1)
+	assert.Equal(t, "velero-b", cmList.Items[0].Namespace)
+
+	_, err = h.KubeClient.CoreV1().Namespaces().Get(t.Context(), "velero", metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(err), "expected namespace %q not to be created, got err: %v", "velero", err)
+}
+
+// TestRestoreMustHaveAdditionalItemInVeleroNamespace verifies that a resourceMustHave item returned as an
+// additional item by a restore item action is restored into the namespace of the restoring velero, the same as
+// when the item is restored from the backup contents, and that its namespace in the backup is not created.
+func TestRestoreMustHaveAdditionalItemInVeleroNamespace(t *testing.T) {
+	h := newHarness(t)
+	h.DiscoveryClient.WithAPIResource(test.DataUploads())
+	h.DiscoveryClient.WithAPIResource(test.Pods())
+	require.NoError(t, h.discoveryHelper.Refresh())
+
+	action := &pluggableAction{
+		selector: velero.ResourceSelector{IncludedResources: []string{"pods"}},
+		executeFunc: func(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+			return &velero.RestoreItemActionExecuteOutput{
+				UpdatedItem: input.Item,
+				AdditionalItems: []velero.ResourceIdentifier{
+					{GroupResource: schema.GroupResource{Group: "velero.io", Resource: "datauploads"}, Namespace: "velero", Name: "du-1"},
+				},
+			}, nil
+		},
+	}
+
+	data := &Request{
+		Log:     h.log,
+		Restore: builder.ForRestore("velero-b", "restore-1").Backup("backup-1").IncludedNamespaces("app").Result(),
+		Backup:  defaultBackup().Result(),
+		BackupReader: test.NewTarWriter(t).
+			AddItems("pods", builder.ForPod("app", "pod-1").Result()).
+			AddItems("datauploads.velero.io", builder.ForDataUpload("velero", "du-1").Result()).
+			Done(),
+	}
+	_, errs := h.restorer.Restore(data, []riav2.RestoreItemAction{action}, nil)
+	require.True(t, errs.IsEmpty(), "expected no errors but got %v", errs)
+
+	assertAPIContents(t, h, map[*test.APIResource][]string{
+		test.DataUploads(): {"velero-b/du-1"},
+	})
+	_, err := h.KubeClient.CoreV1().Namespaces().Get(t.Context(), "velero", metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(err), "expected namespace %q not to be created, got err: %v", "velero", err)
 }
 
 // TestRestoreNamespaceMapping runs restores with namespace mappings specified,

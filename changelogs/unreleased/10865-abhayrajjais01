@@ -1,0 +1,1 @@
+Use the request context when fetching the BackupStorageLocation during backup deletion

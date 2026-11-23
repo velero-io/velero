@@ -1,0 +1,1 @@
+Skip the AWS-specific snapshot waits in the e2e suite when running on kind

@@ -315,7 +315,7 @@ func (s *nodeAgentServer) run() {
 	var loadAffinity []*kube.LoadAffinity
 	if s.dataPathConfigs != nil && len(s.dataPathConfigs.LoadAffinity) > 0 {
 		loadAffinity = s.dataPathConfigs.LoadAffinity
-		s.logger.Infof("Using customized loadAffinity %v", loadAffinity)
+		s.logger.Infof("Using customized loadAffinity %+v", loadAffinity)
 	}
 
 	var backupPVCConfig map[string]velerotypes.BackupPVC

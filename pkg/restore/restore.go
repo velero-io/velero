@@ -1010,18 +1010,6 @@ func (ctx *restoreContext) processSelectedResource(
 				}
 			}
 
-			// Make sure the resource in the "resourceMustHave" set will always be created in the namespace where velero is installed.
-			if ctx.resourceMustHave.Has(groupResource.String()) && targetNS != "" && targetNS != ctx.restore.Namespace {
-				err := fmt.Errorf("resource %s/%s is must-have per velero internal setting, and is namespace-scoped, but its target namespace %q is not Velero's namespace %q", groupResource.String(), selectedItem.name, targetNS, ctx.restore.Namespace)
-				ctx.log.WithFields(logrus.Fields{
-					"resource":        groupResource.String(),
-					"name":            selectedItem.name,
-					"targetNamespace": targetNS,
-					"veleroNamespace": ctx.restore.Namespace,
-				}).Error(err.Error())
-				errs.Add(targetNS, err)
-				continue
-			}
 			// If we don't know whether this namespace exists yet, attempt to create
 			// it in order to ensure it exists. Try to get it from the backup tarball
 			// (in order to get any backed-up metadata), but if we don't find it there,
@@ -1037,6 +1025,7 @@ func (ctx *restoreContext) processSelectedResource(
 
 				ns := getNamespace(logger, nsPath, targetNS)
 				_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(
+					go_context.Background(),
 					ns,
 					ctx.namespaceClient,
 					ctx.resourceTerminatingTimeout,
@@ -1467,7 +1456,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		}
 
 		nsToEnsure := getNamespace(restoreLogger, nsPath, namespace)
-		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
+		_, nsCreated, err := kube.EnsureNamespaceExistsAndIsReady(go_context.Background(), nsToEnsure, ctx.namespaceClient, ctx.resourceTerminatingTimeout, ctx.resourceDeletionStatusTracker)
 		if err != nil {
 			errs.AddVeleroError(err)
 			return warnings, errs, itemExists
@@ -1776,12 +1765,7 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 				continue
 			}
 
-			additionalItemNamespace := additionalItem.Namespace
-			if additionalItemNamespace != "" {
-				if remapped, ok := ctx.restore.Spec.NamespaceMapping[additionalItemNamespace]; ok {
-					additionalItemNamespace = remapped
-				}
-			}
+			additionalItemNamespace := ctx.getTargetNamespace(additionalItem.GroupResource.String(), additionalItem.Namespace)
 
 			w, e, additionalItemExists := ctx.restoreItem(additionalObj, additionalItem.GroupResource, additionalItemNamespace, mustIncludeAdditionalItems)
 			if additionalItemExists {
@@ -2772,6 +2756,22 @@ func (ctx *restoreContext) getOrderedResourceCollection(
 	return restoreResourceCollection, processedResources, warnings, errs
 }
 
+// getTargetNamespace returns the namespace that an item backed up in originalNamespace is restored into.
+// The resources in the "resourceMustHave" set are always restored into the namespace where velero is installed,
+// which may differ from the velero namespace of the cluster where the backup was taken.
+func (ctx *restoreContext) getTargetNamespace(resource string, originalNamespace string) string {
+	if originalNamespace == "" {
+		return ""
+	}
+	if ctx.resourceMustHave.Has(resource) {
+		return ctx.restore.Namespace
+	}
+	if target, ok := ctx.restore.Spec.NamespaceMapping[originalNamespace]; ok {
+		return target
+	}
+	return originalNamespace
+}
+
 // getSelectedRestoreableItems applies Kubernetes selectors on individual items
 // of each resource type to create a list of items which will be actually
 // restored.
@@ -2786,15 +2786,15 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 		restorable.selectedItemsByNamespace = make(map[string][]restoreableItem)
 	}
 
-	targetNamespace := originalNamespace
-	if target, ok := ctx.restore.Spec.NamespaceMapping[originalNamespace]; ok {
-		targetNamespace = target
-	}
+	targetNamespace := ctx.getTargetNamespace(resource, originalNamespace)
 
-	if targetNamespace != "" {
-		ctx.log.Infof("Resource '%s' will be restored into namespace '%s'", resource, targetNamespace)
-	} else {
+	switch {
+	case targetNamespace == "":
 		ctx.log.Infof("Resource '%s' will be restored at cluster scope", resource)
+	case ctx.resourceMustHave.Has(resource) && targetNamespace != originalNamespace:
+		ctx.log.Infof("Resource '%s' is must-have per velero internal setting, it will be restored into velero's namespace '%s' instead of '%s'", resource, targetNamespace, originalNamespace)
+	default:
+		ctx.log.Infof("Resource '%s' will be restored into namespace '%s'", resource, targetNamespace)
 	}
 
 	resourceForPath := resource

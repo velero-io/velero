@@ -148,11 +148,11 @@ func (t *TestCase) Restore() error {
 	// the snapshots of AWS may be still in pending status when do the restore, wait for a while
 	// to avoid this https://github.com/velero-io/velero/issues/1799
 	// TODO remove this after https://github.com/velero-io/velero/issues/3533 is fixed
-	By("Waiting 5 minutes to make sure the snapshots are ready...", func() {
-		if t.UseVolumeSnapshots && veleroCfg.CloudProvider != Vsphere {
+	if t.UseVolumeSnapshots && veleroCfg.CloudProvider != Vsphere && SnapshotsAreRemote(veleroCfg.CloudProvider) {
+		By("Waiting 5 minutes to make sure the snapshots are ready...", func() {
 			time.Sleep(5 * time.Minute)
-		}
-	})
+		})
+	}
 
 	By("Start to restore ......", func() {
 		if t.RestorePhaseExpect == "" {

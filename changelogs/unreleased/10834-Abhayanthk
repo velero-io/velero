@@ -1,0 +1,1 @@
+Fix cross-namespace data mover restore regressed by #10333

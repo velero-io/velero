@@ -49,6 +49,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
 	cliinstall "github.com/velero-io/velero/pkg/cmd/cli/install"
+	"github.com/velero-io/velero/pkg/cmd/util/cacert"
 	"github.com/velero-io/velero/pkg/cmd/util/flag"
 	veleroexec "github.com/velero-io/velero/pkg/util/exec"
 	"github.com/velero-io/velero/test"
@@ -257,6 +258,17 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	io.Prefix = veleroCfg.BSLPrefix
 	io.BackupStorageConfig = flag.NewMap()
 	io.BackupStorageConfig.Set(veleroCfg.BSLConfig)
+
+	// CACertFile is the CA bundle used to verify TLS connections to the object
+	// store. It is passed through to `velero install --cacert`, which stores it
+	// in the BSL's spec.objectStorage.caCert.
+	if veleroCfg.CACertFile != "" {
+		realPath, err := filepath.Abs(veleroCfg.CACertFile)
+		if err != nil {
+			return nil, err
+		}
+		io.CACertFile = realPath
+	}
 
 	io.VolumeSnapshotConfig = flag.NewMap()
 	io.VolumeSnapshotConfig.Set(veleroCfg.VSLConfig)
@@ -635,6 +647,7 @@ func RunDebug(ctx context.Context, veleroCLI, veleroNamespace, backup, restore s
 }
 
 func VeleroCreateBackupLocation(ctx context.Context,
+	client kbclient.Client,
 	veleroCLI,
 	veleroNamespace,
 	name,
@@ -645,6 +658,79 @@ func VeleroCreateBackupLocation(ctx context.Context,
 	secretName,
 	secretKey string,
 ) error {
+	// An additional location pointing at the same object store as the default
+	// one needs the same CA bundle. `velero install --cacert` already stored it
+	// in the default BSL, so take it from there instead of asking for the path
+	// a second time.
+	caCert, err := cacert.GetCACertFromBSL(ctx, client, veleroNamespace, common.DefaultBSLName)
+	if err != nil {
+		return err
+	}
+
+	var caCertFile string
+	cleanup := func() {}
+	if caCert != "" {
+		caCertFile, cleanup, err = writeTempCACert([]byte(caCert))
+		if err != nil {
+			return err
+		}
+	}
+	defer cleanup()
+
+	args := createBackupLocationArgs(
+		veleroNamespace,
+		name,
+		objectStoreProvider,
+		bucket,
+		prefix,
+		config,
+		secretName,
+		secretKey,
+		caCertFile,
+	)
+
+	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
+		return err
+	}
+
+	return CheckBSL(ctx, veleroNamespace, name)
+}
+
+// writeTempCACert writes a CA bundle to a temporary file so it can be handed to
+// a Velero CLI flag that takes a path. The second return value removes the
+// file; it is always safe to call.
+func writeTempCACert(data []byte) (string, func(), error) {
+	noop := func() {}
+
+	f, err := os.CreateTemp("", "bsl-ca-cert-*.crt")
+	if err != nil {
+		return "", noop, errors.Wrap(err, "failed to create a temporary file for the BSL CA bundle")
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", noop, errors.Wrap(err, "failed to write the BSL CA bundle to a temporary file")
+	}
+
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
+}
+
+// createBackupLocationArgs builds the argument list for
+// `velero backup-location create`. It is separated from
+// VeleroCreateBackupLocation so that the argument construction can be verified
+// without invoking the Velero CLI.
+func createBackupLocationArgs(
+	veleroNamespace,
+	name,
+	objectStoreProvider,
+	bucket,
+	prefix,
+	config,
+	secretName,
+	secretKey,
+	caCertFile string,
+) []string {
 	args := []string{
 		"--namespace", veleroNamespace,
 		"create", "backup-location", name,
@@ -660,15 +746,15 @@ func VeleroCreateBackupLocation(ctx context.Context,
 		args = append(args, "--config", config)
 	}
 
+	if caCertFile != "" {
+		args = append(args, "--cacert", caCertFile)
+	}
+
 	if secretName != "" && secretKey != "" {
 		args = append(args, "--credential", fmt.Sprintf("%s=%s", secretName, secretKey))
 	}
 
-	if err := VeleroCmdExec(ctx, veleroCLI, args); err != nil {
-		return err
-	}
-
-	return CheckBSL(ctx, veleroNamespace, name)
+	return args
 }
 
 func VeleroVersion(ctx context.Context, veleroCLI, veleroNamespace string) error {
@@ -1568,30 +1654,6 @@ func DeletePVs(ctx context.Context, client TestClient, pvList []string) error {
 		}
 	}
 	return nil
-}
-
-func CleanAllRetainedPV(ctx context.Context, client TestClient) {
-	pvNameList, err := GetAllPVNames(ctx, client)
-	if err != nil {
-		fmt.Println("fail to list PV")
-	}
-	for _, pv := range pvNameList {
-		args := []string{"patch", "pv", pv, "-p", "{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Delete\"}}"}
-		fmt.Println(args)
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err := veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to patch PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-
-		args = []string{"delete", "pv", pv, "--timeout=60s"}
-		fmt.Println(args)
-		cmd = exec.CommandContext(ctx, "kubectl", args...)
-		stdout, errMsg, err = veleroexec.RunCommand(cmd)
-		if err != nil {
-			fmt.Printf("fail to delete PV %s reclaim policy to delete: stdout: %s, stderr: %s", pv, stdout, errMsg)
-		}
-	}
 }
 
 func KubectlGetBackupRepository(ctx context.Context, uploaderType, veleroNamespace string) ([]string, error) {

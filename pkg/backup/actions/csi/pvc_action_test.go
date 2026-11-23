@@ -1805,6 +1805,66 @@ func TestUpdateVGSCreatedVS(t *testing.T) {
 	}
 }
 
+func TestUpdateVGSCreatedVSSanitizesLongBackupName(t *testing.T) {
+	// A Backup name can be up to 253 characters, but it is written as a
+	// Kubernetes label value on the VolumeSnapshots created by a VGS, and
+	// label values are capped at 63 bytes.
+	longName := strings.Repeat("a", 64)
+	backup := &velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: longName,
+			UID:  "backup-uid-123",
+		},
+	}
+
+	vgs := &volumegroupsnapshotv1.VolumeGroupSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-vgs",
+			Namespace: "ns",
+			UID:       "vgs-uid-123",
+		},
+	}
+
+	vs := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vs-long-name",
+			Namespace: vgs.Namespace,
+		},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			ReadyToUse:              ptr.To(true),
+			VolumeGroupSnapshotName: ptr.To(vgs.Name),
+		},
+		Spec: snapshotv1api.VolumeSnapshotSpec{
+			Source: snapshotv1api.VolumeSnapshotSource{
+				PersistentVolumeClaimName: ptr.To("pvc-1"),
+			},
+		},
+	}
+
+	client := velerotest.NewFakeControllerRuntimeClient(t, vgs, vs)
+	action := &pvcBackupItemAction{
+		log:      velerotest.NewLogger(),
+		crClient: client,
+	}
+
+	vsMap := map[string]*snapshotv1api.VolumeSnapshot{"pvc-1": vs}
+	require.NoError(t, action.updateVGSCreatedVS(t.Context(), vsMap, vgs, backup))
+
+	updated := &snapshotv1api.VolumeSnapshot{}
+	require.NoError(t, client.Get(t.Context(), crclient.ObjectKey{Name: vs.Name, Namespace: vs.Namespace}, updated))
+
+	nameLabel := updated.Labels[velerov1api.BackupNameLabel]
+	assert.Equal(t, label.GetValidName(longName), nameLabel)
+	assert.Len(t, nameLabel, 63, "backup name label must fit the 63-byte label value limit")
+
+	// The lookup path also uses label.GetValidName, so the sanitized label must
+	// remain discoverable.
+	found, err := action.findExistingVSForBackup(t.Context(), backup.UID, longName, "pvc-1", vs.Namespace)
+	require.NoError(t, err)
+	require.NotNil(t, found, "VS labeled with a sanitized long backup name should be discoverable")
+	assert.Equal(t, vs.Name, found.Name)
+}
+
 func TestPatchVGSCDeletionPolicy(t *testing.T) {
 	tests := []struct {
 		name           string

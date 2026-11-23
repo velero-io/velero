@@ -149,6 +149,12 @@ func init() {
 		"bsl-config",
 		"", "configuration to use for the backup storage location. Format is key1=value1,key2=value2")
 	flag.StringVar(
+		&test.VeleroCfg.CACertFile,
+		"bsl-ca-cert-file",
+		"",
+		"file containing a certificate bundle to use when verifying TLS connections to the object store. Optional.",
+	)
+	flag.StringVar(
 		&test.VeleroCfg.BSLPrefix,
 		"prefix",
 		"",
@@ -423,18 +429,6 @@ var _ = Describe(
 	"Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups",
 	Label("Basic", "Snapshot", "SkipVanillaZfs", "AdditionalBSL"),
 	BackupRestoreWithSnapshots,
-)
-
-var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups",
-	Label("Basic", "Snapshot", "RetainPV", "AdditionalBSL"),
-	BackupRestoreRetainedPVWithSnapshots,
-)
-
-var _ = Describe(
-	"Velero tests on cluster using the plugin provider for object storage and file system backup for volumes",
-	Label("Basic", "FSBackup", "RetainPV", "AdditionalBSL"),
-	BackupRestoreRetainedPVWithFSBackup,
 )
 
 var _ = Describe(

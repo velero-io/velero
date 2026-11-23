@@ -72,12 +72,12 @@ func GenerateJobName(repo string) string {
 }
 
 // DeleteOldJobs deletes old maintenance jobs and keeps the latest N jobs
-func DeleteOldJobs(cli client.Client, repo velerov1api.BackupRepository, keep int, logger logrus.FieldLogger) error {
+func DeleteOldJobs(ctx context.Context, cli client.Client, repo velerov1api.BackupRepository, keep int, logger logrus.FieldLogger) error {
 	logger.Infof("Start to delete old maintenance jobs. %d jobs will be kept.", keep)
 	// Get the maintenance job list by label
 	jobList := &batchv1api.JobList{}
 	err := cli.List(
-		context.TODO(),
+		ctx,
 		jobList,
 		&client.ListOptions{
 			Namespace: repo.Namespace,
@@ -98,7 +98,7 @@ func DeleteOldJobs(cli client.Client, repo velerov1api.BackupRepository, keep in
 			return jobList.Items[i].CreationTimestamp.Before(&jobList.Items[j].CreationTimestamp)
 		})
 		for i := 0; i < len(jobList.Items)-keep; i++ {
-			err = cli.Delete(context.TODO(), &jobList.Items[i], client.PropagationPolicy(metav1.DeletePropagationBackground))
+			err = cli.Delete(ctx, &jobList.Items[i], client.PropagationPolicy(metav1.DeletePropagationBackground))
 			if err != nil {
 				return err
 			}
@@ -153,10 +153,10 @@ func waitForJobComplete(ctx context.Context, client client.Client, ns string, jo
 	return ret, err
 }
 
-func getResultFromJob(cli client.Client, job *batchv1api.Job) (string, error) {
+func getResultFromJob(ctx context.Context, cli client.Client, job *batchv1api.Job) (string, error) {
 	// Get the maintenance job related pod by label selector
 	podList := &corev1api.PodList{}
-	err := cli.List(context.TODO(), podList, client.InNamespace(job.Namespace), client.MatchingLabels(map[string]string{"job-name": job.Name}))
+	err := cli.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels(map[string]string{"job-name": job.Name}))
 	if err != nil {
 		return "", err
 	}
@@ -357,7 +357,7 @@ func WaitJobComplete(cli client.Client, ctx context.Context, jobName, ns string,
 
 	result := ""
 	if maintenanceJob.Status.Failed > 0 {
-		if r, err := getResultFromJob(cli, maintenanceJob); err != nil {
+		if r, err := getResultFromJob(ctx, cli, maintenanceJob); err != nil {
 			log.WithError(err).Warn("Failed to get maintenance job result")
 			result = "Repo maintenance failed but result is not retrievable"
 		} else {
@@ -373,7 +373,7 @@ func WaitJobComplete(cli client.Client, ctx context.Context, jobName, ns string,
 func WaitAllJobsComplete(ctx context.Context, cli client.Client, repo *velerov1api.BackupRepository, limit int, log logrus.FieldLogger) ([]velerov1api.BackupRepositoryMaintenanceStatus, error) {
 	jobList := &batchv1api.JobList{}
 	err := cli.List(
-		context.TODO(),
+		ctx,
 		jobList,
 		&client.ListOptions{
 			Namespace: repo.Namespace,
@@ -420,7 +420,7 @@ func WaitAllJobsComplete(ctx context.Context, cli client.Client, repo *velerov1a
 
 		message := ""
 		if job.Status.Failed > 0 {
-			if msg, err := getResultFromJob(cli, job); err != nil {
+			if msg, err := getResultFromJob(ctx, cli, job); err != nil {
 				log.WithError(err).Warnf("Failed to get result of maintenance job %s", job.Name)
 				message = fmt.Sprintf("Repo maintenance failed but result is not retrievable, err: %v", err)
 			} else {
