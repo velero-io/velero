@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	testclocks "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -215,6 +216,73 @@ func TestRestoreFinalizerReconcile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRestoreFinalizerReconcileResultsUploadFails(t *testing.T) {
+	// When the backup storage location rejects writes (e.g. the bucket is over
+	// quota), the restore must still reach a terminal phase instead of retrying
+	// the results upload in FinalizingPartiallyFailed forever.
+	origBackoff := objectStorageBackoff
+	objectStorageBackoff = wait.Backoff{Duration: time.Millisecond, Factor: 1.0, Steps: 3}
+	t.Cleanup(func() { objectStorageBackoff = origBackoff })
+
+	now := time.Now().Truncate(time.Second)
+	quotaErr := errors.New("PutObject: 403 QuotaExceeded")
+
+	var (
+		fakeClient    = velerotest.NewFakeControllerRuntimeClientBuilder(t).Build()
+		logger        = velerotest.NewLogger()
+		pluginManager = &pluginmocks.Manager{}
+		backupStore   = &persistencemocks.BackupStore{}
+	)
+
+	r := NewRestoreFinalizerReconciler(
+		logger,
+		velerov1api.DefaultNamespace,
+		fakeClient,
+		func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager },
+		NewFakeSingleObjectBackupStoreGetter(backupStore),
+		metrics.NewServerMetrics(),
+		fakeClient,
+		hook.NewMultiHookTracker(),
+		10*time.Minute,
+	)
+	r.clock = testclocks.NewFakeClock(now)
+
+	restore := builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Phase(velerov1api.RestorePhaseFinalizing).Backup("backup-1").Result()
+	backup := defaultBackup().StorageLocation("default").Result()
+	location := builder.ForBackupStorageLocation(velerov1api.DefaultNamespace, "default").Provider("myCloud").Bucket("bucket").Result()
+
+	require.NoError(t, r.Client.Create(t.Context(), restore))
+	require.NoError(t, r.Client.Create(t.Context(), backup))
+	require.NoError(t, r.Client.Create(t.Context(), location))
+
+	backupStore.On("GetBackupVolumeInfos", backup.Name).Return(nil, nil)
+	backupStore.On("GetRestoreVolumeInfos", restore.Name).Return([]*volume.RestoreVolumeInfo{}, nil)
+	backupStore.On("GetRestoredResourceList", restore.Name).Return(map[string][]string{}, nil)
+	backupStore.On("GetRestoreItemOperations", restore.Name).Return([]*itemoperation.RestoreOperation{}, nil)
+	// Both writes the finalizer performs are rejected by the object store.
+	backupStore.On("PutRestoreVolumeInfo", restore.Name, mock.Anything).Return(quotaErr)
+	backupStore.On("GetRestoreResults", restore.Name).Return(map[string]results.Result{}, nil)
+	backupStore.On("PutRestoreResults", mock.Anything, restore.Name, mock.Anything).Return(quotaErr)
+	pluginManager.On("GetRestoreItemActionsV2").Return(nil, nil)
+	pluginManager.On("CleanupClients")
+
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: restore.Namespace,
+		Name:      restore.Name,
+	}})
+	require.NoError(t, err)
+
+	restoreAfter := velerov1api.Restore{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Namespace: restore.Namespace, Name: restore.Name}, &restoreAfter))
+	assert.Equal(t, velerov1api.RestorePhasePartiallyFailed, restoreAfter.Status.Phase)
+	// One error from the volume info upload, one from the results upload.
+	assert.Equal(t, 2, restoreAfter.Status.Errors)
+	require.NotNil(t, restoreAfter.Status.CompletionTimestamp)
+	expectedCompletedTime := metav1.NewTime(now)
+	require.True(t, expectedCompletedTime.Equal(restoreAfter.Status.CompletionTimestamp))
+	backupStore.AssertNumberOfCalls(t, "PutRestoreResults", objectStorageBackoff.Steps)
 }
 
 func TestUpdateResult(t *testing.T) {

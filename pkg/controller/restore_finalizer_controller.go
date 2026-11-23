@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -210,10 +211,17 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	if warningCnt > 0 || errCnt > 0 {
-		err := r.updateResults(backupStore, restore, &warnings, &errs)
-		if err != nil {
-			log.WithError(err).Error("error updating results")
-			return ctrl.Result{}, errors.Wrap(err, "error updating results")
+		if err := r.updateResults(backupStore, restore, &warnings, &errs); err != nil {
+			// The restored resources and volume data are already in place; only the
+			// results file could not be read or written in the backup storage
+			// location (for example because the bucket is over quota). Returning the
+			// error would hold the restore in Finalizing/FinalizingPartiallyFailed
+			// forever, since every requeue fails the same way. Record the failure as
+			// an error and let the restore reach a terminal phase instead, as the
+			// restore controller does when its own uploads fail.
+			log.WithError(err).Error("error updating restore results in backup storage, marking the restore as partially failed")
+			restore.Status.Errors++
+			restore.Status.Phase = velerov1api.RestorePhaseFinalizingPartiallyFailed
 		}
 	}
 
@@ -245,7 +253,12 @@ func (r *restoreFinalizerReconciler) updateResults(backupStore persistence.Backu
 		"warnings": warnings,
 		"errors":   errs,
 	}
-	if err := putResults(restore, m, backupStore); err != nil {
+	// Retry with objectStorageBackoff so a transient object storage error does not
+	// fail the restore, while a persistent one (e.g. the bucket is over quota) is
+	// reported within a bounded time instead of blocking the reconcile.
+	if err := retry.OnError(objectStorageBackoff, func(err error) bool { return err != nil },
+		func() error { return putResults(restore, m, backupStore) },
+	); err != nil {
 		return errors.Wrap(err, "error putting restore results")
 	}
 
