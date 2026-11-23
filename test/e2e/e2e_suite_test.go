@@ -149,6 +149,12 @@ func init() {
 		"bsl-config",
 		"", "configuration to use for the backup storage location. Format is key1=value1,key2=value2")
 	flag.StringVar(
+		&test.VeleroCfg.CACertFile,
+		"bsl-ca-cert-file",
+		"",
+		"file containing a certificate bundle to use when verifying TLS connections to the object store. Optional.",
+	)
+	flag.StringVar(
 		&test.VeleroCfg.BSLPrefix,
 		"prefix",
 		"",
