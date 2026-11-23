@@ -1,0 +1,1 @@
+Finish a restore as PartiallyFailed when its results, resource list or volume info cannot be uploaded to the backup storage location (e.g. the bucket is over quota) instead of leaving it in FinalizingPartiallyFailed forever
