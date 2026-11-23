@@ -438,6 +438,9 @@ func installVeleroServer(
 	if len(options.Prefix) > 0 {
 		args = append(args, "--prefix", options.Prefix)
 	}
+	if len(options.CACertFile) > 0 {
+		args = append(args, "--cacert", options.CACertFile)
+	}
 	//Treat ServiceAccountName priority higher than SecretFile
 	if len(options.ServiceAccountName) > 0 {
 		args = append(args, "--service-account-name", options.ServiceAccountName)
