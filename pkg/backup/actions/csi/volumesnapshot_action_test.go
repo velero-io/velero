@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -307,6 +308,64 @@ func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 			require.Equal(t, tc.expectedHandles, handles)
 		})
 	}
+}
+
+type v1beta1VGSBackupClient struct {
+	crclient.Client
+}
+
+func (c *v1beta1VGSBackupClient) Get(ctx context.Context, key crclient.ObjectKey, obj crclient.Object, opts ...crclient.GetOption) error {
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		switch u.GetKind() {
+		case "VolumeGroupSnapshot":
+			u.Object = map[string]any{
+				"apiVersion": "groupsnapshot.storage.k8s.io/v1beta1",
+				"kind":       "VolumeGroupSnapshot",
+				"metadata":   map[string]any{"namespace": key.Namespace, "name": key.Name},
+				"status":     map[string]any{"boundVolumeGroupSnapshotContentName": "group-content"},
+			}
+			return nil
+		case "VolumeGroupSnapshotContent":
+			u.Object = map[string]any{
+				"apiVersion": "groupsnapshot.storage.k8s.io/v1beta1",
+				"kind":       "VolumeGroupSnapshotContent",
+				"metadata":   map[string]any{"name": key.Name},
+				"status": map[string]any{
+					"volumeGroupSnapshotHandle": "group-handle",
+					"volumeSnapshotHandlePairList": []any{
+						map[string]any{"volumeHandle": "volume-1", "snapshotHandle": "snapshot-1"},
+						map[string]any{"volumeHandle": "volume-2", "snapshotHandle": "snapshot-2"},
+					},
+				},
+			}
+			return nil
+		}
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func TestVSExecuteRecordsSkippedGroupMemberOnV1beta1OnlyAPI(t *testing.T) {
+	backup := builder.ForBackup("velero", "backup").ObjectMeta(builder.WithUID("backup-uid")).Phase(velerov1api.BackupPhaseInProgress).Result()
+	vs := builder.ForVolumeSnapshot("app", "vs").Status().BoundVolumeSnapshotContentName("vsc").Result()
+	vs.Status.VolumeGroupSnapshotName = ptr.To("group")
+	vsc := builder.ForVolumeSnapshotContent("vsc").Status(&snapshotv1api.VolumeSnapshotContentStatus{
+		SnapshotHandle:            ptr.To("snapshot-1"),
+		VolumeGroupSnapshotHandle: ptr.To("group-handle"),
+	}).Result()
+	base := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+		WithRESTMapper(velerotest.VGSTestRESTMapper("v1beta1")).
+		WithRuntimeObjects(vs, vsc).Build()
+	action := &volumeSnapshotBackupItemAction{log: velerotest.NewLogger(), crClient: &v1beta1VGSBackupClient{Client: base}}
+
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vs)
+	require.NoError(t, err)
+	result, additionalItems, operationID, itemsToUpdate, err := action.Execute(&unstructured.Unstructured{Object: obj}, backup)
+	require.NoError(t, err)
+	require.Len(t, additionalItems, 1)
+	require.NotEmpty(t, operationID)
+	require.Len(t, itemsToUpdate, 2)
+	annotations := result.UnstructuredContent()["metadata"].(map[string]any)["annotations"].(map[string]any)
+	require.Equal(t, `["snapshot-1","snapshot-2"]`, annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation])
 }
 
 func TestVSProgress(t *testing.T) {

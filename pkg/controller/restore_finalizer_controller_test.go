@@ -1022,6 +1022,8 @@ func TestCleanupStubVGSC(t *testing.T) {
 		expectedRemaining int
 		expectedWarnings  bool
 		expectedWarning   string
+		failFirstVSList   bool
+		blockVSList       bool
 	}{
 		{
 			// A backup taken before Velero recorded the group members gives a stub
@@ -1091,6 +1093,26 @@ func TestCleanupStubVGSC(t *testing.T) {
 			},
 			expectedRemaining: 0,
 			expectedWarnings:  false,
+		},
+		{
+			name:              "transient VolumeSnapshot list failure retries before deleting the stub",
+			restore:           builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs:     []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			existingVSs:       []*snapshotv1api.VolumeSnapshot{restoredVS("vs-1", "vgs-handle-1", true)},
+			resourceTimeout:   21 * time.Second,
+			expectedRemaining: 0,
+			expectedWarnings:  false,
+			failFirstVSList:   true,
+		},
+		{
+			name:              "VolumeSnapshot list is canceled when the readiness timeout expires",
+			restore:           builder.ForRestore(velerov1api.DefaultNamespace, "restore-1").Result(),
+			existingVGSCs:     []*volumegroupsnapshotv1.VolumeGroupSnapshotContent{stubVGSC("vgs-handle-1", snapshotHandle1)},
+			resourceTimeout:   time.Second,
+			expectedRemaining: 0,
+			expectedWarnings:  true,
+			expectedWarning:   "timed out waiting for VolumeSnapshots related to VGSC",
+			blockVSList:       true,
 		},
 		{
 			name:              "no stub VGSCs to clean up",
@@ -1307,7 +1329,30 @@ func TestCleanupStubVGSC(t *testing.T) {
 			for _, vs := range tc.existingVSs {
 				seed = append(seed, vs)
 			}
-			crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, seed...)
+			clientBuilder := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+				WithRESTMapper(velerotest.VGSTestRESTMapper("v1")).
+				WithRuntimeObjects(seed...)
+			vsListCalls := 0
+			if tc.failFirstVSList || tc.blockVSList {
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, client crclient.WithWatch, list crclient.ObjectList, opts ...crclient.ListOption) error {
+						if _, ok := list.(*snapshotv1api.VolumeSnapshotList); ok {
+							if tc.blockVSList {
+								<-ctx.Done()
+								return ctx.Err()
+							}
+							if tc.failFirstVSList {
+								vsListCalls++
+								if vsListCalls == 1 {
+									return fmt.Errorf("temporary VolumeSnapshot list failure")
+								}
+							}
+						}
+						return client.List(ctx, list, opts...)
+					},
+				})
+			}
+			crClient := clientBuilder.Build()
 
 			resourceTimeout := tc.resourceTimeout
 			if resourceTimeout == 0 {
@@ -1321,6 +1366,9 @@ func TestCleanupStubVGSC(t *testing.T) {
 			}
 
 			warnings := ctx.cleanupStubVGSC()
+			if tc.failFirstVSList {
+				assert.GreaterOrEqual(t, vsListCalls, 2, "the readiness check should retry the failed list")
+			}
 
 			if tc.expectedWarnings {
 				assert.False(t, warnings.IsEmpty())

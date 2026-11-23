@@ -561,28 +561,24 @@ func (ctx *finalizerContext) waitForStubGroup(vgsc *volumegroupsnapshotv1.Volume
 	}
 	groupHandle := handles.VolumeGroupSnapshotHandle
 
-	members, err := ctx.restoredGroupVolumeSnapshots(groupHandle)
-	if err != nil {
-		return errors.Wrapf(err, "failed to list the restored VolumeSnapshots of VGSC %s", vgsc.Name)
-	}
-	var missing []string
-	for _, vs := range members {
-		if h := vs.Annotations[velerov1api.VolumeSnapshotHandleAnnotation]; h != "" && !slices.Contains(handles.VolumeSnapshotHandles, h) {
-			missing = append(missing, h)
-		}
-	}
-	if len(missing) > 0 {
-		return errors.Errorf("stub VGSC %s does not list snapshot handles %v of its group, so the restored VolumeSnapshots "+
-			"of the group cannot become ready; the backup has no record of the group members", vgsc.Name, missing)
-	}
-
 	log.Infof("waiting for the restored VolumeSnapshots of group %s to become ReadyToUse", groupHandle)
-	err = wait.PollUntilContextTimeout(context.Background(), 10*time.Second, ctx.resourceTimeout, true, func(context.Context) (bool, error) {
-		members, err := ctx.restoredGroupVolumeSnapshots(groupHandle)
+	err := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, ctx.resourceTimeout, true, func(pollCtx context.Context) (bool, error) {
+		members, err := ctx.restoredGroupVolumeSnapshots(pollCtx, groupHandle)
 		if err != nil {
 			log.WithError(err).Warn("failed to list VolumeSnapshots")
 			return false, nil
 		}
+		var missing []string
+		for _, vs := range members {
+			if h := vs.Annotations[velerov1api.VolumeSnapshotHandleAnnotation]; h != "" && !slices.Contains(handles.VolumeSnapshotHandles, h) {
+				missing = append(missing, h)
+			}
+		}
+		if len(missing) > 0 {
+			return false, errors.Errorf("stub VGSC %s does not list snapshot handles %v of its group, so the restored VolumeSnapshots "+
+				"of the group cannot become ready; the backup has no record of the group members", vgsc.Name, missing)
+		}
+
 		for _, vs := range members {
 			if vs.Status == nil || !boolptr.IsSetToTrue(vs.Status.ReadyToUse) {
 				log.Debugf("VolumeSnapshot %s/%s not yet ReadyToUse", vs.Namespace, vs.Name)
@@ -591,14 +587,17 @@ func (ctx *finalizerContext) waitForStubGroup(vgsc *volumegroupsnapshotv1.Volume
 		}
 		return true, nil
 	})
-	return errors.Wrapf(err, "timed out waiting for VolumeSnapshots related to VGSC %s", vgsc.Name)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errors.Wrapf(err, "timed out waiting for VolumeSnapshots related to VGSC %s", vgsc.Name)
+	}
+	return errors.Wrapf(err, "failed waiting for VolumeSnapshots related to VGSC %s", vgsc.Name)
 }
 
 // restoredGroupVolumeSnapshots returns the VolumeSnapshots this restore created
 // from the VolumeGroupSnapshot with the given handle.
-func (ctx *finalizerContext) restoredGroupVolumeSnapshots(groupHandle string) ([]snapshotv1api.VolumeSnapshot, error) {
+func (ctx *finalizerContext) restoredGroupVolumeSnapshots(pollCtx context.Context, groupHandle string) ([]snapshotv1api.VolumeSnapshot, error) {
 	vsList := &snapshotv1api.VolumeSnapshotList{}
-	if err := ctx.crClient.List(context.Background(), vsList, client.MatchingLabels{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)}); err != nil {
+	if err := ctx.crClient.List(pollCtx, vsList, client.MatchingLabels{velerov1api.RestoreNameLabel: label.GetValidName(ctx.restore.Name)}); err != nil {
 		return nil, err
 	}
 
