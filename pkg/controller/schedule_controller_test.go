@@ -17,10 +17,13 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	cron "github.com/netresearch/go-cron"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +43,7 @@ import (
 // Test reconcile function of schedule controller. Pause is not covered as event filter will not allow it through
 func TestReconcileOfSchedule(t *testing.T) {
 	require.NoError(t, velerov1.AddToScheme(scheme.Scheme))
+	const emptyScheduleError = `invalid spec.schedule "": schedule is empty. Expected a non-empty 5-field cron expression (minute hour day-of-month month day-of-week), e.g. "0 2 * * *" or "0 2 * * MON-FRI", or a supported shortcut, e.g. "@daily" or "@every 5m"`
 
 	newScheduleBuilder := func(phase velerov1.SchedulePhase) *builder.ScheduleBuilder {
 		return builder.ForSchedule("ns", "name").Phase(phase)
@@ -70,19 +74,34 @@ func TestReconcileOfSchedule(t *testing.T) {
 			name:                     "schedule with phase New gets validated and failed if invalid",
 			schedule:                 newScheduleBuilder(velerov1.SchedulePhaseNew).Result(),
 			expectedPhase:            string(velerov1.SchedulePhaseFailedValidation),
-			expectedValidationErrors: []string{"Schedule must be a non-empty valid Cron expression"},
+			expectedValidationErrors: []string{emptyScheduleError},
 		},
 		{
 			name:                     "schedule with phase <blank> gets validated and failed if invalid",
 			schedule:                 newScheduleBuilder(velerov1.SchedulePhase("")).Result(),
 			expectedPhase:            string(velerov1.SchedulePhaseFailedValidation),
-			expectedValidationErrors: []string{"Schedule must be a non-empty valid Cron expression"},
+			expectedValidationErrors: []string{emptyScheduleError},
 		},
 		{
 			name:                     "schedule with phase Enabled gets re-validated and failed if invalid",
 			schedule:                 newScheduleBuilder(velerov1.SchedulePhaseEnabled).Result(),
 			expectedPhase:            string(velerov1.SchedulePhaseFailedValidation),
-			expectedValidationErrors: []string{"Schedule must be a non-empty valid Cron expression"},
+			expectedValidationErrors: []string{emptyScheduleError},
+		},
+		{
+			name:                     "malformed non-empty schedule persists readable validation error and triggers no backup",
+			schedule:                 newScheduleBuilder(velerov1.SchedulePhaseNew).CronSchedule("a 0 * * *").Result(),
+			expectedPhase:            string(velerov1.SchedulePhaseFailedValidation),
+			expectedValidationErrors: []string{`invalid spec.schedule "a 0 * * *": could not parse "a" as a valid cron field value. Expected a non-empty 5-field cron expression (minute hour day-of-month month day-of-week), e.g. "0 2 * * *" or "0 2 * * MON-FRI", or a supported shortcut, e.g. "@daily" or "@every 5m"`},
+		},
+		{
+			name: "invalid schedule update persists the new validation error",
+			schedule: newScheduleBuilder(velerov1.SchedulePhaseFailedValidation).
+				CronSchedule("b 0 * * *").
+				ValidationError(`invalid spec.schedule "a 0 * * *": could not parse "a" as a valid cron field value. Expected a non-empty 5-field cron expression (minute hour day-of-month month day-of-week), e.g. "0 2 * * *" or "0 2 * * MON-FRI", or a supported shortcut, e.g. "@daily" or "@every 5m"`).
+				SkipImmediately(ptr.To(false)).Result(),
+			expectedPhase:            string(velerov1.SchedulePhaseFailedValidation),
+			expectedValidationErrors: []string{`invalid spec.schedule "b 0 * * *": could not parse "b" as a valid cron field value. Expected a non-empty 5-field cron expression (minute hour day-of-month month day-of-week), e.g. "0 2 * * *" or "0 2 * * MON-FRI", or a supported shortcut, e.g. "@daily" or "@every 5m"`},
 		},
 		{
 			name:                 "schedule with phase New gets validated and triggers a backup",
@@ -377,6 +396,94 @@ func TestGetNextRunTime(t *testing.T) {
 			assert.Equal(t, test.expectedDue, due)
 			// ignore diffs of under a second. the cron library does some rounding.
 			assert.WithinDuration(t, expectedNextRunTime, nextRunTime, time.Second)
+		})
+	}
+}
+
+func TestParseCronScheduleValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		spec   string
+		reason string
+	}{
+		{name: "empty", reason: "schedule is empty"},
+		{name: "whitespace", spec: "   ", reason: "expected exactly 5 fields"},
+		{name: "quotes", spec: "* * * * *''", reason: `could not parse "*''" as a valid cron field value`},
+		{name: "invalid character", spec: "$ * * * *", reason: `could not parse "$" as a valid cron field value`},
+		{name: "invalid letter", spec: "a * * * *", reason: `could not parse "a" as a valid cron field value`},
+		{name: "unknown word", spec: "0 2 * * FUNDAY", reason: `could not parse "FUNDAY" as a valid cron field value`},
+		{name: "invalid step", spec: "*/a * * * *", reason: `could not parse "a" as a valid cron field value`},
+		{name: "missing field", spec: "0 2 * *", reason: "expected exactly 5 fields"},
+		{name: "extra field", spec: "0 0 2 * * *", reason: "expected exactly 5 fields"},
+		{name: "out of range", spec: "60 * * * *", reason: "above maximum"},
+		{name: "integer overflow", spec: "999999999999999999999999 0 * * *", reason: `numeric value "999999999999999999999999" is too large for a cron field`},
+		{name: "unknown shortcut", spec: "@sometimes", reason: "unrecognized descriptor"},
+		{name: "invalid interval", spec: "@every banana", reason: "invalid duration"},
+		{name: "numeric", spec: "0 2 * * *"},
+		{name: "weekdays", spec: "0 2 * * MON-FRI"},
+		{name: "month", spec: "0 2 1 JAN *"},
+		{name: "lowercase names", spec: "0 2 * jan mon"},
+		{name: "daily", spec: "@daily"},
+		{name: "interval", spec: "@every 5m"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := builder.ForSchedule("velero", "schedule-1").CronSchedule(test.spec).Result()
+			parsed, errs := parseCronSchedule(s, velerotest.NewLogger())
+			if test.reason == "" {
+				require.Empty(t, errs)
+				require.NotNil(t, parsed)
+				return
+			}
+			require.Nil(t, parsed)
+			require.Len(t, errs, 1)
+			assert.Contains(t, errs[0], fmt.Sprintf("invalid spec.schedule %q:", test.spec))
+			assert.Contains(t, errs[0], test.reason)
+			assert.NotContains(t, errs[0], "strconv.")
+			assert.NotContains(t, errs[0], "failed to parse int")
+			assert.Contains(t, errs[0], "minute hour day-of-month month day-of-week")
+			assert.Contains(t, errs[0], `"0 2 * * *"`)
+			assert.Contains(t, errs[0], `"@daily"`)
+			assert.Contains(t, errs[0], `"@every 5m"`)
+		})
+	}
+}
+
+func TestParseCronScheduleLogsOriginalError(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     string
+		logError string
+	}{
+		{
+			name:     "invalid syntax",
+			spec:     "a 0 * * *",
+			logError: `failed to parse int from "a": strconv.Atoi: parsing "a": invalid syntax`,
+		},
+		{
+			name:     "integer overflow",
+			spec:     "999999999999999999999999 0 * * *",
+			logError: `failed to parse int from "999999999999999999999999": strconv.Atoi: parsing "999999999999999999999999": value out of range`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logger, hook := logrustest.NewNullLogger()
+			logger.SetLevel(logrus.DebugLevel)
+			s := builder.ForSchedule("velero", "schedule-1").CronSchedule(test.spec).Result()
+			parsed, errs := parseCronSchedule(s, logger)
+			require.Nil(t, parsed)
+			require.Len(t, errs, 1)
+			assert.NotContains(t, errs[0], "strconv.")
+
+			entries := hook.AllEntries()
+			require.Len(t, entries, 1)
+			assert.Equal(t, logrus.DebugLevel, entries[0].Level)
+			assert.Equal(t, "Error parsing schedule", entries[0].Message)
+			assert.Equal(t, test.spec, entries[0].Data["schedule"])
+			loggedError, ok := entries[0].Data[logrus.ErrorKey].(error)
+			require.True(t, ok)
+			assert.EqualError(t, loggedError, test.logError)
 		})
 	}
 }
