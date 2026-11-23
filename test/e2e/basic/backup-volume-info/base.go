@@ -197,6 +197,16 @@ func (v *BackupVolumeInfo) CreateResources() error {
 	return nil
 }
 
+// fileAbsent reports whether a failed read failed because the file is not
+// there, as opposed to the read itself going wrong. cat and cmd's type word it
+// differently, so both are matched.
+func fileAbsent(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "no such file") ||
+		strings.Contains(lower, "cannot find the file") ||
+		strings.Contains(lower, "cannot find the path")
+}
+
 // VerifyRestoredVolumeContents checks the restore, not just the backup
 // metadata. Every volume CreateResources populated must come back with its
 // contents, and every volume it deliberately left empty must come back empty.
@@ -236,13 +246,19 @@ func (v *BackupVolumeInfo) VerifyRestoredVolumeContents(namespace string) error 
 			}
 			checked++
 
-			content, _, readErr := ReadFileFromPodVolume(
+			content, readStderr, readErr := ReadFileFromPodVolume(
 				namespace, pod.Name, DefaultContainerName, vol.Name, want.FileName, v.VeleroCfg.WorkerOS,
 			)
 			if want.Content == "" {
-				// Nothing was written here, so the read is expected to fail.
+				// Nothing was written here, so the read is expected to fail
+				// because the file is absent. Checking the reason matters:
+				// any other failure, an exec that could not reach the pod for
+				// instance, would otherwise read as proof the volume is empty.
 				Expect(readErr).To(HaveOccurred(),
 					fmt.Sprintf("volume %s was left empty before the backup but came back with %q", vol.Name, content))
+				Expect(fileAbsent(readStderr)).To(BeTrue(),
+					fmt.Sprintf("reading %s from the empty volume %s failed for a reason other than the file being absent: %s",
+						want.FileName, vol.Name, readStderr))
 				continue
 			}
 
