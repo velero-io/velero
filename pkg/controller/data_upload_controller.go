@@ -616,6 +616,8 @@ func (r *DataUploadReconciler) tryCancelDataUpload(ctx context.Context, du *vele
 	// cleans up any objects generated during the snapshot expose
 	r.cleanUp(ctx, du, log)
 
+	r.closeDataPath(ctx, du.Name)
+
 	log.Warn("data upload is canceled")
 
 	return true

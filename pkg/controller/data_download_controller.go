@@ -603,6 +603,8 @@ func (r *DataDownloadReconciler) tryCancelDataDownload(ctx context.Context, dd *
 		Snapshot: dd.Spec.CSISnapshot,
 	})
 
+	r.closeDataPath(ctx, dd.Name)
+
 	log.Warn("data download is canceled")
 
 	return true

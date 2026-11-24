@@ -460,6 +460,8 @@ func (r *PodVolumeRestoreReconciler) tryCancelPodVolumeRestore(ctx context.Conte
 
 	r.exposer.CleanUp(ctx, getPVROwnerObject(pvr))
 
+	r.closeDataPath(ctx, pvr.Name)
+
 	log.Warn("PVR is canceled")
 
 	return true

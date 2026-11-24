@@ -1,0 +1,1 @@
+Fix issue #10886, close VGDP when data mover CR is cancelled by controller
