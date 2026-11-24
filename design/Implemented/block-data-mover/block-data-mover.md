@@ -363,15 +363,15 @@ Storages/CSI drivers may support the changeId differently based on the storage's
 1. Some storages don't require the parent snapshot itself at the time of calculating changes, then parent snapshot could be deleted immediately after the parent backup completes.  
 2. In order to calculate the changes, some storages require the parent snapshot mapping to the changeId always exists at the time of `GetMetadataDelta` is called, then the parent snapshot can NOT be deleted as long as there are incremental backups based on it.  
 
-The existing exposer works perfectly with Case 1, that is, the snapshot is always deleted when the backup completes.  
-However, for Case 2, since the snapshot must be retained, the exposer needs changes as below:
+The existing exposer works perfectly with the first kind of storage, which does not require the parent snapshot (`requireBaseSnapshotForDelta: false` in the snapshot metadata API), that is, the snapshot is always deleted when the backup completes.  
+However, for the second kind, which requires the parent snapshot (`requireBaseSnapshotForDelta: true`), since the snapshot must be retained, the exposer needs changes as below:
 - At the end of each backup, keep the current VolumeSnapshot's `deletionPolicy` as `Retain`, then when the VolumeSnapshot is deleted at the end of the backup, the current snapshot is retained in the storage
 - `GetMetadataDelta` is called with `BaseSnapshotId` set as the preserved changeId
 - When deleting a backup, a VolumeSnapshot-VolumeSnapshotContent pair is rebuilt with `deletionPolicy` as `delete` and `snapshotHandle` as the preserved one
 - Then the rebuilt VolumeSnapshot is deleted so that the volume snapshot is deleted from the storage
 
 There is no way to automatically detect which way a specific volume support, so an interface is exposed to users to set the volume snapshot retention method.  
-The interface could be added to the `Action.Parameters` of Volume Policy. By default, Velero block data mover takes Way 1, so volume snapshot is never retained; if users specify `RetainSnapshot` parameter, Way 2 will be taken.  
+The interface could be added to the `Action.Parameters` of Volume Policy. By default, Velero block data mover treats the storage as not requiring the parent snapshot, so volume snapshot is never retained; if users set the `requireBaseSnapshotForDelta` parameter, the snapshot is retained.  
 ```go
 type Action struct {
 	Type VolumeActionType `yaml:"type"`
@@ -379,6 +379,8 @@ type Action struct {
 }
 ```
 In this way, users could specify --- for storage class "xxx" or CSI driver "yyy", backup through CSI snapshot with Velero block data mover and retain the snapshot.   
+The retention for storage that requires the parent snapshot is fully specified in [incremental backups on storage that requires the base snapshot for delta][6].  
+There, the retained snapshot is released when the next backup of the volume completes, superseding the "can NOT be deleted" rule above.  
 
 #### Incremental Size
 By the end of the backup, incremental size is also returned by the uploader, as same as Velero file system uploader. The size indicates how much data are unique so processed by the uploader, based on the provided CBT.  
@@ -549,3 +551,4 @@ When the parameter is not specified, by default, Velero goes with incremental ba
 [3]: ../Implemented/vgdp-micro-service/vgdp-micro-service.md
 [4]: https://kubernetes.io/blog/2025/09/25/csi-changed-block-tracking/
 [5]: https://kopia.io/docs/advanced/architecture/
+[6]: ../../block-data-mover-base-snapshot-retention_design.md
