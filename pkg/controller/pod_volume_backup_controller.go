@@ -444,6 +444,8 @@ func (r *PodVolumeBackupReconciler) tryCancelPodVolumeBackup(ctx context.Context
 
 	r.exposer.CleanUp(ctx, getPVBOwnerObject(pvb))
 
+	r.closeDataPath(ctx, pvb.Name)
+
 	log.Warn("PVB is canceled")
 
 	return true
