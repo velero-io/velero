@@ -606,6 +606,7 @@ func MakePodPVCAttachment(volumeName string, volumeMode *corev1api.PersistentVol
 // returns PV, error.
 // PV will be nil on error
 func GetPVForPVC(
+	ctx context.Context,
 	pvc *corev1api.PersistentVolumeClaim,
 	crClient crclient.Client,
 ) (*corev1api.PersistentVolume, error) {
@@ -619,7 +620,7 @@ func GetPVForPVC(
 
 	pv := &corev1api.PersistentVolume{}
 	err := crClient.Get(
-		context.TODO(),
+		ctx,
 		crclient.ObjectKey{Name: pvc.Spec.VolumeName},
 		pv,
 	)
@@ -630,13 +631,13 @@ func GetPVForPVC(
 	return pv, nil
 }
 
-func GetPVCForPodVolume(vol *corev1api.Volume, pod *corev1api.Pod, crClient crclient.Client) (*corev1api.PersistentVolumeClaim, error) {
+func GetPVCForPodVolume(ctx context.Context, vol *corev1api.Volume, pod *corev1api.Pod, crClient crclient.Client) (*corev1api.PersistentVolumeClaim, error) {
 	if vol.PersistentVolumeClaim == nil {
 		return nil, errors.Errorf("volume %s/%s has no PVC associated with it", pod.Namespace, vol.Name)
 	}
 	pvc := &corev1api.PersistentVolumeClaim{}
 	err := crClient.Get(
-		context.TODO(),
+		ctx,
 		crclient.ObjectKey{Name: vol.PersistentVolumeClaim.ClaimName, Namespace: pod.Namespace},
 		pvc,
 	)
@@ -668,7 +669,7 @@ func DiagnosePV(pv *corev1api.PersistentVolume) string {
 	return diag
 }
 
-func GetPVCAttachingNodeOS(pvc *corev1api.PersistentVolumeClaim, nodeClient corev1client.CoreV1Interface,
+func GetPVCAttachingNodeOS(ctx context.Context, pvc *corev1api.PersistentVolumeClaim, nodeClient corev1client.CoreV1Interface,
 	storageClient storagev1.StorageV1Interface, log logrus.FieldLogger) string {
 	var nodeOS string
 	var scFsType string
@@ -688,7 +689,7 @@ func GetPVCAttachingNodeOS(pvc *corev1api.PersistentVolumeClaim, nodeClient core
 
 	nodeName := ""
 	if pvc.Spec.VolumeName != "" {
-		if n, err := GetPVAttachedNode(context.Background(), pvc.Spec.VolumeName, storageClient); err != nil {
+		if n, err := GetPVAttachedNode(ctx, pvc.Spec.VolumeName, storageClient); err != nil {
 			log.WithError(err).Warnf("Failed to get attached node for PVC %s/%s", pvc.Namespace, pvc.Name)
 		} else {
 			nodeName = n
@@ -702,7 +703,7 @@ func GetPVCAttachingNodeOS(pvc *corev1api.PersistentVolumeClaim, nodeClient core
 	}
 
 	if nodeName != "" {
-		if os, err := GetNodeOS(context.Background(), nodeName, nodeClient); err != nil {
+		if os, err := GetNodeOS(ctx, nodeName, nodeClient); err != nil {
 			log.WithError(err).Warnf("Failed to get os from node %s for PVC %s/%s", nodeName, pvc.Namespace, pvc.Name)
 		} else {
 			nodeOS = os
@@ -710,7 +711,7 @@ func GetPVCAttachingNodeOS(pvc *corev1api.PersistentVolumeClaim, nodeClient core
 	}
 
 	if pvc.Spec.StorageClassName != nil {
-		if sc, err := storageClient.StorageClasses().Get(context.Background(), *pvc.Spec.StorageClassName, metav1.GetOptions{}); err != nil {
+		if sc, err := storageClient.StorageClasses().Get(ctx, *pvc.Spec.StorageClassName, metav1.GetOptions{}); err != nil {
 			log.WithError(err).Warnf("Failed to get storage class %s for PVC %s/%s", *pvc.Spec.StorageClassName, pvc.Namespace, pvc.Name)
 		} else if sc.Parameters != nil {
 			scFsType = strings.ToLower(sc.Parameters["csi.storage.k8s.io/fstype"])

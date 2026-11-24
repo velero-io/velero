@@ -1498,7 +1498,7 @@ func TestGetPVForPVC(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actualPV, actualError := GetPVForPVC(tc.inPVC, fakeClient)
+			actualPV, actualError := GetPVForPVC(t.Context(), tc.inPVC, fakeClient)
 
 			if tc.expectError {
 				require.Error(t, actualError, "Want error; Got nil error")
@@ -1622,7 +1622,7 @@ func TestGetPVCForPodVolume(t *testing.T) {
 	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, objs...)
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actualPVC, actualError := GetPVCForPodVolume(tc.vol, samplePod, fakeClient)
+			actualPVC, actualError := GetPVCForPodVolume(t.Context(), tc.vol, samplePod, fakeClient)
 			if tc.expectedError {
 				require.Error(t, actualError, "Want error; Got nil error")
 				assert.Nilf(t, actualPVC, "Want PV: nil; Got PV: %q", actualPVC)
@@ -2032,7 +2032,7 @@ func TestGetPVCAttachingNodeOS(t *testing.T) {
 
 			var kubeClient kubernetes.Interface = fakeKubeClient
 
-			nodeOS := GetPVCAttachingNodeOS(test.pvc, kubeClient.CoreV1(), kubeClient.StorageV1(), velerotest.NewLogger())
+			nodeOS := GetPVCAttachingNodeOS(t.Context(), test.pvc, kubeClient.CoreV1(), kubeClient.StorageV1(), velerotest.NewLogger())
 
 			assert.Equal(t, test.expectedNodeOS, nodeOS)
 		})

@@ -258,6 +258,7 @@ func GetVolumesToExclude(obj metav1.Object) []string {
 // Note: In the main backup path, the cache is always built (via NewVolumeHelperImplWithNamespaces),
 // so the fallback is only used by plugins that don't need cache optimization.
 func IsPVCDefaultToFSBackupWithCache(
+	ctx context.Context,
 	pvcNamespace, pvcName string,
 	crClient crclient.Client,
 	defaultVolumesToFsBackup bool,
@@ -270,7 +271,7 @@ func IsPVCDefaultToFSBackupWithCache(
 	if cache != nil && cache.IsBuilt() {
 		pods = cache.GetPodsUsingPVC(pvcNamespace, pvcName)
 	} else {
-		pods, err = getPodsUsingPVCDirect(pvcNamespace, pvcName, crClient)
+		pods, err = getPodsUsingPVCDirect(ctx, pvcNamespace, pvcName, crClient)
 		if err != nil {
 			return false, errors.WithStack(err)
 		}
@@ -313,6 +314,7 @@ func getPodVolumeNameForPVC(pod corev1api.Pod, pvcName string) (string, error) {
 // Note: In the main backup path, the cache is always built (via NewVolumeHelperImplWithNamespaces),
 // so the fallback is only used by plugins that don't need cache optimization.
 func GetPodsUsingPVCWithCache(
+	ctx context.Context,
 	pvcNamespace, pvcName string,
 	crClient crclient.Client,
 	cache *PVCPodCache,
@@ -327,19 +329,20 @@ func GetPodsUsingPVCWithCache(
 	}
 
 	// Fall back to direct lookup (for plugins without cache)
-	return getPodsUsingPVCDirect(pvcNamespace, pvcName, crClient)
+	return getPodsUsingPVCDirect(ctx, pvcNamespace, pvcName, crClient)
 }
 
 // getPodsUsingPVCDirect returns all pods in the given namespace that use the specified PVC.
 // This is an internal function that lists all pods in the namespace and filters them.
 func getPodsUsingPVCDirect(
+	ctx context.Context,
 	pvcNamespace, pvcName string,
 	crClient crclient.Client,
 ) ([]corev1api.Pod, error) {
 	podsUsingPVC := []corev1api.Pod{}
 	podList := new(corev1api.PodList)
 	if err := crClient.List(
-		context.TODO(),
+		ctx,
 		podList,
 		&crclient.ListOptions{Namespace: pvcNamespace},
 	); err != nil {

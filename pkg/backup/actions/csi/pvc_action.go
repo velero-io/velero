@@ -179,7 +179,7 @@ func (p *pvcBackupItemAction) validatePVCAndPV(
 	)
 
 	// Do nothing if this is not a CSI provisioned volume
-	pv, err := kubeutil.GetPVForPVC(&pvc, p.crClient)
+	pv, err := kubeutil.GetPVForPVC(context.TODO(), &pvc, p.crClient)
 	if err != nil {
 		return false, updateItem, "", errors.WithStack(err)
 	}
@@ -930,7 +930,7 @@ func (p *pvcBackupItemAction) determineCSIDriver(
 	var driver string
 
 	for _, pvc := range pvcs {
-		pv, err := kubeutil.GetPVForPVC(&pvc, p.crClient)
+		pv, err := kubeutil.GetPVForPVC(context.TODO(), &pvc, p.crClient)
 		if err != nil {
 			return "", err
 		}
