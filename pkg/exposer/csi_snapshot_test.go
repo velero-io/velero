@@ -986,7 +986,7 @@ func TestExpose(t *testing.T) {
 				ExposeTimeout:    time.Millisecond,
 				BackupPVCConfig: map[string]velerotypes.BackupPVC{
 					"fake-sc": {
-						Annotations: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
+						IntolerateSourceNode: true,
 					},
 				},
 				Affinity: nil,
@@ -1025,7 +1025,6 @@ func TestExpose(t *testing.T) {
 					},
 				},
 			},
-			expectedPVCAnnotation: nil,
 		},
 		{
 			name:        "IntolerateSourceNode, get empty source node",
@@ -1040,7 +1039,7 @@ func TestExpose(t *testing.T) {
 				ExposeTimeout:    time.Millisecond,
 				BackupPVCConfig: map[string]velerotypes.BackupPVC{
 					"fake-sc": {
-						Annotations: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
+						IntolerateSourceNode: true,
 					},
 				},
 				Affinity: nil,
@@ -1070,7 +1069,6 @@ func TestExpose(t *testing.T) {
 					},
 				},
 			},
-			expectedPVCAnnotation: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
 		},
 		{
 			name:        "IntolerateSourceNode, get source nodes",
@@ -1085,7 +1083,7 @@ func TestExpose(t *testing.T) {
 				ExposeTimeout:    time.Millisecond,
 				BackupPVCConfig: map[string]velerotypes.BackupPVC{
 					"fake-sc": {
-						Annotations: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
+						IntolerateSourceNode: true,
 					},
 				},
 				Affinity: nil,
@@ -1122,7 +1120,6 @@ func TestExpose(t *testing.T) {
 					},
 				},
 			},
-			expectedPVCAnnotation: map[string]string{util.VSphereCNSFastCloneAnno: "true"},
 		},
 		{
 			name:        "block data mover success",
