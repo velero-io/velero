@@ -17,9 +17,14 @@ limitations under the License.
 package backup
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/velero-io/velero/pkg/itemoperation"
 )
 
 func TestRequest_BackupResourceList(t *testing.T) {
@@ -79,4 +84,32 @@ func TestRequest_BackupResourceListEntriesSorted(t *testing.T) {
 	assert.Equal(t, map[string][]string{
 		"v1/Pod": {"ns1/pod1", "ns2/pod2"},
 	}, req.BackupResourceList())
+}
+
+func TestRequest_AddItemOperationConcurrent(t *testing.T) {
+	const (
+		goroutines   = 8
+		perGoroutine = 100
+	)
+
+	req := &Request{}
+	var wg sync.WaitGroup
+	for g := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range perGoroutine {
+				req.AddItemOperation(&itemoperation.BackupOperation{
+					Spec: itemoperation.BackupOperationSpec{OperationID: fmt.Sprintf("%d-%d", g, i)},
+				})
+			}
+		}()
+	}
+	wg.Wait()
+
+	operations := *req.GetItemOperationsList()
+	require.Len(t, operations, goroutines*perGoroutine)
+	for _, operation := range operations {
+		require.NotNil(t, operation)
+	}
 }

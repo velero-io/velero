@@ -3565,6 +3565,61 @@ func TestBackupWithAsyncOperations(t *testing.T) {
 	}
 }
 
+// TestBackupWithAsyncOperationsMultipleWorkers verifies that every async
+// operation is recorded when ItemBlocks are processed by more than one worker.
+func TestBackupWithAsyncOperationsMultipleWorkers(t *testing.T) {
+	const (
+		workers  = 8
+		numItems = 200
+	)
+
+	asyncAction := &pluggableAction{
+		selector: velero.ResourceSelector{IncludedResources: []string{"persistentvolumeclaims"}},
+		executeFunc: func(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, string, []velero.ResourceIdentifier, error) {
+			obj, ok := item.(*unstructured.Unstructured)
+			if !ok {
+				return nil, nil, "", nil, errors.Errorf("unexpected type %T", item)
+			}
+
+			return obj, nil, obj.GetName() + "-1", nil, nil
+		},
+	}
+
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+
+	itemBlockPool := StartItemBlockWorkerPool(t.Context(), workers, log)
+	defer itemBlockPool.Stop()
+
+	h := newHarness(t, itemBlockPool)
+	h.log = log
+
+	pvcs := make([]metav1.Object, 0, numItems)
+	for i := range numItems {
+		pvcs = append(pvcs, builder.ForPersistentVolumeClaim("ns-1", fmt.Sprintf("pvc-%03d", i)).Result())
+	}
+	h.addItems(t, test.PVCs(pvcs...))
+
+	req := &Request{
+		Backup:               defaultBackup().Result(),
+		SkippedVolumeTracker: NewSkipVolumeTracker(),
+		BackedUpItems:        NewBackedUpItemsMap(),
+		WorkerPool:           itemBlockPool,
+	}
+
+	err := h.backupper.Backup(h.log, req, bytes.NewBuffer([]byte{}), []biav2.BackupItemAction{asyncAction}, nil, nil)
+	require.NoError(t, err)
+
+	operations := *req.GetItemOperationsList()
+	require.Len(t, operations, numItems)
+	operationIDs := make(map[string]struct{}, numItems)
+	for i, operation := range operations {
+		require.NotNil(t, operation, "operation %d is nil", i)
+		operationIDs[operation.Spec.OperationID] = struct{}{}
+	}
+	assert.Len(t, operationIDs, numItems)
+}
+
 // TestBackupWithInvalidHooks runs backups with invalid hook specifications and verifies
 // that an error is returned.
 func TestBackupWithInvalidHooks(t *testing.T) {

@@ -1,0 +1,1 @@
+Fix data race on the backup item operations list when multiple ItemBlock workers record async operations

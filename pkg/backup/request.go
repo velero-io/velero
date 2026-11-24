@@ -89,6 +89,7 @@ type Request struct {
 	// excluded by global or fine-grained backup resource filters.
 	MustIncludeAdditionalItemPVCs *backedUpItemsMap
 	itemOperationsList            *[]*itemoperation.BackupOperation
+	itemOperationsLock            sync.Mutex
 	ResPolicies                   *resourcepolicies.Policies
 	SkippedVolumeTracker          *skipVolumeTracker
 	VolumesInformation            volume.BackupVolumesInformation
@@ -125,6 +126,20 @@ type NamespacedFilterPattern struct {
 
 // GetItemOperationsList returns ItemOperationsList, initializing it if necessary
 func (r *Request) GetItemOperationsList() *[]*itemoperation.BackupOperation {
+	r.itemOperationsLock.Lock()
+	defer r.itemOperationsLock.Unlock()
+	return r.itemOperationsListLocked()
+}
+
+// AddItemOperation appends an operation to ItemOperationsList. It is safe for concurrent use.
+func (r *Request) AddItemOperation(op *itemoperation.BackupOperation) {
+	r.itemOperationsLock.Lock()
+	defer r.itemOperationsLock.Unlock()
+	list := r.itemOperationsListLocked()
+	*list = append(*list, op)
+}
+
+func (r *Request) itemOperationsListLocked() *[]*itemoperation.BackupOperation {
 	if r.itemOperationsList == nil {
 		list := []*itemoperation.BackupOperation{}
 		r.itemOperationsList = &list

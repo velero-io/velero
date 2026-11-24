@@ -527,8 +527,7 @@ func (ib *itemBackupper) executeActions(
 				},
 			}
 			newOperation.Spec.PostOperationItems = postOperationItems
-			itemOperList := ib.backupRequest.GetItemOperationsList()
-			*itemOperList = append(*itemOperList, &newOperation)
+			ib.backupRequest.AddItemOperation(&newOperation)
 		}
 
 		for _, additionalItem := range additionalItemIdentifiers {
