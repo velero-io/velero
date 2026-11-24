@@ -79,6 +79,10 @@ type BackupPVC struct {
 	// namespace-scoped configmaps for volume provisioning (e.g., tenant-specific
 	// Vault connection overrides for encrypted volumes).
 	ConfigMapNames []string `json:"configMapNames,omitempty"`
+
+	// IntolerateSourceNode specifies whether the backupPVC is allowed to be attached to the
+	// same node as the sourcePVC
+	IntolerateSourceNode bool `json:"intolerateSourceNode,omitempty"`
 }
 
 type RestorePVC struct {

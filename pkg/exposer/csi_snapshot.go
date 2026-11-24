@@ -36,7 +36,6 @@ import (
 
 	"github.com/velero-io/velero/pkg/nodeagent"
 	velerotypes "github.com/velero-io/velero/pkg/types"
-	"github.com/velero-io/velero/pkg/util"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	"github.com/velero-io/velero/pkg/util/csi"
 	"github.com/velero-io/velero/pkg/util/datamover"
@@ -272,10 +271,9 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 			backupPVCAnnotations = value.Annotations
 		}
 
-		if _, found := backupPVCAnnotations[util.VSphereCNSFastCloneAnno]; found {
+		if value.IntolerateSourceNode {
 			if n, err := kube.GetPVAttachedNodes(ctx, csiExposeParam.SourcePVName, e.kubeClient.StorageV1()); err != nil {
-				curLog.WithField("source PV", csiExposeParam.SourcePVName).WithError(err).Warnf("Failed to get attached node for source PV, ignore %s annotation", util.VSphereCNSFastCloneAnno)
-				delete(backupPVCAnnotations, util.VSphereCNSFastCloneAnno)
+				curLog.WithField("source PV", csiExposeParam.SourcePVName).WithError(err).Warn("Failed to get attached node for source PV, ignore IntolerateSourceNode")
 			} else {
 				intoleratableNodes = n
 			}
