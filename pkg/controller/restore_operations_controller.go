@@ -132,7 +132,7 @@ func (r *restoreOperationsReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	info, err := r.fetchBackupInfo(restore.Spec.BackupName)
+	info, err := r.fetchBackupInfo(ctx, restore.Spec.BackupName)
 	if err != nil {
 		log.Warnf("Cannot check progress on Restore operations because backup info is unavailable %s; marking restore FinalizingPartiallyFailed", err.Error())
 		restore.Status.Phase = velerov1api.RestorePhaseFinalizingPartiallyFailed
@@ -198,8 +198,8 @@ func (r *restoreOperationsReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 // fetchBackupInfo checks the backup lister for a backup that matches the given name. If it doesn't
 // find it, it returns an error.
-func (r *restoreOperationsReconciler) fetchBackupInfo(backupName string) (backupInfo, error) {
-	return fetchBackupInfoInternal(r.Client, r.namespace, backupName)
+func (r *restoreOperationsReconciler) fetchBackupInfo(ctx context.Context, backupName string) (backupInfo, error) {
+	return fetchBackupInfoInternal(ctx, r.Client, r.namespace, backupName)
 }
 
 func (r *restoreOperationsReconciler) updateRestoreAndOperationsJSON(

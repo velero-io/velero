@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -198,7 +198,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !restore.DeletionTimestamp.IsZero() {
 		// check the finalizer and run clean-up
 		if controllerutil.ContainsFinalizer(restore, ExternalResourcesFinalizer) {
-			if err := r.deleteExternalResources(restore); err != nil {
+			if err := r.deleteExternalResources(ctx, restore); err != nil {
 				log.Errorf("fail to delete external resources: %s", err.Error())
 				return ctrl.Result{}, err
 			}
@@ -280,7 +280,7 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.runValidatedRestore(restore, info, resourceModifiers, restoreResPolicies); err != nil {
+	if err := r.runValidatedRestore(ctx, restore, info, resourceModifiers, restoreResPolicies); err != nil {
 		log.WithError(err).Debug("Restore failed")
 		restore.Status.Phase = api.RestorePhaseFailed
 		restore.Status.FailureReason = fmt.Sprintf("restore execution failed: %v", err)
@@ -406,7 +406,7 @@ func (r *restoreReconciler) validateAndComplete(ctx context.Context, restore *ap
 		}
 	}
 
-	info, err := r.fetchBackupInfo(restore.Spec.BackupName)
+	info, err := r.fetchBackupInfo(ctx, restore.Spec.BackupName)
 	if err != nil {
 		restore.Status.ValidationErrors = append(restore.Status.ValidationErrors, fmt.Sprintf("Error retrieving backup: %v", err))
 		return backupInfo{}, nil, nil
@@ -560,19 +560,19 @@ func mostRecentCompletedBackup(backups []api.Backup) api.Backup {
 
 // fetchBackupInfo checks the backup lister for a backup that matches the given name. If it doesn't
 // find it, it returns an error.
-func (r *restoreReconciler) fetchBackupInfo(backupName string) (backupInfo, error) {
-	return fetchBackupInfoInternal(r.kbClient, r.namespace, backupName)
+func (r *restoreReconciler) fetchBackupInfo(ctx context.Context, backupName string) (backupInfo, error) {
+	return fetchBackupInfoInternal(ctx, r.kbClient, r.namespace, backupName)
 }
 
-func fetchBackupInfoInternal(kbClient client.Client, namespace, backupName string) (backupInfo, error) {
+func fetchBackupInfoInternal(ctx context.Context, kbClient client.Client, namespace, backupName string) (backupInfo, error) {
 	backup := &api.Backup{}
-	err := kbClient.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: backupName}, backup)
+	err := kbClient.Get(ctx, types.NamespacedName{Namespace: namespace, Name: backupName}, backup)
 	if err != nil {
 		return backupInfo{}, errors.Wrap(err, fmt.Sprintf("can't find backup %s/%s", namespace, backupName))
 	}
 
 	location := &api.BackupStorageLocation{}
-	if err := kbClient.Get(context.Background(), client.ObjectKey{
+	if err := kbClient.Get(ctx, client.ObjectKey{
 		Namespace: namespace,
 		Name:      backup.Spec.StorageLocation,
 	}, location); err != nil {
@@ -589,7 +589,7 @@ func fetchBackupInfoInternal(kbClient client.Client, namespace, backupName strin
 // The log and results files are uploaded to backup storage. Any error returned from this function
 // means that the restore failed. This function updates the restore API object with warning and error
 // counts, but *does not* update its phase or patch it via the API.
-func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backupInfo, resourceModifiers *resourcemodifiers.ResourceModifiers, restoreResPolicies *resourcepolicies.Policies) error {
+func (r *restoreReconciler) runValidatedRestore(ctx context.Context, restore *api.Restore, info backupInfo, resourceModifiers *resourcemodifiers.ResourceModifiers, restoreResPolicies *resourcepolicies.Policies) error {
 	// instantiate the per-restore logger that will output both to a temp file
 	// (for upload to object storage) and to stdout.
 	restoreLog, err := logging.NewTempFileLogger(r.restoreLogLevel, r.logFormat, nil, logrus.Fields{"restore": kubeutil.NamespaceAndName(restore)})
@@ -626,7 +626,7 @@ func (r *restoreReconciler) runValidatedRestore(restore *api.Restore, info backu
 	}
 
 	podVolumeBackupList := &api.PodVolumeBackupList{}
-	err = r.kbClient.List(context.TODO(), podVolumeBackupList, listOpts)
+	err = r.kbClient.List(ctx, podVolumeBackupList, listOpts)
 	if err != nil {
 		restoreLog.Errorf("Fail to list PodVolumeBackup :%s", err.Error())
 		return errors.WithStack(err)
@@ -813,14 +813,14 @@ func (r *restoreReconciler) updateTotalRestoreMetric() {
 }
 
 // deleteExternalResources deletes all the external resources related to the restore
-func (r *restoreReconciler) deleteExternalResources(restore *api.Restore) error {
+func (r *restoreReconciler) deleteExternalResources(ctx context.Context, restore *api.Restore) error {
 	r.logger.Infof("Finalizer is deleting external resources, backup: %s", restore.Spec.BackupName)
 
 	if restore.Spec.BackupName == "" {
 		return nil
 	}
 
-	backupInfo, err := r.fetchBackupInfo(restore.Spec.BackupName)
+	backupInfo, err := r.fetchBackupInfo(ctx, restore.Spec.BackupName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			r.logger.Errorf("got not found error: %v, skip deleting the restore files in object storage", err)
