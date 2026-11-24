@@ -19,6 +19,50 @@ This configuration design enables a number of different use cases, including:
 - Have some Velero backups go to a bucket in an eastern USA region, and others go to a bucket in a western USA region, or to a different storage provider
 - For volume providers that support it, like Portworx, you can have some snapshots stored locally on the cluster and have others stored in the cloud
 
+## Backup storage location availability
+
+A `BackupStorageLocation` (BSL) must have `status.phase: Available` before Velero can use it for a backup or restore. If the location is `Unavailable`, Velero rejects backup and restore requests that use it during validation, even if the bucket is reachable and existing backup data can still be read. The requests can be submitted successfully, but their status becomes `FailedValidation`.
+
+Velero periodically validates each BSL. Validation includes checking the location configuration, initializing the object storage plugin, and listing the immediate subdirectories under the configured storage root. Errors in these steps can mark the BSL as `Unavailable`; see [Troubleshooting an unavailable backup storage location](troubleshooting.md#unavailable-backup-storage-location).
+
+### Required directory layout
+
+The storage root is the bucket root when `spec.objectStorage.prefix` is unset, or the configured prefix within the bucket when it is set. Only the following immediate subdirectories are allowed under that root:
+
+```text
+backups/
+restores/
+restic/
+metadata/
+plugins/
+kopia/
+```
+
+These directories do not all need to exist. An empty storage root also passes the directory layout check. The check rejects unexpected immediate subdirectories; it does not recursively validate backup contents or verify all read and write operations.
+
+For example, consider this bucket:
+
+```text
+my-bucket/
+├── other-app/
+└── velero/
+    ├── backups/
+    └── kopia/
+```
+
+A BSL configured with only `bucket: my-bucket` fails the layout check because `other-app/` and `velero/` are unexpected top-level directories. Configure a dedicated prefix to share the bucket with another application:
+
+```yaml
+spec:
+  objectStorage:
+    bucket: my-bucket
+    prefix: velero
+```
+
+With this configuration, Velero checks the immediate subdirectories inside `my-bucket/velero/`. The `other-app/` directory is outside the storage root and does not affect this BSL's layout validation. Reserve the configured bucket or prefix for Velero data.
+
+**Note:** Changing an existing BSL's prefix changes where Velero looks for backups and repository data. It does not move existing objects. Do not point the BSL at an empty prefix if you need to restore backups stored at its previous location.
+
 ## Limitations / Caveats
 
 - Velero supports multiple credentials for `BackupStorageLocations`, allowing you to specify the credentials to use with any `BackupStorageLocation`.
