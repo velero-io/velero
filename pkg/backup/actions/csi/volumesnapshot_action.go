@@ -266,31 +266,32 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 // groupMemberHandles returns the snapshot handles of every member of the
 // VolumeGroupSnapshot the VolumeSnapshot was taken in, as a JSON list. It
 // returns "" when they cannot be found, and the restore then falls back to the
-// VolumeSnapshot's own handle.
+// backup volume info. Because the restore can still rebuild the list, a
+// missing list is logged at info level and does not add a backup warning.
 func (p *volumeSnapshotBackupItemAction) groupMemberHandles(ctx context.Context, vs *snapshotv1api.VolumeSnapshot, groupHandle string) string {
 	log := p.log.WithField("VolumeSnapshot", vs.Namespace+"/"+vs.Name)
 	if vs.Status == nil || vs.Status.VolumeGroupSnapshotName == nil {
-		log.Warn("VolumeSnapshot has a VolumeGroupSnapshotHandle but no VolumeGroupSnapshot name")
+		log.Info("VolumeSnapshot has a VolumeGroupSnapshotHandle but no VolumeGroupSnapshot name")
 		return ""
 	}
 
 	vgs, err := csi.GetVGS(ctx, p.crClient, vs.Namespace, *vs.Status.VolumeGroupSnapshotName)
 	if err != nil {
-		log.WithError(err).Warn("Failed to get the VolumeGroupSnapshot")
+		log.WithError(err).Info("Failed to get the VolumeGroupSnapshot")
 		return ""
 	}
 	if vgs.Status == nil || vgs.Status.BoundVolumeGroupSnapshotContentName == nil {
-		log.Warnf("VolumeGroupSnapshot %s is not bound to a VolumeGroupSnapshotContent", vgs.Name)
+		log.Infof("VolumeGroupSnapshot %s is not bound to a VolumeGroupSnapshotContent", vgs.Name)
 		return ""
 	}
 
 	vgsc, err := csi.GetVGSC(ctx, p.crClient, *vgs.Status.BoundVolumeGroupSnapshotContentName)
 	if err != nil {
-		log.WithError(err).Warn("Failed to get the VolumeGroupSnapshotContent")
+		log.WithError(err).Info("Failed to get the VolumeGroupSnapshotContent")
 		return ""
 	}
 	if vgsc.Status == nil || vgsc.Status.VolumeGroupSnapshotHandle == nil || *vgsc.Status.VolumeGroupSnapshotHandle != groupHandle {
-		log.Warnf("VolumeGroupSnapshotContent %s does not have VolumeGroupSnapshotHandle %s", vgsc.Name, groupHandle)
+		log.Infof("VolumeGroupSnapshotContent %s does not have VolumeGroupSnapshotHandle %s", vgsc.Name, groupHandle)
 		return ""
 	}
 
@@ -301,13 +302,13 @@ func (p *volumeSnapshotBackupItemAction) groupMemberHandles(ctx context.Context,
 		}
 	}
 	if len(handles) == 0 {
-		log.Warnf("VolumeGroupSnapshotContent %s lists no snapshot handles", vgsc.Name)
+		log.Infof("VolumeGroupSnapshotContent %s lists no snapshot handles", vgsc.Name)
 		return ""
 	}
 
 	out, err := json.Marshal(handles)
 	if err != nil {
-		log.WithError(err).Warn("Failed to encode the group member snapshot handles")
+		log.WithError(err).Info("Failed to encode the group member snapshot handles")
 		return ""
 	}
 	return string(out)

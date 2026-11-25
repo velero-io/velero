@@ -26,6 +26,7 @@ import (
 	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -290,8 +291,9 @@ func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 				SnapshotHandle:            ptr.To("snap-1"),
 				VolumeGroupSnapshotHandle: ptr.To("group-1"),
 			}).Result()
+			logger, logHook := logtest.NewNullLogger()
 			action := &volumeSnapshotBackupItemAction{
-				log:      velerotest.NewLogger(),
+				log:      logger,
 				crClient: velerotest.NewFakeControllerRuntimeClientWithVGS(t, append(tc.objects, vs, vsc)...),
 			}
 
@@ -299,6 +301,12 @@ func TestVSExecuteRecordsGroupMemberHandles(t *testing.T) {
 			require.NoError(t, err)
 			result, _, _, _, err := action.Execute(&unstructured.Unstructured{Object: obj}, backup)
 			require.NoError(t, err)
+
+			// Plugin warnings count as backup warnings, and the restore can
+			// still rebuild missing member handles from the backup volume info.
+			for _, entry := range logHook.AllEntries() {
+				require.Greater(t, entry.Level, logrus.WarnLevel, "unexpected log at level %s: %s", entry.Level, entry.Message)
+			}
 
 			handles, found := result.UnstructuredContent()["metadata"].(map[string]any)["annotations"].(map[string]any)[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation]
 			if tc.expectedHandles == "" {
