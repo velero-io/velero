@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	clientgofake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,6 +57,7 @@ import (
 	"github.com/velero-io/velero/pkg/metrics"
 	velerotest "github.com/velero-io/velero/pkg/test"
 	"github.com/velero-io/velero/pkg/uploader"
+	"github.com/velero-io/velero/pkg/util"
 	"github.com/velero-io/velero/pkg/util/kube"
 )
 
@@ -1544,7 +1547,7 @@ func TestPodVolumeBackupSetupExposeParam(t *testing.T) {
 			)
 
 			// Act
-			got := r.setupExposeParam(basePVB)
+			got := r.setupExposeParam(t.Context(), basePVB)
 
 			// Core fields
 			assert.Equal(t, exposer.PodVolumeExposeTypeBackup, got.Type)
@@ -1604,4 +1607,52 @@ func TestPodVolumeBackupCancelConcurrency(t *testing.T) {
 	v, ok := r.cancelledPVB.Load(pvb.Name)
 	assert.True(t, ok)
 	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
+}
+
+type exposeParamCtxKey struct{}
+
+// exposeParamTransport records the path and the context value of every request, and answers
+// all of them with NotFound. It is used instead of the fake clientset, which drops the context.
+type exposeParamTransport struct {
+	paths     []string
+	ctxValues []any
+}
+
+func (rt *exposeParamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.paths = append(rt.paths, req.URL.Path)
+	rt.ctxValues = append(rt.ctxValues, req.Context().Value(exposeParamCtxKey{}))
+	return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: http.NoBody, Request: req}, nil
+}
+
+// requireSetupExposeParamUsesContext verifies that all the requests sent by setup use the context passed to it.
+func requireSetupExposeParamUsesContext(t *testing.T, namespace string, setup func(context.Context, kubernetes.Interface)) {
+	t.Helper()
+
+	rt := &exposeParamTransport{}
+	kubeClient, err := kubernetes.NewForConfig(&rest.Config{Host: "http://fake", Transport: rt, QPS: -1})
+	require.NoError(t, err)
+
+	setup(context.WithValue(t.Context(), exposeParamCtxKey{}, "sentinel"), kubeClient)
+
+	// The node is read once, and the node-agent daemonset is read once for each
+	// third party label and annotation, and once for the tolerations.
+	expectedPaths := []string{"/api/v1/nodes/worker-1"}
+	for range len(util.ThirdPartyLabels) + len(util.ThirdPartyAnnotations) + 1 {
+		expectedPaths = append(expectedPaths, "/apis/apps/v1/namespaces/"+namespace+"/daemonsets/node-agent")
+	}
+	require.Equal(t, expectedPaths, rt.paths)
+
+	for i, value := range rt.ctxValues {
+		assert.Equal(t, "sentinel", value, "request %d (%s) should use the caller's context", i, rt.paths[i])
+	}
+}
+
+func TestPodVolumeBackupSetupExposeParam_ContextPropagation(t *testing.T) {
+	pvb := pvbBuilder().Result()
+	pvb.Spec.Node = "worker-1"
+
+	requireSetupExposeParamUsesContext(t, pvb.Namespace, func(ctx context.Context, kubeClient kubernetes.Interface) {
+		r := &PodVolumeBackupReconciler{kubeClient: kubeClient, logger: velerotest.NewLogger()}
+		r.setupExposeParam(ctx, pvb)
+	})
 }

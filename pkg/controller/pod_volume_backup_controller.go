@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -251,7 +251,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 		log.Info("Exposing PVB")
 
-		exposeParam := r.setupExposeParam(pvb)
+		exposeParam := r.setupExposeParam(ctx, pvb)
 		if err := r.exposer.Expose(ctx, getPVBOwnerObject(pvb), exposeParam); err != nil {
 			return r.errorOut(ctx, pvb, err, "error to expose PVB", log)
 		}
@@ -829,10 +829,10 @@ func (r *PodVolumeBackupReconciler) closeDataPath(ctx context.Context, pvbName s
 	r.dataPathMgr.RemoveAsyncBR(pvbName)
 }
 
-func (r *PodVolumeBackupReconciler) setupExposeParam(pvb *velerov1api.PodVolumeBackup) exposer.PodVolumeExposeParam {
+func (r *PodVolumeBackupReconciler) setupExposeParam(ctx context.Context, pvb *velerov1api.PodVolumeBackup) exposer.PodVolumeExposeParam {
 	log := r.logger.WithField("PVB", pvb.Name)
 
-	nodeOS, err := kube.GetNodeOS(context.Background(), pvb.Spec.Node, r.kubeClient.CoreV1())
+	nodeOS, err := kube.GetNodeOS(ctx, pvb.Spec.Node, r.kubeClient.CoreV1())
 	if err != nil {
 		log.WithError(err).Warnf("Failed to get nodeOS for node %s, use linux node-agent for hosting pod labels, annotations and tolerations", pvb.Spec.Node)
 	}
@@ -844,7 +844,7 @@ func (r *PodVolumeBackupReconciler) setupExposeParam(pvb *velerov1api.PodVolumeB
 		}
 	} else {
 		for _, k := range util.ThirdPartyLabels {
-			if v, err := nodeagent.GetLabelValue(context.Background(), r.kubeClient, pvb.Namespace, k, nodeOS); err != nil {
+			if v, err := nodeagent.GetLabelValue(ctx, r.kubeClient, pvb.Namespace, k, nodeOS); err != nil {
 				if err != nodeagent.ErrNodeAgentLabelNotFound {
 					log.WithError(err).Warnf("Failed to check node-agent label, skip adding host pod label %s", k)
 				}
@@ -861,7 +861,7 @@ func (r *PodVolumeBackupReconciler) setupExposeParam(pvb *velerov1api.PodVolumeB
 		}
 	} else {
 		for _, k := range util.ThirdPartyAnnotations {
-			if v, err := nodeagent.GetAnnotationValue(context.Background(), r.kubeClient, pvb.Namespace, k, nodeOS); err != nil {
+			if v, err := nodeagent.GetAnnotationValue(ctx, r.kubeClient, pvb.Namespace, k, nodeOS); err != nil {
 				if err != nodeagent.ErrNodeAgentAnnotationNotFound {
 					log.WithError(err).Warnf("Failed to check node-agent annotation, skip adding host pod annotation %s", k)
 				}
@@ -871,7 +871,7 @@ func (r *PodVolumeBackupReconciler) setupExposeParam(pvb *velerov1api.PodVolumeB
 		}
 	}
 
-	hostingPodTolerations, err := nodeagent.GetTolerations(context.Background(), r.kubeClient, pvb.Namespace, nodeOS, r.tolerations)
+	hostingPodTolerations, err := nodeagent.GetTolerations(ctx, r.kubeClient, pvb.Namespace, nodeOS, r.tolerations)
 	if err != nil {
 		log.WithError(err).Warn("Failed to get node-agent daemonset tolerations, hosting pod will only get configured tolerations")
 	}
