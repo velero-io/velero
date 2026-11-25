@@ -197,7 +197,17 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) Verify() error {
 	// every volume in the group must come back with the content written before
 	// the backup, which is what shows the group snapshot was actually usable.
 	namespace := c.CaseBaseName
-	Expect(WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)).To(Succeed(),
+	err = WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)
+	if err != nil {
+		for _, resource := range []string{"deployment", "pods", "pvc", "volumesnapshots"} {
+			fmt.Print(RunCommand("kubectl", []string{"describe", resource, "-n", namespace, "--request-timeout=30s"}))
+		}
+		fmt.Print(RunCommand("kubectl", []string{"get", "events", "-n", namespace, "--request-timeout=30s"}))
+		for _, resource := range []string{"volumesnapshotcontents", "volumegroupsnapshotcontents"} {
+			fmt.Print(RunCommand("kubectl", []string{"get", resource, "-o", "wide", "--request-timeout=30s"}))
+		}
+	}
+	Expect(err).To(Succeed(),
 		fmt.Sprintf("the deployment in namespace %s is not ready after the restore", namespace))
 
 	Expect(c.writtenContent).To(HaveLen(vgsPVCCount),

@@ -173,5 +173,5 @@ func (v *BackupVolumeInfo) Destroy() error {
 		return errors.Wrap(err, "Could cleanup retrieve namespaces")
 	}
 
-	return WaitAllSelectedNSDeleted(v.Ctx, v.Client, "ns-test=true")
+	return WaitAllSelectedNSDeleted(v.Ctx, v.Client, "kubernetes.io/metadata.name="+v.CaseBaseName)
 }
