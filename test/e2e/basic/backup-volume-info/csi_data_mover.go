@@ -61,5 +61,8 @@ func (c *CSIDataMoverVolumeInfo) Verify() error {
 	Expect(volumeInfo).ToNot(BeEmpty())
 	Expect(volumeInfo[0].SnapshotDataMovementInfo).NotTo(BeNil())
 
-	return nil
+	// The metadata above only describes the backup. Check that the restore
+	// produced usable volumes too: the populated ones must come back with their
+	// contents and the empty ones must come back empty.
+	return c.VerifyRestoredVolumeContents(c.CaseBaseName)
 }

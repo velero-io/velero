@@ -18,8 +18,6 @@ package basic
 
 import (
 	"fmt"
-	"strings"
-	"unicode"
 
 	"github.com/cockroachdb/errors"
 	. "github.com/onsi/gomega"
@@ -62,12 +60,6 @@ var CSIVolumeGroupSnapshotVolumeInfoTest func() = TestFunc(&CSIVolumeGroupSnapsh
 
 type CSIVolumeGroupSnapshotVolumeInfo struct {
 	BackupVolumeInfo
-
-	// writtenContent maps a grouped volume's name to the content written into
-	// it before the backup. Recorded at write time rather than recomputed in
-	// Verify, so the check does not depend on the restored pod keeping the name
-	// it had at backup time.
-	writtenContent map[string]string
 }
 
 // CreateResources replaces the base case's resources with PVCs that carry the
@@ -132,7 +124,6 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) CreateResources() error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to list pods in namespace %s", namespace)
 	}
-	c.writtenContent = make(map[string]string, len(vols))
 	for _, pod := range podList.Items {
 		for _, vol := range vols {
 			// CreateFileToPod ignores the content argument and writes a string
@@ -151,7 +142,11 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) CreateResources() error {
 			); err != nil {
 				return errors.Wrapf(err, "failed to write %s to volume %s of pod %s", vgsFileName, vol.Name, pod.Name)
 			}
-			c.writtenContent[vol.Name] = content
+			c.restoredVolumes = append(c.restoredVolumes, volumeContent{
+				VolumeName: vol.Name,
+				FileName:   vgsFileName,
+				Content:    content,
+			})
 		}
 	}
 	return nil
@@ -196,51 +191,5 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) Verify() error {
 	// The metadata above only describes the backup. Check the restore as well:
 	// every volume in the group must come back with the content written before
 	// the backup, which is what shows the group snapshot was actually usable.
-	namespace := c.CaseBaseName
-	Expect(WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)).To(Succeed(),
-		fmt.Sprintf("the deployment in namespace %s is not ready after the restore", namespace))
-
-	Expect(c.writtenContent).To(HaveLen(vgsPVCCount),
-		"CreateResources did not record what it wrote, so there is nothing to compare the restore against")
-
-	podList, err := ListPods(c.Ctx, c.Client, namespace)
-	Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("failed to list pods in namespace %s after the restore", namespace))
-
-	podsChecked := 0
-	for _, pod := range podList.Items {
-		// A pod left over from before the restore may still be terminating.
-		// Only the running one can be exec'd into.
-		if pod.Status.Phase != corev1api.PodRunning {
-			continue
-		}
-		podsChecked++
-
-		restored := 0
-		for _, vol := range pod.Spec.Volumes {
-			expected, inGroup := c.writtenContent[vol.Name]
-			if !inGroup {
-				continue
-			}
-			content, _, err := ReadFileFromPodVolume(
-				namespace,
-				pod.Name,
-				DefaultContainerName,
-				vol.Name,
-				vgsFileName,
-				c.VeleroCfg.WorkerOS,
-			)
-			Expect(err).ToNot(HaveOccurred(),
-				fmt.Sprintf("failed to read %s from volume %s of restored pod %s", vgsFileName, vol.Name, pod.Name))
-
-			content = strings.TrimRightFunc(content, unicode.IsSpace)
-			Expect(content).To(Equal(expected),
-				fmt.Sprintf("volume %s did not come back with its contents.\n expected: %s\n got: %s", vol.Name, expected, content))
-			restored++
-		}
-		Expect(restored).To(Equal(vgsPVCCount),
-			fmt.Sprintf("pod %s came back with %d of the %d volumes in the group", pod.Name, restored, vgsPVCCount))
-	}
-	Expect(podsChecked).To(BeNumerically(">", 0),
-		fmt.Sprintf("no running pod was restored into namespace %s, so nothing was verified", namespace))
-	return nil
+	return c.VerifyRestoredVolumeContents(c.CaseBaseName)
 }
