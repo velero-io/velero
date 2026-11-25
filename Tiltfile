@@ -52,7 +52,7 @@ git_sha = str(local("git rev-parse HEAD", quiet = True, echo_off = True)).strip(
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.26.10 as tilt-helper
+FROM golang:1.26.11 as tilt-helper
 
 # Support live reloading with Tilt
 RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
