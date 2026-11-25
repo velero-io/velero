@@ -549,6 +549,22 @@ func TestBackupOldResourceFiltering(t *testing.T) {
 			},
 		},
 		{
+			name: "should not include cluster-scoped resource if the included namespace wildcard matches no namespace and IncludeClusterResources=nil",
+			backup: defaultBackup().
+				IncludedNamespaces("missing-*").
+				IncludedResources("pods", "persistentvolumes").
+				Result(),
+			apiResources: []*test.APIResource{
+				test.Pods(
+					builder.ForPod("ns-1", "pod-1").Result(),
+				),
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
+			},
+			want: []string{},
+		},
+		{
 			name: "should include cluster-scoped resources if backing up all namespaces and IncludeClusterResources=true",
 			backup: defaultBackup().
 				IncludeClusterResources(true).
@@ -3371,6 +3387,28 @@ func TestBackupWithSnapshots(t *testing.T) {
 			},
 			wantSkippedVolumes: []SkippedVolume{},
 		},
+		{
+			name: "persistent volume is not snapshotted when the namespace include wildcard matches no namespace",
+			req: &Request{
+				Backup: defaultBackup().IncludedNamespaces("missing-*").Result(),
+				SnapshotLocations: []*velerov1.VolumeSnapshotLocation{
+					newSnapshotLocation("velero", "default", "default"),
+				},
+				SkippedVolumeTracker: NewSkipVolumeTracker(),
+				BackedUpItems:        NewBackedUpItemsMap(),
+				WorkerPool:           itemBlockPool,
+			},
+			apiResources: []*test.APIResource{
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
+			},
+			snapshotterGetter: map[string]vsv1.VolumeSnapshotter{
+				"default": new(fakeVolumeSnapshotter).WithVolume("pv-1", "vol-1", "", "type-1", 100, false),
+			},
+			want:               nil,
+			wantSkippedVolumes: []SkippedVolume{},
+		},
 	}
 
 	for _, tc := range tests {
@@ -5498,10 +5536,11 @@ func TestBackupNewResourceFiltering(t *testing.T) {
 
 func TestBackupNamespaces(t *testing.T) {
 	tests := []struct {
-		name         string
-		backup       *velerov1.Backup
-		apiResources []*test.APIResource
-		want         []string
+		name             string
+		backup           *velerov1.Backup
+		apiResources     []*test.APIResource
+		runtimeResources []runtime.Object
+		want             []string
 	}{
 		{
 			name: "LabelSelector test",
@@ -5629,8 +5668,69 @@ func TestBackupNamespaces(t *testing.T) {
 				test.Deployments(
 					builder.ForDeployment("ns-1", "deploy-1").ObjectMeta(builder.WithLabels("a", "b")).Result(),
 				),
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
+			},
+			runtimeResources: []runtime.Object{
+				builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+				builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+				builder.ForNamespace("ns-3").Phase(corev1api.NamespaceActive).Result(),
 			},
 			want: []string{},
+		},
+		{
+			name:   "Wildcard matching some namespaces does not back up cluster-scoped resources",
+			backup: defaultBackup().IncludedNamespaces("ns-1*").Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-2", "deploy-2").Result(),
+				),
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
+			},
+			runtimeResources: []runtime.Object{
+				builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+				builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
+				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
+			},
+		},
+		{
+			name:   "Wildcard star backs up cluster-scoped resources",
+			backup: defaultBackup().IncludedNamespaces("*").Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+				),
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
+			},
+			runtimeResources: []runtime.Object{
+				builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+			},
+			want: []string{
+				"resources/namespaces/cluster/ns-1.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
+				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
+				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
+				"resources/persistentvolumes/cluster/pv-1.json",
+				"resources/persistentvolumes/v1-preferredversion/cluster/pv-1.json",
+			},
 		},
 		{
 			name:   "Default namespace filter test",
@@ -5644,6 +5744,9 @@ func TestBackupNamespaces(t *testing.T) {
 				test.Deployments(
 					builder.ForDeployment("ns-1", "deploy-1").ObjectMeta(builder.WithLabels("a", "b")).Result(),
 				),
+				test.PVs(
+					builder.ForPersistentVolume("pv-1").Result(),
+				),
 			},
 			want: []string{
 				"resources/namespaces/cluster/ns-1.json",
@@ -5654,6 +5757,8 @@ func TestBackupNamespaces(t *testing.T) {
 				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
 				"resources/deployments.apps/namespaces/ns-1/deploy-1.json",
 				"resources/deployments.apps/v1-preferredversion/namespaces/ns-1/deploy-1.json",
+				"resources/persistentvolumes/cluster/pv-1.json",
+				"resources/persistentvolumes/v1-preferredversion/cluster/pv-1.json",
 			},
 		},
 		{
@@ -5698,6 +5803,7 @@ func TestBackupNamespaces(t *testing.T) {
 				}
 				backupFile = bytes.NewBuffer([]byte{})
 			)
+			h.backupper.kbClient = test.NewFakeControllerRuntimeClient(t, tc.runtimeResources...)
 
 			for _, resource := range tc.apiResources {
 				h.addItems(t, resource)
