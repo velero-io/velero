@@ -1,0 +1,1 @@
+Fix VolumeGroupSnapshot restores that left the restored PVCs Pending, including restores of older backups. Older backups restore in most cases, but taking a new backup of VGS workloads is still recommended

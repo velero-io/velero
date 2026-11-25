@@ -18,6 +18,7 @@ package csi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -163,6 +164,12 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 			// for CSI drivers that populate this field (e.g., Ceph RBD).
 			if vsc.Status.VolumeGroupSnapshotHandle != nil {
 				annotations[velerov1api.VolumeGroupSnapshotHandleAnnotation] = *vsc.Status.VolumeGroupSnapshotHandle
+
+				// The stub VGSC created on restore must list the snapshot of
+				// every group member, or the CSI driver rejects it.
+				if handles := p.groupMemberHandles(ctx, vs, *vsc.Status.VolumeGroupSnapshotHandle); handles != "" {
+					annotations[velerov1api.VolumeGroupSnapshotMemberHandlesAnnotation] = handles
+				}
 			}
 		}
 
@@ -254,6 +261,57 @@ func (p *volumeSnapshotBackupItemAction) Execute(
 
 	return &unstructured.Unstructured{Object: vsMap},
 		additionalItems, operationID, itemToUpdate, nil
+}
+
+// groupMemberHandles returns the snapshot handles of every member of the
+// VolumeGroupSnapshot the VolumeSnapshot was taken in, as a JSON list. It
+// returns "" when they cannot be found, and the restore then falls back to the
+// backup volume info. Because the restore can still rebuild the list, a
+// missing list is logged at info level and does not add a backup warning.
+func (p *volumeSnapshotBackupItemAction) groupMemberHandles(ctx context.Context, vs *snapshotv1api.VolumeSnapshot, groupHandle string) string {
+	log := p.log.WithField("VolumeSnapshot", vs.Namespace+"/"+vs.Name)
+	if vs.Status == nil || vs.Status.VolumeGroupSnapshotName == nil {
+		log.Info("VolumeSnapshot has a VolumeGroupSnapshotHandle but no VolumeGroupSnapshot name")
+		return ""
+	}
+
+	vgs, err := csi.GetVGS(ctx, p.crClient, vs.Namespace, *vs.Status.VolumeGroupSnapshotName)
+	if err != nil {
+		log.WithError(err).Info("Failed to get the VolumeGroupSnapshot")
+		return ""
+	}
+	if vgs.Status == nil || vgs.Status.BoundVolumeGroupSnapshotContentName == nil {
+		log.Infof("VolumeGroupSnapshot %s is not bound to a VolumeGroupSnapshotContent", vgs.Name)
+		return ""
+	}
+
+	vgsc, err := csi.GetVGSC(ctx, p.crClient, *vgs.Status.BoundVolumeGroupSnapshotContentName)
+	if err != nil {
+		log.WithError(err).Info("Failed to get the VolumeGroupSnapshotContent")
+		return ""
+	}
+	if vgsc.Status == nil || vgsc.Status.VolumeGroupSnapshotHandle == nil || *vgsc.Status.VolumeGroupSnapshotHandle != groupHandle {
+		log.Infof("VolumeGroupSnapshotContent %s does not have VolumeGroupSnapshotHandle %s", vgsc.Name, groupHandle)
+		return ""
+	}
+
+	handles := make([]string, 0, len(vgsc.Status.VolumeSnapshotInfoList))
+	for _, info := range vgsc.Status.VolumeSnapshotInfoList {
+		if info.SnapshotHandle != "" {
+			handles = append(handles, info.SnapshotHandle)
+		}
+	}
+	if len(handles) == 0 {
+		log.Infof("VolumeGroupSnapshotContent %s lists no snapshot handles", vgsc.Name)
+		return ""
+	}
+
+	out, err := json.Marshal(handles)
+	if err != nil {
+		log.WithError(err).Info("Failed to encode the group member snapshot handles")
+		return ""
+	}
+	return string(out)
 }
 
 // Name returns the plugin's name.

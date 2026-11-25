@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
@@ -137,6 +138,45 @@ func TestVGSHelpersRoundTrip(t *testing.T) {
 	require.NoError(t, csi.DeleteVGS(t.Context(), c, "ns-1", "vgs-1"))
 	_, err = csi.GetVGS(t.Context(), c, "ns-1", "vgs-1")
 	require.Error(t, err)
+}
+
+type legacyVGSCClient struct {
+	crclient.Client
+	content *unstructured.Unstructured
+}
+
+func (c *legacyVGSCClient) Get(_ context.Context, _ crclient.ObjectKey, obj crclient.Object, _ ...crclient.GetOption) error {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return errors.New("unexpected typed get")
+	}
+	u.Object = c.content.DeepCopy().Object
+	return nil
+}
+
+func TestGetVGSCNormalizesV1beta1MemberHandles(t *testing.T) {
+	base := velerotest.NewFakeControllerRuntimeClientBuilder(t).
+		WithRESTMapper(velerotest.VGSTestRESTMapper("v1beta1")).Build()
+	legacy := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "groupsnapshot.storage.k8s.io/v1beta1",
+		"kind":       "VolumeGroupSnapshotContent",
+		"metadata":   map[string]any{"name": "group-content"},
+		"status": map[string]any{
+			"volumeGroupSnapshotHandle": "group-handle",
+			"volumeSnapshotHandlePairList": []any{
+				map[string]any{"volumeHandle": "volume-1", "snapshotHandle": "snapshot-1"},
+				map[string]any{"volumeHandle": "volume-2", "snapshotHandle": "snapshot-2"},
+			},
+		},
+	}}
+
+	got, err := csi.GetVGSC(t.Context(), &legacyVGSCClient{Client: base, content: legacy}, "group-content")
+	require.NoError(t, err)
+	require.Equal(t, "group-handle", *got.Status.VolumeGroupSnapshotHandle)
+	require.Equal(t, []volumegroupsnapshotv1.VolumeSnapshotInfo{
+		{VolumeHandle: "volume-1", SnapshotHandle: "snapshot-1"},
+		{VolumeHandle: "volume-2", SnapshotHandle: "snapshot-2"},
+	}, got.Status.VolumeSnapshotInfoList)
 }
 
 func TestCleanupBackupVolumeGroupSnapshots(t *testing.T) {

@@ -114,7 +114,11 @@ Here is a visual representation of the backup workflow:
 
 Restoring from a VGS backup is simple and flexible. During backup, Velero creates individual `VolumeSnapshots` from the `VolumeGroupSnapshot`, so the restore process works with standard volume snapshot restoration.
 
-> **Good to know:** No special VGS-related logic is needed during the restore. This means you can restore your data to a cluster that doesn't have VGS support enabled, providing excellent portability.
+> **Good to know:** For most CSI drivers, the restore needs no VGS-specific step. The restored snapshots are standard `VolumeSnapshots`, so you can restore your data to a cluster that doesn't have VGS support enabled. The exception is described below.
+
+Some CSI drivers, such as Ceph RBD and the CSI hostpath driver, mark each restored snapshot as part of its original group. For these, Velero creates a temporary `VolumeGroupSnapshotContent` during the restore that lists the snapshot of every member of the group, because the CSI driver rejects a list that does not match the group. Velero records that list in each `VolumeSnapshot` during the backup.
+
+> **Backups from older Velero versions:** VGS backups taken by older Velero versions do not have this record. For them, Velero rebuilds the list from the backup's volume information. If the backup did not snapshot a PVC that carries the VGS label, for example because a volume policy skipped it, the volume information has no snapshot for that PVC, so the list misses it. The CSI driver then rejects the restore and the restored PVCs stay `Pending`. The restore reports a warning once it has waited for them for the Velero server's `--resource-timeout` (10 minutes by default). To avoid this, take a new backup of your VGS workloads after upgrading Velero.
 
 ## Prerequisites
 

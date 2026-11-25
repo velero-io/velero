@@ -37,8 +37,8 @@ import (
 // all VGS I/O with *unstructured.Unstructured on the existing crClient: the
 // object's GVK is stamped to the served version and controller-runtime routes
 // it via its RESTMapper. Objects are converted to/from the canonical v1 typed
-// structs, whose field layout is identical across v1beta1/v1beta2/v1 for
-// everything Velero reads or writes.
+// structs. Most fields Velero uses share the same layout across versions;
+// GetVGSC normalizes v1beta1's legacy member list to the canonical v1 field.
 const (
 	// VGSGroup is the VolumeGroupSnapshot API group.
 	VGSGroup = "groupsnapshot.storage.k8s.io"
@@ -246,11 +246,45 @@ func GetVGSC(ctx context.Context, c client.Client, name string) (*volumegroupsna
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, u); err != nil {
 		return nil, err
 	}
+	if gv.Version == "v1beta1" {
+		if err := normalizeVGSContentV1beta1(u); err != nil {
+			return nil, err
+		}
+	}
 	out := &volumegroupsnapshotv1.VolumeGroupSnapshotContent{}
 	if err := fromUnstructured(u, out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// normalizeVGSContentV1beta1 maps the legacy member list to the canonical v1
+// field. The API server's conversion webhook normally performs this mapping,
+// but a cluster serving only v1beta1 returns the legacy JSON field directly.
+func normalizeVGSContentV1beta1(u *unstructured.Unstructured) error {
+	pairs, found, err := unstructured.NestedSlice(u.Object, "status", "volumeSnapshotHandlePairList")
+	if err != nil || !found {
+		return err
+	}
+
+	infos := make([]any, 0, len(pairs))
+	for i, pair := range pairs {
+		pairMap, ok := pair.(map[string]any)
+		if !ok {
+			return errors.Errorf("status.volumeSnapshotHandlePairList[%d] is not an object", i)
+		}
+		volumeHandle, _, err := unstructured.NestedString(pairMap, "volumeHandle")
+		if err != nil {
+			return errors.Wrapf(err, "failed to read volumeHandle from status.volumeSnapshotHandlePairList[%d]", i)
+		}
+		snapshotHandle, _, err := unstructured.NestedString(pairMap, "snapshotHandle")
+		if err != nil {
+			return errors.Wrapf(err, "failed to read snapshotHandle from status.volumeSnapshotHandlePairList[%d]", i)
+		}
+		infos = append(infos, map[string]any{"volumeHandle": volumeHandle, "snapshotHandle": snapshotHandle})
+	}
+
+	return unstructured.SetNestedSlice(u.Object, infos, "status", "volumeSnapshotInfoList")
 }
 
 // ListVGSC lists VolumeGroupSnapshotContents matching the given labels.
