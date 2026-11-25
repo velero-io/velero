@@ -266,6 +266,12 @@ jobs:
         # of fixing the markers by hand. The mention stays inside backticks,
         # which does not trigger the Copilot agent; the user opts in by
         # posting the command themselves.
+        #
+        # NOTE: this hint is a stopgap. Once the org enables Copilot coding
+        # agent (premium requests) on velero-io, the workflow can post the
+        # `@copilot` mention itself to auto-trigger conflict resolution, and
+        # this hint-only step becomes obsolete — replace it with the direct
+        # invocation at that point.
         if: steps.backport.outputs.created_pull_numbers != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
