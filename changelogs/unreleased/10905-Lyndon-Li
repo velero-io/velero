@@ -1,0 +1,1 @@
+Related to #9229. Remove the hardcode behavior for linked-clone of vSphere CSI driver and make IntolerateSourceNode configurable to support different versions of vSphere CSI driver.
