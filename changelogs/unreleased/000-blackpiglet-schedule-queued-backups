@@ -1,0 +1,1 @@
+Skip creating a scheduled backup while a previous backup from the same schedule is Queued or ReadyToStart.

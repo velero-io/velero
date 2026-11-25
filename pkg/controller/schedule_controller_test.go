@@ -607,53 +607,34 @@ func TestGetBackup(t *testing.T) {
 
 func TestCheckIfBackupInNewOrProgress(t *testing.T) {
 	require.NoError(t, velerov1.AddToScheme(scheme.Scheme))
-
-	client := fake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
-	logger := velerotest.NewLogger()
-
-	// Create testing schedule
-	testSchedule := builder.ForSchedule("ns", "name").Phase(velerov1.SchedulePhaseEnabled).Result()
-	err := client.Create(ctx, testSchedule)
-	require.NoError(t, err, "fail to create schedule in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	// Create backup in New phase.
-	newBackup := builder.ForBackup("ns", "backup-1").
-		ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, "name")).
-		Phase(velerov1.BackupPhaseNew).Result()
-	err = client.Create(ctx, newBackup)
-	require.NoError(t, err, "fail to create backup in New phase in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	reconciler := NewScheduleReconciler("ns", logger, client, metrics.NewServerMetrics(), false)
-	result := reconciler.checkIfBackupInNewOrProgress(testSchedule)
-	assert.True(t, result)
-
-	// Clean backup in New phase.
-	err = client.Delete(ctx, newBackup)
-	require.NoError(t, err, "fail to delete backup in New phase in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	// Create backup in InProgress phase.
-	inProgressBackup := builder.ForBackup("ns", "backup-2").
-		ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, "name")).
-		Phase(velerov1.BackupPhaseInProgress).Result()
-	err = client.Create(ctx, inProgressBackup)
-	require.NoError(t, err, "fail to create backup in InProgress phase in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	reconciler = NewScheduleReconciler("namespace", logger, client, metrics.NewServerMetrics(), false)
-	result = reconciler.checkIfBackupInNewOrProgress(testSchedule)
-	assert.True(t, result)
-
-	// Clean backup in InProgress phase.
-	err = client.Delete(ctx, inProgressBackup)
-	require.NoError(t, err, "fail to delete backup in InProgress phase in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	// Create backup with empty phase (not yet reconciled).
-	emptyPhaseBackup := builder.ForBackup("ns", "backup-3").
-		ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, "name")).
-		Phase("").Result()
-	err = client.Create(ctx, emptyPhaseBackup)
-	require.NoError(t, err, "fail to create backup with empty phase in TestCheckIfBackupInNewOrProgress: %v", err)
-
-	reconciler = NewScheduleReconciler("namespace", logger, client, metrics.NewServerMetrics(), false)
-	result = reconciler.checkIfBackupInNewOrProgress(testSchedule)
-	assert.True(t, result)
+	tests := []struct {
+		name         string
+		phase        velerov1.BackupPhase
+		namespace    string
+		scheduleName string
+		want         bool
+	}{
+		{"empty phase", "", "ns", "name", true},
+		{"new", velerov1.BackupPhaseNew, "ns", "name", true},
+		{"queued", velerov1.BackupPhaseQueued, "ns", "name", true},
+		{"ready to start", velerov1.BackupPhaseReadyToStart, "ns", "name", true},
+		{"in progress", velerov1.BackupPhaseInProgress, "ns", "name", true},
+		{"completed", velerov1.BackupPhaseCompleted, "ns", "name", false},
+		{"failed", velerov1.BackupPhaseFailed, "ns", "name", false},
+		{"partially failed", velerov1.BackupPhasePartiallyFailed, "ns", "name", false},
+		{"failed validation", velerov1.BackupPhaseFailedValidation, "ns", "name", false},
+		{"queued from another schedule", velerov1.BackupPhaseQueued, "ns", "other", false},
+		{"ready to start in another namespace", velerov1.BackupPhaseReadyToStart, "other", "name", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			backup := builder.ForBackup(test.namespace, "backup").
+				ObjectMeta(builder.WithLabels(velerov1.ScheduleNameLabel, test.scheduleName)).
+				Phase(test.phase).Result()
+			client := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(backup).Build()
+			reconciler := NewScheduleReconciler("ns", velerotest.NewLogger(), client, metrics.NewServerMetrics(), false)
+			schedule := builder.ForSchedule("ns", "name").Result()
+			assert.Equal(t, test.want, reconciler.checkIfBackupInNewOrProgress(schedule))
+		})
+	}
 }
