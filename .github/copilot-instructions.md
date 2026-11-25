@@ -77,23 +77,33 @@ branches.
 
 ## Resolving backport conflicts
 
-When a backport cannot cherry-pick cleanly, the workflow commits the conflict
-markers (`<<<<<<<`, `=======`, `>>>>>>>`) into a **draft** backport PR instead
-of failing. If you are asked on such a PR to resolve the merge conflicts:
+When a backport cannot cherry-pick cleanly, the workflow commits the first
+conflicting commit (conflict markers `<<<<<<<`, `=======`, `>>>>>>>` and/or a
+modify/delete conflict) into a **draft** backport PR instead of failing. If
+you are asked on such a PR to resolve the conflicts:
 
-- The markers are ordinary file content, not live git conflicts. Edit each
+- The conflicts are ordinary file content, not live git conflicts. Edit each
   file, keep the correct combination of both sides, and remove all three
-  marker lines plus their branch labels.
+  marker lines plus their branch labels. Modify/delete conflicts have no
+  markers — decide whether the backported change re-adds, keeps, or drops the
+  file.
 - The `<<<<<<< HEAD` side is the release branch's current state; the other
   side is the backported change. Resolve so the backported change applies on
   top of the release branch's current code — do not simply delete one side.
+- **Multi-commit backports are incomplete by design at this point.** The
+  backport stops at the first conflicting commit; the backport action leaves
+  a comment on the draft PR listing the source commits that were not yet
+  cherry-picked. After resolving the conflicts, cherry-pick those remaining
+  commits in order (they may conflict too — resolve each the same way). Do
+  not re-apply the commit that was already committed as conflicted.
 - The changelog file `changelogs/unreleased/<backport_pr>-<user>` was already
   renamed by the workflow. Keep it as-is; do not rename or recreate it.
 - The DCO re-signing above ran **before** your commits. Every commit you add
   must carry its own `Signed-off-by:` trailer (see DCO below), or the DCO
   check will fail.
-- After resolving, state in a comment which files were conflicted and how
-  each was resolved, so the reviewer can check the resolution choices.
+- After resolving, state in a comment which files were conflicted, how each
+  was resolved, and which remaining commits were applied, so the reviewer can
+  check the resolution choices.
 
 ## DCO signoff (required on every commit)
 
