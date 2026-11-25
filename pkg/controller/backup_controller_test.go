@@ -44,11 +44,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-<<<<<<< HEAD
-=======
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
->>>>>>> 10765840f (Fix ReadyToStart backup recovery after restart (#10629))
 
 	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
