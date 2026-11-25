@@ -97,7 +97,7 @@ The configurable parameters are as follows:
 | `provider` | String | Required Field | The name for whichever object storage provider will be used to store the backups. See [your object storage provider's plugin documentation](../supported-providers) for the appropriate value to use. |
 | `objectStorage` | ObjectStorageLocation | Required Field | Specification of the object storage for the given provider. |
 | `objectStorage/bucket` | String | Required Field | The storage bucket where backups are to be uploaded. |
-| `objectStorage/prefix` | String | Optional Field | The directory inside a storage bucket where backups are to be uploaded. |
+| `objectStorage/prefix` | String | Optional Field | The directory inside a storage bucket where backups are to be uploaded. Reserve this prefix for Velero data; unexpected immediate subdirectories cause the location to become `Unavailable`, blocking backups and restores. See [Required directory layout](../../locations/#required-directory-layout). |
 | `objectStorage/caCert` | String | Optional Field | **Deprecated**: Use `caCertRef` instead. A base64 encoded CA bundle to be used when verifying TLS connections |
 | `objectStorage/caCertRef` | [corev1.SecretKeySelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#secretkeyselector-v1-core) | Optional Field | Reference to a Secret containing a CA bundle to be used when verifying TLS connections. The Secret must be in the same namespace as the BackupStorageLocation. |
 | `objectStorage/caCertRef/name` | String | Required Field (when using caCertRef) | The name of the Secret containing the CA certificate bundle |

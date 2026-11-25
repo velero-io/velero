@@ -13,6 +13,27 @@ These tips can help you troubleshoot known issues. If they don't help, you can [
 
 - [Debug restores][1]
 
+## Unavailable backup storage location
+
+A backup storage location (BSL) must be `Available` for Velero to create backups or restore backups from it. A successfully submitted request can still enter `FailedValidation` if its BSL is unavailable.
+
+Check the location's phase, validation message, and last validation time (replace `default` and the namespace if needed):
+
+```shell
+velero backup-location get
+kubectl -n velero get backupstoragelocation default -o yaml
+```
+
+Inspect `status.phase`, `status.message`, and `status.lastValidationTime`. The message identifies the validation error, such as invalid configuration, an object storage access error, or an unexpected directory layout.
+
+If the message contains `Backup store contains invalid top-level directories`, check the immediate subdirectories under the BSL's `spec.objectStorage.prefix`, or under the bucket root if no prefix is configured. Only Velero's [expected directories](locations.md#required-directory-layout) are allowed there. An unrelated directory can cause validation to fail even when existing backups remain readable.
+
+Move unrelated data outside the configured storage root, or use a dedicated bucket or prefix for Velero. Preserve existing Velero data: changing the BSL's prefix does not move backups or repository data to the new location.
+
+For other validation errors, correct the configuration or storage access problem reported in `status.message`. Wait for the next validation and confirm that `status.phase` becomes `Available`. Validation normally runs every minute; the BSL's `spec.validationFrequency` can override the server setting, and `0s` disables periodic validation.
+
+After the location becomes available, create new backup or restore requests for any that entered `FailedValidation`. Those failed requests do not automatically resume.
+
 ## General troubleshooting information
 
 You can use the `velero bug` command to open a [Github issue][4] by launching a browser window with some prepopulated values. Values included are OS, CPU architecture, `kubectl` client and server versions (if available) and the `velero` client version. This information isn't submitted to Github until you click the `Submit new issue` button in the Github UI, so feel free to add, remove or update whatever information you like.
