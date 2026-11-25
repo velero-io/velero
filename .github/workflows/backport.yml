@@ -258,3 +258,34 @@ jobs:
             fi
             git push --force-with-lease origin "HEAD:${branch}"
           done
+
+      - name: Hint Copilot conflict resolution on conflicted backports
+        # `conflict_resolution: draft_commit_conflicts` commits conflict
+        # markers into the created draft backport PR. Comment on such PRs so
+        # the requester knows they can hand the resolution to Copilot instead
+        # of fixing the markers by hand. The mention stays inside backticks,
+        # which does not trigger the Copilot agent; the user opts in by
+        # posting the command themselves.
+        if: steps.backport.outputs.created_pull_numbers != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CREATED_PR_NUMBERS: ${{ steps.backport.outputs.created_pull_numbers }}
+        run: |
+          for new_pr in $CREATED_PR_NUMBERS; do
+            branch=$(gh pr view "$new_pr" --repo "$REPO" --json headRefName -q .headRefName)
+            git fetch origin "$branch" --quiet
+            # Conflict markers start with 7 '<' or 7 '>' followed by a space.
+            # '=======' alone is too common in prose to be a safe signal.
+            if git grep -qE '^(<{7} |>{7} )' "origin/${branch}" -- . ':!vendor'; then
+              # Idempotency: skip if the hint was already posted.
+              if gh pr view "$new_pr" --repo "$REPO" --json comments \
+                  --jq '.comments[].body' | grep -q 'let Copilot resolve'; then
+                echo "Hint already posted on PR #${new_pr}; skipping."
+                continue
+              fi
+              body=$'This backport contains merge conflict markers (committed by the backport workflow so the draft PR stays reviewable).\n\nYou can let Copilot resolve them by commenting:\n\n`@copilot` please resolve the merge conflicts on this branch, then make sure the changelog file and DCO signoff still pass\n\nOr resolve them manually: edit the files containing `<<<<<<<` / `=======` / `>>>>>>>` markers, commit, then mark the PR ready for review.'
+              gh pr comment "$new_pr" --repo "$REPO" --body "$body"
+              echo "Posted Copilot conflict hint on PR #${new_pr}."
+            fi
+          done

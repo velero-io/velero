@@ -75,6 +75,34 @@ branches.
   passes on backport PRs.
 - Only repository **owners, members, and collaborators** may trigger these commands.
 
+## Resolving backport conflicts
+
+When a backport cannot cherry-pick cleanly, the workflow commits the conflict
+markers (`<<<<<<<`, `=======`, `>>>>>>>`) into a **draft** backport PR instead
+of failing. If you are asked on such a PR to resolve the merge conflicts:
+
+- The markers are ordinary file content, not live git conflicts. Edit each
+  file, keep the correct combination of both sides, and remove all three
+  marker lines plus their branch labels.
+- The `<<<<<<< HEAD` side is the release branch's current state; the other
+  side is the backported change. Resolve so the backported change applies on
+  top of the release branch's current code — do not simply delete one side.
+- The changelog file `changelogs/unreleased/<backport_pr>-<user>` was already
+  renamed by the workflow. Keep it as-is; do not rename or recreate it.
+- The DCO re-signing above ran **before** your commits. Every commit you add
+  must carry its own `Signed-off-by:` trailer (see DCO below), or the DCO
+  check will fail.
+- After resolving, state in a comment which files were conflicted and how
+  each was resolved, so the reviewer can check the resolution choices.
+
+## DCO signoff (required on every commit)
+
+This repository enforces the [DCO](https://github.com/apps/dco): every commit
+must end with a `Signed-off-by: <name> <email>` line matching the commit
+author. Always commit with `git commit -s` (which appends the trailer), or run
+`git rebase --signoff` over the commits before pushing. A missing or
+mismatched trailer fails CI.
+
 ## General coding guidelines
 
 - Follow the existing code style of the file being edited.
