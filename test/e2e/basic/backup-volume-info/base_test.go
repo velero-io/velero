@@ -35,7 +35,7 @@ import (
 func TestDestroyWaitsForTestNamespace(t *testing.T) {
 	const name = "csi-vgs-volumeinfo"
 	client := fake.NewSimpleClientset(
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"kubernetes.io/metadata.name": name}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Labels: map[string]string{"ns-test": "true"}}},
 	)
 	client.PrependReactor("delete", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
@@ -43,10 +43,8 @@ func TestDestroyWaitsForTestNamespace(t *testing.T) {
 	})
 	pollStarted := make(chan struct{})
 	var once sync.Once
-	client.PrependReactor("list", "namespaces", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		if !action.(clienttesting.ListAction).GetListRestrictions().Labels.Empty() {
-			once.Do(func() { close(pollStarted) })
-		}
+	client.PrependReactor("get", "namespaces", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		once.Do(func() { close(pollStarted) })
 		return false, nil, nil
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)

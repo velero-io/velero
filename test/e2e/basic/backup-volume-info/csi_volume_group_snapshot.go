@@ -17,8 +17,11 @@ limitations under the License.
 package basic
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cockroachdb/errors"
@@ -199,12 +202,29 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) Verify() error {
 	namespace := c.CaseBaseName
 	err = WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)
 	if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		var commands [][]string
 		for _, resource := range []string{"deployment", "pods", "pvc", "volumesnapshots"} {
-			fmt.Print(RunCommand("kubectl", []string{"describe", resource, "-n", namespace, "--request-timeout=30s"}))
+			commands = append(commands, []string{"describe", resource, "-n", namespace, "--request-timeout=30s"})
 		}
-		fmt.Print(RunCommand("kubectl", []string{"get", "events", "-n", namespace, "--request-timeout=30s"}))
+		commands = append(commands, []string{"get", "events", "-n", namespace, "--request-timeout=30s"})
 		for _, resource := range []string{"volumesnapshotcontents", "volumegroupsnapshotcontents"} {
-			fmt.Print(RunCommand("kubectl", []string{"get", resource, "-o", "wide", "--request-timeout=30s"}))
+			commands = append(commands, []string{"get", resource, "-o", "wide", "--request-timeout=30s"})
+		}
+		for _, args := range commands {
+			if ctx.Err() != nil {
+				fmt.Printf("Timed out collecting restore diagnostics: %v\n", ctx.Err())
+				break
+			}
+			cmd := exec.CommandContext(ctx, "kubectl", args...)
+			cmd.WaitDelay = 2 * time.Second
+			fmt.Printf("Diagnostic command: %v\n", cmd)
+			output, cmdErr := cmd.CombinedOutput()
+			fmt.Print(string(output))
+			if cmdErr != nil {
+				fmt.Printf("Diagnostic command failed: %v\n", cmdErr)
+			}
 		}
 	}
 	Expect(err).To(Succeed(),
