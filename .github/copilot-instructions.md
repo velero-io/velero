@@ -99,9 +99,16 @@ of failing. If you are asked on such a PR to resolve the merge conflicts:
 
 This repository enforces the [DCO](https://github.com/apps/dco): every commit
 must end with a `Signed-off-by: <name> <email>` line matching the commit
-author. Always commit with `git commit -s` (which appends the trailer), or run
-`git rebase --signoff` over the commits before pushing. A missing or
-mismatched trailer fails CI.
+author. A missing or mismatched trailer fails CI.
+
+**Get the signoff right on the first commit — do not plan to fix it later.**
+Sign at creation time with `git commit -s` (which appends the trailer). Do
+**not** rely on `git rebase --signoff`, `git commit --amend`, or any other
+history rewrite to add trailers after the fact: those rewrite already-pushed
+commits, which requires a force push — and in this environment you do not
+have force-push permission, so a commit pushed without its trailer cannot be
+repaired, only superseded by a revert + new commit. Check `git log -1` for
+the trailer before pushing if unsure.
 
 ## General coding guidelines
 
