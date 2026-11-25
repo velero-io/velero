@@ -130,7 +130,7 @@ func (r *restoreFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	info, err := fetchBackupInfoInternal(r.Client, r.namespace, restore.Spec.BackupName)
+	info, err := fetchBackupInfoInternal(ctx, r.Client, r.namespace, restore.Spec.BackupName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.WithError(err).Error("not found backup, skip")

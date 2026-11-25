@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 	"time"
@@ -35,9 +36,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/velero-io/velero/internal/hook"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/builder"
+	"github.com/velero-io/velero/pkg/itemoperationmap"
 	"github.com/velero-io/velero/pkg/metrics"
 	persistencemocks "github.com/velero-io/velero/pkg/persistence/mocks"
 	"github.com/velero-io/velero/pkg/plugin/clientmgmt"
@@ -143,7 +146,7 @@ func TestFetchBackupInfo(t *testing.T) {
 				backupStore.On("GetBackupMetadata", test.backupName).Return(test.backupStoreBackup, nil).Maybe()
 			}
 
-			info, err := r.fetchBackupInfo(test.backupName)
+			info, err := r.fetchBackupInfo(t.Context(), test.backupName)
 
 			require.Equal(t, test.expectedErr, err != nil)
 			if test.expectedRes != nil {
@@ -1570,4 +1573,156 @@ func (r *fakeRestorer) RestoreWithResolvers(req *pkgrestore.Request,
 	r.calledWithPVBs = req.PodVolumeBackups
 
 	return res.Get(0).(results.Result), res.Get(1).(results.Result)
+}
+
+type reconcileFunc func(context.Context, ctrl.Request) (ctrl.Result, error)
+
+type restoreCtxKey struct{}
+
+// restoreContextTrackingClient records the context passed to the Backup and
+// BackupStorageLocation Get calls and to the PodVolumeBackup List calls.
+type restoreContextTrackingClient struct {
+	client.Client
+	backupGetCtxs []context.Context
+	bslGetCtxs    []context.Context
+	pvbListCtxs   []context.Context
+}
+
+func (c *restoreContextTrackingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	switch obj.(type) {
+	case *velerov1api.Backup:
+		c.backupGetCtxs = append(c.backupGetCtxs, ctx)
+	case *velerov1api.BackupStorageLocation:
+		c.bslGetCtxs = append(c.bslGetCtxs, ctx)
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *restoreContextTrackingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*velerov1api.PodVolumeBackupList); ok {
+		c.pvbListCtxs = append(c.pvbListCtxs, ctx)
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+// TestRestoreControllers_BackupInfoContextPropagation verifies that the restore controllers
+// use the reconcile context to look up the backup, its storage location and its PodVolumeBackups.
+func TestRestoreControllers_BackupInfoContextPropagation(t *testing.T) {
+	const ns = velerov1api.DefaultNamespace
+	errStop := errors.New("stop reconcile")
+
+	newRestore := func(phase velerov1api.RestorePhase) *velerov1api.Restore {
+		return builder.ForRestore(ns, "restore-1").Backup("backup-1").Phase(phase).Result()
+	}
+	newRestoreReconciler := func(t *testing.T, cli client.Client, store *persistencemocks.BackupStore, pm *pluginmocks.Manager) reconcileFunc {
+		t.Helper()
+		return NewRestoreReconciler(t.Context(), ns, &fakeRestorer{kbClient: cli}, cli, velerotest.NewLogger(), logrus.InfoLevel,
+			func(logrus.FieldLogger) clientmgmt.Manager { return pm }, NewFakeSingleObjectBackupStoreGetter(store),
+			metrics.NewServerMetrics(), logging.FormatText, 30*time.Minute, 60*time.Minute, false, cli, 10*time.Minute, "").Reconcile
+	}
+
+	tests := []struct {
+		name          string
+		restore       *velerov1api.Restore
+		deleteRestore bool
+		newReconcile  func(*testing.T, client.Client, *persistencemocks.BackupStore, *pluginmocks.Manager) reconcileFunc
+		// mockStore makes the backup store stop the reconcile right after the calls under test.
+		mockStore     func(*persistencemocks.BackupStore)
+		expectErr     bool
+		expectPVBList bool
+	}{
+		{
+			name:         "restore",
+			restore:      newRestore(velerov1api.RestorePhaseNew),
+			newReconcile: newRestoreReconciler,
+			mockStore: func(s *persistencemocks.BackupStore) {
+				s.On("GetBackupContents", "backup-1").Return(io.NopCloser(bytes.NewReader([]byte("hello world"))), nil)
+				s.On("GetBackupVolumeSnapshots", "backup-1").Return(nil, errStop)
+			},
+			expectPVBList: true,
+		},
+		{
+			name: "restore deletion",
+			restore: func() *velerov1api.Restore {
+				restore := newRestore(velerov1api.RestorePhaseCompleted)
+				restore.Finalizers = []string{ExternalResourcesFinalizer}
+				return restore
+			}(),
+			deleteRestore: true,
+			newReconcile:  newRestoreReconciler,
+			mockStore: func(s *persistencemocks.BackupStore) {
+				s.On("DeleteRestore", "restore-1").Return(errStop)
+			},
+			expectErr: true,
+		},
+		{
+			name:    "restore operations",
+			restore: newRestore(velerov1api.RestorePhaseWaitingForPluginOperations),
+			newReconcile: func(_ *testing.T, cli client.Client, store *persistencemocks.BackupStore, pm *pluginmocks.Manager) reconcileFunc {
+				return NewRestoreOperationsReconciler(velerotest.NewLogger(), ns, cli, time.Minute,
+					func(logrus.FieldLogger) clientmgmt.Manager { return pm }, NewFakeSingleObjectBackupStoreGetter(store),
+					metrics.NewServerMetrics(), itemoperationmap.NewRestoreItemOperationsMap()).Reconcile
+			},
+			mockStore: func(s *persistencemocks.BackupStore) {
+				s.On("GetRestoreItemOperations", "restore-1").Return(nil, errStop)
+			},
+			expectErr: true,
+		},
+		{
+			name:    "restore finalizer",
+			restore: newRestore(velerov1api.RestorePhaseFinalizing),
+			newReconcile: func(_ *testing.T, cli client.Client, store *persistencemocks.BackupStore, pm *pluginmocks.Manager) reconcileFunc {
+				return NewRestoreFinalizerReconciler(velerotest.NewLogger(), ns, cli,
+					func(logrus.FieldLogger) clientmgmt.Manager { return pm }, NewFakeSingleObjectBackupStoreGetter(store),
+					metrics.NewServerMetrics(), cli, hook.NewMultiHookTracker(), 10*time.Minute).Reconcile
+			},
+			mockStore: func(s *persistencemocks.BackupStore) {
+				s.On("GetBackupVolumeInfos", "backup-1").Return(nil, errStop)
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cli := &restoreContextTrackingClient{
+				Client: velerotest.NewFakeControllerRuntimeClient(t,
+					test.restore,
+					builder.ForBackup(ns, "backup-1").StorageLocation("default").Phase(velerov1api.BackupPhaseCompleted).Result(),
+					builder.ForBackupStorageLocation(ns, "default").Provider("myCloud").Bucket("bucket").
+						Phase(velerov1api.BackupStorageLocationPhaseAvailable).Result(),
+				),
+			}
+			if test.deleteRestore {
+				require.NoError(t, cli.Delete(t.Context(), test.restore))
+			}
+
+			store := &persistencemocks.BackupStore{}
+			test.mockStore(store)
+			pluginManager := &pluginmocks.Manager{}
+			pluginManager.On("GetRestoreItemActionsV2").Return(nil, nil)
+			pluginManager.On("CleanupClients")
+
+			ctx := context.WithValue(t.Context(), restoreCtxKey{}, "sentinel")
+			_, err := test.newReconcile(t, cli, store, pluginManager)(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{Namespace: ns, Name: "restore-1"},
+			})
+			assert.Equal(t, test.expectErr, err != nil, "got error %v", err)
+			store.AssertExpectations(t)
+
+			calls := map[string][]context.Context{
+				"Backup Get": cli.backupGetCtxs,
+				"BSL Get":    cli.bslGetCtxs,
+			}
+			if test.expectPVBList {
+				calls["PodVolumeBackup List"] = cli.pvbListCtxs
+			}
+			for call, ctxs := range calls {
+				require.NotEmpty(t, ctxs, "expected at least one %s call", call)
+				for _, got := range ctxs {
+					assert.Equal(t, "sentinel", got.Value(restoreCtxKey{}), "%s should use the reconcile context", call)
+				}
+			}
+		})
+	}
 }
