@@ -19,6 +19,7 @@ operation could perform better. Specifically:
   volume is not possible. Therefore for these clusters, when setting `readOnly` for a storage class, users must also disable relabeling.
   Note that this option is not consistent with the Restricted pod security policy, so if Velero pods must run with a restricted policy,
   disabling relabeling (and therefore readOnly volume mounting) is not possible.
+- Some storage providers don't support to attach the backupPVC, which is created from a snapshot, to be attached to the same node as the sourcePVC that the snapshot is created from, otherwise, the data mover pod may fail to start.
 
 Velero introduces a new section in the node agent configuration ConfigMap (the name of this ConfigMap is passed using `--node-agent-configmap` velero server argument)
 called `backupPVC`, through which you can specify the following
@@ -40,9 +41,6 @@ default the source PVC's storage class will be used.
   support (`CSIDriver.spec.seLinuxMount: true`) and a storage class that supports creating `ReadWriteOncePod` PVCs from a snapshot. This field is ignored
   if `readOnly` is `true`.
 
-The users can specify the ConfigMap name during velero installation by CLI:
-`velero install --node-agent-configmap=<ConfigMap-Name>`
-
 - `annotations`: permits to set annotations on the backupPVC itself. typically useful for some CSI provider which cannot mount
   a VolumeSnapshot without a custom annotation.
 
@@ -55,6 +53,11 @@ The users can specify the ConfigMap name during velero installation by CLI:
 - `configMapNames`: a list of configmap names to copy from the source PVC's namespace to the Velero namespace before the backupPVC
   is created, and delete after the DataUpload completes. This is needed for CSI drivers that require namespace-scoped configmaps to
   provision the volume, for example a tenant-specific ceph-csi KMS connection override configmap (`ceph-csi-kms-config`).
+
+- `intolerateSourceNode`: a boolean value to specify whether to tolerate the source node, when it sets to `true`, the backupPVC will not be attached to the same node as the sourcePVC, the data mover pod will also run in another node.
+
+The users can specify the ConfigMap name during velero installation by CLI:
+`velero install --node-agent-configmap=<ConfigMap-Name>`
 
 A sample of `backupPVC` config as part of the ConfigMap would look like:
 ```json
@@ -83,6 +86,9 @@ A sample of `backupPVC` config as part of the ConfigMap would look like:
         },
         "storage-class-5": {
             "readWriteOncePod": true
+        },
+        "storage-class-6": {
+            "intolerateSourceNode": true
         }
     }
 }
