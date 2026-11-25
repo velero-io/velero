@@ -1,0 +1,1 @@
+Honor the documented Fail default when a backup hook omits on-error; set on-error: Continue to keep the previous behavior

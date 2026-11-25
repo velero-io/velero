@@ -244,7 +244,7 @@ func (h *DefaultItemHookHandler) HandleHooks(
 			hookLog.WithError(errTracker).Warn("Error recording the hook in hook tracker")
 		}
 
-		if errExec != nil && hookFromAnnotations.OnError == velerov1api.HookErrorModeFail {
+		if errExec != nil && effectiveBackupHookErrorMode(hookFromAnnotations.OnError) == velerov1api.HookErrorModeFail {
 			return errExec
 		}
 
@@ -287,7 +287,7 @@ func (h *DefaultItemHookHandler) HandleHooks(
 						if err != nil {
 							hookLog.WithError(err).Error("Error executing hook")
 							hookFailed = true
-							if hook.Exec.OnError == velerov1api.HookErrorModeFail {
+							if effectiveBackupHookErrorMode(hook.Exec.OnError) == velerov1api.HookErrorModeFail {
 								modeFailError = err
 							}
 						}
@@ -302,6 +302,17 @@ func (h *DefaultItemHookHandler) HandleHooks(
 	}
 
 	return modeFailError
+}
+
+// effectiveBackupHookErrorMode returns the error mode that applies to a backup hook.
+// Only an omitted mode defaults to Fail, matching the documented behavior for backup
+// hooks. Unrecognized values keep their legacy Continue behavior.
+// Restore hooks have a different default (Continue) and must not use this helper.
+func effectiveBackupHookErrorMode(mode velerov1api.HookErrorMode) velerov1api.HookErrorMode {
+	if mode == "" {
+		return velerov1api.HookErrorModeFail
+	}
+	return mode
 }
 
 // NoOpItemHookHandler is the an itemHookHandler for the Finalize controller where hooks don't run
@@ -340,9 +351,25 @@ func getPodExecHookFromAnnotations(annotations map[string]string, phase HookPhas
 
 	container := getHookAnnotation(annotations, podBackupHookContainerAnnotationKey, phase)
 
-	onError := velerov1api.HookErrorMode(getHookAnnotation(annotations, podBackupHookOnErrorAnnotationKey, phase))
-	if onError != velerov1api.HookErrorModeContinue && onError != velerov1api.HookErrorModeFail {
-		onError = ""
+	onErrorValue := getHookAnnotation(annotations, podBackupHookOnErrorAnnotationKey, phase)
+	onError := velerov1api.HookErrorMode(onErrorValue)
+
+	switch onError {
+	case velerov1api.HookErrorModeContinue, velerov1api.HookErrorModeFail:
+		// Use the specified value.
+	case "":
+		// Omitted; HandleHooks applies the documented Fail default.
+	default:
+		// Keep the legacy behavior for unrecognized values instead of turning
+		// a typo into a fatal hook error.
+		log.Warnf("Invalid value %q for %s, valid values are %q and %q; using %q",
+			onErrorValue,
+			phasedKey(phase, podBackupHookOnErrorAnnotationKey),
+			velerov1api.HookErrorModeContinue,
+			velerov1api.HookErrorModeFail,
+			velerov1api.HookErrorModeContinue,
+		)
+		onError = velerov1api.HookErrorModeContinue
 	}
 
 	var timeout time.Duration
