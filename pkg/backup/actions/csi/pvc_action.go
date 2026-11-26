@@ -377,7 +377,7 @@ func (p *pvcBackupItemAction) Execute(
 
 	labels := map[string]string{
 		velerov1api.VolumeSnapshotLabel: vs.Name,
-		velerov1api.BackupNameLabel:     backup.Name,
+		velerov1api.BackupNameLabel:     label.GetValidName(backup.Name),
 	}
 
 	annotations := map[string]string{
@@ -1131,7 +1131,7 @@ func (p *pvcBackupItemAction) updateVGSCreatedVS(
 			if latestVS.Labels == nil {
 				latestVS.Labels = make(map[string]string)
 			}
-			latestVS.Labels[velerov1api.BackupNameLabel] = backup.Name
+			latestVS.Labels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
 			latestVS.Labels[velerov1api.BackupUIDLabel] = string(backup.UID)
 
 			// Attempt to update
