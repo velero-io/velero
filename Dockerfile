@@ -49,7 +49,7 @@ RUN mkdir -p /output/usr/bin && \
     go clean -modcache -cache
 
 # Velero image packing section
-FROM paketobuildpacks/ubuntu-noble-run-tiny:0.0.160
+FROM paketobuildpacks/ubuntu-noble-run-tiny:0.0.162
 
 LABEL maintainer="Xun Jiang <xun.jiang@broadcom.com>"
 
