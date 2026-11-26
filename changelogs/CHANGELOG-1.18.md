@@ -1,3 +1,24 @@
+## v1.18.5
+
+### Download
+https://github.com/vmware-tanzu/velero/releases/tag/v1.18.5
+
+### Container Image
+`velero/velero:v1.18.5`
+
+### Documentation
+https://velero.io/docs/v1.18/
+
+### Upgrading
+https://velero.io/docs/v1.18/upgrade-to-1.18/
+
+### All Changes
+  * Detect the VolumeGroupSnapshot API version (v1/v1beta2/v1beta1) at runtime so VGS backup and restore work across clusters serving differentversions (#10792, @shubham-pampattiwar)
+  * Ignore incomplete PVB for backup sync to avoid unexpected execution from tampered data from BSL (#10772, @Lyndon-Li)
+  * Bump paketobuildpacks/run-jammy-tiny to 0.2.190 to fix OpenSSL CVEs in the Velero image (#10690, @kaovilai)
+  * Guard upstream-only GitHub Actions workflows to skip on forks (e.g. openshift/velero) (#10426, @kaovilai)
+
+
 ## v1.18.4
 
 ### Download
