@@ -146,6 +146,12 @@ spec:
                   If its value is "none", the data mover will do a full backup
                   If its value is a specific snapshotID, the data mover finds the specific snapshot as parent.
                 type: string
+              snapshotErrorTimeout:
+                description: |-
+                  SnapshotErrorTimeout specifies how long to tolerate persistent errors reported
+                  in the source CSI VolumeSnapshot status before failing the data upload, instead
+                  of waiting the full OperationTimeout. A zero value disables the early failure.
+                type: string
               snapshotType:
                 description: SnapshotType is the type of the snapshot to be backed
                   up.
