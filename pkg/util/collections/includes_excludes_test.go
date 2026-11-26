@@ -165,13 +165,13 @@ func TestValidateIncludesExcludes(t *testing.T) {
 		{
 			name:     "malformed glob pattern in includes is not allowed",
 			includes: []string{"pods", "foo["},
-			want:     []error{errors.New(`invalid glob pattern "foo[" in includes list: unexpected end of input`)},
+			want:     []error{errors.New(`invalid glob pattern "foo[" in includes list: glob: syntax error at 4: unexpected end of input`)},
 		},
 		{
 			name:     "malformed glob pattern in excludes is not allowed",
 			includes: []string{"pods"},
 			excludes: []string{"[bar"},
-			want:     []error{errors.New(`invalid glob pattern "[bar" in excludes list: unexpected end of input`)},
+			want:     []error{errors.New(`invalid glob pattern "[bar" in excludes list: glob: syntax error at 4: unexpected end of input`)},
 		},
 	}
 
@@ -427,8 +427,8 @@ func TestValidateScopedIncludesExcludes(t *testing.T) {
 			includes: []string{"pods", "foo["},
 			excludes: []string{"[]"},
 			wantErr: []error{
-				errors.New(`invalid glob pattern "foo[" in includes list: unexpected end of input`),
-				errors.New(`invalid glob pattern "[]" in excludes list: could not parse range`),
+				errors.New(`invalid glob pattern "foo[" in includes list: glob: syntax error at 4: unexpected end of input`),
+				errors.New(`invalid glob pattern "[]" in excludes list: glob: syntax error at 2: could not parse range`),
 			},
 		},
 	}

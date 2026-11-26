@@ -465,7 +465,7 @@ type resolvedNamespaceFilter struct {
 // glob so that getNamespaceFilter does not recompile on every call.
 type namespacedFilterPattern struct {
 	pattern  string
-	compiled glob.Glob // compiled once at restore start; nil for exact-match patterns
+	compiled *glob.Pattern // compiled once at restore start; nil for exact-match patterns
 }
 
 func (ctx *restoreContext) getNamespaceFilter(namespace string) *resolvedNamespaceFilter {
@@ -616,7 +616,7 @@ func resolveRestoreNamespacedFilterPolicies(
 		}
 		for _, nsPattern := range policy.Namespaces {
 			result[nsPattern] = nsFilter
-			var compiled glob.Glob
+			var compiled *glob.Pattern
 			if strings.ContainsAny(nsPattern, "*?[") {
 				var err error
 				compiled, err = glob.Compile(nsPattern)

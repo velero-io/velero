@@ -117,7 +117,7 @@ type Request struct {
 // directly in NamespacedFilterMap.
 type NamespacedFilterPattern struct {
 	Pattern  string
-	Compiled glob.Glob
+	Compiled *glob.Pattern
 }
 
 // BackupVolumesInformation contains the information needs by generating
