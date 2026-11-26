@@ -47,10 +47,12 @@ import (
 )
 
 // objectStorageBackoff retries object storage writes (PutBackupMetadata,
-// PutBackupContents). Bounded (Steps) so a persistent failure surfaces as an
-// error within a bounded time rather than retrying forever; see the retry
-// call sites below for rationale. Var (not const) so tests can shrink it for
-// speed, matching pkg/repository/maintenance's waitCompletionBackOff pattern.
+// PutBackupContents, and the restore finalizer's PutRestoreResults). Bounded
+// (Steps) so a persistent failure surfaces as an error within a bounded time
+// rather than retrying forever; see the retry call sites below and in
+// restore_finalizer_controller.go for rationale. Var (not const) so tests can
+// shrink it for speed, matching pkg/repository/maintenance's
+// waitCompletionBackOff pattern.
 var objectStorageBackoff = wait.Backoff{
 	Duration: time.Second,
 	Factor:   2.0,
