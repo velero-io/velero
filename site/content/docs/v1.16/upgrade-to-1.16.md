@@ -20,6 +20,25 @@ If you're not yet running at least Velero v1.15, see the following:
 
 Before upgrading, check the [Velero compatibility matrix](https://github.com/velero-io/velero#velero-compatibility-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
+### Node-agent Pod label
+
+Starting in Velero v1.16, File System Backup uses the `role: node-agent` label to find the running node-agent Pod on each workload node. Changing only the DaemonSet image does not add this label. If it is missing, backups can be marked `PartiallyFailed` with `daemonset pod not found in running state in node <node-name>`, even when the node-agent Pod is running. No PodVolumeBackup is created for the affected Pod.
+
+If you use File System Backup and your `node-agent` DaemonSet's Pod template is missing the label, patch the template before running backups. Replace `velero` with your Velero namespace if different:
+
+```bash
+kubectl -n velero patch daemonset node-agent --type=merge \
+    -p '{"spec":{"template":{"metadata":{"labels":{"role":"node-agent"}}}}}'
+```
+
+Wait for the DaemonSet rollout to complete before running backups:
+
+```bash
+kubectl -n velero rollout status daemonset/node-agent
+```
+
+If you manage the DaemonSet with Helm or GitOps, ensure the label is also present under `spec.template.metadata.labels` in your managed configuration.
+
 ## Instructions
 
 ### Upgrade from v1.15
