@@ -35,7 +35,7 @@ The following is an overview of Velero's restore process that starts after you r
 
     * Sorting the resources to help Velero decide the [restore order](#restore-order) to use.
 
-    * Attempting to discover the resources by their Kubernetes [Group Version Resource (GVR)](https://kubernetes.io/docs/reference/using-api/api-concepts/). If a resource is not discoverable, Velero will exclude it from the restore. See more about how [Velero backs up API versions](#backed-up-api-versions).
+    * Attempting to discover the resources by their Kubernetes [Group Version Resource (GVR)](https://kubernetes.io/docs/reference/using-api/api-concepts/). If a resource is not discoverable, Velero will exclude it from the restore. See more about how [Velero backs up API versions](how-velero-works.md#backed-up-api-versions).
 
     * Applying any configured [resource filters](resource-filtering.md).
 
@@ -263,7 +263,7 @@ are `none` (default) and `update`. If you choose to update existing resources du
 You can also configure the existing resource policy in a [Restore](api-types/restore.md) object.
 
 **NOTE:** 
-* Update of a resource only applies to the Kubernetes resource data such as its spec. It may not work as expected for certain resource types such as PVCs and Pods. For PVCs, this policy alone does not restore or overwrite data in the PV. Use the separate [existing volume data policy](volume-data-inplace-restore.md#choose-a-restore-policy) to restore data into an existing volume.
+* Update of a resource only applies to the Kubernetes resource data such as its spec. It may not work as expected for certain resource types such as PVCs and Pods. For PVCs, this policy alone does not restore or overwrite data in the PV. Use the separate [existing volume data policy](volume-data-inplace-restore.md#existing-volume-data-policy) to restore data into an existing volume.
 * `update` existing resource policy works in a best-effort way, which means when restore's `--existing-resource-policy` is set to `update`, Velero will try to update the resource if the resource already exists, if the update fails, Velero will fall back to the default non-destructive way in the restore, and just logs a warning without failing the restore.
 
 ## Restore existing volume data policy
