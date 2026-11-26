@@ -17,8 +17,11 @@ limitations under the License.
 package kube
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -34,7 +37,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/velero-io/velero/pkg/builder"
 	velerotest "github.com/velero-io/velero/pkg/test"
@@ -886,5 +891,69 @@ func TestGetVolumeModeByPV(t *testing.T) {
 			actual := GetVolumeModeByPV(test.pv)
 			assert.Equal(t, test.expected, actual)
 		})
+	}
+}
+
+type volumeDirCtxKey struct{}
+
+// volumeDirTransport serves fixed JSON responses by request path and records the path and
+// the context value of every request. It is used instead of the fake clientset, which
+// drops the context.
+type volumeDirTransport struct {
+	t         *testing.T
+	responses map[string]runtime.Object
+	paths     []string
+	ctxValues []any
+}
+
+func (rt *volumeDirTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.paths = append(rt.paths, req.URL.Path)
+	rt.ctxValues = append(rt.ctxValues, req.Context().Value(volumeDirCtxKey{}))
+
+	obj, ok := rt.responses[req.URL.Path]
+	if !ok {
+		return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: http.NoBody, Request: req}, nil
+	}
+	body, err := json.Marshal(obj)
+	require.NoError(rt.t, err)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func TestGetVolumeDirectory_CSIDriverListUsesContext(t *testing.T) {
+	pod := builder.ForPod("ns-1", "my-pod").Volumes(builder.ForVolume("my-vol").PersistentVolumeClaimSource("my-pvc").Result()).Result()
+	pvc := builder.ForPersistentVolumeClaim("ns-1", "my-pvc").VolumeName("a-pv").Result()
+	pvc.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"}
+	// A PV without a CSI source that was migrated to a CSI driver, so the CSI drivers have to be listed.
+	pv := builder.ForPersistentVolume("a-pv").ObjectMeta(builder.WithAnnotations(KubeAnnMigratedTo, "csi.test.com")).Result()
+	pv.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolume"}
+	csiDrivers := &storagev1api.CSIDriverList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "storage.k8s.io/v1", Kind: "CSIDriverList"},
+		Items:    []storagev1api.CSIDriver{{ObjectMeta: metav1.ObjectMeta{Name: "csi.test.com"}}},
+	}
+
+	rt := &volumeDirTransport{
+		t: t,
+		responses: map[string]runtime.Object{
+			"/api/v1/namespaces/ns-1/persistentvolumeclaims/my-pvc": pvc,
+			"/api/v1/persistentvolumes/a-pv":                        pv,
+			"/apis/storage.k8s.io/v1/csidrivers":                    csiDrivers,
+		},
+	}
+	kubeClient, err := kubernetes.NewForConfig(&rest.Config{Host: "http://fake", Transport: rt, QPS: -1})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), volumeDirCtxKey{}, "sentinel")
+	dir, err := GetVolumeDirectory(ctx, velerotest.NewLogger(), pod, "my-vol", kubeClient)
+	require.NoError(t, err)
+	assert.Equal(t, "a-pv/mount", dir)
+
+	require.Contains(t, rt.paths, "/apis/storage.k8s.io/v1/csidrivers")
+	for i, value := range rt.ctxValues {
+		assert.Equal(t, "sentinel", value, "request %d (%s) should use the caller's context", i, rt.paths[i])
 	}
 }

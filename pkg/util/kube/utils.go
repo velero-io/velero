@@ -177,7 +177,7 @@ func GetVolumeDirectory(ctx context.Context, log logrus.FieldLogger, pod *corev1
 
 	// Most common case is that we have a PVC VolumeSource, and we need to check the PV it points to for a CSI source.
 	// PV's been created with a CSI source.
-	isProvisionedByCSI, err := isProvisionedByCSI(log, pv, kubeClient)
+	isProvisionedByCSI, err := isProvisionedByCSI(ctx, log, pv, kubeClient)
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
@@ -246,7 +246,7 @@ func GetPodPVCVolume(ctx context.Context, log logrus.FieldLogger, pod *corev1api
 // isProvisionedByCSI function checks whether this is a CSI PV by annotation.
 // Either "pv.kubernetes.io/provisioned-by" or "pv.kubernetes.io/migrated-to" indicates
 // PV is provisioned by CSI.
-func isProvisionedByCSI(log logrus.FieldLogger, pv *corev1api.PersistentVolume, kubeClient kubernetes.Interface) (bool, error) {
+func isProvisionedByCSI(ctx context.Context, log logrus.FieldLogger, pv *corev1api.PersistentVolume, kubeClient kubernetes.Interface) (bool, error) {
 	if pv.Spec.CSI != nil {
 		return true, nil
 	}
@@ -256,7 +256,7 @@ func isProvisionedByCSI(log logrus.FieldLogger, pv *corev1api.PersistentVolume, 
 		driverName := pv.Annotations[KubeAnnDynamicallyProvisioned]
 		migratedDriver := pv.Annotations[KubeAnnMigratedTo]
 		if len(driverName) > 0 || len(migratedDriver) > 0 {
-			list, err := kubeClient.StorageV1().CSIDrivers().List(context.TODO(), metav1.ListOptions{})
+			list, err := kubeClient.StorageV1().CSIDrivers().List(ctx, metav1.ListOptions{})
 			if err != nil {
 				return false, err
 			}
