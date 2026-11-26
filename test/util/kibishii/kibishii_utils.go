@@ -681,6 +681,10 @@ func generateData(ctx context.Context, namespace string, kibishiiData *KibishiiD
 
 func verifyData(ctx context.Context, namespace string, kibishiiData *KibishiiData) error {
 	timeout := 10 * time.Minute
+	// A healthy verify takes well under a minute. Bound each attempt, derived
+	// from the poll's context, so one hung kubectl exec cannot outlive the
+	// poll deadline and so the poll gets the chance to retry.
+	attemptTimeout := 5 * time.Minute
 	interval := 5 * time.Second
 	err := wait.PollUntilContextTimeout(
 		ctx,
@@ -688,10 +692,10 @@ func verifyData(ctx context.Context, namespace string, kibishiiData *KibishiiDat
 		timeout,
 		true,
 		func(ctx context.Context) (bool, error) {
-			timeout, ctxCancel := context.WithTimeout(context.Background(), time.Minute*20)
+			attemptCtx, ctxCancel := context.WithTimeout(ctx, attemptTimeout)
 			defer ctxCancel()
 			kibishiiVerifyCmd := exec.CommandContext(
-				timeout,
+				attemptCtx,
 				"kubectl",
 				"exec",
 				"-n",
