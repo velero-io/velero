@@ -178,7 +178,7 @@ func (c *scheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Check for the schedule being due to run.
-	// If there are backup created by this schedule still in New or InProgress state,
+	// If backups created by this schedule are still waiting to start or InProgress,
 	// skip current backup creation to avoid running overlap backups.
 	// As the schedule must be validated before checking whether it's due, we cannot put the checking log in Predicate
 	if c.ifDue(schedule, cronSchedule) && !c.checkIfBackupInNewOrProgress(schedule) {
@@ -241,7 +241,7 @@ func parseCronSchedule(itm *velerov1.Schedule, logger logrus.FieldLogger) (cron.
 	return schedule, nil
 }
 
-// checkIfBackupInNewOrProgress check whether there are backups created by this schedule still in New or InProgress state
+// checkIfBackupInNewOrProgress checks whether backups from this schedule are waiting to start or InProgress.
 func (c *scheduleReconciler) checkIfBackupInNewOrProgress(schedule *velerov1.Schedule) bool {
 	log := c.logger.WithField("schedule", kube.NamespaceAndName(schedule))
 	backupList := &velerov1.BackupList{}
@@ -259,8 +259,9 @@ func (c *scheduleReconciler) checkIfBackupInNewOrProgress(schedule *velerov1.Sch
 	}
 
 	for _, backup := range backupList.Items {
-		if backup.Status.Phase == "" || backup.Status.Phase == velerov1.BackupPhaseNew || backup.Status.Phase == velerov1.BackupPhaseInProgress {
-			log.Debugf("%s/%s still has backups that are in InProgress or New...", schedule.Namespace, schedule.Name)
+		switch backup.Status.Phase {
+		case "", velerov1.BackupPhaseNew, velerov1.BackupPhaseQueued, velerov1.BackupPhaseReadyToStart, velerov1.BackupPhaseInProgress:
+			log.WithField("backup", kube.NamespaceAndName(&backup)).WithField("phase", backup.Status.Phase).Debug("Schedule still has a backup waiting to start or in progress")
 			return true
 		}
 	}
