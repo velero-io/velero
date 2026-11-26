@@ -11,8 +11,8 @@ It lets a user check filters, namespace mappings, resource modifiers and existin
 > - One optional field, `spec.dryRun`, and the same restore engine, so a dry run gives the answers a real restore would give.
 > - A dry run never writes.
 >   When the restore starts, Velero gives the engine read-only versions of its [write paths](#write-paths), runs its built-in plugins with [clients that can only read](#read-only-clients-for-the-built-in-actions), and does not start plugins from outside the Velero repository.
-> - A dry run creates nothing, so it keeps the namespaces, CRDs and objects a real restore would create in a [planned state](#planned-state), where later items that depend on them or end up with the same name find them.
-> - It cannot predict errors that only the API server or a storage provider returns, and six cases differ from a real restore, see [Item outcomes](#item-outcomes).
+> - A dry run creates nothing, so it keeps the namespaces, CRDs and objects a real restore would create in a [planned state](#planned-state), where later items, and the built-in actions through a [read proxy](#read-proxy-for-the-built-in-actions), find them.
+> - It cannot predict errors that only the API server or a storage provider returns, and seven cases differ from a real restore, see [Item outcomes](#item-outcomes).
 > - An old `Restore` CRD or an old Velero server could turn a dry run into a real restore.
 >   The Velero CLI is guarded against both, and other clients only partly, see [Version skew](#version-skew).
 > - It costs less than a real restore of the same backup, because it sends the same number of API requests, with reads in place of writes, and copies no volume data.
@@ -113,18 +113,68 @@ A `Restore` that has the label but not `spec.dryRun` fails validation, see [Vers
 **A dry-run restore may read anything a real restore reads, and may write only its own records**, which are the status and progress of the `Restore` object and the restore artifacts in the backup storage location.
 It must not create, update, patch or delete any other object in the cluster, and must not ask a storage provider to create, change or delete a volume or snapshot.
 
-The rule is enforced in three places.
+### Architecture
 
-- In the restore engine, through its [write paths](#write-paths).
-- In the plugins built into Velero, through [clients that can only read](#read-only-clients-for-the-built-in-actions) and [their contract](#restoreitemaction-plugins).
-- In the controllers that act after the engine, see [Writers outside the engine](#writers-outside-the-engine).
+A dry run has two jobs, to write nothing, and to give the answers a real restore would give although nothing it would create exists.
+The diagram shows the two processes that take part and where each job is done.
 
-### Write paths
+```text
++----------------------------- Velero server process ------------------------------+
+|                                                                                  |
+| Restore engine                                                                   |
+|   writes --> dry-run write paths: nothing is sent, and what the                  |
+|              restore would create or patch is kept in the planned state          |
+|   reads  --> the planned state first, then the informer cache or the             |
+|              API server                                                          |
+|                                                                                  |
+|   +----------------------------- Planned state ------------------------------+   |
+|   | the namespaces it would create, and a copy of every other object         |   |
+|   | it would create or patch, CRDs included                                  |   |
+|   +--------------------------------------------------------------------------+   |
+|                                     ^                                            |
+|                                     | looked up first                            |
+|   +------------- Read proxy, one per dry run, on a Unix socket --------------+   |
+|   | GET of a planned object       --> the planned copy                       |   |
+|   | LIST                          --> the API server's list, with the        |   |
+|   |                                   matching planned objects added         |   |
+|   | discovery                     --> the API server's answer, with the      |   |
+|   |                                   kinds of planned CRDs added            |   |
+|   | any other read, and watches   --> the API server                         |   |
+|   | any write                     --> refused, 403 Forbidden                 |   |
+|   +--------------------------------------------------------------------------+   |
+|                                                                                  |
++----------------------------------------------------------------------------------+
+                                    ^
+                                    | plain reads only, through the socket
++------------------ Built-in plugin process, velero run-plugins -------------------+
+|                                                                                  |
+| Built-in restore item actions                                                    |
+|   every Kubernetes client is built by client.Config                              |
+|                                                                                  |
+| Read-only transport                                                              |
+|   writes, exec, attach, port-forward, proxy --> refused here, 403                |
+|   plain reads --> the read proxy socket, with no API credentials                 |
+|                                                                                  |
++----------------------------------------------------------------------------------+
+
+Restore item actions from outside the Velero repository: not started
+```
+
+- The restore engine gets [dry-run write paths](#write-paths) in place of the real ones, and keeps what it would create or patch in the [planned state](#planned-state).
+- The built-in restore item actions run in their own process with [clients that can only read](#read-only-clients-for-the-built-in-actions), and see the planned state through the [read proxy](#read-proxy-for-the-built-in-actions).
+- Restore item actions [from outside the repository](#actions-from-outside-the-repository) are not started.
+- The controllers that act after the engine skip their cluster changes, see [Writers outside the engine](#writers-outside-the-engine).
+
+### Restore engine
+
+The engine runs the same code in a dry run.
+Three parts make the difference, the [write paths](#write-paths) it is given, the [resource client](#dry-run-resource-client) that looks objects up instead of creating them, and the [planned state](#planned-state) that remembers what it would have done.
+
+#### Write paths
 
 A write path is a client or helper that the restore engine uses to change something outside itself, for example the client that creates the restored objects, or the volume snapshotter that asks a storage provider for a new volume.
 The engine has six write paths, and it receives all of them from `RestoreWithResolvers` when a restore starts.
 For a dry run, `RestoreWithResolvers` checks `spec.dryRun` once and gives the engine a dry-run version of each write path instead of the real one.
-The engine code is the same for both.
 
 ```mermaid
 flowchart TD
@@ -154,23 +204,10 @@ Each dry-run version holds the real write path as a named field instead of embed
 A client that is added to the engine later needs a dry-run version of its own.
 **One switch was chosen over a check before each write**, because a forgotten check is a silent write, while new code that uses an existing write path is covered without knowing about dry runs.
 
-Four small dry-run checks remain inside the engine, and none of them is needed for safety.
-They plan missing namespaces, see [Planned state](#planned-state), and skip the steps that act on objects a dry run never created.
+Five small dry-run checks remain inside the engine, and none of them is needed for safety.
+They plan missing namespaces, see [Planned state](#planned-state), skip the steps that act on objects a dry run never created, and warn about old backups that moved snapshot data, see [Item outcomes](#item-outcomes).
 
-### Writers outside the engine
-
-**The write paths cover the restore engine only.**
-Three other places write during a restore.
-
-| Writer | Dry-run handling |
-|---|---|
-| RestoreItemAction plugins | The built-in ones run in their own process, whose Kubernetes clients can only read during a dry run, and plugins from outside the repository are not started, see [RestoreItemAction plugins](#restoreitemaction-plugins). |
-| Restore finalizer controller, which patches dynamically provisioned PVs, deletes stub `VolumeGroupSnapshotContent`s, waits for exec hooks and uploads the restore volume info | For a dry run it checks once and only uploads the restore volume info, one of the dry run's own records. The other steps would wait up to the resource timeout, 10 minutes by default, for PVCs and snapshots that a dry run never creates, and the stub cleanup finds stubs by restore name, so it would delete stubs that an earlier restore of the same name left behind. Dry-run write paths stop writes, not waits. |
-| Restore operations controller | Nothing to track, because a dry run starts no asynchronous operation. |
-
-The restore controller itself writes only the `Restore` status and the restore artifacts, which are the output of the dry run.
-
-### Dry-run resource client
+#### Dry-run resource client
 
 In a dry run, `Create` looks the object up instead of creating it, first in the [planned state](#planned-state), then in the cluster.
 If the object is not found, it would be created.
@@ -190,36 +227,115 @@ The table follows a Pod that exists with a different image, restored with `exist
 
 Two lookups need care.
 
-- The API server also answers "not found" for a resource it does not serve, so before reporting `created` the client asks whether the resource is served or planned, see [Planned state](#planned-state).
+- The API server also answers "not found" for a resource it does not serve, so before reporting `created` the client asks whether the resource is served or its CRD is planned, see [Item outcomes](#item-outcomes).
 - An object with only a `generateName`, which a plugin can produce, cannot already exist.
   It is recorded as `created` if its resource is served or planned.
 
 `Patch` logs the paths of the fields it would change, never their values, because a patch of a `Secret` carries its data and the restore log is uploaded to the backup storage location.
 
-### Planned state
+#### Planned state
 
-Three in-memory stores on the restore context remember what the restore would already have created.
+Three in-memory stores on the restore context remember what the restore would already have created or changed.
 
 - `plannedNamespaces` holds the missing namespaces that this restore would create.
   A planned namespace is recorded as `created` once and is not looked up again for later items.
-- `plannedCRDs` holds the names (`<plural>.<group>`) of the missing CustomResourceDefinitions that this restore would create, added at the create step.
+- `plannedCRDs` holds the names (`<plural>.<group>`) of the missing CustomResourceDefinitions that this restore would create, added at the create step, as an index that the engine checks.
   The engine restores CRDs in a pass of its own before every other resource, fixed in `execute` and independent of the resource priorities an operator configures, so the set is complete before any custom resource is looked at.
-- `plannedObjects` holds a copy of every other object this restore would create, under its name after resource modifiers, namespace mapping and restore item actions.
-  The dry-run client and the informer-cache lookup check it before the cluster, and `Patch` updates the copy.
-  So when two backup items end up with the same name, the second is compared with the first, as in a real restore.
+- `plannedObjects` holds a copy of every other object this restore would create or patch, CRDs included, under its name after resource modifiers, namespace mapping and restore item actions.
+  The dry-run client, the informer-cache lookup and the [read proxy](#read-proxy-for-the-built-in-actions) of the built-in actions check it before the cluster.
+  `Patch` updates the copy, and takes it from the cluster first when the object already exists there.
+  So when two backup items end up with the same name, the second is compared with the first, as in a real restore, also when an object of that name already exists.
   With the informer cache on, a real restore holds about the same objects in its cache.
   With it off, the store is extra memory, 27 MB for 10,000 small Secrets in a separate measurement.
 
-The API server answers "not found" both for a missing object and for a resource it does not serve, so the CRD set is what tells these cases apart.
-
-| CRD of a custom resource | Real restore | Dry run records |
-|---|---|---|
-| In the backup, not in the cluster | creates the CRD in the first pass, then the custom resource | `created`, because the CRD is in `plannedCRDs` |
-| Already served by the cluster | creates the custom resource | `created` |
-| In neither | the create fails, because the resource is not served | `failed`, with the API server's error |
-
 **Without the namespace and CRD sets**, the first restore into an empty cluster, which is the main disaster-recovery case, would report most items as failures, or would report custom resources as created that a real restore cannot create.
 Both behaviours were checked against Kubernetes v1.33 with a prototype.
+
+### RestoreItemAction plugins
+
+The actions built into Velero run during a dry run as they do in a real restore.
+They have to, because they change items, add additional items and skip items, and all of that decides what a restore would do.
+Without them, a namespace restore would leave its PVs out of the report, because only the PVC action brings them in, and Velero's own `DataUpload` objects would be reported as `created` instead of `skipped`.
+
+During a dry run, an action must follow this contract.
+
+- It can tell from `input.Restore.Spec.DryRun`.
+  No plugin API change is needed for this, and it works for both v1 and v2 actions.
+- It must not create, change or delete anything in the cluster or in an external system.
+- It must not start an asynchronous operation.
+  If an action returns an operation ID during a dry run, Velero does not track it and records a warning that names the action.
+- It should still return the updated item, additional items and skip decision it would return in a real restore.
+
+All actions in the Velero repository are updated to follow this contract.
+Three of them write to the cluster today.
+`DataUploadRetrieveAction` creates a temporary DataUploadResult `ConfigMap`, which the CSI PVC action reads, so in a dry run the CSI PVC action must not depend on it.
+The `VolumeSnapshot` action creates a stub `VolumeGroupSnapshotContent` for a snapshot that was taken as part of a volume group snapshot.
+The CSI PVC action writes as listed in [Volumes](#volumes), including a `VolumeSnapshot` of the existing PVC for an incremental in-place restore.
+
+#### Read-only clients for the built-in actions
+
+The contract is not left to the code of each action.
+The built-in actions run in their own process, `velero run-plugins`, and the restore controller starts a new one for every restore.
+For a dry run, the plugin manager starts that process with `VELERO_READ_ONLY_CLIENTS=true`, and with `VELERO_PLANNED_READ_PROXY` set to the socket of the [read proxy](#read-proxy-for-the-built-in-actions) of this restore.
+Every Kubernetes client in that process is built from one function, `client.Config`, and with these settings the function adds a transport that lets only plain reads leave the process, and sends them to the read proxy.
+
+| Request | Result |
+|---|---|
+| `GET` or `HEAD` of an object, a list, a watch, discovery or a log | sent to the read proxy |
+| `POST`, `PUT`, `PATCH`, `DELETE` or any other method, server-side dry runs included | refused with `403 Forbidden`, as RBAC would refuse it |
+| `exec`, `attach`, `port-forward` and `proxy`, which act even on a `GET`, and any connection upgrade | refused with a `Forbidden` error |
+
+**So a write that an action was not updated for fails loudly with an error, instead of writing.**
+The transport sits under every kind of client, the typed clientset, the dynamic client, the controller-runtime client and the CSI snapshot clientset, and under helpers such as `CreateRetryGenerateName`, so it does not depend on reading every action correctly.
+A dry run never falls back to the ordinary plugin manager, and does not start without the read-only one.
+
+#### Read proxy for the built-in actions
+
+Some built-in actions read objects that an earlier item of the same restore creates.
+The `change-storage-class` action gets the StorageClass it maps to and fails the item when the class is missing.
+The `secret` action lists ServiceAccounts, and skips the token Secret of each one.
+By default, StorageClasses are restored before PVCs, and ServiceAccounts before Secrets.
+The planned state lives in the Velero server process, so without the proxy these reads miss it, and the dry run reports a PVC `failed` and a token Secret `created` that a real restore creates and skips.
+
+**So the reads of the built-in plugin process go through a read proxy in the Velero server process.**
+
+- The restore controller starts it for each dry run before the plugin process, and stops it after.
+  It listens on a Unix socket in a directory that only the Velero user can open.
+- It answers the `GET` of a planned object with the planned copy, and adds the matching planned objects to a list, by namespace, label selector and name.
+- It adds the kinds of planned CRDs to discovery, and lists their planned objects, so an action finds a kind whose CRD only this restore creates, such as the CSI snapshot kinds in a cluster that does not have them yet.
+- It sends every other read, watches included, to the API server with the credentials of the Velero server.
+  It returns the API server's errors unchanged, so an API server that cannot be reached is never reported as "not found".
+  The one exception is "not found" for the resource of a planned CRD, which a real restore would already serve, so the proxy answers it from the planned state.
+- It refuses every other method with `403 Forbidden`, so a write that got past the read-only transport still cannot reach the API server.
+- A dry run does not start without it.
+
+The proxy serves a planned object only in the API version that the restore would create it in.
+A watch does not see planned objects, so a built-in action must read with uncached clients, as every one does today, and not through an informer.
+It does not serve planned namespaces, which the planned state keeps as names, and no built-in action reads a namespace.
+
+#### Actions from outside the repository
+
+Velero cannot make actions from plugins outside the repository safe, see [Open Issues](#open-issues).
+They run in their own process with their own clients, and a plugin built before this change decodes the `Restore` with older API types, drops `spec.dryRun`, and cannot see the dry run even if its author wanted to respect it.
+
+Therefore **the plugin manager of a dry run starts only the restore item actions that the Velero executable serves**, so no code of any other action runs, not even its constructor.
+It decides by the executable and not by the name, because any plugin can register a `velero.io/` name.
+For each action it did not start, the restore records one warning that names it and states that the report may be less accurate for the items it applies to.
+
+`VolumeSnapshotter` plugins are reached only through the volume snapshotter write path.
+`ObjectStore` plugins are used as usual to read the backup and to write the restore artifacts.
+
+### Writers outside the engine
+
+**The write paths cover the restore engine, and the read-only clients cover the built-in actions.**
+Two controllers also write during a restore.
+
+| Writer | Dry-run handling |
+|---|---|
+| Restore finalizer controller, which patches dynamically provisioned PVs, deletes stub `VolumeGroupSnapshotContent`s, waits for exec hooks and uploads the restore volume info | For a dry run it checks once and only uploads the restore volume info, one of the dry run's own records. The other steps would wait up to the resource timeout, 10 minutes by default, for PVCs and snapshots that a dry run never creates, and the stub cleanup finds stubs by restore name, so it would delete stubs that an earlier restore of the same name left behind. Dry-run write paths stop writes, not waits. |
+| Restore operations controller | Nothing to track, because a dry run starts no asynchronous operation. |
+
+The restore controller itself writes only the `Restore` status and the restore artifacts, which are the output of the dry run.
 
 ### Item outcomes
 
@@ -237,9 +353,9 @@ The recorded action for an item follows the same rules as a real restore.
 | A plugin returns an error, or the item cannot be decoded | any | `failed` | the existing error |
 
 As in a real restore, an item that exists and equals the backup copy is recorded `failed` instead of `skipped` when it gets a warning, for example the warning that its volume data will not be restored.
-An object that an earlier item of this restore would create counts as existing, see [Planned state](#planned-state).
+An object that an earlier item of this restore would create counts as existing, and one it would patch is compared in its patched form, for the engine and for the built-in actions, see [Planned state](#planned-state).
 
-**Six cases are known to differ from a real restore.**
+**Seven cases are known to differ from a real restore.**
 Each is tested on its own against the outcome defined here.
 
 | Case | Real restore | Dry run | Why the dry run cannot know |
@@ -249,6 +365,7 @@ Each is tested on its own against the outcome defined here.
 | A target namespace that is terminating | waits for it to disappear, then creates it, or fails its items when the timeout ends | the namespace and its items `created`, with a warning in the restore results | the outcome depends on what happens during the wait |
 | A patch that the API server would reject, for example because of an immutable field or an admission webhook | records a warning and patches only the restore labels | `updated` | the patch is never sent |
 | An object with only a `generateName` | listed under the name the API server generated | listed under its name in the backup | only the API server picks the name |
+| A backup made before Velero v1.13 that moved snapshot data, and so has no volume info | re-provisions the PVs whose data was moved, which it finds through the DataUploadResult `ConfigMap`s that the DataUpload action creates | those of them with reclaim policy `Retain` reported as restored from the backup, with one warning in the restore results, while those with `Delete` are re-provisioned as in a real restore | the dry run creates no `ConfigMap`, and newer backups decide from the volume info |
 | An in-place restore of volume data into a PVC that exists | the CSI PVC action deletes the PVC first, so the PVC is `created` again and its data is restored | reported like any PVC that exists, for example `failed` when it equals the backup copy, with a warning that its volume data will not be restored | the PVC that a real restore deletes is still there |
 
 **Errors that only the API server or a storage provider can return are not predicted.**
@@ -274,73 +391,6 @@ A dry run skips that read, because it created none, and fills the file from the 
 > [!WARNING]
 > In a real in-place restore, the CSI PVC action deletes the user's existing PVC.
 > This write happens inside a plugin, outside the write paths, so the plugin contract below is what keeps a dry run from reaching it.
-
-### RestoreItemAction plugins
-
-The actions built into Velero run during a dry run as they do in a real restore.
-They have to, because they change items, add additional items and skip items, and all of that decides what a restore would do.
-Without them, a namespace restore would leave its PVs out of the report, because only the PVC action brings them in, and Velero's own `DataUpload` objects would be reported as `created` instead of `skipped`.
-
-During a dry run, an action must follow this contract.
-
-- It can tell from `input.Restore.Spec.DryRun`.
-  No plugin API change is needed for this, and it works for both v1 and v2 actions.
-- It must not create, change or delete anything in the cluster or in an external system.
-- It must not start an asynchronous operation.
-  If an action returns an operation ID during a dry run, Velero does not track it and records a warning that names the action.
-- It should still return the updated item, additional items and skip decision it would return in a real restore.
-
-All actions in the Velero repository are updated to follow this contract.
-Three of them write to the cluster today.
-`DataUploadRetrieveAction` creates a temporary DataUploadResult `ConfigMap`.
-The `VolumeSnapshot` action creates a stub `VolumeGroupSnapshotContent` for a snapshot that was taken as part of a volume group snapshot.
-The CSI PVC action writes as listed in [Volumes](#volumes), including a `VolumeSnapshot` of the existing PVC for an incremental in-place restore.
-The CSI PVC action reads that `ConfigMap`, so in a dry run it must not depend on it.
-
-#### Read-only clients for the built-in actions
-
-The contract is not left to the code of each action.
-The built-in actions run in their own process, `velero run-plugins`, and the restore controller starts a new one for every restore.
-For a dry run, the plugin manager starts that process with `VELERO_READ_ONLY_CLIENTS=true`.
-Every Kubernetes client in that process is built from one function, `client.Config`, and with this setting the function adds a transport that lets only plain reads leave the process.
-
-```mermaid
-flowchart TD
-    A["Restore controller<br>for a dry run"] --> B["Plugin manager<br>for dry runs"]
-    B -- "starts with<br>VELERO_READ_ONLY_CLIENTS=true" --> C["Built-in plugin process<br>velero run-plugins"]
-    B -- "does not start" --> O["Restore item actions<br>from outside the repository"]
-    C --> T["Read-only transport<br>added by client.Config"]
-    T -- "plain reads" --> K["API server"]
-    T -- "everything else" --> X["refused inside the process"]
-```
-
-| Request | Result |
-|---|---|
-| `GET` or `HEAD` of an object, a list, a watch, discovery or a log | sent |
-| `POST`, `PUT`, `PATCH`, `DELETE` or any other method, server-side dry runs included | refused with `403 Forbidden`, as RBAC would refuse it |
-| `exec`, `attach`, `port-forward` and `proxy`, which act even on a `GET`, and any connection upgrade | refused with a `Forbidden` error |
-
-**So a write that an action was not updated for fails loudly with an error, instead of writing.**
-The transport sits under every kind of client, the typed clientset, the dynamic client, the controller-runtime client and the CSI snapshot clientset, and under helpers such as `CreateRetryGenerateName`, so it does not depend on reading every action correctly.
-A dry run never falls back to the ordinary plugin manager, and does not start without the read-only one.
-
-Two tests keep the guard complete as the code changes.
-
-- Every restore item action registered in the Velero executable runs through its real constructor against a fake API server, once with the read-only clients and once without.
-  A newly registered action fails the test until it has a case.
-- The Velero packages that the plugin process loads are scanned for ways to reach the API server without `client.Config`, such as `rest.InClusterConfig`, `rest.AnonymousClientConfig` or replacing `WrapTransport`.
-
-#### Actions from outside the repository
-
-Velero cannot make actions from plugins outside the repository safe, see [Open Issues](#open-issues).
-They run in their own process with their own clients, and a plugin built before this change decodes the `Restore` with older API types, drops `spec.dryRun`, and cannot see the dry run even if its author wanted to respect it.
-
-Therefore **the plugin manager of a dry run starts only the restore item actions that the Velero executable serves**, so no code of any other action runs, not even its constructor.
-It decides by the executable and not by the name, because any plugin can register a `velero.io/` name.
-For each action it did not start, the restore records one warning that names it and states that the report may be less accurate for the items it applies to.
-
-`VolumeSnapshotter` plugins are reached only through the volume snapshotter write path.
-`ObjectStore` plugins are used as usual to read the backup and to write the restore artifacts.
 
 ### Controller, phases and metrics
 
@@ -431,7 +481,7 @@ A dry run needs the `EnableRestoreDryRun` feature flag until the last step remov
 2. Restore engine with the dry-run write paths and the planned state, with all plugins and the finalizer's cluster changes turned off.
 3. Read-only clients for the built-in plugins.
 4. CLI, version checks and user documentation.
-5. Built-in plugins run again in dry runs.
+5. Built-in plugins run again in dry runs, with the read proxy, which needs the planned state of step 2.
 6. Volume reporting.
 7. End-to-end tests, then the feature flag is removed.
 
@@ -442,7 +492,7 @@ flowchart TD
     S1["1 API field<br>and validation"] --> S2["2 Restore engine, all plugins<br>and finalizer changes off"]
     S1 --> S3["3 Read-only clients<br>for built-in plugins"]
     S1 --> S4["4 CLI, version checks<br>and user documentation"]
-    S2 --> S5["5 Built-in plugins<br>run again"]
+    S2 --> S5["5 Built-in plugins run again,<br>with the read proxy"]
     S3 --> S5
     S5 --> S6["6 Volume reporting"]
     S6 --> S7["7 End-to-end tests,<br>flag removed"]
@@ -452,8 +502,8 @@ flowchart TD
 ### Testing
 
 - A no-write guard runs the existing restore test tables a second time with `dryRun` set to true, against fake clients that fail the test on any write except a patch of the `Restore` being run.
-- Parity tests check that the dry run's resource list, warnings and errors equal those of the real restore of the same input, including two items that end up with the same name, except the six known differences in [Item outcomes](#item-outcomes), which are tested on their own.
-- Unit tests cover each dry-run write path, an empty-cluster restore with a CRD and its custom resource, the read-only clients for every kind of request, every built-in action through its real constructor with and without them, the scan for client configurations that bypass them, the plugin manager starting no action from outside the repository, the finalizing phase, the label check, and the CLI version check.
+- Parity tests check that the dry run's resource list, warnings and errors equal those of the real restore of the same input, including two items that end up with the same name, with and without an object of that name in the cluster, an action that reads an object the same restore creates, an action that reads a kind whose CRD the same restore creates, and a mapped StorageClass that is in neither the cluster nor the backup, which fails in both, except the seven known differences in [Item outcomes](#item-outcomes), which are tested on their own.
+- Unit tests cover each dry-run write path, an empty-cluster restore with a CRD and its custom resource, the read-only clients and the read proxy for every kind of request, writes sent straight to the proxy and an API server that cannot be reached included, every built-in action registered in the Velero executable through its real constructor with and without them, so that a newly registered action fails until it has a case, a scan of the packages the plugin process loads for ways to reach the API server without `client.Config`, such as `rest.InClusterConfig` or replacing `WrapTransport`, the plugin manager starting no action from outside the repository, the finalizing phase, the label check, and the CLI version check.
 - An end-to-end test on kind checks that a dry run leaves every resource version unchanged, and that its resource list equals that of the real restore that follows.
 
 ## Alternatives Considered
@@ -478,6 +528,13 @@ It would have to copy every decision of the real one.
 Every such change would have to be made twice, and a copy that drifts gives answers that differ from a real restore, which is worse than no dry run, because users trust it.
 This design keeps one engine and puts the dry-run behaviour in the dry-run write paths.
 
+### Other ways to show the planned state to the built-in actions
+
+- Creating the planned objects in the cluster while the dry run lasts breaks the [rule for side effects](#rule-for-side-effects).
+  Other workloads could see them, for example a second default StorageClass, and they would be left behind if Velero stopped.
+- Passing the planned state to each action needs a change in every action that reads, and a new action could miss it.
+- Running the built-in actions in the Velero server process lets them read the planned state directly, but gives up the process boundary that keeps their read-only clients apart from the clients of the server.
+
 ### A separate resource kind
 
 A new kind, for example `RestorePlan`, would keep dry runs out of the list of restores, and it is safe for every client and both directions of version skew, because an old CRD rejects the unknown kind and an old server ignores it.
@@ -489,6 +546,7 @@ The spec field is still proposed, because it is the approach discussed in #448, 
 A dry run needs the same permission as a real restore, which is creating a `Restore` in the Velero namespace.
 It shows the same information as a real restore, which is the names of resources in the backup, whether they exist in the cluster, and the paths of fields that differ, never their values.
 It grants no new access.
+The [read proxy](#read-proxy-for-the-built-in-actions) can be reached only through a socket that only the Velero user can open, and it only reads.
 
 The security-relevant property is the side-effect rule, because users would trust a dry run, so a dry run that writes would be worse than none.
 The dry-run write paths, the no-write guard in tests, the feature flag, the [version checks](#version-skew), the [read-only clients of the built-in plugins](#read-only-clients-for-the-built-in-actions) and the [plugin rule](#actions-from-outside-the-repository) protect it, and all existing restore checks run unchanged during a dry run.
