@@ -258,3 +258,42 @@ jobs:
             fi
             git push --force-with-lease origin "HEAD:${branch}"
           done
+
+      - name: Hint Copilot conflict resolution on conflicted backports
+        # `conflict_resolution: draft_commit_conflicts` commits the first
+        # conflicting cherry-pick and opens the backport PR as a DRAFT —
+        # draft status is exactly the action's conflict signal (it is set
+        # from `cherryPickResult.status === "conflicts"` and nothing else
+        # in this workflow creates drafts). Checking isDraft instead of
+        # scanning for textual conflict markers also catches conflicts that
+        # leave no markers (e.g. modify/delete) and vendor-only conflicts.
+        # Comment on such PRs so the requester knows they can hand the
+        # resolution to Copilot instead of fixing it by hand. The mention
+        # stays inside backticks, which does not trigger the Copilot agent;
+        # the user opts in by posting the command themselves.
+        #
+        # NOTE: this hint is a stopgap. Once the org enables Copilot coding
+        # agent (premium requests) on velero-io, the workflow can post the
+        # `@copilot` mention itself to auto-trigger conflict resolution, and
+        # this hint-only step becomes obsolete — replace it with the direct
+        # invocation at that point.
+        if: steps.backport.outputs.created_pull_numbers != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CREATED_PR_NUMBERS: ${{ steps.backport.outputs.created_pull_numbers }}
+        run: |
+          for new_pr in $CREATED_PR_NUMBERS; do
+            if [ "$(gh pr view "$new_pr" --repo "$REPO" --json isDraft -q .isDraft)" != "true" ]; then
+              continue
+            fi
+            # Idempotency: skip if the hint was already posted.
+            if gh pr view "$new_pr" --repo "$REPO" --json comments \
+                --jq '.comments[].body' | grep -q 'let Copilot finish the backport'; then
+              echo "Hint already posted on PR #${new_pr}; skipping."
+              continue
+            fi
+            body=$'This backport has unresolved conflicts (the backport workflow committed the first conflicting cherry-pick so the draft PR stays reviewable).\n\nIf the backport action\'s comment on this PR lists commits that were not cherry-picked yet, apply them in order after resolving — resolving the conflicts alone is not enough.\n\nYou can let Copilot finish the backport by commenting:\n\n`@copilot` please resolve the conflicts on this branch, apply any remaining commits listed by the backport action, then make sure the changelog file and DCO signoff still pass\n\nOr do it manually: resolve the conflicts (textual `<<<<<<<` / `=======` / `>>>>>>>` markers where present, or modify/delete conflicts), apply the remaining commits, then mark the PR ready for review.'
+            gh pr comment "$new_pr" --repo "$REPO" --body "$body"
+            echo "Posted Copilot conflict hint on PR #${new_pr}."
+          done

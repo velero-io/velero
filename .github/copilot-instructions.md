@@ -75,6 +75,51 @@ branches.
   passes on backport PRs.
 - Only repository **owners, members, and collaborators** may trigger these commands.
 
+## Resolving backport conflicts
+
+When a backport cannot cherry-pick cleanly, the workflow commits the first
+conflicting commit (conflict markers `<<<<<<<`, `=======`, `>>>>>>>` and/or a
+modify/delete conflict) into a **draft** backport PR instead of failing. If
+you are asked on such a PR to resolve the conflicts:
+
+- The conflicts are ordinary file content, not live git conflicts. Edit each
+  file, keep the correct combination of both sides, and remove all three
+  marker lines plus their branch labels. Modify/delete conflicts have no
+  markers — decide whether the backported change re-adds, keeps, or drops the
+  file.
+- The `<<<<<<< HEAD` side is the release branch's current state; the other
+  side is the backported change. Resolve so the backported change applies on
+  top of the release branch's current code — do not simply delete one side.
+- **Multi-commit backports are incomplete by design at this point.** The
+  backport stops at the first conflicting commit; the backport action leaves
+  a comment on the draft PR listing the source commits that were not yet
+  cherry-picked. After resolving the conflicts, cherry-pick those remaining
+  commits in order (they may conflict too — resolve each the same way). Do
+  not re-apply the commit that was already committed as conflicted.
+- The changelog file `changelogs/unreleased/<backport_pr>-<user>` was already
+  renamed by the workflow. Keep it as-is; do not rename or recreate it.
+- The DCO re-signing above ran **before** your commits. Every commit you add
+  must carry its own `Signed-off-by:` trailer (see DCO below), or the DCO
+  check will fail.
+- After resolving, state in a comment which files were conflicted, how each
+  was resolved, and which remaining commits were applied, so the reviewer can
+  check the resolution choices.
+
+## DCO signoff (required on every commit)
+
+This repository enforces the [DCO](https://github.com/apps/dco): every commit
+must end with a `Signed-off-by: <name> <email>` line matching the commit
+author. A missing or mismatched trailer fails CI.
+
+**Get the signoff right on the first commit — do not plan to fix it later.**
+Sign at creation time with `git commit -s` (which appends the trailer). Do
+**not** rely on `git rebase --signoff`, `git commit --amend`, or any other
+history rewrite to add trailers after the fact: those rewrite already-pushed
+commits, which requires a force push — and in this environment you do not
+have force-push permission, so a commit pushed without its trailer cannot be
+repaired, only superseded by a revert + new commit. Check `git log -1` for
+the trailer before pushing if unsure.
+
 ## General coding guidelines
 
 - Follow the existing code style of the file being edited.
