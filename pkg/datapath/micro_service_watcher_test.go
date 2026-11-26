@@ -184,6 +184,7 @@ func TestStartWatch(t *testing.T) {
 		thisPod              string
 		thisContainer        string
 		terminationMessage   string
+		useRealTermMessage   bool
 		redirectLogErr       error
 		insertPod            *corev1api.Pod
 		insertEventsBefore   []insertEvent
@@ -411,6 +412,85 @@ func TestStartWatch(t *testing.T) {
 			expectFail:           true,
 			expectFailMsg:        "data path pod was evicted, message: fake-evicted-message",
 		},
+		{
+			name:               "failed with reason and exit code when pod is OOMKilled without termination message",
+			thisPod:            "fak-pod-1",
+			thisContainer:      "fake-container-1",
+			useRealTermMessage: true,
+			insertPod: builder.ForPod("velero", "fake-pod-1").Phase(corev1api.PodFailed).ContainerStatuses(
+				&corev1api.ContainerStatus{
+					Name:  "fake-container-1",
+					State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}},
+				},
+			).Result(),
+			insertEventsBefore: []insertEvent{
+				{
+					event: &corev1api.Event{Reason: EventReasonStarted},
+				},
+			},
+			expectStartEvent: true,
+			expectFail:       true,
+			expectFailMsg:    "pod is terminated unexpectedly, reason OOMKilled, exit code 137",
+		},
+		{
+			name:               "evicted message is kept when container has no termination message",
+			thisPod:            "fak-pod-1",
+			thisContainer:      "fake-container-1",
+			useRealTermMessage: true,
+			insertPod: builder.ForPod("velero", "fake-pod-1").Status(corev1api.PodStatus{
+				Phase:   corev1api.PodFailed,
+				Message: "fake-evicted-message",
+				ContainerStatuses: []corev1api.ContainerStatus{
+					{
+						Name:  "fake-container-1",
+						State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "Error", ExitCode: 137}},
+					},
+				},
+			}).Result(),
+			insertEventsBefore: []insertEvent{
+				{
+					event: &corev1api.Event{Reason: EventReasonStarted},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonEvicted, Message: "fake-evicted-message"},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonStopped},
+				},
+			},
+			expectStartEvent:     true,
+			expectTerminateEvent: true,
+			expectFail:           true,
+			expectFailMsg:        "data path pod was evicted, message: fake-evicted-message",
+		},
+		{
+			name:               "failed with pod status message when pod is deleted without termination message",
+			thisPod:            "fak-pod-1",
+			thisContainer:      "fake-container-1",
+			useRealTermMessage: true,
+			insertPod: builder.ForPod("velero", "fake-pod-1").Status(corev1api.PodStatus{
+				Phase:   corev1api.PodFailed,
+				Message: "data path pod was deleted before completion",
+				ContainerStatuses: []corev1api.ContainerStatus{
+					{
+						Name:  "fake-container-1",
+						State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "Error", ExitCode: 137}},
+					},
+				},
+			}).Result(),
+			insertEventsBefore: []insertEvent{
+				{
+					event: &corev1api.Event{Reason: EventReasonStarted},
+				},
+				{
+					event: &corev1api.Event{Reason: EventReasonStopped},
+				},
+			},
+			expectStartEvent:     true,
+			expectTerminateEvent: true,
+			expectFail:           true,
+			expectFailMsg:        "data path pod was deleted before completion",
+		},
 	}
 
 	for _, test := range tests {
@@ -423,6 +503,9 @@ func TestStartWatch(t *testing.T) {
 				redirectErr:        test.redirectLogErr,
 			}
 			funcGetPodTerminationMessage = sw.getPodContainerTerminateMessage
+			if test.useRealTermMessage {
+				funcGetPodTerminationMessage = originalTerminationMessage
+			}
 			funcRedirectLog = sw.redirectDataMoverLogs
 			funcGetResultFromMessage = sw.getResultFromMessage
 

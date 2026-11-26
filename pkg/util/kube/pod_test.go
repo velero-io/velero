@@ -580,11 +580,38 @@ func TestGetPodContainerTerminateMessage(t *testing.T) {
 			container: "container-1",
 		},
 		{
-			name: "empty message when no termination message",
+			name: "reason and exit code when no termination message",
 			pod: &corev1api.Pod{
 				Status: corev1api.PodStatus{
 					ContainerStatuses: []corev1api.ContainerStatus{
-						{Name: "container-1", State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "fake-reason"}}},
+						{Name: "container-1", State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "fake-reason", ExitCode: 1}}},
+					},
+				},
+			},
+			container: "container-1",
+			message:   "pod is terminated unexpectedly, reason fake-reason, exit code 1",
+		},
+		{
+			name: "reason and exit code when container is OOMKilled",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodFailed,
+					ContainerStatuses: []corev1api.ContainerStatus{
+						{Name: "container-1", State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}}},
+					},
+				},
+			},
+			container: "container-1",
+			message:   "pod is terminated unexpectedly, reason OOMKilled, exit code 137",
+		},
+		{
+			name: "empty message when no termination message but pod has status message",
+			pod: &corev1api.Pod{
+				Status: corev1api.PodStatus{
+					Phase:   corev1api.PodFailed,
+					Message: "fake-pod-message",
+					ContainerStatuses: []corev1api.ContainerStatus{
+						{Name: "container-1", State: corev1api.ContainerState{Terminated: &corev1api.ContainerStateTerminated{Reason: "OOMKilled", ExitCode: 137}}},
 					},
 				},
 			},
