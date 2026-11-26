@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/velero-io/velero/pkg/builder"
 	"github.com/velero-io/velero/pkg/datapath"
@@ -390,4 +391,52 @@ func TestRunCancelableRestore(t *testing.T) {
 	}
 
 	cancel()
+}
+
+func TestRunCancelableRestoreRetriesGetError(t *testing.T) {
+	for _, recover := range []bool{false, true} {
+		t.Run(fmt.Sprintf("recover=%t", recover), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			scheme := runtime.NewScheme()
+			require.NoError(t, velerov2alpha1api.AddToScheme(scheme))
+			du := builder.ForDataDownload(velerov1api.DefaultNamespace, "test-du").
+				Phase(velerov2alpha1api.DataDownloadPhaseInProgress).Result()
+			getErr := errors.New("API server unavailable")
+			calls := 0
+			fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(du).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, c kbclient.WithWatch, key kbclient.ObjectKey, obj kbclient.Object, opts ...kbclient.GetOption) error {
+						calls++
+						if calls == 1 {
+							return getErr
+						}
+						if !recover {
+							cancel()
+							return getErr
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}).Build()
+			bs := &RestoreMicroService{
+				namespace:        du.Namespace,
+				dataDownloadName: du.Name,
+				client:           fakeClient,
+				logger:           velerotest.NewLogger(),
+				dataPathMgr:      datapath.NewManager(0),
+			}
+
+			_, err := bs.RunCancelableDataPath(ctx)
+			require.Equal(t, 2, calls)
+			if recover {
+				// Reaching data path creation proves the lookup recovered.
+				require.EqualError(t, err, "error to create data path: Concurrent number exceeds")
+				assert.NotErrorIs(t, err, getErr)
+			} else {
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, getErr)
+				assert.Contains(t, err.Error(), "error to get dd test-du")
+			}
+		})
+	}
 }

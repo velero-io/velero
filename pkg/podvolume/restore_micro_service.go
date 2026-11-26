@@ -126,6 +126,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	})
 
 	pvr := &velerov1api.PodVolumeRestore{}
+	var lastGetErr error
 	err := wait.PollUntilContextCancel(ctx, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		err := r.client.Get(ctx, types.NamespacedName{
 			Namespace: r.namespace,
@@ -136,7 +137,9 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		}
 
 		if err != nil {
-			return true, errors.Wrapf(err, "error to get PVR %s", r.pvrName)
+			lastGetErr = errors.Wrapf(err, "error to get PVR %s", r.pvrName)
+			log.WithError(lastGetErr).Warn("Failed to get PVR, retrying")
+			return false, nil
 		}
 
 		if pvr.Status.Phase == velerov1api.PodVolumeRestorePhaseInProgress {
@@ -146,6 +149,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		}
 	})
 	if err != nil {
+		err = errors.Join(err, lastGetErr)
 		log.WithError(err).Error("Failed to wait PVR")
 		return "", errors.Wrap(err, "error waiting for PVR")
 	}
