@@ -142,6 +142,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	})
 
 	du := &velerov2alpha1api.DataUpload{}
+	var lastGetErr error
 	err := wait.PollUntilContextCancel(ctx, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		err := r.client.Get(ctx, types.NamespacedName{
 			Namespace: r.namespace,
@@ -153,7 +154,9 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		}
 
 		if err != nil {
-			return true, errors.Wrapf(err, "error to get du %s", r.dataUploadName)
+			lastGetErr = errors.Wrapf(err, "error to get du %s", r.dataUploadName)
+			log.WithError(lastGetErr).Warn("Failed to get du, retrying")
+			return false, nil
 		}
 
 		if du.Status.Phase == velerov2alpha1api.DataUploadPhaseInProgress {
@@ -164,6 +167,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	})
 
 	if err != nil {
+		err = errors.Join(err, lastGetErr)
 		log.WithError(err).Error("Failed to wait du")
 		return "", errors.Wrap(err, "error waiting for du")
 	}

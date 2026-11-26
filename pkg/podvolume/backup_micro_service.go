@@ -133,6 +133,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	})
 
 	pvb := &velerov1api.PodVolumeBackup{}
+	var lastGetErr error
 	err := wait.PollUntilContextCancel(ctx, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		err := r.client.Get(ctx, types.NamespacedName{
 			Namespace: r.namespace,
@@ -144,7 +145,9 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 		}
 
 		if err != nil {
-			return true, errors.Wrapf(err, "error to get PVB %s", r.pvbName)
+			lastGetErr = errors.Wrapf(err, "error to get PVB %s", r.pvbName)
+			log.WithError(lastGetErr).Warn("Failed to get PVB, retrying")
+			return false, nil
 		}
 
 		if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseInProgress {
@@ -155,6 +158,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 	})
 
 	if err != nil {
+		err = errors.Join(err, lastGetErr)
 		log.WithError(err).Error("Failed to wait PVB")
 		return "", errors.Wrap(err, "error waiting for PVB")
 	}
