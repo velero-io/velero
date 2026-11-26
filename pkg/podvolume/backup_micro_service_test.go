@@ -38,6 +38,7 @@ import (
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 
 	clientFake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	velerotest "github.com/velero-io/velero/pkg/test"
 
@@ -529,6 +530,54 @@ func TestRunCancelableDataPathParentSnapshot(t *testing.T) {
 			require.NotNil(t, startParam)
 			assert.Equal(t, test.expectedParentSnapshot, startParam.ParentSnapshot)
 			assert.Equal(t, test.expectedForceFull, startParam.ForceFull)
+		})
+	}
+}
+
+func TestRunCancelableBackupRetriesGetError(t *testing.T) {
+	for _, recover := range []bool{false, true} {
+		t.Run(fmt.Sprintf("recover=%t", recover), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			scheme := runtime.NewScheme()
+			require.NoError(t, velerov1api.AddToScheme(scheme))
+			du := builder.ForPodVolumeBackup(velerov1api.DefaultNamespace, "test-du").
+				Phase(velerov1api.PodVolumeBackupPhaseInProgress).Result()
+			getErr := errors.New("API server unavailable")
+			calls := 0
+			fakeClient := clientFake.NewClientBuilder().WithScheme(scheme).WithObjects(du).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, c kbclient.WithWatch, key kbclient.ObjectKey, obj kbclient.Object, opts ...kbclient.GetOption) error {
+						calls++
+						if calls == 1 {
+							return getErr
+						}
+						if !recover {
+							cancel()
+							return getErr
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}).Build()
+			bs := &BackupMicroService{
+				namespace:   du.Namespace,
+				pvbName:     du.Name,
+				client:      fakeClient,
+				logger:      velerotest.NewLogger(),
+				dataPathMgr: datapath.NewManager(0),
+			}
+
+			_, err := bs.RunCancelableDataPath(ctx)
+			require.Equal(t, 2, calls)
+			if recover {
+				// Reaching data path creation proves the lookup recovered.
+				require.EqualError(t, err, "error to create data path: Concurrent number exceeds")
+				assert.NotErrorIs(t, err, getErr)
+			} else {
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, getErr)
+				assert.Contains(t, err.Error(), "error to get PVB test-du")
+			}
 		})
 	}
 }

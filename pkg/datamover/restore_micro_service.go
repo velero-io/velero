@@ -130,6 +130,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 	})
 
 	dd := &velerov2alpha1api.DataDownload{}
+	var lastGetErr error
 	err := wait.PollUntilContextCancel(ctx, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		err := r.client.Get(ctx, types.NamespacedName{
 			Namespace: r.namespace,
@@ -140,7 +141,9 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		}
 
 		if err != nil {
-			return true, errors.Wrapf(err, "error to get dd %s", r.dataDownloadName)
+			lastGetErr = errors.Wrapf(err, "error to get dd %s", r.dataDownloadName)
+			log.WithError(lastGetErr).Warn("Failed to get dd, retrying")
+			return false, nil
 		}
 
 		if dd.Status.Phase == velerov2alpha1api.DataDownloadPhaseInProgress {
@@ -150,6 +153,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 		}
 	})
 	if err != nil {
+		err = errors.Join(err, lastGetErr)
 		log.WithError(err).Error("Failed to wait dd")
 		return "", errors.Wrap(err, "error waiting for dd")
 	}

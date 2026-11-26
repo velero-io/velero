@@ -1,0 +1,1 @@
+Fix issue #10912, retry of retrieving data mover CR before it reaches to InProgress
