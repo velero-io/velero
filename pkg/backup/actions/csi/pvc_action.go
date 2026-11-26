@@ -243,6 +243,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 		vsLabels[k] = v
 	}
 	vsLabels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
+	vsLabels[velerov1api.BackupUIDLabel] = string(backup.UID)
 
 	// Craft the vs object to be created
 	vs = &snapshotv1api.VolumeSnapshot{

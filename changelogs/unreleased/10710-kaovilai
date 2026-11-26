@@ -1,0 +1,1 @@
+Fix backup deletion not cleaning up CSI VolumeSnapshots in workload namespaces for backups without a tarball, e.g. backups failed by a Velero server restart
