@@ -1,5 +1,5 @@
 /*
-Copyright The Velero Contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1348,7 +1348,7 @@ func TestPodVolumeRestoreSetupExposeParam(t *testing.T) {
 			)
 
 			// Act
-			got := r.setupExposeParam(basePVR)
+			got := r.setupExposeParam(t.Context(), basePVR)
 
 			// Core fields
 			assert.Equal(t, exposer.PodVolumeExposeTypeRestore, got.Type)
@@ -2345,4 +2345,14 @@ func TestPodVolumeRestoreCancelConcurrency(t *testing.T) {
 	v, ok := r.cancelledPVR.Load(pvr.Name)
 	assert.True(t, ok)
 	assert.Equal(t, firstTime, v.(time.Time), "The initially recorded timestamp should be preserved")
+}
+
+func TestPodVolumeRestoreSetupExposeParam_ContextPropagation(t *testing.T) {
+	pvr := pvrBuilder().Result()
+	pvr.Status.Node = "worker-1"
+
+	requireSetupExposeParamUsesContext(t, pvr.Namespace, func(ctx context.Context, kubeClient kubernetes.Interface) {
+		r := &PodVolumeRestoreReconciler{kubeClient: kubeClient, logger: velerotest.NewLogger()}
+		r.setupExposeParam(ctx, pvr)
+	})
 }
