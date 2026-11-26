@@ -158,7 +158,7 @@ func (v *volumeHelperImpl) getPVAndMatchAction(obj runtime.Unstructured, groupRe
 			return nil, nil, err
 		}
 
-		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
+		pv, err = kubeutil.GetPVForPVC(context.TODO(), pvc, v.client)
 		if err != nil {
 			v.logger.WithError(err).Warnf("failed to get PV for PVC %s", pvc.Namespace+"/"+pvc.Name)
 			getPVErr = fmt.Errorf("fail to get PV for PVC %s: %w", pvc.Namespace+"/"+pvc.Name, errGetPVForPVC)
@@ -198,7 +198,7 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 			return false, err
 		}
 
-		pv, err = kubeutil.GetPVForPVC(pvc, v.client)
+		pv, err = kubeutil.GetPVForPVC(context.TODO(), pvc, v.client)
 		if err != nil {
 			// Any error means PV not available - save to return later if no policy matches
 			v.logger.Debugf("PV not found for PVC %s: %v", pvc.Namespace+"/"+pvc.Name, err)
@@ -247,6 +247,7 @@ func (v *volumeHelperImpl) ShouldPerformSnapshot(obj runtime.Unstructured, group
 	if pv.Spec.ClaimRef != nil {
 		// Use cached lookup if available for better performance with many PVCs/pods
 		pods, err := podvolumeutil.GetPodsUsingPVCWithCache(
+			context.TODO(),
 			pv.Spec.ClaimRef.Namespace,
 			pv.Spec.ClaimRef.Name,
 			v.client,
@@ -292,12 +293,12 @@ func (v volumeHelperImpl) ShouldPerformFSBackup(volume corev1api.Volume, pod cor
 		resource = &volume
 		var pvc = &corev1api.PersistentVolumeClaim{}
 		if volume.VolumeSource.PersistentVolumeClaim != nil {
-			pvc, err = kubeutil.GetPVCForPodVolume(&volume, &pod, v.client)
+			pvc, err = kubeutil.GetPVCForPodVolume(context.TODO(), &volume, &pod, v.client)
 			if err != nil {
 				v.logger.WithError(err).Errorf("fail to get PVC for pod %s", pod.Namespace+"/"+pod.Name)
 				return false, err
 			}
-			pvResource, err := kubeutil.GetPVForPVC(pvc, v.client)
+			pvResource, err := kubeutil.GetPVForPVC(context.TODO(), pvc, v.client)
 			if err != nil {
 				// Any error means PV not available - save to return later if no policy matches
 				v.logger.Debugf("PV not found for PVC %s: %v", pvc.Namespace+"/"+pvc.Name, err)

@@ -968,7 +968,7 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 		if du.Spec.DataMover == datamover.DataMoverTypeVeleroBlock {
 			nodeOS = kube.NodeOSLinux
 		} else {
-			nodeOS = kube.GetPVCAttachingNodeOS(pvc, r.kubeClient.CoreV1(), r.kubeClient.StorageV1(), log)
+			nodeOS = kube.GetPVCAttachingNodeOS(context.Background(), pvc, r.kubeClient.CoreV1(), r.kubeClient.StorageV1(), log)
 		}
 
 		if err := kube.HasNodeWithOS(context.Background(), nodeOS, r.kubeClient.CoreV1()); err != nil {

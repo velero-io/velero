@@ -216,7 +216,7 @@ func (b *backupper) getMatchAction(resPolicies *resourcepolicies.Policies, pvc *
 	if pvc != nil {
 		// Ignore err, if the PV is not available (Pending/Lost PVC or PV fetch failed) - try matching with PVC only
 		// GetPVForPVC returns nil for all error cases
-		pv, _ := kube.GetPVForPVC(pvc, b.crClient)
+		pv, _ := kube.GetPVForPVC(context.TODO(), pvc, b.crClient)
 		vfd := resourcepolicies.NewVolumeFilterData(pv, nil, pvc)
 		return resPolicies.GetMatchAction(vfd)
 	}

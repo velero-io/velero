@@ -822,7 +822,7 @@ func TestGetPodsUsingPVCWithCache(t *testing.T) {
 				}
 			}
 
-			pods, err := GetPodsUsingPVCWithCache(tc.pvcNamespace, tc.pvcName, fakeClient, cache)
+			pods, err := GetPodsUsingPVCWithCache(t.Context(), tc.pvcNamespace, tc.pvcName, fakeClient, cache)
 			require.NoError(t, err)
 			assert.Len(t, pods, tc.expectedPodCount, "unexpected number of pods")
 		})
@@ -940,7 +940,7 @@ func TestIsPVCDefaultToFSBackupWithCache(t *testing.T) {
 				}
 			}
 
-			result, err := IsPVCDefaultToFSBackupWithCache(tc.pvcNamespace, tc.pvcName, fakeClient, tc.defaultVolumesToFsBackup, cache)
+			result, err := IsPVCDefaultToFSBackupWithCache(t.Context(), tc.pvcNamespace, tc.pvcName, fakeClient, tc.defaultVolumesToFsBackup, cache)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedResult, result)
 		})
