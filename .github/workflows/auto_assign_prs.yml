@@ -3,6 +3,27 @@ name: "Auto Assign Author"
 
 # pull_request_target means that this will run on pull requests, but in
 # the context of the base repo. This should mean PRs from forks are supported.
+#
+# Also callable as a reusable workflow (`uses:
+# velero-io/velero/.github/workflows/auto_assign_prs.yml@main`) from other
+# velero-io repos — see velero-plugin-for-aws/gcp/microsoft-azure. Each
+# caller repo needs its own `.github/auto-assignees.yml` (kentaro-m/auto-
+# assign-action fetches it via the GitHub API using the calling repo's
+# context — there's no checkout step in this workflow) and its own
+# `.github/CODEOWNERS` naming the reviewer team for the re-request-review
+# job below to make sense. Callers must grant at least `pull-requests: write`
+# in their own job-level permissions — a caller's permissions cap what this
+# called workflow's jobs can request, regardless of what's declared here.
+#
+# IMPORTANT for callers: the config file must use kentaro-m's v2 schema
+# (`addReviewers`, `reviewGroups`, `numberOfReviewers`, `skipKeywords`, ...).
+# The older necojackarc/auto-request-review schema keys (`reviewers.defaults`,
+# `groups`, `options.number_of_reviewers`, ...) are silently ignored by
+# kentaro-m — a config carried over from a removed necojackarc job will
+# still assign the author (via `addAssignees: author`) but will NOT request
+# any reviewers. This repo's own `.github/auto-assignees.yml` still carries
+# those vestigial keys; reviewer selection here comes from CODEOWNERS plus
+# the re-request-review job below, not from the config's reviewer lists.
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
@@ -10,6 +31,7 @@ on:
   # review once only one maintainer has approved.
   pull_request_review:
     types: [submitted]
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,7 +40,7 @@ permissions:
 jobs:
   # Automatically assigns reviewers and owner
   add-reviews:
-    if: github.repository == 'velero-io/velero' && github.event_name == 'pull_request_target'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Set the author of a PR as the assignee
@@ -33,8 +55,16 @@ jobs:
   # re-requests a review from the maintainer team whenever a PR still has
   # fewer than the required number of approvals, so a second CODEOWNERS
   # reviewer gets pinged.
+  #
+  # Known limitation: `pull_request_review` runs on PRs from forks carry a
+  # read-only GITHUB_TOKEN (declared permissions cannot elevate it), so the
+  # re-request call can fail there. The script catches that and logs a
+  # warning instead of failing the job — fork PRs simply don't get the
+  # automatic second ping and rely on CODEOWNERS/maintainer attention. A
+  # GitHub App installation token (or PAT) would close this gap; see the
+  # equivalent note in backport.yml.
   re-request-review:
-    if: github.repository == 'velero-io/velero' && github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
     runs-on: ubuntu-latest
     steps:
       - name: Re-request review from maintainers if more approvals are needed
