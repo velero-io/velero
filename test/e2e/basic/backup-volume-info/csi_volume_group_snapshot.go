@@ -17,8 +17,11 @@ limitations under the License.
 package basic
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cockroachdb/errors"
@@ -197,7 +200,34 @@ func (c *CSIVolumeGroupSnapshotVolumeInfo) Verify() error {
 	// every volume in the group must come back with the content written before
 	// the backup, which is what shows the group snapshot was actually usable.
 	namespace := c.CaseBaseName
-	Expect(WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)).To(Succeed(),
+	err = WaitForReadyDeployment(c.Client.ClientGo, namespace, c.CaseBaseName)
+	if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		var commands [][]string
+		for _, resource := range []string{"deployment", "pods", "pvc", "volumesnapshots"} {
+			commands = append(commands, []string{"describe", resource, "-n", namespace, "--request-timeout=30s"})
+		}
+		commands = append(commands, []string{"get", "events", "-n", namespace, "--request-timeout=30s"})
+		for _, resource := range []string{"volumesnapshotcontents", "volumegroupsnapshotcontents"} {
+			commands = append(commands, []string{"get", resource, "-o", "wide", "--request-timeout=30s"})
+		}
+		for _, args := range commands {
+			if ctx.Err() != nil {
+				fmt.Printf("Timed out collecting restore diagnostics: %v\n", ctx.Err())
+				break
+			}
+			cmd := exec.CommandContext(ctx, "kubectl", args...)
+			cmd.WaitDelay = 2 * time.Second
+			fmt.Printf("Diagnostic command: %v\n", cmd)
+			output, cmdErr := cmd.CombinedOutput()
+			fmt.Print(string(output))
+			if cmdErr != nil {
+				fmt.Printf("Diagnostic command failed: %v\n", cmdErr)
+			}
+		}
+	}
+	Expect(err).To(Succeed(),
 		fmt.Sprintf("the deployment in namespace %s is not ready after the restore", namespace))
 
 	Expect(c.writtenContent).To(HaveLen(vgsPVCCount),

@@ -17,6 +17,7 @@ limitations under the License.
 package basic
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,6 +27,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	. "github.com/velero-io/velero/test"
 	. "github.com/velero-io/velero/test/e2e/test"
@@ -173,5 +177,11 @@ func (v *BackupVolumeInfo) Destroy() error {
 		return errors.Wrap(err, "Could cleanup retrieve namespaces")
 	}
 
-	return WaitAllSelectedNSDeleted(v.Ctx, v.Client, "ns-test=true")
+	return wait.PollUntilContextCancel(v.Ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		_, err := v.Client.ClientGo.CoreV1().Namespaces().Get(ctx, v.CaseBaseName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	})
 }

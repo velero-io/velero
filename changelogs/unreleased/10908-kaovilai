@@ -1,0 +1,1 @@
+Fix namespace deletion synchronization and improve diagnostics in CSI backup volume info end-to-end tests.
