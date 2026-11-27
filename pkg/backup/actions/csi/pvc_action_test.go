@@ -19,6 +19,7 @@ package csi
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ import (
 	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1api "k8s.io/api/apps/v1"
@@ -39,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
@@ -56,6 +59,7 @@ import (
 	uploaderUtil "github.com/velero-io/velero/pkg/uploader/util"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 	csi "github.com/velero-io/velero/pkg/util/csi"
+	vhutil "github.com/velero-io/velero/pkg/util/volumehelper"
 )
 
 const testDriver = "csi.example.com"
@@ -77,27 +81,64 @@ func (c *errorInjectingClient) Create(ctx context.Context, obj crclient.Object, 
 	return c.Client.Create(ctx, obj, opts...)
 }
 
+// stubVolumeHelper is a test double for vhutil.VolumeHelper used to reach
+// Execute branches that validated volume policies cannot (Phase-2 exclude guard).
+type stubVolumeHelper struct {
+	snapshot       bool
+	dataMover      string
+	exclude        []string
+	excludeDropped bool
+}
+
+func (s *stubVolumeHelper) ShouldPerformSnapshot(runtime.Unstructured, schema.GroupResource) (bool, error) {
+	return s.snapshot, nil
+}
+func (s *stubVolumeHelper) ShouldPerformFSBackup(corev1api.Volume, corev1api.Pod) (bool, error) {
+	return false, nil
+}
+func (s *stubVolumeHelper) ShouldPerformCustomAction(runtime.Unstructured, schema.GroupResource, map[string]any) (bool, error) {
+	return false, nil
+}
+func (s *stubVolumeHelper) GetActionParameters(runtime.Unstructured, schema.GroupResource) (bool, string, map[string]any, error) {
+	return false, "", nil, nil
+}
+func (s *stubVolumeHelper) GetSnapshotClass(runtime.Unstructured, schema.GroupResource) (string, error) {
+	return "", nil
+}
+func (s *stubVolumeHelper) GetDataMoverFromActionParameters(runtime.Unstructured, schema.GroupResource) string {
+	return s.dataMover
+}
+func (s *stubVolumeHelper) GetEffectiveExclude(runtime.Unstructured, schema.GroupResource, bool) ([]string, bool, error) {
+	return s.exclude, s.excludeDropped, nil
+}
+
 func TestExecute(t *testing.T) {
 	boolTrue := true
 	tests := []struct {
-		name                 string
-		backup               *velerov1api.Backup
-		pvc                  *corev1api.PersistentVolumeClaim
-		pv                   *corev1api.PersistentVolume
-		sc                   *storagev1api.StorageClass
-		vsClass              *snapshotv1api.VolumeSnapshotClass
-		operationID          string
-		expectedErr          error
-		expectErr            bool // Use bool for cases where we just need to check for any error
-		expectedBackup       *velerov1api.Backup
-		expectedDataUpload   *velerov2alpha1.DataUpload
-		expectedPVC          *corev1api.PersistentVolumeClaim
-		resourcePolicy       *corev1api.ConfigMap
-		globalResourcePolicy *corev1api.ConfigMap
-		extraObjects         []runtime.Object
-		failVSCreate         bool
-		skipVSReadyUpdate    bool // New flag to control VS readiness
-		expectedVSClassName  string
+		name                   string
+		backup                 *velerov1api.Backup
+		pvc                    *corev1api.PersistentVolumeClaim
+		pv                     *corev1api.PersistentVolume
+		sc                     *storagev1api.StorageClass
+		vsClass                *snapshotv1api.VolumeSnapshotClass
+		operationID            string
+		expectedErr            error
+		expectErr              bool // Use bool for cases where we just need to check for any error
+		expectedBackup         *velerov1api.Backup
+		expectedDataUpload     *velerov2alpha1.DataUpload
+		expectedPVC            *corev1api.PersistentVolumeClaim
+		resourcePolicy         *corev1api.ConfigMap
+		globalResourcePolicy   *corev1api.ConfigMap
+		extraObjects           []runtime.Object
+		failVSCreate           bool
+		skipVSReadyUpdate      bool // New flag to control VS readiness
+		expectedVSClassName    string
+		expectedErrContains    string
+		volumeHelper           vhutil.VolumeHelper
+		expectUnfilteredUpload bool
+		expectNoDataUpload     bool
+		expectNoVS             bool
+		expectLogContains      string
 	}{
 		{
 			name:   "Skip PVC BIA when backup is in finalizing phase",
@@ -293,6 +334,156 @@ func TestExecute(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:                "exclude with velero-block volume policy is rejected at policy load",
+			backup:              builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
+			resourcePolicy:      builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"dataMover":"velero-block"}},"exclude":["*.tmp"]}]}`).Result(),
+			pvc:                 builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:                  builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:                  builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:             builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			expectErr:           true,
+			skipVSReadyUpdate:   true,
+			expectedErrContains: `exclude is not supported for data mover "velero-block"`,
+		},
+		{
+			name:           "exclude with snapshot velero-fs is copied onto DataUpload",
+			backup:         builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").SnapshotMoveData(true).CSISnapshotTimeout(1 * time.Minute).Result(),
+			resourcePolicy: builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"dataMover":"velero-fs"}},"exclude":["*.tmp","/cache/*"]}]}`).Result(),
+			pvc:            builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:             builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:             builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:        builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
+			operationID: ".",
+			expectedDataUpload: &velerov2alpha1.DataUpload{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "DataUpload",
+					APIVersion: velerov2alpha1.SchemeGroupVersion.String(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-",
+					Namespace:    "velero",
+					Labels: map[string]string{
+						velerov1api.BackupNameLabel:       "test",
+						velerov1api.BackupUIDLabel:        "",
+						velerov1api.PVCUIDLabel:           "",
+						velerov1api.AsyncOperationIDLabel: "du-.",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "velero.io/v1",
+							Kind:       "Backup",
+							Name:       "test",
+							UID:        "",
+							Controller: &boolTrue,
+						},
+					},
+				},
+				Spec: velerov2alpha1.DataUploadSpec{
+					SnapshotType: velerov2alpha1.SnapshotTypeCSI,
+					CSISnapshot: &velerov2alpha1.CSISnapshotSpec{
+						VolumeSnapshot: "",
+						StorageClass:   "testSC",
+						SnapshotClass:  "testVSClass",
+					},
+					SourcePVC:        "testPVC",
+					SourceNamespace:  "velero",
+					DataMover:        "velero-fs",
+					OperationTimeout: metav1.Duration{Duration: 1 * time.Minute},
+					ParentSnapshot:   "",
+					DataMoverConfig: map[string]string{
+						uploaderUtil.Exclude: `["*.tmp","/cache/*"]`,
+					},
+				},
+			},
+		},
+		{
+			name:    "unsupported runtime exclusions warn and preserve DataUpload",
+			backup:  builder.ForBackup("velero", "test").SnapshotMoveData(true).DataMover("velero-block").CSISnapshotTimeout(1 * time.Minute).Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			volumeHelper: &stubVolumeHelper{
+				snapshot:  true,
+				dataMover: "velero-block",
+				exclude:   []string{"*.tmp"},
+			},
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
+			expectUnfilteredUpload: true,
+			expectLogContains:      "effective data mover cannot filter source data",
+		},
+		{
+			name:    "warns when inherited exclude is dropped for a velero-block winning action",
+			backup:  builder.ForBackup("velero", "test").SnapshotMoveData(true).DataMover("velero-block").CSISnapshotTimeout(1 * time.Minute).Result(),
+			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:      builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass: builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			volumeHelper: &stubVolumeHelper{
+				snapshot:       true,
+				dataMover:      "velero-block",
+				excludeDropped: true,
+			},
+			extraObjects: []runtime.Object{
+				&corev1api.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "linux-node", Labels: map[string]string{corev1api.LabelOSStable: "linux"}},
+				},
+				&appsv1api.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "velero", Name: "node-agent"},
+					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
+				},
+			},
+			expectLogContains: "cannot filter source data",
+		},
+		{
+			name:           "warns when exclude is set but SnapshotMoveData is false",
+			backup:         builder.ForBackup("velero", "test").ResourcePolicies("resourcePolicy").CSISnapshotTimeout(1 * time.Minute).Result(),
+			resourcePolicy: builder.ForConfigMap("velero", "resourcePolicy").Data("policy", `{"version":"v1","volumePolicies":[{"conditions":{"csi":{}},"action":{"type":"snapshot","parameters":{"dataMover":"velero-fs"}},"exclude":["*.tmp"]}]}`).Result(),
+			pvc:            builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
+			pv:             builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
+			sc:             builder.ForStorageClass("testSC").Provisioner("hostpath").Result(),
+			vsClass:        builder.ForVolumeSnapshotClass("testVSClass").Driver("hostpath").ObjectMeta(builder.WithLabels(velerov1api.VolumeSnapshotClassSelectorLabel, "")).Result(),
+			// No SnapshotMoveData: no DataUpload is created, and the backup logs
+			// that the exclude patterns were not applied.
+			expectNoDataUpload: true,
+			expectLogContains:  "does not have SnapshotMoveData enabled",
+		},
+	}
+
+	for _, base := range tests {
+		if base.name != "exclude with snapshot velero-fs is copied onto DataUpload" {
+			continue
+		}
+		raw := base
+		raw.name = "raw-block velero-fs warns and creates an unfiltered DataUpload"
+		raw.pvc = base.pvc.DeepCopy()
+		raw.pvc.Spec.VolumeMode = ptr.To(corev1api.PersistentVolumeBlock)
+		raw.pv = base.pv.DeepCopy()
+		raw.pv.Spec.VolumeMode = ptr.To(corev1api.PersistentVolumeBlock)
+		raw.expectedDataUpload = base.expectedDataUpload.DeepCopy()
+		raw.expectedDataUpload.Spec.DataMoverConfig = nil
+		raw.expectUnfilteredUpload = true
+		raw.expectLogContains = "raw-block source cannot filter source data"
+		tests = append(tests, raw)
+		break
 	}
 
 	for _, tc := range tests {
@@ -300,6 +491,7 @@ func TestExecute(t *testing.T) {
 			t.Parallel()
 			logger := logrus.New()
 			logger.Level = logrus.DebugLevel
+			logHook := logrustest.NewLocal(logger)
 			objects := make([]runtime.Object, 0)
 			if tc.pvc != nil {
 				objects = append(objects, tc.pvc)
@@ -330,8 +522,9 @@ func TestExecute(t *testing.T) {
 			}
 
 			pvcBIA := pvcBackupItemAction{
-				log:      logger,
-				crClient: crClient,
+				log:          logger,
+				crClient:     crClient,
+				volumeHelper: tc.volumeHelper,
 			}
 
 			pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&tc.pvc)
@@ -383,6 +576,9 @@ func TestExecute(t *testing.T) {
 				require.EqualError(t, err, tc.expectedErr.Error())
 			} else if tc.expectErr {
 				require.Error(t, err)
+				if tc.expectedErrContains != "" {
+					assert.Contains(t, err.Error(), tc.expectedErrContains)
+				}
 				// On timeout failure, check that the cleanup logic was called
 				if tc.skipVSReadyUpdate {
 					vsList := new(snapshotv1api.VolumeSnapshotList)
@@ -419,6 +615,36 @@ func TestExecute(t *testing.T) {
 				require.NotNil(t, vsList.Items[0].Spec.VolumeSnapshotClassName)
 				assert.Equal(t, tc.expectedVSClassName, *vsList.Items[0].Spec.VolumeSnapshotClassName,
 					"VolumeSnapshot should use the VolumeSnapshotClass specified by volume policy")
+			}
+
+			if tc.expectUnfilteredUpload {
+				var uploads velerov2alpha1.DataUploadList
+				require.NoError(t, crClient.List(t.Context(), &uploads))
+				require.Len(t, uploads.Items, 1)
+				assert.NotContains(t, uploads.Items[0].Spec.DataMoverConfig, uploaderUtil.Exclude)
+				var snapshots snapshotv1api.VolumeSnapshotList
+				require.NoError(t, crClient.List(t.Context(), &snapshots))
+				require.Len(t, snapshots.Items, 1)
+			}
+			if tc.expectNoDataUpload {
+				dataUploadList := new(velerov2alpha1.DataUploadList)
+				require.NoError(t, crClient.List(t.Context(), dataUploadList))
+				assert.Empty(t, dataUploadList.Items, "DataUpload should not be created when exclude is rejected")
+			}
+			if tc.expectNoVS {
+				vsList := new(snapshotv1api.VolumeSnapshotList)
+				require.NoError(t, crClient.List(t.Context(), vsList, &crclient.ListOptions{Namespace: tc.pvc.Namespace}))
+				assert.Empty(t, vsList.Items, "VolumeSnapshot should be deleted when exclude is rejected")
+			}
+			if tc.expectLogContains != "" {
+				found := false
+				for _, entry := range logHook.AllEntries() {
+					if strings.Contains(entry.Message, tc.expectLogContains) {
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "expected a log entry containing %q", tc.expectLogContains)
 			}
 		})
 	}
@@ -2364,6 +2590,7 @@ func TestNewDataUpload(t *testing.T) {
 		vsClassName               *string
 		uploaderConfig            *velerov1api.UploaderConfigForBackup
 		dataMoverFromVolumePolicy string
+		exclude                   []string
 		expectedParentSnap        string
 		expectedDataMoverCfg      map[string]string
 	}{
@@ -2415,6 +2642,37 @@ func TestNewDataUpload(t *testing.T) {
 			uploaderConfig:       &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 3, ParallelBlocksUpload: 7},
 			expectedDataMoverCfg: map[string]string{uploaderUtil.ParallelFilesUpload: "3", uploaderUtil.ParallelBlocksUpload: "7"},
 		},
+		{
+			name:               "exclude patterns are JSON-encoded into DataMoverConfig",
+			backupType:         "",
+			vsClassName:        ptr.To("test-vs-class"),
+			exclude:            []string{"/cache/*", "*.tmp"},
+			expectedParentSnap: "",
+			expectedDataMoverCfg: map[string]string{
+				uploaderUtil.Exclude: `["/cache/*","*.tmp"]`,
+			},
+		},
+		{
+			name:               "exclude merges with both uploader concurrency settings",
+			backupType:         "",
+			vsClassName:        ptr.To("test-vs-class"),
+			uploaderConfig:     &velerov1api.UploaderConfigForBackup{ParallelFilesUpload: 10, ParallelBlocksUpload: 7},
+			exclude:            []string{"*.log"},
+			expectedParentSnap: "",
+			expectedDataMoverCfg: map[string]string{
+				uploaderUtil.ParallelFilesUpload:  "10",
+				uploaderUtil.ParallelBlocksUpload: "7",
+				uploaderUtil.Exclude:              `["*.log"]`,
+			},
+		},
+		{
+			name:                 "empty exclude does not write the key",
+			backupType:           "",
+			vsClassName:          ptr.To("test-vs-class"),
+			exclude:              nil,
+			expectedParentSnap:   "",
+			expectedDataMoverCfg: nil,
+		},
 	}
 
 	for _, tc := range tests {
@@ -2463,7 +2721,8 @@ func TestNewDataUpload(t *testing.T) {
 			operationID := "test-op-id"
 			fsType := "ext4"
 
-			du := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy)
+			du, err := newDataUpload(backup, vs, pvc, operationID, vsc, fsType, tc.dataMoverFromVolumePolicy, tc.exclude)
+			require.NoError(t, err)
 
 			require.NotNil(t, du)
 			assert.Equal(t, velerov2alpha1.SchemeGroupVersion.String(), du.APIVersion)
@@ -2511,4 +2770,15 @@ func TestNewDataUpload(t *testing.T) {
 			assert.Equal(t, tc.expectedDataMoverCfg, du.Spec.DataMoverConfig)
 		})
 	}
+}
+
+func TestNewDataUploadRejectsOversizedExclude(t *testing.T) {
+	backup := builder.ForBackup("velero", "backup").Result()
+	pvc := builder.ForPersistentVolumeClaim("ns", "pvc").StorageClass("sc").Result()
+	vs := builder.ForVolumeSnapshot("ns", "snapshot").Result()
+	vsc := builder.ForVolumeSnapshotContent("content").Result()
+	patterns := slices.Repeat([]string{"*"}, uploaderUtil.MaxExcludePatterns+1)
+	du, err := newDataUpload(backup, vs, pvc, "op", vsc, "ext4", "velero-fs", patterns)
+	require.ErrorContains(t, err, "maximum is 128")
+	assert.Nil(t, du)
 }

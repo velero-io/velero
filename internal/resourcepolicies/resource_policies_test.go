@@ -3334,6 +3334,26 @@ namespacedFilterPolicies:
 	assert.Nil(t, p.GetClusterScopedFilterPolicy())
 }
 
+func TestGetGlobalResourcePoliciesRejectsInheritExcludes(t *testing.T) {
+	data := `version: v1
+volumePolicies:
+  - conditions:
+      storageClass:
+        - gp2
+    action:
+      type: fs-backup
+    exclude:
+      - "*.tmp"
+    inheritExcludes: false
+`
+	client := velerotest.NewFakeControllerRuntimeClient(t)
+	require.NoError(t, client.Create(t.Context(), globalPolicyConfigMap("global", data)))
+
+	_, err := GetGlobalResourcePolicies(client, "velero", "global", logrus.New())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inheritExcludes is not supported on global policies")
+}
+
 func TestActionGetDataMover(t *testing.T) {
 	testCases := []struct {
 		name              string
@@ -3456,4 +3476,350 @@ func TestActionGetSnapshotClass(t *testing.T) {
 			assert.Equal(t, tc.expectedClass, snapshotClass)
 		})
 	}
+}
+
+func TestVolumePolicyExcludeYAML(t *testing.T) {
+	t.Run("valid exclude list and inheritExcludes", func(t *testing.T) {
+		yamlData := `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude:
+  - " /cache/* "
+  - "*.tmp"
+  inheritExcludes: false
+`
+		res, err := unmarshalResourcePolicies(&yamlData)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		p := &Policies{}
+		require.NoError(t, p.BuildPolicy(res))
+		require.Len(t, p.volumePolicies, 1)
+		assert.Equal(t, []string{"/cache/*", "*.tmp"}, p.volumePolicies[0].exclude)
+		require.NotNil(t, p.volumePolicies[0].inheritExcludes)
+		assert.False(t, *p.volumePolicies[0].inheritExcludes)
+	})
+
+	t.Run("invalid exclude type string returns decode error", func(t *testing.T) {
+		yamlData := `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: "*.tmp"
+`
+		_, err := unmarshalResourcePolicies(&yamlData)
+		require.Error(t, err)
+	})
+
+	t.Run("invalid inheritExcludes type returns decode error", func(t *testing.T) {
+		yamlData := `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  inheritExcludes: "false"
+`
+		_, err := unmarshalResourcePolicies(&yamlData)
+		require.Error(t, err)
+	})
+}
+
+func TestGetEffectiveExclude(t *testing.T) {
+	pv := &corev1api.PersistentVolume{Spec: corev1api.PersistentVolumeSpec{StorageClassName: "gp2"}}
+	vfd := VolumeFilterData{PersistentVolume: pv}
+
+	build := func(t *testing.T, backupYAML, globalYAML string) *Policies {
+		t.Helper()
+		client := velerotest.NewFakeControllerRuntimeClient(t)
+		var backupRef string
+		if backupYAML != "" {
+			backupRef = "backup01"
+			require.NoError(t, client.Create(t.Context(), globalPolicyConfigMap("backup01", backupYAML)))
+		}
+		globalName := ""
+		if globalYAML != "" {
+			globalName = "global"
+			require.NoError(t, client.Create(t.Context(), globalPolicyConfigMap("global", globalYAML)))
+		}
+		p, err := GetResourcePoliciesFromBackupWithGlobal(backupWithPolicy(backupRef), client, globalName, "velero", logrus.New())
+		require.NoError(t, err)
+		require.NotNil(t, p)
+		return p
+	}
+
+	t.Run("first-match-wins still applies to action type", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["node_modules/"]
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: skip
+`)
+		action, err := p.GetMatchAction(vfd)
+		require.NoError(t, err)
+		require.NotNil(t, action)
+		assert.Equal(t, FSBackup, action.Type)
+	})
+
+	t.Run("concatenates global then backup-level exclude", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["node_modules/"]
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Equal(t, []string{"*.tmp", "node_modules/"}, got)
+	})
+
+	t.Run("backup-level negation overlays global exclude", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.log", "!keep.tmp"]
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Equal(t, []string{"*.tmp", "*.log", "!keep.tmp"}, got)
+	})
+
+	t.Run("intra-document isolation: catch-all does not leak into earlier matched rule", func(t *testing.T) {
+		// In a single document, Rule 1 matches gp2 with no exclude; Rule 2 is a catch-all with exclude.
+		// Rule 1 wins; Rule 2's excludes must NOT bleed into the volume.
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+- conditions: {}
+  action:
+    type: fs-backup
+  exclude: ["*.catchall"]
+`, "")
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("inheritExcludes false opts out of global exclude", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  inheritExcludes: false
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("inheritExcludes false with backup exclude replaces global baseline", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["custom-cache/"]
+  inheritExcludes: false
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Equal(t, []string{"custom-cache/"}, got)
+	})
+
+	t.Run("action override without exclude preserves global baseline", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: snapshot
+    parameters:
+      dataMover: velero-fs
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Equal(t, []string{"*.tmp"}, got)
+	})
+
+	t.Run("skip winning action drops inherited exclude", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: skip
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.True(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("velero-block winning action drops inherited exclude", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: snapshot
+    parameters:
+      dataMover: velero-block
+`, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`)
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.True(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("no matching rule returns nil", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["other"]
+  action:
+    type: fs-backup
+  exclude: ["*.tmp"]
+`, "")
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("nil policies returns nil", func(t *testing.T) {
+		var p *Policies
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+
+	t.Run("skip winning action without any exclude does not report dropped", func(t *testing.T) {
+		p := build(t, `version: v1
+volumePolicies:
+- conditions:
+    storageClass: ["gp2"]
+  action:
+    type: skip
+`, "")
+		got, dropped, err := p.GetEffectiveExclude(vfd)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+}
+
+func TestValidateExcludeForDataMover(t *testing.T) {
+	require.NoError(t, ValidateExcludeForDataMover(nil, datamover.DataMoverTypeVeleroBlock))
+	require.NoError(t, ValidateExcludeForDataMover([]string{"*.tmp"}, datamover.DataMoverTypeVeleroFs))
+	require.Error(t, ValidateExcludeForDataMover([]string{"*.tmp"}, datamover.DataMoverTypeVeleroBlock))
+}
+
+func TestPolicyMatches(t *testing.T) {
+	vol := &structuredVolume{storageClass: "gp2"}
+
+	t.Run("nil policy returns false", func(t *testing.T) {
+		assert.False(t, policyMatches(nil, vol))
+	})
+
+	t.Run("empty conditions matches vacuously", func(t *testing.T) {
+		p := &volPolicy{}
+		assert.True(t, policyMatches(p, vol))
+	})
+
+	t.Run("all matching conditions returns true", func(t *testing.T) {
+		p := &volPolicy{
+			conditions: []volumeCondition{
+				&storageClassCondition{storageClass: []string{"gp2"}},
+			},
+		}
+		assert.True(t, policyMatches(p, vol))
+	})
+
+	t.Run("non-matching condition returns false", func(t *testing.T) {
+		p := &volPolicy{
+			conditions: []volumeCondition{
+				&storageClassCondition{storageClass: []string{"other"}},
+			},
+		}
+		assert.False(t, policyMatches(p, vol))
+	})
 }

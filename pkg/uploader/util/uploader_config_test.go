@@ -17,7 +17,10 @@ limitations under the License.
 package util
 
 import (
+	"encoding/json"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -322,5 +325,194 @@ func TestGetDeleteExtraFiles(t *testing.T) {
 				t.Errorf("Expected error '%v', but got '%v'", test.expectedError, err)
 			}
 		})
+	}
+}
+
+func TestStoreExclude(t *testing.T) {
+	got, err := StoreExclude(nil)
+	if err != nil {
+		t.Fatalf("StoreExclude(nil) error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("StoreExclude(nil) = %q, want empty", got)
+	}
+
+	got, err = StoreExclude([]string{})
+	if err != nil {
+		t.Fatalf("StoreExclude(empty) error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("StoreExclude(empty) = %q, want empty", got)
+	}
+}
+
+func TestGetExclude(t *testing.T) {
+	tests := []struct {
+		name           string
+		uploaderCfg    map[string]string
+		expectedResult []string
+		expectErr      bool
+	}{
+		{
+			name:        "missing key",
+			uploaderCfg: map[string]string{},
+		},
+		{
+			name:        "empty value",
+			uploaderCfg: map[string]string{Exclude: "  "},
+		},
+		{
+			name:           "round-trip including comma in pattern",
+			uploaderCfg:    map[string]string{Exclude: `["/cache/*","foo,bar.txt","*.tmp"]`},
+			expectedResult: []string{"/cache/*", "foo,bar.txt", "*.tmp"},
+		},
+		{
+			name:        "malformed JSON",
+			uploaderCfg: map[string]string{Exclude: "not-json"},
+			expectErr:   true,
+		},
+		{
+			name:        "JSON object instead of array",
+			uploaderCfg: map[string]string{Exclude: `{"files":"*.tmp"}`},
+			expectErr:   true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := GetExclude(test.uploaderCfg)
+			if test.expectErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(result, test.expectedResult) {
+				t.Errorf("got %v, want %v", result, test.expectedResult)
+			}
+		})
+	}
+}
+
+func TestStoreExcludeRoundTrip(t *testing.T) {
+	patterns := []string{"/cache/*", "foo,bar.txt", "*.tmp"}
+	serialized, err := StoreExclude(patterns)
+	if err != nil {
+		t.Fatalf("StoreExclude: %v", err)
+	}
+	got, err := GetExclude(map[string]string{Exclude: serialized})
+	if err != nil {
+		t.Fatalf("GetExclude: %v", err)
+	}
+	if !reflect.DeepEqual(got, patterns) {
+		t.Errorf("round-trip got %v, want %v", got, patterns)
+	}
+}
+
+func TestMergeExclude(t *testing.T) {
+	got, err := MergeExclude(nil, nil)
+	if err != nil {
+		t.Fatalf("MergeExclude(nil, nil): %v", err)
+	}
+	if got != nil {
+		t.Errorf("MergeExclude(nil, empty) = %v, want nil", got)
+	}
+
+	existing := map[string]string{ParallelFilesUpload: "3"}
+	got, err = MergeExclude(existing, nil)
+	if err != nil {
+		t.Fatalf("MergeExclude existing empty: %v", err)
+	}
+	if _, ok := got[Exclude]; ok {
+		t.Errorf("empty patterns should not write Exclude key, got %v", got)
+	}
+
+	got, err = MergeExclude(nil, []string{"*.tmp"})
+	if err != nil {
+		t.Fatalf("MergeExclude nil cfg: %v", err)
+	}
+	if got[Exclude] != `["*.tmp"]` {
+		t.Errorf("got Exclude=%q", got[Exclude])
+	}
+
+	existingWithEntries := map[string]string{"ExistingKey": "val"}
+	got, err = MergeExclude(existingWithEntries, []string{"*.log"})
+	if err != nil {
+		t.Fatalf("MergeExclude existingWithEntries: %v", err)
+	}
+	if got["ExistingKey"] != "val" || got[Exclude] != `["*.log"]` {
+		t.Errorf("got %v, want ExistingKey preserved and Exclude set", got)
+	}
+}
+
+func TestExcludePayloadLimits(t *testing.T) {
+	boundary := slices.Repeat([]string{strings.Repeat("a", 4093)}, 16)
+	boundary[15] = strings.Repeat("a", 4092)
+	overBoundary := slices.Clone(boundary)
+	overBoundary[15] += "a"
+	for _, tc := range []struct {
+		name     string
+		patterns []string
+		wantErr  string
+	}{
+		{"maximum count", slices.Repeat([]string{"*"}, MaxExcludePatterns), ""},
+		{"too many patterns", slices.Repeat([]string{"*"}, MaxExcludePatterns+1), "maximum is 128"},
+		{"maximum pattern bytes", []string{strings.Repeat("a", MaxExcludePatternBytes)}, ""},
+		{"pattern too long", []string{strings.Repeat("a", MaxExcludePatternBytes+1)}, "maximum is 4096 bytes per pattern"},
+		{"UTF-8 byte length", []string{strings.Repeat("界", 1366)}, "maximum is 4096 bytes per pattern"},
+		{"maximum JSON bytes", boundary, ""},
+		{"one JSON byte too many", overBoundary, "maximum is 65536 bytes"},
+		{"JSON escaping exceeds limit", slices.Repeat([]string{strings.Repeat("<", 683)}, 16), "maximum is 65536 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := StoreExclude(tc.patterns)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("StoreExclude error = %v, want %q", err, tc.wantErr)
+				}
+				if encoded != "" {
+					t.Fatal("oversized payload was returned")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "maximum JSON bytes" && len(encoded) != MaxExcludeEncodedBytes {
+				t.Fatalf("boundary fixture is %d bytes", len(encoded))
+			}
+			raw, err := json.Marshal(tc.patterns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := GetExclude(map[string]string{Exclude: string(raw)})
+			if (err != nil) != (tc.wantErr != "") {
+				t.Fatalf("GetExclude error = %v, want failure = %v", err, tc.wantErr != "")
+			}
+			if err == nil && !reflect.DeepEqual(decoded, tc.patterns) {
+				t.Fatal("patterns changed")
+			}
+		})
+	}
+}
+
+func TestMergeExcludeCombinedLimit(t *testing.T) {
+	global := slices.Repeat([]string{"global/*"}, MaxExcludePatterns/2+1)
+	local := slices.Repeat([]string{"local/*"}, MaxExcludePatterns/2+1)
+	if err := ValidateExclude(global); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateExclude(local); err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]string{Exclude: `["previous/*"]`, ParallelFilesUpload: "3"}
+	before := map[string]string{Exclude: `["previous/*"]`, ParallelFilesUpload: "3"}
+	got, err := MergeExclude(cfg, append(global, local...))
+	if err == nil || got != nil {
+		t.Fatal("combined oversized list was accepted")
+	}
+	if !reflect.DeepEqual(cfg, before) {
+		t.Fatal("configuration was modified on failure")
 	}
 }

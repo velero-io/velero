@@ -36,4 +36,7 @@ type VolumeHelper interface {
 	GetActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) (bool, string, map[string]any, error)
 	GetSnapshotClass(obj runtime.Unstructured, groupResource schema.GroupResource) (string, error)
 	GetDataMoverFromActionParameters(obj runtime.Unstructured, groupResource schema.GroupResource) string
+	// GetEffectiveExclude omits patterns with a warning for raw-block data movement.
+	// Snapshot-only callers pass false so they can report unapplied patterns.
+	GetEffectiveExclude(obj runtime.Unstructured, groupResource schema.GroupResource, forDataMovement bool) (patterns []string, dropped bool, err error)
 }

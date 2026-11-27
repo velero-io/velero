@@ -17,9 +17,14 @@ limitations under the License.
 package util
 
 import (
+	"encoding/json"
+	"fmt"
+	"maps"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/sirupsen/logrus"
 
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 )
@@ -30,6 +35,15 @@ const (
 	WriteSparseFiles     = "WriteSparseFiles"
 	RestoreConcurrency   = "ParallelFilesDownload"
 	DeleteExtraFiles     = "DeleteExtraFiles"
+
+	// Exclude is the reserved transport key in PVB UploaderSettings and
+	// DU DataMoverConfig. Value is a JSON-encoded []string.
+	Exclude = "Exclude"
+
+	// Exclusion limits bound the policy payload carried by each PVB/DataUpload.
+	MaxExcludePatterns     = 128
+	MaxExcludePatternBytes = 4 * 1024
+	MaxExcludeEncodedBytes = 64 * 1024
 )
 
 func StoreBackupConfig(config *velerov1api.UploaderConfigForBackup) map[string]string {
@@ -118,4 +132,86 @@ func GetDeleteExtraFiles(uploaderCfg map[string]string) (bool, error) {
 		return deleteExtraFilesBool, nil
 	}
 	return false, nil
+}
+
+func StoreExclude(patterns []string) (string, error) {
+	if len(patterns) > MaxExcludePatterns {
+		return "", fmt.Errorf("exclude contains %d patterns; maximum is %d", len(patterns), MaxExcludePatterns)
+	}
+	for i, pattern := range patterns {
+		if len(pattern) > MaxExcludePatternBytes {
+			return "", fmt.Errorf("exclude[%d] is %d bytes; maximum is %d bytes per pattern", i, len(pattern), MaxExcludePatternBytes)
+		}
+	}
+	if len(patterns) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(patterns)
+	if err != nil {
+		return "", fmt.Errorf("failed to JSON-encode exclude patterns: %w", err)
+	}
+	if len(b) > MaxExcludeEncodedBytes {
+		return "", fmt.Errorf("JSON-encoded exclude list is %d bytes; maximum is %d bytes", len(b), MaxExcludeEncodedBytes)
+	}
+	return string(b), nil
+}
+
+// ValidateExclude checks payload limits without interpreting pattern syntax.
+func ValidateExclude(patterns []string) error {
+	_, err := StoreExclude(patterns)
+	return err
+}
+
+func GetExclude(uploaderCfg map[string]string) ([]string, error) {
+	raw, ok := uploaderCfg[Exclude]
+	if len(raw) > MaxExcludeEncodedBytes {
+		return nil, fmt.Errorf("encoded %q config is %d bytes; maximum is %d bytes", Exclude, len(raw), MaxExcludeEncodedBytes)
+	}
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var patterns []string
+	if err := json.Unmarshal([]byte(raw), &patterns); err != nil {
+		return nil, fmt.Errorf("invalid %q config (expected JSON-encoded string array): %w", Exclude, err)
+	}
+	if err := ValidateExclude(patterns); err != nil {
+		return nil, err
+	}
+	return patterns, nil
+}
+
+// IgnoreExcludeForRawBlock removes content exclusions before a raw-device copy.
+// Preserve the caller's configuration and report that the full volume is copied.
+func IgnoreExcludeForRawBlock(cfg map[string]string, log logrus.FieldLogger) (map[string]string, error) {
+	patterns, err := GetExclude(cfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read Exclude uploader config")
+	}
+	if len(patterns) > 0 {
+		log.WithField("exclude", patterns).Warn("Volume policy exclude patterns are ignored: raw-block source cannot filter source data; backing up the full volume")
+	}
+	if _, present := cfg[Exclude]; !present {
+		return cfg, nil
+	}
+	cfg = maps.Clone(cfg)
+	delete(cfg, Exclude)
+	return cfg, nil
+}
+
+// MergeExclude JSON-encodes patterns into cfg under the Exclude key.
+// Empty lists leave cfg unchanged (the key is not written). A nil cfg is
+// allocated only when a non-empty payload must be stored.
+func MergeExclude(cfg map[string]string, patterns []string) (map[string]string, error) {
+	serialized, err := StoreExclude(patterns)
+	if err != nil {
+		return nil, err
+	}
+	if serialized == "" {
+		return cfg, nil
+	}
+	if cfg == nil {
+		cfg = make(map[string]string)
+	}
+	cfg[Exclude] = serialized
+	return cfg, nil
 }

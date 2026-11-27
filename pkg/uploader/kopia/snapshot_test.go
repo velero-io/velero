@@ -18,13 +18,18 @@ package kopia
 
 import (
 	"context"
+	"io"
+	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/fs/ignorefs"
 	"github.com/kopia/kopia/fs/virtualfs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/manifest"
@@ -966,7 +971,7 @@ func TestFileUploadConcurrency(t *testing.T) {
 				assert.Equal(t, tc.want, pol.UploadPolicy.MaxParallelFileReads.OrDefault(0))
 				return stop
 			}
-			_, err := setupPolicy(t.Context(), nil, snapshot.SourceInfo{}, tc.config)
+			_, err := setupPolicy(t.Context(), nil, snapshot.SourceInfo{}, tc.config, logrus.New())
 			if tc.invalid {
 				require.ErrorContains(t, err, "failed to get uploader config")
 				require.False(t, called)
@@ -1034,4 +1039,159 @@ func TestFileRestoreConcurrency(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetupPolicy(t *testing.T) {
+	origSet := setPolicyFunc
+	origTree := treeForSourceFunc
+	t.Cleanup(func() {
+		setPolicyFunc = origSet
+		treeForSourceFunc = origTree
+	})
+
+	var captured *policy.Policy
+	setPolicyFunc = func(ctx context.Context, rep repo.RepositoryWriter, si snapshot.SourceInfo, p *policy.Policy) error {
+		captured = p
+		return nil
+	}
+	treeForSourceFunc = func(ctx context.Context, rep repo.Repository, si snapshot.SourceInfo) (*policy.Tree, error) {
+		return nil, nil
+	}
+
+	repoWriter := &repomocks.RepositoryWriter{}
+	repoWriter.On("Flush", mock.Anything).Return(nil)
+	sourceInfo := snapshot.SourceInfo{UserName: "u", Host: "h", Path: "/var"}
+
+	windowsMandatory := []string{"/System Volume Information/", "/$Recycle.Bin/"}
+
+	t.Run("exclude JSON appears in ignore rules", func(t *testing.T) {
+		captured = nil
+		var buf strings.Builder
+		log := logrus.New()
+		log.SetOutput(&buf)
+		_, err := setupPolicy(t.Context(), repoWriter, sourceInfo, map[string]string{
+			"Exclude": `["*.tmp","/cache/*"]`,
+		}, log)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		wantRules := []string{"*.tmp", "/cache/*"}
+		if runtime.GOOS == "windows" {
+			wantRules = append(wantRules, windowsMandatory...)
+		}
+		assert.Equal(t, wantRules, captured.FilesPolicy.IgnoreRules)
+		assert.Contains(t, buf.String(), "resolved filesystem exclude patterns")
+		assert.Contains(t, buf.String(), "*.tmp")
+	})
+
+	t.Run("malformed JSON returns error", func(t *testing.T) {
+		log := logrus.New()
+		log.SetOutput(io.Discard)
+		_, err := setupPolicy(t.Context(), repoWriter, sourceInfo, map[string]string{
+			"Exclude": "not-json",
+		}, log)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read Exclude uploader config")
+	})
+
+	t.Run("no Exclude key retains mandatory platform rules", func(t *testing.T) {
+		captured = nil
+		log := logrus.New()
+		log.SetOutput(io.Discard)
+		_, err := setupPolicy(t.Context(), repoWriter, sourceInfo, map[string]string{}, log)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		if runtime.GOOS == "windows" {
+			assert.Equal(t, windowsMandatory, captured.FilesPolicy.IgnoreRules)
+		} else {
+			assert.Empty(t, captured.FilesPolicy.IgnoreRules)
+		}
+	})
+}
+
+func TestFilesystemIgnoreRulesMandatoryWindowsExclusions(t *testing.T) {
+	rootPath := t.TempDir()
+	for _, name := range []string{"System Volume Information", "$Recycle.Bin"} {
+		require.NoError(t, os.Mkdir(filepath.Join(rootPath, name), 0700))
+		require.NoError(t, os.WriteFile(filepath.Join(rootPath, name, "protected.txt"), []byte("protected"), 0600))
+	}
+	for _, name := range []string{"data.txt", "keep.tmp", "drop.tmp"} {
+		require.NoError(t, os.WriteFile(filepath.Join(rootPath, name), []byte(name), 0600))
+	}
+	ordinary := []string{"data.txt", "keep.tmp", "drop.tmp"}
+	for _, tc := range []struct {
+		name     string
+		goos     string
+		patterns []string
+		want     []string
+	}{
+		{name: "no policy patterns", goos: "windows", want: ordinary},
+		{name: "broad re-inclusion", goos: "windows", patterns: []string{"*.tmp", "!**"}, want: ordinary},
+		{name: "include everything", goos: "windows", patterns: []string{"/*", "!**"}, want: ordinary},
+		{name: "targeted re-inclusion", goos: "windows", patterns: []string{"!/System Volume Information/", "!/$Recycle.Bin/"}, want: ordinary},
+		{name: "ordinary negation still works", goos: "windows", patterns: []string{"*.tmp", "!keep.tmp"}, want: []string{"data.txt", "keep.tmp"}},
+		{name: "Linux has no Windows exclusions", goos: "linux", patterns: []string{"*.tmp", "!**"}, want: []string{"data.txt", "keep.tmp", "drop.tmp", "System Volume Information", "$Recycle.Bin"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := getDefaultPolicy()
+			p.FilesPolicy.IgnoreRules = filesystemIgnoreRules(tc.patterns, tc.goos)
+			if tc.goos == "windows" {
+				assert.Equal(t, []string{"/System Volume Information/", "/$Recycle.Bin/"}, p.FilesPolicy.IgnoreRules[len(tc.patterns):])
+			}
+			assert.True(t, slices.Equal(tc.patterns, p.FilesPolicy.IgnoreRules[:len(tc.patterns)]))
+			root, err := getLocalFSEntry(rootPath)
+			require.NoError(t, err)
+			filtered := ignorefs.New(root.(fs.Directory), policy.BuildTree(map[string]*policy.Policy{".": p}, policy.DefaultPolicy))
+			entries, err := fs.GetAllEntries(t.Context(), filtered)
+			require.NoError(t, err)
+			var names []string
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			assert.ElementsMatch(t, tc.want, names)
+		})
+	}
+}
+
+func TestBackupRawBlockIgnoresExclude(t *testing.T) {
+	originalBlock := localBlockEntryFunc
+	originalSet, originalTree := setPolicyFunc, treeForSourceFunc
+	originalLoad, originalSave := loadSnapshotFunc, saveSnapshotFunc
+	originalRetention := applyRetentionPolicyFunc
+	t.Cleanup(func() {
+		localBlockEntryFunc = originalBlock
+		setPolicyFunc, treeForSourceFunc = originalSet, originalTree
+		loadSnapshotFunc, saveSnapshotFunc = originalLoad, originalSave
+		applyRetentionPolicyFunc = originalRetention
+	})
+	entry := virtualfs.NewStaticDirectory("device", []fs.Entry{
+		virtualfs.StreamingFileFromReader("device", io.NopCloser(strings.NewReader("full device payload"))),
+	})
+	localBlockEntryFunc = func(string) (fs.Entry, error) { return entry, nil }
+	s := injectSnapshotFuncs()
+	manifest := &snapshot.Manifest{ID: "full-block", RootEntry: &snapshot.DirEntry{}}
+	MockFuncs(s, []mockArgs{
+		{returns: []any{manifest, nil}},
+		{returns: []any{manifest.ID, nil}},
+		{returns: []any{nil, nil}},
+		{returns: []any{nil, nil}},
+		{returns: []any{nil}},
+		{returns: []any{manifest, nil}},
+		{returns: []any{nil}},
+	})
+	var logs strings.Builder
+	log := logrus.New()
+	log.SetOutput(&logs)
+	cfg := map[string]string{"Exclude": `["*"]`, "ParallelFilesUpload": "3"}
+	info, _, err := Backup(t.Context(), s.uploderMock, s.repoWriterMock, "/dev/test", "", true, "",
+		uploader.PersistentVolumeBlock, cfg, nil, &fakeProgressUpdater{}, log)
+	require.NoError(t, err)
+	assert.Equal(t, "full-block", info.ID)
+	assert.Equal(t, `["*"]`, cfg["Exclude"])
+	assert.Contains(t, logs.String(), "level=warning")
+	assert.Contains(t, logs.String(), "backing up the full volume")
+	s.policyMock.AssertCalled(t, "SetPolicy", mock.Anything, mock.Anything, mock.Anything,
+		mock.MatchedBy(func(p *policy.Policy) bool {
+			return !slices.Contains(p.FilesPolicy.IgnoreRules, "*") && *p.UploadPolicy.MaxParallelFileReads == 3
+		}))
+	s.uploderMock.AssertCalled(t, "Upload", mock.Anything, entry, mock.Anything, mock.Anything, mock.Anything)
 }

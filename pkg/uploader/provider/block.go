@@ -30,6 +30,7 @@ import (
 	"github.com/velero-io/velero/pkg/repository/udmrepo"
 	"github.com/velero-io/velero/pkg/uploader"
 	"github.com/velero-io/velero/pkg/uploader/block"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 )
 
 var blockBackupFunc = block.Backup
@@ -117,6 +118,10 @@ func (bp *blockProvider) RunBackup(
 		"realSource":     realSource,
 		"parentSnapshot": parentSnapshot,
 	})
+	uploaderCfg, err := uploaderutil.IgnoreExcludeForRawBlock(uploaderCfg, log)
+	if err != nil {
+		return "", false, 0, 0, 0, false, err
+	}
 
 	log.Infof("Run block backup, CBT source info: %v", cbtParam.Source)
 

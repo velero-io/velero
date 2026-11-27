@@ -18,6 +18,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -433,6 +434,66 @@ func TestBlockProviderCancelThroughWrappedError(t *testing.T) {
 			uploader.PersistentVolumeBlock, map[string]string{}, &blockMockProgressUpdater{})
 
 		require.ErrorIs(t, err, ErrorCanceled)
+	})
+}
+
+func TestBlockProviderRunBackupExclude(t *testing.T) {
+	bp := &blockProvider{
+		requestorType: "test-requestor",
+		log:           logrus.New(),
+	}
+
+	t.Run("non-empty Exclude warns and copies the full volume", func(t *testing.T) {
+		orig := blockBackupFunc
+		t.Cleanup(func() { blockBackupFunc = orig })
+		called := false
+		blockBackupFunc = func(_ context.Context, _ block.Uploader, _ udmrepo.BackupRepo, path, _ string, _ cbtservice.SourceInfo, _ bool, _ string, _ cbtservice.Service, cfg map[string]string, _ map[string]string, _ logrus.FieldLogger) (uploader.SnapshotInfo, bool, error) {
+			called = true
+			assert.Equal(t, "/dev/sda", path)
+			assert.NotContains(t, cfg, "Exclude")
+			assert.Equal(t, "3", cfg["ParallelBlocksUpload"])
+			return uploader.SnapshotInfo{ID: "full-volume", SnapshotSize: 4096}, false, nil
+		}
+		var logs strings.Builder
+		bp.log = logrus.New()
+		bp.log.(*logrus.Logger).SetOutput(&logs)
+		cfg := map[string]string{"Exclude": `["*"]`, "ParallelBlocksUpload": "3"}
+		id, _, size, _, _, _, err := bp.RunBackup(
+			t.Context(),
+			"/dev/sda",
+			"",
+			nil,
+			false,
+			"",
+			CBTParam{},
+			uploader.PersistentVolumeBlock,
+			cfg,
+			&FakeBackupProgressUpdater{},
+		)
+		require.NoError(t, err)
+		require.True(t, called)
+		assert.Equal(t, "full-volume", id)
+		assert.EqualValues(t, 4096, size)
+		assert.Equal(t, `["*"]`, cfg["Exclude"])
+		assert.Contains(t, logs.String(), "level=warning")
+		assert.Contains(t, logs.String(), "backing up the full volume")
+	})
+
+	t.Run("malformed Exclude JSON is wrapped", func(t *testing.T) {
+		_, _, _, _, _, _, err := bp.RunBackup(
+			t.Context(),
+			"/dev/sda",
+			"",
+			nil,
+			false,
+			"",
+			CBTParam{},
+			uploader.PersistentVolumeBlock,
+			map[string]string{"Exclude": "not-json"},
+			&FakeBackupProgressUpdater{},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read Exclude uploader config")
 	})
 }
 

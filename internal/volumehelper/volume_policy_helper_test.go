@@ -17,6 +17,7 @@ limitations under the License.
 package volumehelper
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -1815,6 +1816,159 @@ func TestGetDataMoverFromActionParameters(t *testing.T) {
 	}
 }
 
+func TestGetEffectiveExclude(t *testing.T) {
+	pv := builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result()
+	policies := &resourcepolicies.ResourcePolicies{
+		Version: "v1",
+		VolumePolicies: []resourcepolicies.VolumePolicy{
+			{
+				Conditions: map[string]any{
+					"storageClass": []string{"gp2-csi"},
+				},
+				Action: resourcepolicies.Action{
+					Type: resourcepolicies.FSBackup,
+				},
+				Exclude: []string{"*.tmp", "node_modules/"},
+			},
+		},
+	}
+	p := &resourcepolicies.Policies{}
+	require.NoError(t, p.BuildPolicy(policies))
+
+	vh := NewVolumeHelperImpl(p, ptr.To(true), logrus.StandardLogger(), velerotest.NewFakeControllerRuntimeClient(t), false, false, nil)
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pv)
+	require.NoError(t, err)
+
+	got, dropped, err := vh.GetEffectiveExclude(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumes, false)
+	require.NoError(t, err)
+	assert.False(t, dropped)
+	assert.Equal(t, []string{"*.tmp", "node_modules/"}, got)
+
+	nilVH := NewVolumeHelperImpl(nil, ptr.To(true), logrus.StandardLogger(), velerotest.NewFakeControllerRuntimeClient(t), false, false, nil)
+	got, dropped, err = nilVH.GetEffectiveExclude(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumes, false)
+	require.NoError(t, err)
+	assert.False(t, dropped)
+	assert.Nil(t, got)
+}
+
+func TestGetEffectiveExcludePVCWithoutPV(t *testing.T) {
+	pvc := builder.ForPersistentVolumeClaim("ns", "pvc-1").
+		ObjectMeta(builder.WithLabels("env", "prod")).
+		StorageClass("gp2-csi").
+		Result()
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvc)
+	require.NoError(t, err)
+	unstructuredPVC := &unstructured.Unstructured{Object: obj}
+
+	t.Run("pvcLabels match applies exclude when PV lookup fails", func(t *testing.T) {
+		policies := &resourcepolicies.ResourcePolicies{
+			Version: "v1",
+			VolumePolicies: []resourcepolicies.VolumePolicy{
+				{
+					Conditions: map[string]any{
+						"pvcLabels": map[string]string{"env": "prod"},
+					},
+					Action: resourcepolicies.Action{
+						Type: resourcepolicies.FSBackup,
+					},
+					Exclude: []string{"*.tmp"},
+				},
+			},
+		}
+		p := &resourcepolicies.Policies{}
+		require.NoError(t, p.BuildPolicy(policies))
+
+		vh := NewVolumeHelperImpl(p, ptr.To(true), logrus.StandardLogger(), velerotest.NewFakeControllerRuntimeClient(t), false, false, nil)
+		got, dropped, err := vh.GetEffectiveExclude(unstructuredPVC, kuberesource.PersistentVolumeClaims, false)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Equal(t, []string{"*.tmp"}, got)
+	})
+
+	t.Run("storageClass rule does not match a zero PV", func(t *testing.T) {
+		policies := &resourcepolicies.ResourcePolicies{
+			Version: "v1",
+			VolumePolicies: []resourcepolicies.VolumePolicy{
+				{
+					Conditions: map[string]any{
+						"storageClass": []string{"gp2-csi"},
+					},
+					Action: resourcepolicies.Action{
+						Type: resourcepolicies.FSBackup,
+					},
+					Exclude: []string{"*.tmp"},
+				},
+			},
+		}
+		p := &resourcepolicies.Policies{}
+		require.NoError(t, p.BuildPolicy(policies))
+
+		vh := NewVolumeHelperImpl(p, ptr.To(true), logrus.StandardLogger(), velerotest.NewFakeControllerRuntimeClient(t), false, false, nil)
+		got, dropped, err := vh.GetEffectiveExclude(unstructuredPVC, kuberesource.PersistentVolumeClaims, false)
+		require.NoError(t, err)
+		assert.False(t, dropped)
+		assert.Nil(t, got)
+	})
+}
+
+func TestNewVolumeHelperImplWithCacheLoadsGlobalPolicies(t *testing.T) {
+	globalCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "global-volume-policy", Namespace: "velero"},
+		Data: map[string]string{
+			"policies.yaml": `version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - gp2-csi
+  action:
+    type: fs-backup
+  exclude:
+  - "*.tmp"
+`,
+		},
+	}
+	backupCM := &corev1api.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "backup-policy", Namespace: "velero"},
+		Data: map[string]string{
+			"policies.yaml": `version: v1
+volumePolicies:
+- conditions:
+    storageClass:
+    - gp2-csi
+  action:
+    type: fs-backup
+  exclude:
+  - "node_modules/"
+`,
+		},
+	}
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, globalCM, backupCM)
+	backup := velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-backup",
+			Namespace: "velero",
+			Annotations: map[string]string{
+				velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global-volume-policy",
+			},
+		},
+		Spec: velerov1api.BackupSpec{
+			ResourcePolicy: &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "backup-policy"},
+		},
+	}
+
+	vh, err := NewVolumeHelperImplWithCache(backup, fakeClient, logrus.StandardLogger(), nil, nil)
+	require.NoError(t, err)
+
+	pv := builder.ForPersistentVolume("example-pv").StorageClass("gp2-csi").ClaimRef("ns", "pvc-1").Result()
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pv)
+	require.NoError(t, err)
+
+	got, dropped, err := vh.GetEffectiveExclude(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumes, false)
+	require.NoError(t, err)
+	assert.False(t, dropped)
+	assert.Equal(t, []string{"*.tmp", "node_modules/"}, got)
+}
+
 func TestGetActionParameters(t *testing.T) {
 	testCases := []struct {
 		name             string
@@ -2260,6 +2414,70 @@ func TestGetPVAndMatchAction(t *testing.T) {
 					require.NotNil(t, outPV)
 					assert.Equal(t, tc.expectedPVName, outPV.Name)
 				}
+			}
+		})
+	}
+}
+
+func TestGetEffectiveExcludeRawBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		localFields  string
+		globalFields string
+		local        bool
+		movement     bool
+		pvMode       corev1api.PersistentVolumeMode
+		pvcMode      corev1api.PersistentVolumeMode
+		wantPatterns []string
+		warn         bool
+	}{
+		{name: "direct", local: true, localFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock, warn: true},
+		{name: "global-only", globalFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock, warn: true},
+		{name: "inherited", local: true, globalFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock, warn: true},
+		{name: "mixed", local: true, localFields: "  exclude: [\"*.tmp\"]", globalFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock, warn: true},
+		{name: "reset", local: true, localFields: "  inheritExcludes: false", globalFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock},
+		{name: "empty", local: true, movement: true, pvMode: corev1api.PersistentVolumeBlock},
+		{name: "snapshot-only", local: true, localFields: "  exclude: [\"*\"]", pvMode: corev1api.PersistentVolumeBlock, wantPatterns: []string{"*"}},
+		{name: "filesystem", local: true, localFields: "  exclude: [\"*\"]", movement: true, wantPatterns: []string{"*"}},
+		{name: "PV mode wins", local: true, localFields: "  exclude: [\"*\"]", movement: true, pvMode: corev1api.PersistentVolumeBlock, pvcMode: corev1api.PersistentVolumeFilesystem, warn: true},
+		{name: "PVC fallback", local: true, localFields: "  exclude: [\"*\"]", movement: true, pvcMode: corev1api.PersistentVolumeBlock, warn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pv := builder.ForPersistentVolume("pv").Result()
+			pvc := builder.ForPersistentVolumeClaim("ns", "pvc").VolumeName("pv").Phase(corev1api.ClaimBound).Result()
+			if tc.pvMode != "" {
+				pv.Spec.VolumeMode = &tc.pvMode
+			}
+			if tc.pvcMode != "" {
+				pvc.Spec.VolumeMode = &tc.pvcMode
+			}
+			backup := builder.ForBackup("velero", "backup").Result()
+			objects := []runtime.Object{pv, pvc}
+			policy := "version: v1\nvolumePolicies:\n- conditions: {}\n  action: {type: snapshot, parameters: {dataMover: velero-fs}}\n"
+			if tc.local {
+				backup.Spec.ResourcePolicy = &corev1api.TypedLocalObjectReference{Kind: "configmap", Name: "local"}
+				objects = append(objects, builder.ForConfigMap("velero", "local").Data("policy", policy+tc.localFields+"\n").Result())
+			}
+			if tc.globalFields != "" {
+				backup.Annotations = map[string]string{velerov1api.GlobalBackupVolumePolicyConfigMapAnnotation: "global"}
+				objects = append(objects, builder.ForConfigMap("velero", "global").Data("policy", policy+tc.globalFields+"\n").Result())
+			}
+			var logs strings.Builder
+			log := logrus.New()
+			log.SetOutput(&logs)
+			vh, err := NewVolumeHelperImplWithCache(*backup, velerotest.NewFakeControllerRuntimeClient(t, objects...), log, nil, nil)
+			require.NoError(t, err)
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pvc)
+			require.NoError(t, err)
+			patterns, dropped, err := vh.GetEffectiveExclude(&unstructured.Unstructured{Object: obj}, kuberesource.PersistentVolumeClaims, tc.movement)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPatterns, patterns)
+			assert.False(t, dropped) // This signal is reserved for inherited incompatible actions.
+			assert.Equal(t, tc.warn, strings.Contains(logs.String(), "raw-block source cannot filter source data"))
+			if tc.warn {
+				assert.Contains(t, logs.String(), "level=warning")
+				assert.Contains(t, logs.String(), "ns/pvc")
+				assert.Contains(t, logs.String(), "backing up the full volume")
 			}
 		})
 	}
