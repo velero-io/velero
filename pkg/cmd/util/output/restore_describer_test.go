@@ -346,6 +346,7 @@ CSI Snapshot Restores:
 					SnapshotDataMoved: true,
 					RestoreType:       "Incremental",
 					FallbackFull:      true,
+					Activities:        []string{"Failed to restore incrementally, fallback to full restore"},
 					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
 						OperationID:     "op-4",
 						DataMover:       "velero",
@@ -366,6 +367,8 @@ CSI Snapshot Restores:
       Restore Type: Incremental (fallen back to Full)
       Restored data Size (bytes): 2345
       Incremental data Size (bytes): 600
+      Activities:
+        Failed to restore incrementally, fallback to full restore
 `,
 		},
 		{

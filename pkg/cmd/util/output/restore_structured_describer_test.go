@@ -509,6 +509,7 @@ func TestDescribeRestoreCSISnapshotsInSF_NoData(t *testing.T) {
 					PVCNamespace:      "ns-4",
 					RestoreType:       "Incremental",
 					FallbackFull:      true,
+					Activities:        []string{"Failed to restore incrementally, fallback to full restore"},
 					SnapshotDataMovementInfo: &volume.RestoreSnapshotDataMovementInfo{
 						OperationID:     "op-4",
 						DataMover:       "velero",
@@ -529,6 +530,7 @@ func TestDescribeRestoreCSISnapshotsInSF_NoData(t *testing.T) {
 							"size":            int64(2345),
 							"incrementalSize": int64(600),
 							"restoreType":     "Incremental (fallen back to Full)",
+							"activities":      []string{"Failed to restore incrementally, fallback to full restore"},
 						},
 					},
 				},

@@ -446,6 +446,9 @@ func describeDataMovementInSF(details bool, info *volume.BackupVolumeInfo, snaps
 		if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 			dataMovement["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
 		}
+		if len(info.Activities) > 0 {
+			dataMovement["activities"] = info.Activities
+		}
 
 		snapshotDetail["dataMovement"] = dataMovement
 	} else {

@@ -6036,16 +6036,21 @@ func TestUpdateVolumeInfos(t *testing.T) {
 		{
 			name:       "DataUpload VolumeInfo update",
 			operations: []*itemoperation.BackupOperation{},
-			dataUpload: builder.ForDataUpload("velero", "du-1").
-				CompletionTimestamp(&now).
-				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
-				SnapshotID("snapshot-id").
-				Progress(shared.DataMoveOperationProgress{TotalBytes: 1000}).
-				IncrementalBytes(500).
-				Phase(velerov2alpha1.DataUploadPhaseCompleted).
-				SourceNamespace("ns-1").
-				SourcePVC("pvc-1").
-				Result(),
+			dataUpload: func() *velerov2alpha1.DataUpload {
+				du := builder.ForDataUpload("velero", "du-1").
+					CompletionTimestamp(&now).
+					CSISnapshot(&velerov2alpha1.CSISnapshotSpec{VolumeSnapshot: "vs-1"}).
+					SnapshotID("snapshot-id").
+					Progress(shared.DataMoveOperationProgress{TotalBytes: 1000}).
+					IncrementalBytes(500).
+					Phase(velerov2alpha1.DataUploadPhaseCompleted).
+					SourceNamespace("ns-1").
+					SourcePVC("pvc-1").
+					Result()
+				du.Status.FallbackFull = true
+				du.Status.Activities = []string{"Failed to find previous snapshots, fallback to full backup. Err: snapshot not found"}
+				return du
+			}(),
 			volumeInfos: []*volume.BackupVolumeInfo{
 				{
 					PVCName:             "pvc-1",
@@ -6062,6 +6067,8 @@ func TestUpdateVolumeInfos(t *testing.T) {
 					PVCNamespace:        "ns-1",
 					CompletionTimestamp: &now,
 					Result:              volume.VolumeResultSucceeded,
+					FallbackFull:        true,
+					Activities:          []string{"Failed to find previous snapshots, fallback to full backup. Err: snapshot not found"},
 					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:        "velero",
 						RetainedSnapshot: "vs-1",
@@ -6123,6 +6130,8 @@ func TestUpdateVolumeInfos(t *testing.T) {
 			if len(tc.expectedVolumeInfos) > 0 {
 				require.Equal(t, tc.expectedVolumeInfos[0].CompletionTimestamp, tc.volumeInfos[0].CompletionTimestamp)
 				require.Equal(t, tc.expectedVolumeInfos[0].SnapshotDataMovementInfo, tc.volumeInfos[0].SnapshotDataMovementInfo)
+				require.Equal(t, tc.expectedVolumeInfos[0].FallbackFull, tc.volumeInfos[0].FallbackFull)
+				require.Equal(t, tc.expectedVolumeInfos[0].Activities, tc.volumeInfos[0].Activities)
 			}
 		})
 	}

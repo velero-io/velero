@@ -287,7 +287,7 @@ For incremental backups using `velero-block`, Velero will automatically fall bac
 - The critical information is missing or cannot be retrieved from the parent snapshot.
 - The parent snapshot is missing in the backup repository.
 
-When fallback occurs, unallocated regions are still skipped and identical data blocks remain deduplicated by the backup repository. The backup description will clearly indicate that a fallback took place: `Backup Type: Incremental (fallen back to Full)`. In addition, the reason for the fallback is captured in the `status.activities` field of the corresponding `DataUpload` CR.
+When fallback occurs, unallocated regions are still skipped and identical data blocks remain deduplicated by the backup repository. The backup description will clearly indicate that a fallback took place: `Backup Type: Incremental (fallen back to Full)`. In addition, the reason for the fallback is listed under `Activities` in the backup description and is captured in the `status.activities` field of the corresponding `DataUpload` CR.
 
 ### Monitoring Backup Progress
 
@@ -326,9 +326,12 @@ In the `--details` output, each volume's `Data Movement` section displays the co
         Result: Completed
 ```
 
-If an incremental backup fell back to full, it will show:
+If an incremental backup fell back to full, it will show the fallback and its reason:
 ```
         Backup Type: Incremental (fallen back to Full)
+        ...
+        Activities:
+            CBT service is absent, fallback to real full
 ```
 
 You can also view the full `DataUpload` custom resource:
@@ -421,9 +424,24 @@ velero restore describe RESTORE_NAME --details
 velero restore logs RESTORE_NAME
 ```
 
-When reviewing backup details, check whether an incremental backup fell back to full:
-- Look for `Backup Type: Incremental (fallen back to Full)` under `Data Movement`. This indicates that CBT metadata retrieval was unsuccessful or the parent snapshot was missing.
-- Inspect the specific reason for fallback from `status.activities` on the `DataUpload` CR:
+Was your backup or restore incremental, and if not, why?
+
+Check the `Data Movement` section of each volume in the `--details` output of `velero backup describe` or `velero restore describe`:
+- `Backup Type: Incremental` (`Restore Type: Incremental` for a restore) means the volume was backed up or restored incrementally. `Incremental data Size (bytes)` is the amount of data that was new or changed.
+- `Backup Type: Incremental (fallen back to Full)` (`Restore Type: Incremental (fallen back to Full)` for a restore) means an incremental backup or restore was requested but a full one was run.
+- `Activities` lists the messages reported by the data mover, including the reason for the fallback:
+  ```
+      Data Movement:
+          Operation ID: velero-backup-xxxx.pvc-yyyy
+          Data Mover: velero-block
+          Backup Type: Incremental (fallen back to Full)
+          Uploader Type: velero-block
+          ...
+          Activities:
+              CBT service is absent, fallback to real full
+  ```
+
+The same messages are in `status.activities` of the `DataUpload` or `DataDownload` CR, as long as the CR exists in the cluster:
   ```bash
   kubectl -n velero get datauploads -l velero.io/backup-name=BACKUP_NAME -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.activities}{"  - "}{.}{"\n"}{end}{end}'
   ```

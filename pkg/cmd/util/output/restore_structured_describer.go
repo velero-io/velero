@@ -386,6 +386,9 @@ func describeCSISnapshotsRestoresInSF(d *StructuredDescriber, restoreVolInfo []v
 			if info.SnapshotDataMovementInfo.IncrementalSize != nil {
 				dmInfo["incrementalSize"] = *info.SnapshotDataMovementInfo.IncrementalSize
 			}
+			if len(info.Activities) > 0 {
+				dmInfo["activities"] = info.Activities
+			}
 			csiRestores[key] = map[string]any{
 				"dataMovement": dmInfo,
 			}
