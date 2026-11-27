@@ -616,6 +616,7 @@ func TestDescribeCSISnapshotsInSF(t *testing.T) {
 					SnapshotDataMoved: true,
 					BackupType:        velerov1api.BackupTypeIncremental,
 					FallbackFull:      true,
+					Activities:        []string{"Failed to find previous snapshots, fallback to full backup. Err: snapshot not found"},
 					SnapshotDataMovementInfo: &volume.BackupSnapshotDataMovementInfo{
 						DataMover:       "velero",
 						UploaderType:    "fake-uploader",
@@ -639,6 +640,7 @@ func TestDescribeCSISnapshotsInSF(t *testing.T) {
 							"size":            int64(200),
 							"incrementalSize": int64(200),
 							"result":          "succeeded",
+							"activities":      []string{"Failed to find previous snapshots, fallback to full backup. Err: snapshot not found"},
 						},
 					},
 				},

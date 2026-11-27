@@ -1513,6 +1513,7 @@ func TestBackupVolumeInfoJSONRoundTrip(t *testing.T) {
 		Result:                VolumeResultSucceeded,
 		BackupType:            velerov1api.BackupTypeIncremental,
 		FallbackFull:          true,
+		Activities:            []string{"fallback to full backup"},
 		CSISnapshotInfo: &CSISnapshotInfo{
 			SnapshotHandle:            "csi-snap-1",
 			Size:                      2000,
@@ -1574,6 +1575,7 @@ func TestBackupVolumeInfoJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, jsonStr, `"size":1000`)
 	assert.Contains(t, jsonStr, `"incrementalSize":200`)
 	assert.Contains(t, jsonStr, `"fallbackFull":true`)
+	assert.Contains(t, jsonStr, `"activities":["fallback to full backup"]`)
 	assert.Contains(t, jsonStr, `"phase":"Completed"`)
 	assert.Contains(t, jsonStr, `"pvbInfo":{`)
 	assert.Contains(t, jsonStr, `"podName":"pod-1"`)
@@ -1605,6 +1607,7 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 		SnapshotDataMoved: true,
 		RestoreType:       "Incremental",
 		FallbackFull:      true,
+		Activities:        []string{"fallback to full restore"},
 		SnapshotDataMovementInfo: &RestoreSnapshotDataMovementInfo{
 			DataMover:        "velero",
 			UploaderType:     "kopia",
@@ -1660,6 +1663,7 @@ func TestRestoreVolumeInfoJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, jsonStr, `"phase":"Completed"`)
 	assert.Contains(t, jsonStr, `"restoreType":"Incremental"`)
 	assert.Contains(t, jsonStr, `"fallbackFull":true`)
+	assert.Contains(t, jsonStr, `"activities":["fallback to full restore"]`)
 	assert.Contains(t, jsonStr, `"pvrInfo":{`)
 	assert.Contains(t, jsonStr, `"podName":"pod-2"`)
 	assert.Contains(t, jsonStr, `"podNamespace":"ns-2"`)

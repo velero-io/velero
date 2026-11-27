@@ -1215,6 +1215,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 		expectedIncrSize     *int64
 		expectedPhase        velerov2alpha1.DataDownloadPhase
 		expectedFallbackFull bool
+		expectedActivities   []string
 		expectErrs           bool
 		expectErrMsg         string
 	}{
@@ -1257,14 +1258,18 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				},
 			},
 			dataDownloads: []*velerov2alpha1.DataDownload{
-				builder.ForDataDownload("velero", "dd-1").
-					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
-					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1"}).
-					TotalBytes(4096).
-					IncrementalBytes(1024).
-					Phase(velerov2alpha1.DataDownloadPhaseCompleted).
-					FallbackFull(true).
-					Result(),
+				func() *velerov2alpha1.DataDownload {
+					dd := builder.ForDataDownload("velero", "dd-1").
+						ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
+						TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-1", Namespace: "ns-1"}).
+						TotalBytes(4096).
+						IncrementalBytes(1024).
+						Phase(velerov2alpha1.DataDownloadPhaseCompleted).
+						FallbackFull(true).
+						Result()
+					dd.Status.Activities = []string{"Failed to restore incrementally, fallback to full restore"}
+					return dd
+				}(),
 				builder.ForDataDownload("velero", "dd-2").
 					ObjectMeta(builder.WithLabelsMap(map[string]string{velerov1api.RestoreNameLabel: "restore-1"})).
 					TargetVolume(velerov2alpha1.TargetVolumeSpec{PVC: "pvc-2", Namespace: "ns-2"}).
@@ -1294,6 +1299,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 			expectedIncrSize:     ptr.To(int64(1024)),
 			expectedPhase:        velerov2alpha1.DataDownloadPhaseCompleted,
 			expectedFallbackFull: true,
+			expectedActivities:   []string{"Failed to restore incrementally, fallback to full restore"},
 			expectErrs:           false,
 		},
 		{
@@ -1380,6 +1386,7 @@ func TestUpdateVolumeInfos(t *testing.T) {
 				assert.Equal(t, tc.expectedIncrSize, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.IncrementalSize)
 				assert.Equal(t, tc.expectedPhase, ctx.restoreVolumeInfos[0].SnapshotDataMovementInfo.Phase)
 				assert.Equal(t, tc.expectedFallbackFull, ctx.restoreVolumeInfos[0].FallbackFull)
+				assert.Equal(t, tc.expectedActivities, ctx.restoreVolumeInfos[0].Activities)
 				// pvc-2 had nil SnapshotDataMovementInfo and should remain nil, FallbackFull should remain false
 				assert.Nil(t, ctx.restoreVolumeInfos[1].SnapshotDataMovementInfo)
 				assert.False(t, ctx.restoreVolumeInfos[1].FallbackFull)

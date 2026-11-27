@@ -700,6 +700,13 @@ func describeDataMovement(d *Describer, details bool, info *volume.BackupVolumeI
 		}
 
 		d.Printf("\t\t\t\tResult: %s\n", info.Result)
+
+		if len(info.Activities) > 0 {
+			d.Printf("\t\t\t\tActivities:\n")
+			for _, activity := range info.Activities {
+				d.Printf("\t\t\t\t\t%s\n", activity)
+			}
+		}
 	} else {
 		d.Printf("\t\t\tData Movement: %s\n", "included, specify --details for more information")
 	}

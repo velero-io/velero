@@ -1336,6 +1336,7 @@ func updateVolumeInfos(
 				volumeInfos[index].SnapshotDataMovementInfo.SourceSize = dataUpload.Status.SourceSize
 				volumeInfos[index].SnapshotDataMovementInfo.Phase = dataUpload.Status.Phase
 				volumeInfos[index].FallbackFull = dataUpload.Status.FallbackFull
+				volumeInfos[index].Activities = dataUpload.Status.Activities
 
 				if dataUpload.Status.Phase == velerov2alpha1.DataUploadPhaseCompleted {
 					volumeInfos[index].Result = volume.VolumeResultSucceeded

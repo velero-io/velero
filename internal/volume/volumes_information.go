@@ -96,6 +96,10 @@ type BackupVolumeInfo struct {
 	// FallbackFull indicates whether the incremental backup has fallen back to full backup
 	FallbackFull bool `json:"fallbackFull,omitempty"`
 
+	// Activities contains the messages reported by the data path during the backup of the volume,
+	// e.g., the reason of falling back to full backup.
+	Activities []string `json:"activities,omitempty"`
+
 	CSISnapshotInfo          *CSISnapshotInfo                `json:"csiSnapshotInfo,omitempty"`
 	SnapshotDataMovementInfo *BackupSnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
 	NativeSnapshotInfo       *NativeSnapshotInfo             `json:"nativeSnapshotInfo,omitempty"`
@@ -134,6 +138,10 @@ type RestoreVolumeInfo struct {
 
 	// FallbackFull indicates whether the incremental restore has fallen back to full restore
 	FallbackFull bool `json:"fallbackFull,omitempty"`
+
+	// Activities contains the messages reported by the data path during the restore of the volume,
+	// e.g., the reason of falling back to full restore.
+	Activities []string `json:"activities,omitempty"`
 
 	CSISnapshotInfo          *CSISnapshotInfo                 `json:"csiSnapshotInfo,omitempty"`
 	SnapshotDataMovementInfo *RestoreSnapshotDataMovementInfo `json:"snapshotDataMovementInfo,omitempty"`
