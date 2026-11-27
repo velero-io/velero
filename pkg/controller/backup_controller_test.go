@@ -1237,6 +1237,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1279,6 +1280,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1325,6 +1327,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1368,6 +1371,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1411,6 +1415,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1455,6 +1460,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1499,6 +1505,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1543,6 +1550,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1587,6 +1595,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1632,6 +1641,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1677,6 +1687,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.True(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1722,6 +1733,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1768,6 +1780,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1814,6 +1827,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1860,6 +1874,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1907,6 +1922,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.False(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -1953,6 +1969,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					CollectItemOutcomes:              boolptr.False(),
 					ExcludedClusterScopedResources:   autoExcludeClusterScopedResources,
 					ExcludedNamespaceScopedResources: autoExcludeNamespaceScopedResources,
 					BackupType:                       velerov1api.BackupTypeIncremental,
@@ -2003,6 +2020,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					CollectItemOutcomes:              boolptr.False(),
 					IncludedClusterScopedResources:   []string{"storageclasses"},
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
@@ -2055,6 +2073,7 @@ func TestProcessBackupCompletions(t *testing.T) {
 					IncludedNamespaces:               []string{"*"},
 					DefaultVolumesToFsBackup:         boolptr.False(),
 					SnapshotMoveData:                 boolptr.True(),
+					CollectItemOutcomes:              boolptr.False(),
 					IncludedClusterScopedResources:   []string{"storageclasses"},
 					ExcludedClusterScopedResources:   append([]string{"clusterroles"}, autoExcludeClusterScopedResources...),
 					IncludedNamespaceScopedResources: []string{"pods"},
@@ -3066,3 +3085,14 @@ func TestPrepareBackupRequest_DeduplicateExcludedNamespaces(t *testing.T) {
 		})
 	}
 }
+
+// TestPersistBackupWithItemOutcomesDisabledDoesNotPanic is a regression test
+// for a crash found while testing against a real backup store: when
+// collectItemOutcomes is disabled, backup.ItemOutcomes is nil and
+// itemOutcomesJSON is left as a nil *bytes.Buffer. Assigning that directly to
+// the BackupItemOutcomes io.Reader field on persistence.BackupInfo stores a
+// non-nil interface wrapping a nil pointer, which seekAndPutObject's `== nil`
+// check can't detect -- the real objectBackupStore.PutBackup then panics
+// trying to read from it. A mocked BackupStore (used elsewhere in this file)
+// doesn't exercise that code path at all, so this asserts directly on the
+// BackupInfo passed to PutBackup instead.

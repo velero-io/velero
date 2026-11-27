@@ -79,6 +79,7 @@ spec:
                     - CSIBackupVolumeSnapshotContents
                     - BackupVolumeInfos
                     - RestoreVolumeInfo
+                    - BackupItemOutcomes
                     type: string
                   name:
                     description: Name is the name of the Kubernetes resource with

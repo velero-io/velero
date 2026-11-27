@@ -191,6 +191,7 @@ type Config struct {
 	GlobalBackupVolumePoliciesConfigMap string
 	DefaultResourceModifierConfigMap    string
 	MaxBackupExtractionSize             int
+	DefaultCollectItemOutcomes          bool
 }
 
 func GetDefaultConfig() *Config {
@@ -220,6 +221,7 @@ func GetDefaultConfig() *Config {
 		UploaderType:                     uploader.KopiaType,
 		MaxConcurrentK8SConnections:      defaultMaxConcurrentK8SConnections,
 		DefaultSnapshotMoveData:          false,
+		DefaultCollectItemOutcomes:       false,
 		DisableInformerCache:             defaultDisableInformerCache,
 		ScheduleSkipImmediately:          false,
 		CredentialsDirectory:             credentials.DefaultStoreDirectory(),
@@ -258,6 +260,7 @@ func (c *Config) BindFlags(flags *pflag.FlagSet) {
 	flags.DurationVar(&c.ResourceTimeout, "resource-timeout", c.ResourceTimeout, "How long to wait for resource processes which are not covered by other specific timeout parameters. Default is 10 minutes.")
 	flags.IntVar(&c.MaxConcurrentK8SConnections, "max-concurrent-k8s-connections", c.MaxConcurrentK8SConnections, "Max concurrent connections number that Velero can create with kube-apiserver. Default is 30.")
 	flags.BoolVar(&c.DefaultSnapshotMoveData, "default-snapshot-move-data", c.DefaultSnapshotMoveData, "Move data by default for all snapshots supporting data movement.")
+	flags.BoolVar(&c.DefaultCollectItemOutcomes, "default-collect-item-outcomes", c.DefaultCollectItemOutcomes, "Collect per-item outcomes by default for all backups.")
 	flags.BoolVar(&c.DisableInformerCache, "disable-informer-cache", c.DisableInformerCache, "Disable informer cache for Get calls on restore. With this enabled, it will speed up restore in cases where there are backup resources which already exist in the cluster, but for very large clusters this will increase velero memory usage. Default is false (don't disable).")
 	flags.BoolVar(&c.ScheduleSkipImmediately, "schedule-skip-immediately", c.ScheduleSkipImmediately, "Skip the first scheduled backup immediately after creating a schedule. Default is false (don't skip).")
 	flags.Var(&c.DefaultVolumeSnapshotLocations, "default-volume-snapshot-locations", "List of unique volume providers and default volume snapshot location (provider1:location-01,provider2:location-02,...)")

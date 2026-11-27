@@ -33,6 +33,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"github.com/velero-io/velero/internal/credentials"
+	"github.com/velero-io/velero/internal/itemoutcome"
 	"github.com/velero-io/velero/internal/volume"
 	velerov1api "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/itemoperation"
@@ -52,7 +53,8 @@ type BackupInfo struct {
 	BackupItemOperations,
 	BackupResourceList,
 	CSIVolumeSnapshotClasses,
-	BackupVolumeInfo io.Reader
+	BackupVolumeInfo,
+	BackupItemOutcomes io.Reader
 }
 
 // BackupStore defines operations for creating, retrieving, and deleting
@@ -75,6 +77,8 @@ type BackupStore interface {
 	GetCSIVolumeSnapshotClasses(name string) ([]*snapshotv1api.VolumeSnapshotClass, error)
 	PutBackupVolumeInfos(name string, volumeInfo io.Reader) error
 	GetBackupVolumeInfos(name string) ([]*volume.BackupVolumeInfo, error)
+	PutBackupItemOutcomes(name string, itemOutcomes io.Reader) error
+	GetBackupItemOutcomes(name string) (*itemoutcome.ItemOutcomes, error)
 	GetRestoreResults(name string) (map[string]results.Result, error)
 
 	// BackupExists checks if the backup metadata file exists in object storage.
@@ -299,6 +303,7 @@ func (s *objectBackupStore) PutBackup(info BackupInfo) error {
 		s.layout.getBackupResourceListKey(info.Name):    info.BackupResourceList,
 		s.layout.getBackupResultsKey(info.Name):         info.BackupResults,
 		s.layout.getBackupVolumeInfoKey(info.Name):      info.BackupVolumeInfo,
+		s.layout.getBackupItemOutcomesKey(info.Name):    info.BackupItemOutcomes,
 	}
 
 	for key, reader := range backupObjs {
@@ -697,6 +702,8 @@ func (s *objectBackupStore) GetDownloadURL(target velerov1api.DownloadTarget) (s
 		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupResultsKey(target.Name), DownloadURLTTL)
 	case velerov1api.DownloadTargetKindBackupVolumeInfos:
 		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupVolumeInfoKey(target.Name), DownloadURLTTL)
+	case velerov1api.DownloadTargetKindBackupItemOutcomes:
+		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getBackupItemOutcomesKey(target.Name), DownloadURLTTL)
 	case velerov1api.DownloadTargetKindRestoreVolumeInfo:
 		return s.objectStore.CreateSignedURL(s.bucket, s.layout.getRestoreVolumeInfoKey(target.Name), DownloadURLTTL)
 	default:
