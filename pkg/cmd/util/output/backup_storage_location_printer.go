@@ -31,7 +31,7 @@ var (
 		{Name: "Name", Type: "string", Format: "name"},
 		{Name: "Provider"},
 		{Name: "Bucket/Prefix"},
-		{Name: "Phase"},
+		{Name: "Status"},
 		{Name: "Last Validated"},
 		{Name: "Access Mode"},
 		{Name: "Default"},
