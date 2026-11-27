@@ -125,6 +125,19 @@ const (
 	// VolumeGroupSnapshotCleanupCompletedAnnotation marks completed VGS cleanup.
 	VolumeGroupSnapshotCleanupCompletedAnnotation = "velero.io/vgs-cleanup-completed"
 
+	// VolumeGroupSnapshotTempContentLabel marks a temporary
+	// VolumeGroupSnapshotContent created during Backup deletion to release a
+	// group snapshot through DeleteVolumeGroupSnapshot once all member
+	// snapshot handles have been accumulated on it.
+	VolumeGroupSnapshotTempContentLabel = "velero.io/vgs-temp-content"
+
+	// VolumeGroupSnapshotMemberLabel marks a ConfigMap created by the
+	// VolumeSnapshotContent delete item action to record one
+	// VolumeGroupSnapshot member's handle for a backup being deleted. The
+	// Backup deletion controller lists these by BackupUIDLabel to recover
+	// each group's complete member handle list before releasing it.
+	VolumeGroupSnapshotMemberLabel = "velero.io/vgs-member"
+
 	// PVBLabel is the label key used to identify the pvb for pvb pod
 	PVBLabel = "velero.io/pod-volume-backup"
 

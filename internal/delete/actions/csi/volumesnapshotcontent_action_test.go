@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	volumegroupsnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,6 +39,7 @@ import (
 	factorymocks "github.com/velero-io/velero/pkg/client/mocks"
 	"github.com/velero-io/velero/pkg/plugin/velero"
 	velerotest "github.com/velero-io/velero/pkg/test"
+	csiutil "github.com/velero-io/velero/pkg/util/csi"
 )
 
 // fakeClientWithErrors wraps a real client and injects errors for specific operations.
@@ -184,6 +187,164 @@ func TestVSCExecute(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVSCExecuteGroupMember(t *testing.T) {
+	driver := "rbd.csi.ceph.com"
+	groupHandle := "group-handle"
+	class := &volumegroupsnapshotv1.VolumeGroupSnapshotClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "vgs-class"},
+		Driver:     driver,
+		Parameters: map[string]string{
+			"csi.storage.k8s.io/group-snapshotter-secret-name":      "group-secret",
+			"csi.storage.k8s.io/group-snapshotter-secret-namespace": "group-secret-ns",
+		},
+	}
+	backup := builder.ForBackup("velero", "backup").Result()
+	backup.UID = "backup-uid"
+
+	memberItem := func(name, snapshotHandle string) *unstructured.Unstructured {
+		vsc := &snapshotv1api.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{velerov1api.BackupNameLabel: "backup"},
+			},
+			Spec: snapshotv1api.VolumeSnapshotContentSpec{Driver: driver},
+			Status: &snapshotv1api.VolumeSnapshotContentStatus{
+				SnapshotHandle:            &snapshotHandle,
+				VolumeGroupSnapshotHandle: &groupHandle,
+			},
+		}
+		vscMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vsc)
+		require.NoError(t, err)
+		return &unstructured.Unstructured{Object: vscMap}
+	}
+
+	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, backup, class)
+	p := volumeSnapshotContentDeleteItemAction{log: logrus.StandardLogger(), crClient: crClient}
+
+	require.NoError(t, p.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   memberItem("member-1", "handle-1"),
+		Backup: backup,
+	}))
+
+	// No per-member temporary VolumeSnapshotContent is created for group
+	// members, and no VolumeGroupSnapshotContent is created yet either: a
+	// single DIA invocation only sees one tarball item and cannot know the
+	// group's complete member list, which the CSI CRDs require before the
+	// content can be created at all.
+	vscList := &snapshotv1api.VolumeSnapshotContentList{}
+	require.NoError(t, crClient.List(t.Context(), vscList))
+	require.Empty(t, vscList.Items)
+	vgscList := &volumegroupsnapshotv1.VolumeGroupSnapshotContentList{}
+	require.NoError(t, crClient.List(t.Context(), vgscList))
+	require.Empty(t, vgscList.Items)
+
+	// Instead the member's handle is recorded as its own ConfigMap.
+	memberCMs := &corev1api.ConfigMapList{}
+	require.NoError(t, crClient.List(t.Context(), memberCMs, crclient.MatchingLabels(map[string]string{
+		velerov1api.BackupUIDLabel:                 string(backup.UID),
+		velerov1api.VolumeGroupSnapshotMemberLabel: "true",
+	})))
+	require.Len(t, memberCMs.Items, 1)
+	assert.Contains(t, memberCMs.Items[0].Data["member"], `"groupSnapshotHandle":"group-handle"`)
+	assert.Contains(t, memberCMs.Items[0].Data["member"], `"snapshotHandle":"handle-1"`)
+
+	// A second member of the same group gets its own ConfigMap.
+	require.NoError(t, p.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   memberItem("member-2", "handle-2"),
+		Backup: backup,
+	}))
+	require.NoError(t, crClient.List(t.Context(), memberCMs, crclient.MatchingLabels(map[string]string{
+		velerov1api.BackupUIDLabel:                 string(backup.UID),
+		velerov1api.VolumeGroupSnapshotMemberLabel: "true",
+	})))
+	require.Len(t, memberCMs.Items, 2)
+
+	// Re-processing a member (e.g. a retried deletion attempt) is idempotent:
+	// the same ConfigMap name is derived from the member's content name, so
+	// AlreadyExists is treated as success rather than a duplicate.
+	require.NoError(t, p.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   memberItem("member-1", "handle-1"),
+		Backup: backup,
+	}))
+	require.NoError(t, crClient.List(t.Context(), memberCMs, crclient.MatchingLabels(map[string]string{
+		velerov1api.BackupUIDLabel:                 string(backup.UID),
+		velerov1api.VolumeGroupSnapshotMemberLabel: "true",
+	})))
+	require.Len(t, memberCMs.Items, 2)
+
+	// The Backup deletion controller's release step, run after all DIAs
+	// finish, is what actually materializes the complete temporary
+	// VolumeGroupSnapshotContent and releases the group — this is only
+	// exercised end to end in pkg/util/csi, but the handoff point is the
+	// member ConfigMaps asserted above.
+	require.NoError(t, csiutil.ReleaseBackupVolumeGroupSnapshots(t.Context(), backup, crClient, logrus.StandardLogger()))
+	require.NoError(t, crClient.List(t.Context(), memberCMs, crclient.MatchingLabels(map[string]string{
+		velerov1api.BackupUIDLabel:                 string(backup.UID),
+		velerov1api.VolumeGroupSnapshotMemberLabel: "true",
+	})))
+	require.Empty(t, memberCMs.Items)
+}
+
+// TestVSCExecuteGroupMemberWithLiveOriginalVSC covers the normal (non-legacy)
+// CSI snapshot backup case: pkg/backup/actions/csi labels every original VSC
+// with the backup name, group member or not, and it stays live in the
+// cluster (held by the sidecar's own finalizer while its VolumeSnapshot
+// exists) through backup deletion. The group-membership check must run
+// before tryDeleteOriginalVSC, or this live, backup-labeled content would be
+// matched and deleted there directly — the exact forbidden per-member
+// DeleteSnapshot the rest of this fix exists to avoid.
+func TestVSCExecuteGroupMemberWithLiveOriginalVSC(t *testing.T) {
+	driver := "rbd.csi.ceph.com"
+	groupHandle := "group-handle"
+	snapshotHandle := "handle-1"
+	backup := builder.ForBackup("velero", "backup").Result()
+	backup.UID = "backup-uid"
+
+	liveVSC := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "member-1",
+			Labels: map[string]string{velerov1api.BackupNameLabel: "backup"},
+		},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			DeletionPolicy: snapshotv1api.VolumeSnapshotContentRetain,
+			Driver:         driver,
+			Source: snapshotv1api.VolumeSnapshotContentSource{
+				SnapshotHandle: &snapshotHandle,
+			},
+		},
+		Status: &snapshotv1api.VolumeSnapshotContentStatus{
+			SnapshotHandle:            &snapshotHandle,
+			VolumeGroupSnapshotHandle: &groupHandle,
+		},
+	}
+
+	crClient := velerotest.NewFakeControllerRuntimeClientWithVGS(t, backup, liveVSC.DeepCopy())
+	p := volumeSnapshotContentDeleteItemAction{log: logrus.StandardLogger(), crClient: crClient}
+
+	vscMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(liveVSC)
+	require.NoError(t, err)
+
+	require.NoError(t, p.Execute(&velero.DeleteItemActionExecuteInput{
+		Item:   &unstructured.Unstructured{Object: vscMap},
+		Backup: backup,
+	}))
+
+	// The live original VSC must be left untouched: neither deleted nor
+	// patched to DeletionPolicy=Delete.
+	existing := &snapshotv1api.VolumeSnapshotContent{}
+	require.NoError(t, crClient.Get(t.Context(), crclient.ObjectKey{Name: "member-1"}, existing))
+	assert.Equal(t, snapshotv1api.VolumeSnapshotContentRetain, existing.Spec.DeletionPolicy)
+
+	// The member's handle must be recorded for the group release step instead.
+	memberCMs := &corev1api.ConfigMapList{}
+	require.NoError(t, crClient.List(t.Context(), memberCMs, crclient.MatchingLabels(map[string]string{
+		velerov1api.BackupUIDLabel:                 string(backup.UID),
+		velerov1api.VolumeGroupSnapshotMemberLabel: "true",
+	})))
+	require.Len(t, memberCMs.Items, 1)
+	assert.Contains(t, memberCMs.Items[0].Data["member"], `"groupSnapshotHandle":"group-handle"`)
 }
 
 func TestVSCAppliesTo(t *testing.T) {

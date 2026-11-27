@@ -1,0 +1,1 @@
+Fix leaked VolumeGroupSnapshot backend snapshots and orphaned objects: group and member VolumeSnapshotContents are released through DeleteVolumeGroupSnapshot at backup finalization for data mover backups and at Backup deletion for snapshot backups, instead of per-member deletions the CSI spec forbids for group members.

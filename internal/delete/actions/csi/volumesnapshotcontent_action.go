@@ -32,6 +32,7 @@ import (
 	"github.com/velero-io/velero/pkg/client"
 	plugincommon "github.com/velero-io/velero/pkg/plugin/framework/common"
 	"github.com/velero-io/velero/pkg/plugin/velero"
+	csiutil "github.com/velero-io/velero/pkg/util/csi"
 	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
@@ -82,10 +83,44 @@ func (p *volumeSnapshotContentDeleteItemAction) Execute(
 
 	p.log.Infof("Deleting VolumeSnapshotContent %s", snapCont.Name)
 
+	originalVSCName := snapCont.Name
+
+	// Group members cannot be released through a per-member temporary
+	// VolumeSnapshotContent, nor through the legacy direct-delete path below:
+	// the CSI spec forbids DeleteSnapshot for snapshots that belong to a
+	// group, and the CSI snapshotter sidecar skips it for contents carrying a
+	// group snapshot handle. This check must run before tryDeleteOriginalVSC,
+	// since the backup action labels every original VSC (group member or
+	// not) with the backup name, so a live group-member VSC would otherwise
+	// match there first and be deleted directly. Record this member's handle
+	// as its own ConfigMap instead. After all delete item actions have run,
+	// the Backup deletion controller lists every member ConfigMap for the
+	// backup, recovers each group's complete member handle list, and
+	// materializes one temporary static VolumeGroupSnapshotContent per group
+	// to release it, which makes the sidecar call DeleteVolumeGroupSnapshot
+	// for the group and all of its members.
+	if snapCont.Status != nil && snapCont.Status.VolumeGroupSnapshotHandle != nil &&
+		*snapCont.Status.VolumeGroupSnapshotHandle != "" {
+		groupSnapshotHandle := *snapCont.Status.VolumeGroupSnapshotHandle
+		var memberHandle string
+		if snapCont.Status.SnapshotHandle != nil {
+			memberHandle = *snapCont.Status.SnapshotHandle
+		}
+		return csiutil.AccumulateVGSMembers(
+			context.TODO(),
+			p.crClient,
+			p.log,
+			input.Backup,
+			snapCont.Spec.Driver,
+			groupSnapshotHandle,
+			memberHandle,
+			originalVSCName,
+		)
+	}
+
 	// Try to delete the original VSC from the cluster first.
 	// This handles legacy (pre-1.15) backups where the original VSC
 	// with DeletionPolicy=Retain still exists in the cluster.
-	originalVSCName := snapCont.Name
 	if cleaned := p.tryDeleteOriginalVSC(context.TODO(), originalVSCName, input.Backup.Name); cleaned {
 		p.log.Infof("Successfully deleted original VolumeSnapshotContent %s from cluster, skipping temp VSC creation", originalVSCName)
 		return nil

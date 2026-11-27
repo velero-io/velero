@@ -304,6 +304,18 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	// Release group snapshots accumulated by the VolumeSnapshotContent delete
+	// item action before the generic VGS cleanup: for each group, one
+	// temporary static VolumeGroupSnapshotContent with the complete member
+	// handle list is created and deleted, which makes the CSI snapshotter
+	// sidecar call DeleteVolumeGroupSnapshot for the group and all of its
+	// member snapshots. Fail the deletion so a transient error is retried
+	// instead of leaking the backend snapshots.
+	if err := csi.ReleaseBackupVolumeGroupSnapshots(ctx, backup, r.Client, log); err != nil {
+		log.WithError(err).Error("Could not release backup VolumeGroupSnapshots")
+		return ctrl.Result{}, err
+	}
+
 	// VGS/VGSC resources are not stored in the Backup tarball, so clean them
 	// independently of whether DeleteItemActions used the tarball.
 	if err := csi.CleanupBackupVolumeGroupSnapshots(ctx, backup, r.Client, log); err != nil {

@@ -47,7 +47,14 @@ func NewFakeControllerRuntimeClientBuilder(t *testing.T) *k8sfake.ClientBuilder 
 	require.NoError(t, storagev1api.AddToScheme(scheme))
 	require.NoError(t, volumegroupsnapshotv1.AddToScheme(scheme))
 
-	return k8sfake.NewClientBuilder().WithScheme(scheme)
+	return k8sfake.NewClientBuilder().WithScheme(scheme).
+		// The fake client only routes Status().Update/Patch to the status
+		// subresource for types registered here; the VGS CRDs serve one, so
+		// tests exercising VGSC status updates need these registered.
+		WithStatusSubresource(
+			&volumegroupsnapshotv1.VolumeGroupSnapshot{},
+			&volumegroupsnapshotv1.VolumeGroupSnapshotContent{},
+		)
 }
 
 func NewFakeControllerRuntimeClient(t *testing.T, initObjs ...runtime.Object) client.Client {

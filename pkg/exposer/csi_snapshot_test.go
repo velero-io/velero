@@ -33,9 +33,11 @@ import (
 	appsv1api "k8s.io/api/apps/v1"
 	corev1api "k8s.io/api/core/v1"
 	storagev1api "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clientTesting "k8s.io/client-go/testing"
@@ -2537,6 +2539,211 @@ func TestCleanUp_SecretsAndConfigMaps(t *testing.T) {
 
 	_, err = fakeKubeClient.CoreV1().Secrets("velero").Get(t.Context(), "other-secret", metav1.GetOptions{})
 	assert.NoError(t, err, "unrelated secret should not be deleted")
+}
+
+// TestCleanUp_RetainsBackupVSCForVGSMember guards against the race that broke
+// VGS group release on a live cluster: CleanUp deletes the backup VS/VSC
+// (createBackupVS/createBackupVSC) created from the same underlying snapshot
+// handle as the original. For a VGS member, deleting that backup VSC with
+// its default DeletionPolicy=Delete lets the CSI snapshotter sidecar issue a
+// DeleteSnapshot directly on the backend — forbidden by the CSI spec for a
+// group member, and observed to permanently break the later
+// DeleteVolumeGroupSnapshot call on the group content, since the backend can
+// no longer resolve a member it already deleted individually. CleanUp must
+// retain the backup VSC before deleting it so only the group release can
+// ever trigger the real backend deletion for this handle.
+func TestCleanUp_RetainsBackupVSCForVGSMember(t *testing.T) {
+	ownerObject := corev1api.ObjectReference{
+		Kind:       "Backup",
+		Namespace:  "velero",
+		Name:       "backup-vsc-123",
+		UID:        "fake-uid",
+		APIVersion: "v1",
+	}
+	groupName := "my-group"
+
+	originalVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "original-vs", Namespace: "app-ns"},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			VolumeGroupSnapshotName: &groupName,
+		},
+	}
+	backupVSC := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+			Driver:         "fake.csi.driver",
+			Source:         snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: ptr.To("handle-1")},
+		},
+	}
+	backupVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name, Namespace: ownerObject.Namespace},
+		Spec: snapshotv1api.VolumeSnapshotSpec{
+			Source: snapshotv1api.VolumeSnapshotSource{VolumeSnapshotContentName: &backupVSC.Name},
+		},
+	}
+
+	fakeKubeClient := fake.NewSimpleClientset()
+	fakeSnapshotClient := snapshotFake.NewSimpleClientset(originalVS, backupVSC, backupVS)
+
+	// Retain does not cascade-delete the content object when its bound VS is
+	// deleted, so CleanUp must explicitly delete the backup VSC object itself
+	// once it is safely retained. Read the ordering directly off each
+	// action's own parameters (the patch bytes, the delete's target name)
+	// rather than calling back into the fake clientset from within a
+	// reactor registered on that same clientset, which self-deadlocks
+	// against the fake's own lock.
+	var retainedBeforeDelete bool
+	fakeSnapshotClient.Fake.PrependReactor("patch", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		if patchAction, ok := action.(clientTesting.PatchAction); ok && patchAction.GetName() == backupVSC.Name &&
+			strings.Contains(string(patchAction.GetPatch()), `"deletionPolicy":"Retain"`) {
+			retainedBeforeDelete = true
+		}
+		return false, nil, nil
+	})
+	var deletedBeforeRetain bool
+	fakeSnapshotClient.Fake.PrependReactor("delete", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		if deleteAction, ok := action.(clientTesting.DeleteAction); ok && deleteAction.GetName() == backupVSC.Name && !retainedBeforeDelete {
+			deletedBeforeRetain = true
+		}
+		return false, nil, nil
+	})
+
+	exposer := csiSnapshotExposer{
+		kubeClient:        fakeKubeClient,
+		csiSnapshotClient: fakeSnapshotClient.SnapshotV1(),
+		log:               velerotest.NewLogger(),
+	}
+
+	exposer.CleanUp(t.Context(), ownerObject, originalVS.Name, originalVS.Namespace)
+
+	assert.True(t, retainedBeforeDelete, "backup VSC must be patched to Retain before deletion for a VGS member, so the sidecar cannot call DeleteSnapshot on it")
+	assert.False(t, deletedBeforeRetain, "backup VSC must not be deleted before it is retained")
+
+	_, err := fakeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Get(t.Context(), backupVSC.Name, metav1.GetOptions{})
+	require.Error(t, err, "backup VSC object should be gone after CleanUp, not left orphaned in the cluster")
+
+	_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshots(originalVS.Namespace).Get(t.Context(), originalVS.Name, metav1.GetOptions{})
+	assert.NoError(t, err, "the original VolumeSnapshot of a VGS member must still be deferred, unchanged by this fix")
+}
+
+// TestCleanUp_AbortsOnFailedRetainForVGSMember guards the fail-safe fallback
+// for TestCleanUp_RetainsBackupVSCForVGSMember above: if the Retain patch
+// itself fails (a transient API error), CleanUp must not fall through and
+// delete the backup VS/VSC anyway with DeletionPolicy still Delete, since
+// that reintroduces the exact forbidden per-member DeleteSnapshot the Retain
+// step exists to prevent. Leaving the backup VS/VSC in place for CleanUp to
+// be retried is the safer outcome.
+func TestCleanUp_AbortsOnFailedRetainForVGSMember(t *testing.T) {
+	ownerObject := corev1api.ObjectReference{
+		Kind:       "Backup",
+		Namespace:  "velero",
+		Name:       "backup-vsc-456",
+		UID:        "fake-uid",
+		APIVersion: "v1",
+	}
+	groupName := "my-group"
+
+	originalVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "original-vs", Namespace: "app-ns"},
+		Status: &snapshotv1api.VolumeSnapshotStatus{
+			VolumeGroupSnapshotName: &groupName,
+		},
+	}
+	backupVSC := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+			Driver:         "fake.csi.driver",
+			Source:         snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: ptr.To("handle-1")},
+		},
+	}
+	backupVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name, Namespace: ownerObject.Namespace},
+		Spec: snapshotv1api.VolumeSnapshotSpec{
+			Source: snapshotv1api.VolumeSnapshotSource{VolumeSnapshotContentName: &backupVSC.Name},
+		},
+	}
+
+	fakeKubeClient := fake.NewSimpleClientset()
+	fakeSnapshotClient := snapshotFake.NewSimpleClientset(originalVS, backupVSC, backupVS)
+
+	fakeSnapshotClient.Fake.PrependReactor("patch", "volumesnapshotcontents", func(action clientTesting.Action) (bool, runtime.Object, error) {
+		if patchAction, ok := action.(clientTesting.PatchAction); ok && patchAction.GetName() == backupVSC.Name &&
+			strings.Contains(string(patchAction.GetPatch()), `"deletionPolicy":"Retain"`) {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "volumesnapshotcontents"}, backupVSC.Name, errors.New("conflict"))
+		}
+		return false, nil, nil
+	})
+
+	exposer := csiSnapshotExposer{
+		kubeClient:        fakeKubeClient,
+		csiSnapshotClient: fakeSnapshotClient.SnapshotV1(),
+		log:               velerotest.NewLogger(),
+	}
+
+	exposer.CleanUp(t.Context(), ownerObject, originalVS.Name, originalVS.Namespace)
+
+	_, err := fakeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Get(t.Context(), backupVSC.Name, metav1.GetOptions{})
+	require.NoError(t, err, "backup VSC must not be deleted when it could not be confirmed Retained")
+
+	_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshots(ownerObject.Namespace).Get(t.Context(), backupVS.Name, metav1.GetOptions{})
+	require.NoError(t, err, "backup VS must not be deleted when its content could not be confirmed Retained")
+
+	_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshots(originalVS.Namespace).Get(t.Context(), originalVS.Name, metav1.GetOptions{})
+	require.NoError(t, err, "the original VolumeSnapshot must still be deferred")
+}
+
+// TestCleanUp_DeletesBackupVSCForNonVGSMember confirms the fix above is
+// scoped to VGS members: for an ordinary (ungrouped) data-mover snapshot,
+// CleanUp must keep deleting the backup VSC with its normal DeletionPolicy
+// so the backend snapshot is still released once DataUpload completes.
+func TestCleanUp_DeletesBackupVSCForNonVGSMember(t *testing.T) {
+	ownerObject := corev1api.ObjectReference{
+		Kind:       "Backup",
+		Namespace:  "velero",
+		Name:       "backup-vsc-456",
+		UID:        "fake-uid-2",
+		APIVersion: "v1",
+	}
+
+	originalVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "original-vs-2", Namespace: "app-ns"},
+		Status:     &snapshotv1api.VolumeSnapshotStatus{},
+	}
+	backupVSC := &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name},
+		Spec: snapshotv1api.VolumeSnapshotContentSpec{
+			DeletionPolicy: snapshotv1api.VolumeSnapshotContentDelete,
+			Driver:         "fake.csi.driver",
+			Source:         snapshotv1api.VolumeSnapshotContentSource{SnapshotHandle: ptr.To("handle-2")},
+		},
+	}
+	backupVS := &snapshotv1api.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: ownerObject.Name, Namespace: ownerObject.Namespace},
+		Spec: snapshotv1api.VolumeSnapshotSpec{
+			Source: snapshotv1api.VolumeSnapshotSource{VolumeSnapshotContentName: &backupVSC.Name},
+		},
+	}
+
+	fakeKubeClient := fake.NewSimpleClientset()
+	fakeSnapshotClient := snapshotFake.NewSimpleClientset(originalVS, backupVSC, backupVS)
+
+	exposer := csiSnapshotExposer{
+		kubeClient:        fakeKubeClient,
+		csiSnapshotClient: fakeSnapshotClient.SnapshotV1(),
+		log:               velerotest.NewLogger(),
+	}
+
+	exposer.CleanUp(t.Context(), ownerObject, originalVS.Name, originalVS.Namespace)
+
+	updated, err := fakeSnapshotClient.SnapshotV1().VolumeSnapshotContents().Get(t.Context(), backupVSC.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, snapshotv1api.VolumeSnapshotContentDelete, updated.Spec.DeletionPolicy,
+		"backup VSC policy must be left untouched for a non-member so its backend snapshot is still released")
+
+	_, err = fakeSnapshotClient.SnapshotV1().VolumeSnapshots(originalVS.Namespace).Get(t.Context(), originalVS.Name, metav1.GetOptions{})
+	assert.Error(t, err, "the original VolumeSnapshot of a non-member must still be deleted, unchanged by this fix")
 }
 
 // TestBackupPodCBTServiceSAFlagMatchesDatamoverBackupFlags pins the contract between the
