@@ -133,23 +133,24 @@ func (c VeleroConfig) Features() []string {
 	return strings.Split(features, ",")
 }
 
-func (c VeleroConfig) Colorized() bool {
+// Colorized returns nil if the preference is unset or invalid.
+func (c VeleroConfig) Colorized() *bool {
 	val, ok := c[ConfigKeyColorized]
 	if !ok {
-		return true
+		return nil
 	}
 
 	valString, ok := val.(string)
 	if !ok {
-		return true
+		return nil
 	}
 
 	colorized, err := strconv.ParseBool(valString)
 	if err != nil {
-		return true
+		return nil
 	}
 
-	return colorized
+	return &colorized
 }
 
 func (c VeleroConfig) CACertFile() string {

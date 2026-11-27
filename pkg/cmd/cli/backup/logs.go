@@ -33,6 +33,7 @@ import (
 	"github.com/velero-io/velero/pkg/cmd/cli"
 	"github.com/velero-io/velero/pkg/cmd/util/cacert"
 	"github.com/velero-io/velero/pkg/cmd/util/downloadrequest"
+	"github.com/velero-io/velero/pkg/cmd/util/output"
 )
 
 type LogsOptions struct {
@@ -88,8 +89,14 @@ func (l *LogsOptions) Run(c *cobra.Command, f client.Factory) error {
 		bslCACert = ""
 	}
 
-	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, os.Stdout, l.Timeout, l.InsecureSkipTLSVerify, l.CaCertFile, bslCACert)
-	return err
+	w, result := output.PrintLogsWithColor()
+	err = downloadrequest.StreamWithBSLCACert(context.Background(), l.Client, f.Namespace(), l.BackupName, velerov1api.DownloadTargetKindBackupLog, w, l.Timeout, l.InsecureSkipTLSVerify, l.CaCertFile, bslCACert)
+	w.Close()            // signal we're done writing
+	printErr := <-result // wait for all logs to be processed and printed
+	if err != nil {
+		return err
+	}
+	return printErr
 }
 
 func (l *LogsOptions) Complete(args []string, f client.Factory) error {
