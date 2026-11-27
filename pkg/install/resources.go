@@ -236,6 +236,7 @@ func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object)
 type VeleroOptions struct {
 	Namespace                        string
 	Image                            string
+	ImagePullPolicy                  string
 	ProviderName                     string
 	Bucket                           string
 	Prefix                           string
@@ -359,6 +360,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		WithAnnotations(o.PodAnnotations),
 		WithLabels(o.PodLabels),
 		WithImage(o.Image),
+		WithImagePullPolicy(o.ImagePullPolicy),
 		WithResources(o.VeleroPodResources),
 		WithSecret(secretPresent),
 		WithDefaultRepoMaintenanceFrequency(o.DefaultRepoMaintenanceFrequency),
@@ -428,6 +430,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 			WithAnnotations(o.PodAnnotations),
 			WithLabels(o.PodLabels),
 			WithImage(o.Image),
+			WithImagePullPolicy(o.ImagePullPolicy),
 			WithResources(o.NodeAgentPodResources),
 			WithSecret(secretPresent),
 			WithServiceAccountName(serviceAccountName),
