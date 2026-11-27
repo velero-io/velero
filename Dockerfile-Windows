@@ -52,6 +52,7 @@ RUN mkdir -p /output/usr/bin && \
 
 # Velero image packing section
 FROM mcr.microsoft.com/windows/nanoserver:${OS_VERSION}
+LABEL org.opencontainers.image.source="https://github.com/velero-io/velero"
 COPY --from=velero-builder /output /
 
 USER ContainerUser
