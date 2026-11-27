@@ -183,7 +183,8 @@ jobs:
               \"Basic && (ClusterResource || NodePort || StorageClass)\", \
               \"ResourceFiltering && !FSBackup\", \
               \"ResourceModifier || (Backups && BackupsSync) || PrivilegesMgmt || OrderedResources\", \
-              \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\"\
+              \"(NamespaceMapping && Single && FSBackup) || (NamespaceMapping && Multiple && FSBackup)\", \
+              \"BSL && ReadOnly\"\
             ]}" >> $GITHUB_OUTPUT
 
           # The CSI cases need a snapshot stack installed per job, which the
