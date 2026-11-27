@@ -1,0 +1,1 @@
+Reject negative TTLs when creating a backup, in both the CLI and the backup controller. A negative TTL previously produced a backup whose expiration was in the past, so it was garbage collected immediately after creation
