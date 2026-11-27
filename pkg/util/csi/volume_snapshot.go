@@ -146,6 +146,21 @@ func RetainVSC(ctx context.Context, snapshotClient snapshotter.SnapshotV1Interfa
 	})
 }
 
+// DeleteVolumeSnapshotContentObject deletes the VolumeSnapshotContent API
+// object by name without waiting for it to disappear: the CSI snapshotter
+// sidecar may hold the content finalizer until the bound VolumeSnapshot is
+// deleted, e.g. for VolumeGroupSnapshot members. The underlying storage
+// snapshot is not touched; that is governed by the content's DeletionPolicy.
+// A content that is already gone is treated as deleted.
+func DeleteVolumeSnapshotContentObject(ctx context.Context, crClient crclient.Client, vscName string) error {
+	if err := crClient.Delete(ctx, &snapshotv1api.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: vscName},
+	}); err != nil && !apierrors.IsNotFound(err) {
+		return errors.Wrapf(err, "error to delete volume snapshot content %s", vscName)
+	}
+	return nil
+}
+
 // DeleteVolumeSnapshotContentIfAny deletes a VSC by name if it exists,
 // and log an error when the deletion fails.
 func DeleteVolumeSnapshotContentIfAny(
@@ -688,7 +703,7 @@ func DeleteReadyVolumeSnapshot(
 			return
 		}
 
-		if err := client.Delete(ctx, vsc); err != nil {
+		if err := DeleteVolumeSnapshotContentObject(ctx, client, vsc.Name); err != nil {
 			logger.WithError(err).Warnf("Failed to delete the VolumeSnapshotContent %s", vsc.Name)
 		}
 	}

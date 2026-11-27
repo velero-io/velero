@@ -507,8 +507,65 @@ func (e *csiSnapshotExposer) CleanUp(ctx context.Context, ownerObject corev1api.
 	kube.DeleteConfigMapsWithLabel(ctx, e.kubeClient.CoreV1(), ownerObject.Namespace,
 		BackupPVCSecretLabel, string(ownerObject.UID), e.log)
 
+	// The backup VS/VSC (createBackupVS/createBackupVSC) were created from
+	// the same underlying snapshot handle as the original VolumeSnapshot, so
+	// for a VGS member that handle can only be safely released through
+	// DeleteVolumeGroupSnapshot on the group content at VGS cleanup — the
+	// CSI spec forbids a per-member DeleteSnapshot, and the CSI snapshotter
+	// sidecar has no reliable way to know this freshly created,
+	// pre-provisioned content belongs to a group before it syncs status.
+	// Unlike the original VolumeSnapshot, the backup VS is a new object
+	// Velero itself created, so its own status never carries
+	// VolumeGroupSnapshotName; group membership can only be determined from
+	// the original (vsName/sourceNamespace), which DeleteVolumeSnapshotIfAny
+	// below also checks for itself before deleting it.
+	//
+	// Any failure along this membership/retain check aborts the whole
+	// cleanup rather than falling through to delete the backup VS/VSC: since
+	// CleanUp has no caller-visible error path and may not be retried, an
+	// orphaned backup VS/VSC is a far smaller problem than silently deleting
+	// a VGS member snapshot directly, which corrupts the backend's ability
+	// to ever resolve the group again.
+	isGroupMember := false
+	originalVS, err := e.csiSnapshotClient.VolumeSnapshots(sourceNamespace).Get(ctx, vsName, metav1.GetOptions{})
+	switch {
+	case err != nil && apierrors.IsNotFound(err):
+		// Original VolumeSnapshot already gone; nothing to protect.
+	case err != nil:
+		e.log.WithError(err).Errorf("Unable to check VGS membership for VolumeSnapshot %s/%s before backup VSC cleanup, skipping cleanup", sourceNamespace, vsName)
+		return
+	case originalVS.Status != nil && originalVS.Status.VolumeGroupSnapshotName != nil:
+		isGroupMember = true
+		// Retain the backup VSC before anything deletes its bound VS, so the
+		// sidecar cannot issue a direct DeleteSnapshot against the backend —
+		// the group release remains the only path that can call
+		// DeleteVolumeGroupSnapshot for this handle. Unlike DeletionPolicy
+		// Delete, Retain does not cascade-delete the content object when its
+		// VS goes away, so the object itself is explicitly deleted below
+		// once it is safely Retain-policied, the same two-step pattern
+		// CleanupBackupVolumeGroupSnapshots uses for the original member
+		// content: settle the policy first, then remove the object.
+		backupVSC, err := e.csiSnapshotClient.VolumeSnapshotContents().Get(ctx, backupVSName, metav1.GetOptions{})
+		switch {
+		case err != nil && apierrors.IsNotFound(err):
+			// Backup VSC already gone; nothing to retain.
+		case err != nil:
+			e.log.WithError(err).Errorf("Unable to get backup VolumeSnapshotContent %s to retain it before cleanup, skipping cleanup", backupVSName)
+			return
+		default:
+			if _, err := csi.RetainVSC(ctx, e.csiSnapshotClient, backupVSC); err != nil {
+				e.log.WithError(err).Errorf("Failed to retain backup VolumeSnapshotContent %s before cleanup, skipping cleanup", backupVSName)
+				return
+			}
+		}
+	}
+
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, backupVSName, ownerObject.Namespace, e.log)
 	csi.DeleteVolumeSnapshotIfAny(ctx, e.csiSnapshotClient, vsName, sourceNamespace, e.log)
+
+	if isGroupMember {
+		csi.DeleteVolumeSnapshotContentIfAny(ctx, e.csiSnapshotClient, backupVSName, e.log)
+	}
 }
 
 func getVolumeModeByAccessMode(accessMode string, dataMover string) (corev1api.PersistentVolumeMode, error) {

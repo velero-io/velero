@@ -29,6 +29,7 @@ import (
 
 	velerov1 "github.com/velero-io/velero/pkg/apis/velero/v1"
 	"github.com/velero-io/velero/pkg/label"
+	"github.com/velero-io/velero/pkg/util/boolptr"
 	kubeutil "github.com/velero-io/velero/pkg/util/kube"
 )
 
@@ -41,6 +42,21 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 	}
 
 	var cleanupErrs []error
+	// Content policies are settled before any object deletion. Data-mover
+	// backups no longer need the backend snapshots once the data is in the
+	// backup repository, so the group content and the member contents are
+	// set to Delete: the external-snapshotter then releases the group and
+	// all of its members through DeleteVolumeGroupSnapshot, or falls back to
+	// per-member DeleteSnapshot calls for drivers that do not report group
+	// membership on the contents (the same routing normal CSI deletion
+	// relies on). Snapshot backups keep Retain so restores can still reach
+	// the backend snapshots.
+	vgscPolicy := snapshotv1.VolumeSnapshotContentRetain
+	memberPolicy := snapshotv1.VolumeSnapshotContentRetain
+	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
+		vgscPolicy = snapshotv1.VolumeSnapshotContentDelete
+		memberPolicy = snapshotv1.VolumeSnapshotContentDelete
+	}
 	groups, err := ListVGS(ctx, client, "", map[string]string{velerov1.BackupUIDLabel: string(backup.UID)})
 	if err != nil {
 		if errors.Is(err, ErrVGSAPINotAvailable) {
@@ -56,7 +72,13 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 	if err == nil {
 		for i := range contents.Items {
 			content := &contents.Items[i]
-			if err := retainAndDeleteVGSC(ctx, client, content.Name, nil, false); err != nil {
+			// Temporary contents created by the group release step are
+			// released by ReleaseBackupVolumeGroupSnapshots; touching
+			// their policy here would cancel the pending group deletion.
+			if content.Labels[velerov1.VolumeGroupSnapshotTempContentLabel] == "true" {
+				continue
+			}
+			if err := deleteVGSCWithPolicy(ctx, client, content.Name, nil, false, vgscPolicy); err != nil {
 				cleanupErrs = append(cleanupErrs, err)
 			} else {
 				processedContents[content.Name] = struct{}{}
@@ -78,32 +100,20 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 			memberContentNames[*vs.Status.BoundVolumeSnapshotContentName] = struct{}{}
 		}
 	}
-	memberContents := &snapshotv1.VolumeSnapshotContentList{}
-	if err := client.List(ctx, memberContents, crclient.MatchingLabels(map[string]string{velerov1.BackupUIDLabel: string(backup.UID)})); err != nil {
-		cleanupErrs = append(cleanupErrs, errors.Wrap(err, "listing backup VolumeSnapshotContents"))
-	}
-	// VGS members skip individual finalization while the parent exists. Retain
-	// their backend snapshots before VGS deletion even if a driver omitted the
-	// member VolumeGroupSnapshotHandle status field.
-	memberRetentionFailed := false
-	for i := range memberContents.Items {
-		content := &memberContents.Items[i]
-		if _, isMember := memberContentNames[content.Name]; !isMember {
-			continue
-		}
-		if content.Spec.DeletionPolicy == snapshotv1.VolumeSnapshotContentRetain {
-			continue
-		}
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			current := &snapshotv1.VolumeSnapshotContent{}
-			if err := client.Get(ctx, crclient.ObjectKeyFromObject(content), current); err != nil {
-				return err
-			}
-			current.Spec.DeletionPolicy = snapshotv1.VolumeSnapshotContentRetain
-			return client.Update(ctx, current)
-		}); err != nil {
-			cleanupErrs = append(cleanupErrs, errors.Wrapf(err, "retaining VolumeSnapshotContent %s", content.Name))
-			memberRetentionFailed = true
+	// Member VolumeSnapshotContents are discovered through the member
+	// VolumeSnapshots' status because the contents themselves carry no Backup
+	// labels. VGS members skip individual finalization while the parent
+	// exists, so their content policy must be settled before VGS deletion:
+	// once the VGS is gone, garbage collection removes the member
+	// VolumeSnapshots and the external-snapshotter processes the contents
+	// according to the policy settled above. The content objects themselves
+	// are deleted here as well, mirroring ordinary CSI finalization where the
+	// VolumeSnapshotContent is removed together with the VolumeSnapshot.
+	memberCleanupFailed := false
+	for contentName := range memberContentNames {
+		if err := deleteMemberVSCWithPolicy(ctx, client, contentName, memberPolicy); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+			memberCleanupFailed = true
 		}
 	}
 
@@ -125,7 +135,7 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 						ref := content.Spec.VolumeGroupSnapshotRef
 						if ref.UID != group.UID || ref.Name != group.Name || ref.Namespace != group.Namespace {
 							cleanupErrs = append(cleanupErrs, errors.Errorf("VolumeGroupSnapshotContent %s is not bound to %s/%s", content.Name, group.Namespace, group.Name))
-						} else if err := retainAndDeleteVGSC(ctx, client, contentName, backup, true); err != nil {
+						} else if err := deleteVGSCWithPolicy(ctx, client, contentName, backup, true, vgscPolicy); err != nil {
 							cleanupErrs = append(cleanupErrs, err)
 							continue
 						}
@@ -133,7 +143,7 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 				}
 			}
 
-			if memberRetentionFailed {
+			if memberCleanupFailed {
 				continue
 			}
 			log.Infof("Cleaning up VolumeGroupSnapshot %s/%s after backup finalization", group.Namespace, group.Name)
@@ -145,7 +155,42 @@ func CleanupBackupVolumeGroupSnapshots(ctx context.Context, backup *velerov1.Bac
 	return kubeerrs.NewAggregate(cleanupErrs)
 }
 
-func retainAndDeleteVGSC(ctx context.Context, client crclient.Client, contentName string, backup *velerov1.Backup, labelContent bool) error {
+// deleteMemberVSCWithPolicy settles a member VolumeSnapshotContent's
+// DeletionPolicy and deletes the object. This does not itself release any
+// backend snapshot: the policy only governs what the external-snapshotter
+// does when the member VolumeSnapshot is garbage-collected after VGS
+// deletion. Backend release for group members happens through the group
+// content (deleteVGSCWithPolicy with Delete, or the temporary content
+// released during Backup deletion); with Delete the sidecar may still delete
+// a member individually on drivers that do not report group membership,
+// while Retain guarantees no backend deletion, which snapshot backups depend
+// on for restores. Deleting the content object mirrors ordinary CSI
+// finalization, where the VolumeSnapshotContent is removed together with the
+// VolumeSnapshot; the sidecar keeps the content finalizer while the member
+// VolumeSnapshot still exists and releases it once the VGS is gone. Contents
+// that are already gone are treated as settled.
+func deleteMemberVSCWithPolicy(ctx context.Context, client crclient.Client, contentName string, policy snapshotv1.DeletionPolicy) error {
+	if _, err := SetVolumeSnapshotContentDeletionPolicy(ctx, contentName, client, policy); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return errors.Wrapf(err, "setting DeletionPolicy %s for member VolumeSnapshotContent %s", policy, contentName)
+	}
+	if err := DeleteVolumeSnapshotContentObject(ctx, client, contentName); err != nil {
+		return errors.Wrapf(err, "deleting member VolumeSnapshotContent %s", contentName)
+	}
+	return nil
+}
+
+// deleteVGSCWithPolicy patches a VolumeGroupSnapshotContent's DeletionPolicy
+// and deletes the object. With the Delete policy, the external-snapshotter
+// releases the group snapshot and all of its members through
+// DeleteVolumeGroupSnapshot once the parent VGS is deleted; with Retain the
+// backend snapshots are preserved, e.g. for snapshot backups whose restores
+// depend on them. Deleting a bound content while its VGS still exists is
+// safe: the sidecar holds the content finalizer until the VGS deletion
+// completes and then acts according to the policy.
+func deleteVGSCWithPolicy(ctx context.Context, client crclient.Client, contentName string, backup *velerov1.Backup, labelContent bool, policy snapshotv1.DeletionPolicy) error {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		content, err := GetVGSC(ctx, client, contentName)
 		if err != nil {
@@ -160,14 +205,14 @@ func retainAndDeleteVGSC(ctx context.Context, client crclient.Client, contentNam
 				velerov1.BackupUIDLabel:  string(backup.UID),
 			})
 		}
-		content.Spec.DeletionPolicy = snapshotv1.VolumeSnapshotContentRetain
+		content.Spec.DeletionPolicy = policy
 		if _, err := UpdateVGSC(ctx, client, content); err != nil {
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		return errors.Wrapf(err, "retaining VolumeGroupSnapshotContent %s", contentName)
+		return errors.Wrapf(err, "setting DeletionPolicy %s on VolumeGroupSnapshotContent %s", policy, contentName)
 	}
 	if err := DeleteVGSC(ctx, client, contentName); err != nil && !apierrors.IsNotFound(err) {
 		return errors.Wrapf(err, "deleting VolumeGroupSnapshotContent %s", contentName)
