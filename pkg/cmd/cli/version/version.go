@@ -29,7 +29,6 @@ import (
 
 	"github.com/velero-io/velero/pkg/buildinfo"
 	"github.com/velero-io/velero/pkg/client"
-	"github.com/velero-io/velero/pkg/cmd"
 	"github.com/velero-io/velero/pkg/cmd/cli/serverstatus"
 )
 
@@ -41,11 +40,12 @@ func NewCommand(f client.Factory) *cobra.Command {
 		Use:   "version",
 		Short: "Print the velero version and associated image",
 		Run: func(c *cobra.Command, args []string) {
-			var kbClient kbclient.Client
+			var (
+				kbClient    kbclient.Client
+				kbClientErr error
+			)
 			if !clientOnly {
-				var err error
-				kbClient, err = f.KubebuilderClient()
-				cmd.CheckError(err)
+				kbClient, kbClientErr = f.KubebuilderClient()
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -55,7 +55,7 @@ func NewCommand(f client.Factory) *cobra.Command {
 				Namespace: f.Namespace(),
 				Context:   ctx,
 			}
-			printVersion(os.Stdout, clientOnly, kbClient, serverStatusGetter)
+			printVersion(os.Stdout, clientOnly, kbClient, kbClientErr, serverStatusGetter)
 		},
 	}
 
@@ -65,12 +65,17 @@ func NewCommand(f client.Factory) *cobra.Command {
 	return c
 }
 
-func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, serverStatusGetter serverstatus.Getter) {
+func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, kbClientErr error, serverStatusGetter serverstatus.Getter) {
 	fmt.Fprintln(w, "Client:")
 	fmt.Fprintf(w, "\tVersion: %s\n", buildinfo.Version)
 	fmt.Fprintf(w, "\tGit commit: %s\n", buildinfo.FormattedGitSHA())
 
 	if clientOnly {
+		return
+	}
+
+	if kbClientErr != nil {
+		fmt.Fprintf(w, "<error getting server version: %s>\n", kbClientErr)
 		return
 	}
 
