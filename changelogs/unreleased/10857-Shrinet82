@@ -1,0 +1,1 @@
+Fix backup finalizer ignoring --resource-timeout so its final status patch retry is bounded
