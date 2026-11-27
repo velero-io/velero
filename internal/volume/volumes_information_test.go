@@ -1031,6 +1031,95 @@ func TestGenerateVolumeInfoFromDataUpload(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "DataUpload for a renamed PVC uses the source PVC from the DataUpload",
+			dataUpload: builder.ForDataUpload("velero", "testDU").
+				DataMover("velero").
+				CSISnapshot(&velerov2alpha1.CSISnapshotSpec{
+					VolumeSnapshot: "vs-01",
+					SnapshotClass:  "testClass",
+					Driver:         "pd.csi.storage.gke.io",
+				}).SnapshotID("testSnapshotHandle").
+				SourcePVC("testPVC").
+				SourceNamespace("velero").
+				StartTimestamp(&now).
+				CompletionTimestamp(&now).
+				TotalBytes(1024).
+				IncrementalBytes(512).
+				Phase(velerov2alpha1.DataUploadPhaseCompleted).
+				Result(),
+			operation: &itemoperation.BackupOperation{
+				Spec: itemoperation.BackupOperationSpec{
+					OperationID: "testOperation",
+					ResourceIdentifier: velero.ResourceIdentifier{
+						GroupResource: schema.GroupResource{
+							Group:    "",
+							Resource: "persistentvolumeclaims",
+						},
+						Namespace: "velero",
+						Name:      "testPVC-renamed",
+					},
+					PostOperationItems: []velero.ResourceIdentifier{
+						{
+							GroupResource: schema.GroupResource{
+								Group:    "velero.io",
+								Resource: "datauploads",
+							},
+							Namespace: "velero",
+							Name:      "testDU",
+						},
+					},
+				},
+			},
+			pvMap: map[string]pvcPvInfo{
+				"testPV": {
+					PVCName:      "testPVC",
+					PVCNamespace: "velero",
+					PV: corev1api.PersistentVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:   "testPV",
+							Labels: map[string]string{"a": "b"},
+						},
+						Spec: corev1api.PersistentVolumeSpec{
+							PersistentVolumeReclaimPolicy: corev1api.PersistentVolumeReclaimDelete,
+						},
+					},
+				},
+			},
+			expectedVolumeInfos: []*BackupVolumeInfo{
+				{
+					PVCName:             "testPVC",
+					PVCNamespace:        "velero",
+					PVName:              "testPV",
+					BackupMethod:        CSISnapshot,
+					SnapshotDataMoved:   true,
+					BackupType:          velerov1api.BackupTypeIncremental,
+					Result:              VolumeResultSucceeded,
+					StartTimestamp:      &now,
+					CompletionTimestamp: &now,
+					CSISnapshotInfo: &CSISnapshotInfo{
+						VSCName:        FieldValueIsUnknown,
+						SnapshotHandle: FieldValueIsUnknown,
+						OperationID:    FieldValueIsUnknown,
+						Size:           0,
+						Driver:         "pd.csi.storage.gke.io",
+					},
+					SnapshotDataMovementInfo: &BackupSnapshotDataMovementInfo{
+						DataMover:       "velero",
+						UploaderType:    "kopia",
+						OperationID:     "testOperation",
+						Phase:           velerov2alpha1.DataUploadPhaseCompleted,
+						SnapshotHandle:  "testSnapshotHandle",
+						Size:            1024,
+						IncrementalSize: ptr.To(int64(512)),
+					},
+					PVInfo: &PVInfo{
+						ReclaimPolicy: string(corev1api.PersistentVolumeReclaimDelete),
+						Labels:        map[string]string{"a": "b"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1066,6 +1155,7 @@ func TestGenerateVolumeInfoFromDataUpload(t *testing.T) {
 
 			volumesInfo.generateVolumeInfoFromDataUpload()
 
+			require.Len(t, volumesInfo.volumeInfos, len(tc.expectedVolumeInfos))
 			if len(tc.expectedVolumeInfos) > 0 {
 				require.Equal(t, tc.expectedVolumeInfos[0].PVInfo, volumesInfo.volumeInfos[0].PVInfo)
 				require.Equal(t, tc.expectedVolumeInfos[0].SnapshotDataMovementInfo, volumesInfo.volumeInfos[0].SnapshotDataMovementInfo)

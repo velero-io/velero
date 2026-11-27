@@ -456,6 +456,14 @@ func (ib *itemBackupper) executeActions(
 
 		u := &unstructured.Unstructured{Object: updatedItem.UnstructuredContent()}
 
+		// A BackupItemAction is allowed to mutate the item it returns, including
+		// its name and namespace. The item that gets backed up is the returned
+		// one, so re-derive its identity here instead of keeping the values it
+		// was selected with. Otherwise the async operation recorded below would
+		// refer to the pre-action identity.
+		name = u.GetName()
+		namespace = u.GetNamespace()
+
 		if _, ok := u.GetAnnotations()[velerov1api.SkipFromBackupAnnotation]; ok {
 			log.Infof("Resource (groupResource=%s, namespace=%s, name=%s) is skipped from backup by action %s.",
 				groupResource.String(), namespace, name, actionName)

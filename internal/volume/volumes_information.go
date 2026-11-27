@@ -750,10 +750,22 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
 			continue
 		}
 
+		// The operation's ResourceIdentifier is the item identity as it was
+		// backed up, which may differ from the source PVC when a
+		// BackupItemAction renamed it. The DataUpload records the PVC the
+		// snapshot was actually taken for, so prefer that and fall back to
+		// the operation for older DataUploads that do not set it.
+		pvcName := operation.Spec.ResourceIdentifier.Name
+		pvcNamespace := operation.Spec.ResourceIdentifier.Namespace
+		if dataUpload.Spec.SourcePVC != "" {
+			pvcName = dataUpload.Spec.SourcePVC
+			pvcNamespace = dataUpload.Spec.SourceNamespace
+		}
+
 		if pvcPVInfo := v.pvMap.retrieve(
 			"",
-			operation.Spec.ResourceIdentifier.Name,
-			operation.Spec.ResourceIdentifier.Namespace,
+			pvcName,
+			pvcNamespace,
 		); pvcPVInfo != nil {
 			dataMover := veleroDatamover
 			if dataUpload.Spec.DataMover != "" {
@@ -809,7 +821,7 @@ func (v *BackupVolumesInformation) generateVolumeInfoFromDataUpload() {
 
 			tmpVolumeInfos = append(tmpVolumeInfos, volumeInfo)
 		} else {
-			v.logger.Warnf("Cannot find info for PVC %s/%s", operation.Spec.ResourceIdentifier.Namespace, operation.Spec.ResourceIdentifier.Name)
+			v.logger.Warnf("Cannot find info for PVC %s/%s", pvcNamespace, pvcName)
 			continue
 		}
 	}
