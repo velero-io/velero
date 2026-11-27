@@ -52,6 +52,7 @@ RUN mkdir -p /output/usr/bin && \
 FROM paketobuildpacks/ubuntu-noble-run-tiny:latest
 
 LABEL maintainer="Xun Jiang <xun.jiang@broadcom.com>"
+LABEL org.opencontainers.image.source="https://github.com/velero-io/velero"
 
 COPY --from=velero-builder /output /
 
