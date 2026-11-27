@@ -18,6 +18,7 @@ If you're using Velero and want to add your organization to this list,
 <a href="https://cloudcasa.io/" border="0" target="_blank"><img alt="cloudcasa.io" src="site/static/img/adopters/cloudcasa.svg" height="50"></a>
 <a href="https://azure.microsoft.com/" border="0" target="_blank"><img alt="azure.com" src="site/static/img/adopters/azure.svg" height="50"></a>
 <a href="https://www.broadcom.com/" border="0" target="_blank"><img alt="broadcom.com" src="site/static/img/adopters/broadcom.svg" height="50"></a>
+<a href="https://exaqube.com/" border="0" target="_blank"><img alt="exaqube.com" src="site/static/img/adopters/exaqube.svg" height="50"></a>
 ## Success Stories
 
 Below is a list of adopters of Velero in **production environments** that have
