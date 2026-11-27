@@ -17,7 +17,10 @@ limitations under the License.
 package util
 
 import (
+	"encoding/json"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -442,5 +445,74 @@ func TestMergeExclude(t *testing.T) {
 	}
 	if got["ExistingKey"] != "val" || got[Exclude] != `["*.log"]` {
 		t.Errorf("got %v, want ExistingKey preserved and Exclude set", got)
+	}
+}
+
+func TestExcludePayloadLimits(t *testing.T) {
+	boundary := slices.Repeat([]string{strings.Repeat("a", 4093)}, 16)
+	boundary[15] = strings.Repeat("a", 4092)
+	overBoundary := slices.Clone(boundary)
+	overBoundary[15] += "a"
+	for _, tc := range []struct {
+		name     string
+		patterns []string
+		wantErr  string
+	}{
+		{"maximum count", slices.Repeat([]string{"*"}, MaxExcludePatterns), ""},
+		{"too many patterns", slices.Repeat([]string{"*"}, MaxExcludePatterns+1), "maximum is 128"},
+		{"maximum pattern bytes", []string{strings.Repeat("a", MaxExcludePatternBytes)}, ""},
+		{"pattern too long", []string{strings.Repeat("a", MaxExcludePatternBytes+1)}, "maximum is 4096 bytes per pattern"},
+		{"UTF-8 byte length", []string{strings.Repeat("界", 1366)}, "maximum is 4096 bytes per pattern"},
+		{"maximum JSON bytes", boundary, ""},
+		{"one JSON byte too many", overBoundary, "maximum is 65536 bytes"},
+		{"JSON escaping exceeds limit", slices.Repeat([]string{strings.Repeat("<", 683)}, 16), "maximum is 65536 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := StoreExclude(tc.patterns)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("StoreExclude error = %v, want %q", err, tc.wantErr)
+				}
+				if encoded != "" {
+					t.Fatal("oversized payload was returned")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "maximum JSON bytes" && len(encoded) != MaxExcludeEncodedBytes {
+				t.Fatalf("boundary fixture is %d bytes", len(encoded))
+			}
+			raw, err := json.Marshal(tc.patterns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := GetExclude(map[string]string{Exclude: string(raw)})
+			if (err != nil) != (tc.wantErr != "") {
+				t.Fatalf("GetExclude error = %v, want failure = %v", err, tc.wantErr != "")
+			}
+			if err == nil && !reflect.DeepEqual(decoded, tc.patterns) {
+				t.Fatal("patterns changed")
+			}
+		})
+	}
+}
+
+func TestMergeExcludeCombinedLimit(t *testing.T) {
+	global := slices.Repeat([]string{"global/*"}, MaxExcludePatterns/2+1)
+	local := slices.Repeat([]string{"local/*"}, MaxExcludePatterns/2+1)
+	if err := ValidateExclude(global); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateExclude(local); err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]string{Exclude: `["previous/*"]`, ParallelFilesUpload: "3"}
+	before := map[string]string{Exclude: `["previous/*"]`, ParallelFilesUpload: "3"}
+	got, err := MergeExclude(cfg, append(global, local...))
+	if err == nil || got != nil {
+		t.Fatal("combined oversized list was accepted")
+	}
+	if !reflect.DeepEqual(cfg, before) {
+		t.Fatal("configuration was modified on failure")
 	}
 }

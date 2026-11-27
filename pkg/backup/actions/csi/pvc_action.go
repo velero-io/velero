@@ -341,7 +341,7 @@ func (p *pvcBackupItemAction) Execute(
 		return nil, nil, "", nil, err
 	}
 	if !shouldSnapshot {
-		if _, excludeDropped, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims); excludeErr == nil && excludeDropped {
+		if _, excludeDropped, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims, false); excludeErr == nil && excludeDropped {
 			winningAction := "skip"
 			if matched, act, _, _ := vh.GetActionParameters(item, kuberesource.PersistentVolumeClaims); matched {
 				winningAction = act
@@ -420,7 +420,7 @@ func (p *pvcBackupItemAction) Execute(
 
 		dataMoverFromVolumePolicy := vh.GetDataMoverFromActionParameters(item, kuberesource.PersistentVolumeClaims)
 
-		exclude, excludeDropped, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims)
+		exclude, excludeDropped, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims, true)
 		if excludeErr != nil {
 			dataUploadLog.WithError(excludeErr).Error("failed to get exclude patterns from volume policies")
 			if deleteErr := p.crClient.Delete(ctx, vs); deleteErr != nil {
@@ -436,13 +436,8 @@ func (p *pvcBackupItemAction) Execute(
 			effectiveMover = dataMoverFromVolumePolicy
 		}
 		if err := resourcepolicies.ValidateExcludeForDataMover(exclude, effectiveMover); err != nil {
-			dataUploadLog.WithError(err).Error("exclude is not supported by the effective data mover")
-			if deleteErr := p.crClient.Delete(ctx, vs); deleteErr != nil {
-				if !apierrors.IsNotFound(deleteErr) {
-					dataUploadLog.WithError(deleteErr).Error("fail to delete VolumeSnapshot")
-				}
-			}
-			return item, nil, "", nil, nil
+			dataUploadLog.WithError(err).WithField("exclude", exclude).Warn("Volume policy exclude patterns are ignored: the effective data mover cannot filter source data; backing up the full volume")
+			exclude = nil
 		}
 
 		if excludeDropped {
@@ -514,7 +509,7 @@ func (p *pvcBackupItemAction) Execute(
 		// No data movement: no uploader runs for this volume, so volume policy
 		// exclude patterns cannot be applied. Warn instead of silently capturing
 		// an unfiltered snapshot; the backup stays Completed.
-		if exclude, _, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims); excludeErr != nil {
+		if exclude, _, excludeErr := vh.GetEffectiveExclude(item, kuberesource.PersistentVolumeClaims, false); excludeErr != nil {
 			p.log.WithError(excludeErr).Warn("failed to get exclude patterns from volume policies")
 		} else if len(exclude) > 0 {
 			p.log.WithField("exclude", exclude).Warnf(

@@ -19,6 +19,7 @@ package csi
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -107,36 +108,37 @@ func (s *stubVolumeHelper) GetSnapshotClass(runtime.Unstructured, schema.GroupRe
 func (s *stubVolumeHelper) GetDataMoverFromActionParameters(runtime.Unstructured, schema.GroupResource) string {
 	return s.dataMover
 }
-func (s *stubVolumeHelper) GetEffectiveExclude(runtime.Unstructured, schema.GroupResource) ([]string, bool, error) {
+func (s *stubVolumeHelper) GetEffectiveExclude(runtime.Unstructured, schema.GroupResource, bool) ([]string, bool, error) {
 	return s.exclude, s.excludeDropped, nil
 }
 
 func TestExecute(t *testing.T) {
 	boolTrue := true
 	tests := []struct {
-		name                 string
-		backup               *velerov1api.Backup
-		pvc                  *corev1api.PersistentVolumeClaim
-		pv                   *corev1api.PersistentVolume
-		sc                   *storagev1api.StorageClass
-		vsClass              *snapshotv1api.VolumeSnapshotClass
-		operationID          string
-		expectedErr          error
-		expectErr            bool // Use bool for cases where we just need to check for any error
-		expectedBackup       *velerov1api.Backup
-		expectedDataUpload   *velerov2alpha1.DataUpload
-		expectedPVC          *corev1api.PersistentVolumeClaim
-		resourcePolicy       *corev1api.ConfigMap
-		globalResourcePolicy *corev1api.ConfigMap
-		extraObjects         []runtime.Object
-		failVSCreate         bool
-		skipVSReadyUpdate    bool // New flag to control VS readiness
-		expectedVSClassName  string
-		expectedErrContains  string
-		volumeHelper         vhutil.VolumeHelper
-		expectNoDataUpload   bool
-		expectNoVS           bool
-		expectLogContains    string
+		name                   string
+		backup                 *velerov1api.Backup
+		pvc                    *corev1api.PersistentVolumeClaim
+		pv                     *corev1api.PersistentVolume
+		sc                     *storagev1api.StorageClass
+		vsClass                *snapshotv1api.VolumeSnapshotClass
+		operationID            string
+		expectedErr            error
+		expectErr              bool // Use bool for cases where we just need to check for any error
+		expectedBackup         *velerov1api.Backup
+		expectedDataUpload     *velerov2alpha1.DataUpload
+		expectedPVC            *corev1api.PersistentVolumeClaim
+		resourcePolicy         *corev1api.ConfigMap
+		globalResourcePolicy   *corev1api.ConfigMap
+		extraObjects           []runtime.Object
+		failVSCreate           bool
+		skipVSReadyUpdate      bool // New flag to control VS readiness
+		expectedVSClassName    string
+		expectedErrContains    string
+		volumeHelper           vhutil.VolumeHelper
+		expectUnfilteredUpload bool
+		expectNoDataUpload     bool
+		expectNoVS             bool
+		expectLogContains      string
 	}{
 		{
 			name:   "Skip PVC BIA when backup is in finalizing phase",
@@ -405,7 +407,7 @@ func TestExecute(t *testing.T) {
 			},
 		},
 		{
-			name:    "Phase-2 exclude guard deletes VolumeSnapshot and skips DataUpload",
+			name:    "unsupported runtime exclusions warn and preserve DataUpload",
 			backup:  builder.ForBackup("velero", "test").SnapshotMoveData(true).DataMover("velero-block").CSISnapshotTimeout(1 * time.Minute).Result(),
 			pvc:     builder.ForPersistentVolumeClaim("velero", "testPVC").VolumeName("testPV").StorageClass("testSC").Phase(corev1api.ClaimBound).Result(),
 			pv:      builder.ForPersistentVolume("testPV").CSI("hostpath", "testVolume").Result(),
@@ -425,8 +427,8 @@ func TestExecute(t *testing.T) {
 					Status:     appsv1api.DaemonSetStatus{NumberReady: 3},
 				},
 			},
-			expectNoDataUpload: true,
-			expectNoVS:         true,
+			expectUnfilteredUpload: true,
+			expectLogContains:      "effective data mover cannot filter source data",
 		},
 		{
 			name:    "warns when inherited exclude is dropped for a velero-block winning action",
@@ -464,6 +466,24 @@ func TestExecute(t *testing.T) {
 			expectNoDataUpload: true,
 			expectLogContains:  "does not have SnapshotMoveData enabled",
 		},
+	}
+
+	for _, base := range tests {
+		if base.name != "exclude with snapshot velero-fs is copied onto DataUpload" {
+			continue
+		}
+		raw := base
+		raw.name = "raw-block velero-fs warns and creates an unfiltered DataUpload"
+		raw.pvc = base.pvc.DeepCopy()
+		raw.pvc.Spec.VolumeMode = ptr.To(corev1api.PersistentVolumeBlock)
+		raw.pv = base.pv.DeepCopy()
+		raw.pv.Spec.VolumeMode = ptr.To(corev1api.PersistentVolumeBlock)
+		raw.expectedDataUpload = base.expectedDataUpload.DeepCopy()
+		raw.expectedDataUpload.Spec.DataMoverConfig = nil
+		raw.expectUnfilteredUpload = true
+		raw.expectLogContains = "raw-block source cannot filter source data"
+		tests = append(tests, raw)
+		break
 	}
 
 	for _, tc := range tests {
@@ -597,6 +617,15 @@ func TestExecute(t *testing.T) {
 					"VolumeSnapshot should use the VolumeSnapshotClass specified by volume policy")
 			}
 
+			if tc.expectUnfilteredUpload {
+				var uploads velerov2alpha1.DataUploadList
+				require.NoError(t, crClient.List(t.Context(), &uploads))
+				require.Len(t, uploads.Items, 1)
+				assert.NotContains(t, uploads.Items[0].Spec.DataMoverConfig, uploaderUtil.Exclude)
+				var snapshots snapshotv1api.VolumeSnapshotList
+				require.NoError(t, crClient.List(t.Context(), &snapshots))
+				require.Len(t, snapshots.Items, 1)
+			}
 			if tc.expectNoDataUpload {
 				dataUploadList := new(velerov2alpha1.DataUploadList)
 				require.NoError(t, crClient.List(t.Context(), dataUploadList))
@@ -2741,4 +2770,15 @@ func TestNewDataUpload(t *testing.T) {
 			assert.Equal(t, tc.expectedDataMoverCfg, du.Spec.DataMoverConfig)
 		})
 	}
+}
+
+func TestNewDataUploadRejectsOversizedExclude(t *testing.T) {
+	backup := builder.ForBackup("velero", "backup").Result()
+	pvc := builder.ForPersistentVolumeClaim("ns", "pvc").StorageClass("sc").Result()
+	vs := builder.ForVolumeSnapshot("ns", "snapshot").Result()
+	vsc := builder.ForVolumeSnapshotContent("content").Result()
+	patterns := slices.Repeat([]string{"*"}, uploaderUtil.MaxExcludePatterns+1)
+	du, err := newDataUpload(backup, vs, pvc, "op", vsc, "ext4", "velero-fs", patterns)
+	require.ErrorContains(t, err, "maximum is 128")
+	assert.Nil(t, du)
 }

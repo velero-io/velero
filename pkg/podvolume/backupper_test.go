@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/velero-io/velero/pkg/builder"
 	"github.com/velero-io/velero/pkg/repository"
 	velerotest "github.com/velero-io/velero/pkg/test"
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 )
 
 type fakeInformerRegistration struct{}
@@ -1117,14 +1119,21 @@ func TestNewPodVolumeBackupExclude(t *testing.T) {
 	volume := corev1api.Volume{Name: "data"}
 
 	t.Run("sets Exclude JSON when patterns are present", func(t *testing.T) {
-		pvb, err := newPodVolumeBackup(backup, pod, volume, "", "kopia", nil, []string{"*.tmp", "node_modules/"})
+		pvb, err := newPodVolumeBackup(backup, pod, volume, "kopia", nil, []string{"*.tmp", "node_modules/"})
 		require.NoError(t, err)
 		require.Contains(t, pvb.Spec.UploaderSettings, "Exclude")
 		assert.Equal(t, `["*.tmp","node_modules/"]`, pvb.Spec.UploaderSettings["Exclude"])
 	})
 
+	t.Run("rejects oversized effective exclusions before returning a PVB", func(t *testing.T) {
+		patterns := slices.Repeat([]string{"*"}, uploaderutil.MaxExcludePatterns+1)
+		pvb, err := newPodVolumeBackup(backup, pod, volume, "kopia", nil, patterns)
+		require.ErrorContains(t, err, "maximum is 128")
+		assert.Nil(t, pvb)
+	})
+
 	t.Run("omits Exclude key when patterns are empty", func(t *testing.T) {
-		pvb, err := newPodVolumeBackup(backup, pod, volume, "", "kopia", nil, nil)
+		pvb, err := newPodVolumeBackup(backup, pod, volume, "kopia", nil, nil)
 		require.NoError(t, err)
 		_, ok := pvb.Spec.UploaderSettings["Exclude"]
 		assert.False(t, ok)

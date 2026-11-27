@@ -535,7 +535,7 @@ func (v *volumeHelperImpl) GetDataMoverFromActionParameters(obj runtime.Unstruct
 	return ""
 }
 
-func (v *volumeHelperImpl) GetEffectiveExclude(obj runtime.Unstructured, groupResource schema.GroupResource) ([]string, bool, error) {
+func (v *volumeHelperImpl) GetEffectiveExclude(obj runtime.Unstructured, groupResource schema.GroupResource, forDataMovement bool) ([]string, bool, error) {
 	if v.volumePolicy == nil {
 		return nil, false, nil
 	}
@@ -567,5 +567,18 @@ func (v *volumeHelperImpl) GetEffectiveExclude(obj runtime.Unstructured, groupRe
 		}
 	}
 
-	return v.volumePolicy.GetEffectiveExclude(resourcepolicies.NewVolumeFilterData(pv, nil, pvcPtr))
+	volume := resourcepolicies.NewVolumeFilterData(pv, nil, pvcPtr)
+	patterns, dropped, err := v.volumePolicy.GetEffectiveExclude(volume)
+	if err != nil {
+		return nil, false, err
+	}
+	if forDataMovement && volume.VolumeMode() == corev1api.PersistentVolumeBlock && len(patterns) > 0 {
+		metadata, err := meta.Accessor(obj)
+		if err != nil {
+			return nil, false, err
+		}
+		v.logger.WithField("exclude", patterns).Warnf("Volume policy exclude patterns are ignored for %s %s/%s: raw-block source cannot filter source data; backing up the full volume", groupResource.Resource, metadata.GetNamespace(), metadata.GetName())
+		return nil, false, nil
+	}
+	return patterns, dropped, nil
 }

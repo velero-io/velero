@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ var listSnapshotsFunc = snapshot.ListSnapshots
 var filesystemEntryFunc = snapshotfs.FilesystemEntryFromIDWithPath
 var restoreEntryFunc = restore.Entry
 var flushVolumeFunc = flushVolume
+var localBlockEntryFunc = getLocalBlockEntry
 
 const UploaderConfigMultipartKey = "uploader-multipart"
 const MaxErrorReported = 10
@@ -110,6 +112,16 @@ func getDefaultPolicy() *policy.Policy {
 	}
 }
 
+// filesystemIgnoreRules preserves policy ordering and gives mandatory platform
+// exclusions precedence over every Volume Policy pattern, including negations.
+func filesystemIgnoreRules(patterns []string, goos string) []string {
+	rules := slices.Clone(patterns)
+	if goos == "windows" {
+		rules = append(rules, "/System Volume Information/", "/$Recycle.Bin/")
+	}
+	return rules
+}
+
 func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snapshot.SourceInfo, uploaderCfg map[string]string, log logrus.FieldLogger) (*policy.Tree, error) {
 	// some internal operations from Kopia code retrieves policies from repo directly, so we need to persist the policy to repo
 	curPolicy := getDefaultPolicy()
@@ -130,11 +142,6 @@ func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snap
 		curPolicy.UploadPolicy.ParallelUploadAboveSize = newOptionalInt64(2 << 30)
 	}
 
-	if runtime.GOOS == "windows" {
-		curPolicy.FilesPolicy.IgnoreRules = append(curPolicy.FilesPolicy.IgnoreRules,
-			"/System Volume Information/", "/$Recycle.Bin/")
-	}
-
 	patterns, err := uploaderutil.GetExclude(uploaderCfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read Exclude uploader config")
@@ -142,8 +149,12 @@ func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snap
 	if len(patterns) > 0 {
 		curPolicy.FilesPolicy.IgnoreRules = append(curPolicy.FilesPolicy.IgnoreRules, patterns...)
 	}
+	curPolicy.FilesPolicy.IgnoreRules = filesystemIgnoreRules(curPolicy.FilesPolicy.IgnoreRules, runtime.GOOS)
 
-	log.WithField("exclude", patterns).Info("resolved filesystem exclude patterns for volume backup")
+	log.WithFields(logrus.Fields{
+		"exclude":     patterns,
+		"ignoreRules": curPolicy.FilesPolicy.IgnoreRules,
+	}).Info("resolved filesystem exclude patterns for volume backup")
 
 	err = setPolicyFunc(ctx, rep, sourceInfo, curPolicy)
 	if err != nil {
@@ -190,7 +201,11 @@ func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.Re
 	var sourceEntry fs.Entry
 
 	if volMode == uploader.PersistentVolumeBlock {
-		sourceEntry, err = getLocalBlockEntry(source)
+		uploaderCfg, err = uploaderutil.IgnoreExcludeForRawBlock(uploaderCfg, log.WithField("source", source))
+		if err != nil {
+			return nil, false, err
+		}
+		sourceEntry, err = localBlockEntryFunc(source)
 		if err != nil {
 			return nil, false, errors.Wrap(err, "unable to get local block device entry")
 		}

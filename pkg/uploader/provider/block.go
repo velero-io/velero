@@ -113,17 +113,15 @@ func (bp *blockProvider) RunBackup(
 		return "", false, 0, 0, 0, false, errors.New("path is empty")
 	}
 
-	if patterns, err := uploaderutil.GetExclude(uploaderCfg); err != nil {
-		return "", false, 0, 0, 0, false, errors.Wrap(err, "failed to read Exclude uploader config")
-	} else if len(patterns) > 0 {
-		return "", false, 0, 0, 0, false, fmt.Errorf("exclude is not supported by data mover %q", uploader.BlockType)
-	}
-
 	log := bp.log.WithFields(logrus.Fields{
 		"path":           path,
 		"realSource":     realSource,
 		"parentSnapshot": parentSnapshot,
 	})
+	uploaderCfg, err := uploaderutil.IgnoreExcludeForRawBlock(uploaderCfg, log)
+	if err != nil {
+		return "", false, 0, 0, 0, false, err
+	}
 
 	log.Infof("Run block backup, CBT source info: %v", cbtParam.Source)
 

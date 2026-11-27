@@ -16,10 +16,13 @@ limitations under the License.
 package resourcepolicies
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 	"github.com/velero-io/velero/pkg/util/boolptr"
 )
 
@@ -1089,6 +1092,32 @@ func TestValidateForRestore(t *testing.T) {
 				if err1 != nil || err2 != nil {
 					t.Fatalf("Expected error %v, but got error %v %v", tc.wantErr, err1, err2)
 				}
+			}
+		})
+	}
+}
+
+func TestVolumePolicyExcludeLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		patterns []string
+		wantErr  string
+	}{
+		{"count", slices.Repeat([]string{"*"}, uploaderutil.MaxExcludePatterns+1), "maximum is 128"},
+		{"pattern bytes", []string{strings.Repeat("x", uploaderutil.MaxExcludePatternBytes+1)}, "maximum is 4096 bytes per pattern"},
+		{"encoded bytes", slices.Repeat([]string{strings.Repeat("<", 683)}, 16), "maximum is 65536 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Policies{}
+			err := p.BuildPolicy(&ResourcePolicies{Version: "v1", VolumePolicies: []VolumePolicy{{
+				Conditions: map[string]any{"storageClass": []string{"unmatched"}},
+				Action:     Action{Type: FSBackup}, Exclude: tc.patterns,
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Validate(); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("policy validation error = %v, want %q", err, tc.wantErr)
 			}
 		})
 	}

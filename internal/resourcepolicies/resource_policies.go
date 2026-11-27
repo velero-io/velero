@@ -170,8 +170,8 @@ func actionHonorsExclude(a *Action) bool {
 
 // ValidateExcludeForDataMover is a wiring-level guard: if exclude is non-empty
 // and the effective data mover is velero-block, return an error. Phase 1
-// already rejects this combination on a validated action; this is defense in
-// depth for test paths that bypass validate().
+// already rejects this combination on a validated action. Runtime callers warn
+// and clear the patterns on incompatibility so the full-volume backup proceeds.
 func ValidateExcludeForDataMover(exclude []string, dataMover string) error {
 	if len(exclude) == 0 {
 		return nil
@@ -482,10 +482,15 @@ func (p *IncludeExcludePolicy) validateIncludeExclude(includesList, excludesList
 // VolumePolicy defined policy to conditions to match Volumes and related action to handle matched Volumes
 type VolumePolicy struct {
 	// Conditions defined list of conditions to match Volumes
-	Conditions      map[string]any `yaml:"conditions"`
-	Action          Action         `yaml:"action"`
-	Exclude         []string       `yaml:"exclude,omitempty"`
-	InheritExcludes *bool          `yaml:"inheritExcludes,omitempty"`
+	Conditions map[string]any `yaml:"conditions"`
+	Action     Action         `yaml:"action"`
+	// Exclude is an ordered list of patterns identifying content within the selected
+	// volume to omit, interpreted by the data mover used for that volume's backup.
+	// These patterns do not select or exclude volumes. Optional; defaults to an empty list.
+	// Each volume backup uses at most one data mover, which interprets the entire
+	// effective pattern list, including inherited patterns.
+	Exclude         []string `yaml:"exclude,omitempty"`
+	InheritExcludes *bool    `yaml:"inheritExcludes,omitempty"`
 }
 
 // ResourcePolicies currently defined slice of volume policies to handle backup

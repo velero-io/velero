@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.yaml.in/yaml/v3"
 
+	uploaderutil "github.com/velero-io/velero/pkg/uploader/util"
 	datamover "github.com/velero-io/velero/pkg/util/datamover"
 )
 
@@ -145,6 +146,9 @@ func (a *Action) validate() error {
 }
 
 func (v *volPolicy) validate() error {
+	if err := uploaderutil.ValidateExclude(v.exclude); err != nil {
+		return err
+	}
 	if v.exclude != nil {
 		for _, pat := range v.exclude {
 			if strings.TrimSpace(pat) == "" {
