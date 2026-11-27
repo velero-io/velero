@@ -52,7 +52,7 @@ volumePolicies:
 | :--- | :--- |
 | `conditions` | Selects the volumes to which the rule applies. |
 | `action` | Selects how the volume is backed up. |
-| `exclude` | An ordered list of patterns describing content to omit. Optional; defaults to an empty list. |
+| `exclude` | An ordered list of patterns identifying content within the selected volume to omit, interpreted by the data mover used for that volume's backup. These patterns do not select or exclude volumes. Optional; defaults to an empty list. |
 | `inheritExcludes` | Whether a matching per-backup rule inherits patterns from the matching global rule. Optional; defaults to `true`. |
 
 `inheritExcludes` is valid only in per-backup policies. A global policy is the baseline and has nothing higher to inherit from, so declaring this field in a global policy is rejected.
@@ -81,6 +81,8 @@ volumePolicies:
 
 `exclude` is an ordered list of patterns. Each pattern is represented as a string, and its meaning is defined by the mover reading the source. Policy evaluation and transport preserve the order.
 
+Each volume backup uses at most one data mover, which interprets the entire effective pattern list for that volume, including inherited patterns. Snapshot-only backups use no data mover and follow the warning behavior in [Data-Mover Compatibility](#data-mover-compatibility).
+
 For filesystem sources, `fs-backup` and snapshot data movement with `velero-fs` use the same gitignore-style language. Paths are relative to the volume source root, and later matching patterns override earlier ones. Detailed syntax, directory traversal rules, and platform behavior are specified in [Filesystem Exclude Patterns](filesystem-exclude-patterns.md).
 
 Quote patterns in YAML, for example `"*.tmp"`, `"!keep.tmp"`, and `"#literal"`, to avoid YAML interpreting special characters as syntax.
@@ -104,7 +106,7 @@ flowchart TD
     transport --> mover --> repo
 ```
 
-The current filesystem uploader maps patterns to Kopia snapshot ignore rules. This mapping is an uploader detail. Replacement uploaders must preserve the documented portable pattern language; uploader-specific behavior, including existing filters and case sensitivity, is described separately in the filesystem companion.
+The current filesystem uploader maps patterns to Kopia snapshot ignore rules. This mapping is an uploader detail. Uploaders may impose mandatory exclusions required for successful backups; these take precedence over Volume Policy patterns. The filesystem uploader enforces this by appending mandatory exclusions after the effective Volume Policy list. On Windows, this keeps `/System Volume Information/` and `/$Recycle.Bin/` excluded even with `!**`. This precedence guarantee covers Volume Policy patterns; user-managed in-volume ignore files are outside this policy contract. Replacement uploaders must preserve the documented portable pattern language; uploader-specific behavior, including existing filters and case sensitivity, is described separately in the filesystem companion.
 
 ### Policy Evaluation and Precedence
 
@@ -202,11 +204,11 @@ The following table describes the built-in actions covered by this proposal:
 | `skip` | No data backup | Reject nonempty exclusions declared on the rule. |
 | `custom` | Handling outside Velero's data path | Reject nonempty exclusions declared on the rule. |
 
-**Source volume mode:** Compatibility depends on the actual source mode as well as the mover name. Use the resolved PVC/PV mode, defaulting to `Filesystem` when omitted. During raw-block data movement, including through `velero-fs`, nonempty patterns declared by the selected rule fail that volume’s backup. A global rule selected without a per-backup match is a directly selected rule. Patterns inherited solely from a global rule are dropped with a backup warning; `inheritExcludes: false` removes them without a warning. This prevents filesystem patterns from filtering the synthetic device stream instead of filesystem content. Snapshot-only backups do not run this data-movement check and retain the warning behavior below.
+**Source volume mode:** Compatibility depends on the actual source mode as well as the mover name. Use the resolved PV mode, falling back to the PVC mode and then `Filesystem` when omitted. During raw-block data movement, including through `velero-fs`, ignore all effective exclusion patterns and record a backup warning identifying the volume and stating that the full volume is backed up without exclusions. This applies equally to patterns declared by the selected rule and inherited global patterns. Exclusion incompatibility alone must not fail the volume or make the backup `PartiallyFailed`. An empty effective list, including one cleared by `inheritExcludes: false`, produces no warning. Remove the patterns before creating the DataUpload; raw-device uploaders also ignore them with a warning if they receive them. This prevents filesystem patterns from filtering the synthetic device stream instead of filesystem content. Snapshot-only backups retain the warning behavior below.
 
 A plain CSI or native storage-provider snapshot contains the full volume. When no data movement runs and effective patterns are nonempty, Velero records a warning and proceeds with the snapshot. Dropped inherited patterns also produce a warning, including when the selected snapshot action names `velero-block`. The policy can therefore be shared with backups that do move data, but the unfiltered snapshot must not be reported as having applied exclusions.
 
-**Future extensions:** Volume Policy mover selection currently accepts only built-in names. If support for additional movers is added, the same pattern list can be passed through `DataMoverConfig`. Each mover must document its pattern language and reject exclusions it cannot honor. For example, a future database mover could match a database/table tree without new policy fields; that mover and its language are outside this proposal.
+**Future extensions:** Volume Policy mover selection currently accepts only built-in names. If support for additional movers is added, the same pattern list can be passed through `DataMoverConfig`. Each mover must document its pattern language and exclusion support. Incompatibilities known from policy configuration are rejected during policy loading; incompatibilities discovered during volume backup are reported with a warning and the volume is backed up without exclusions. For example, a future database mover could match a database/table tree without new policy fields; that mover and its language are outside this proposal.
 
 ### Transport: PVB and DataUpload
 
@@ -225,6 +227,18 @@ These maps store string values, so the ordered pattern list is encoded as a JSON
 
 `Exclude` is the reserved transport key; the user-facing policy field remains `exclude`. An empty effective list produces no transport entry. Encoding or decoding errors fail the volume backup rather than silently dropping exclusions.
 
+To bound the contribution of exclusions to each PVB/DataUpload, apply these fixed limits to both each rule's list and the effective list after global/per-backup composition:
+
+| Limit | Maximum |
+| :--- | :--- |
+| Pattern count | 128 |
+| Individual pattern size | 4 KiB (4,096 UTF-8 bytes after whitespace normalization) |
+| JSON-encoded pattern list | 64 KiB (65,536 bytes, including JSON delimiters and escaping) |
+
+The encoded-size limit measures the JSON array string before it is embedded in the CR's configuration map. It accounts for escaping, which can make the encoded list larger than the sum of pattern lengths, and leaves room for the remaining CR fields and outer serialization. It bounds exclusion-related growth; it is not a size guarantee for the entire CR. These limits apply independently of the data mover's pattern language. Duplicate patterns count toward the limits and retain their order.
+
+Validate each rule during policy loading, then check the composed list again immediately before setting `Exclude` on a PVB or DataUpload. The transport decoder enforces the same limits. Reject an oversized list with an error identifying the exceeded limit and actual size/count; do not truncate patterns or silently omit them.
+
 ## Validation and Failure Behavior
 
 Validation separates policy structure from mover-specific pattern semantics.
@@ -232,13 +246,14 @@ Validation separates policy structure from mover-specific pattern semantics.
 **Policy loading:** Volume Policy ConfigMaps have no admission webhook. Validation runs when a backup loads the policies, before any of its volumes are copied. Every rule is validated, including rules that do not match a volume in that backup.
 
 - `exclude` must be a list of patterns represented as YAML strings. Numbers, booleans, null values, and composite entries are rejected rather than converted or discarded. An empty list is accepted on every action and has the same effect as omitting the field, including retaining inheritance. Each pattern must be non-empty after trimming whitespace.
+- Every rule's `exclude` list must satisfy the count, per-pattern byte, and encoded-size limits in [Transport: PVB and DataUpload](#transport-pvb-and-dataupload), including rules that do not match a volume.
 - `inheritExcludes` must be a YAML boolean (`true` or `false`) when present and defaults to `true`. Null values, quoted booleans, and strings such as `yes` are rejected. It is allowed only in per-backup policies.
 - Rules with `skip`, `custom`, or `snapshot` with `velero-block` reject nonempty `exclude` lists and any declaration of `inheritExcludes`. An empty `exclude: []` remains equivalent to omission.
 - Pattern syntax is not parsed at this stage because its meaning belongs to the selected mover.
 
-**Volume backup preparation:** Resolve the action and effective patterns using [Policy Evaluation and Precedence](#policy-evaluation-and-precedence), then check compatibility with the selected data path. Dropped inherited patterns and unfiltered snapshots follow the warning behavior described above. A failed PV lookup for a bound claim or a claim with an assigned PV fails volume preparation; it must not change policy matching by discarding PV metadata. PVC-only matching remains available for genuinely unbound claims.
+**Volume backup preparation:** Resolve the action and effective patterns using [Policy Evaluation and Precedence](#policy-evaluation-and-precedence), then check compatibility with the selected data path. Raw-block data movement, dropped inherited patterns, and unfiltered snapshots follow the warning behavior described above. If an incompatible mover is detected at this stage despite policy validation, warn and continue with the full volume without exclusions. A failed PV lookup for a bound claim or a claim with an assigned PV fails volume preparation; it must not change policy matching by discarding PV metadata. PVC-only matching remains available for genuinely unbound claims.
 
-**Mover start:** Validate patterns with the same matcher used to filter the source. Malformed patterns or unsupported exclusions fail that volume's backup.
+**Mover start:** Filesystem movers validate patterns with the same matcher used to filter the source; malformed patterns fail that volume's backup. Raw-device uploaders ignore nonempty exclusion lists with a warning and copy the full volume. Malformed transport encoding remains an error.
 
 ## Compatibility and Existing Behavior
 
@@ -249,14 +264,14 @@ Validation separates policy structure from mover-specific pattern semantics.
 | Exclusion inheritance | A per-backup rule without new fields still inherits patterns if an administrator adds them to a matching global rule. Use `inheritExcludes: false` to opt out. |
 | API and transport | New fields are added to the Volume Policy format. Existing PVB/DataUpload configuration maps carry the patterns; no new Backup, PVB, or DataUpload CRD fields are required. |
 | Repository | The unified repository interface remains unchanged. |
-| Filesystem uploader | User patterns are appended to the overridable Windows defaults. Existing `.kopiaignore` rules and cache-directory filtering remain active. Platform behavior is described in [Filesystem Exclude Patterns](filesystem-exclude-patterns.md#current-filesystem-uploader-behavior-kopia). |
+| Filesystem uploader | Mandatory Windows exclusions are appended after user patterns and cannot be overridden by Volume Policy negations. Existing `.kopiaignore` rules and cache-directory filtering remain active. Platform behavior is described in [Filesystem Exclude Patterns](filesystem-exclude-patterns.md#current-filesystem-uploader-behavior-kopia). |
 | Restore | Restore uses the stored payload. Content omitted during backup is not recreated; no restore filtering feature is introduced. |
 
 ## Observability
 
 Backup logs record the resolved policy patterns and selected mover for each affected volume. These records must be available through `velero backup logs`, so operators can verify the policy configuration used for a backup. They do not enumerate every filter applied by Kopia: in-volume rules can override policy patterns, and cache-directory filtering acts independently. Resetting policy inheritance does not disable these filters.
 
-Warnings identify volumes whose inherited patterns were dropped because of an incompatible action or raw-block source, or whose patterns could not be applied because no data movement occurred. Mover logs can provide additional diagnostics, but do not replace these backup-level records.
+Warnings identify volumes whose patterns were ignored because of a raw-block source or an incompatible mover discovered during backup, whose inherited patterns were dropped because of an incompatible action, or whose patterns could not be applied because no data movement occurred. Warnings for raw-block sources explicitly state that the full volume is backed up without exclusions. Mover logs can provide additional diagnostics, but do not replace these backup-level records.
 
 ## Security and Recovery Considerations
 

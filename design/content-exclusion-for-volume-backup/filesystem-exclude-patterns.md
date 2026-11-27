@@ -14,10 +14,12 @@ This feature adds no new in-volume ignore-file interface. The current Kopia uplo
 
 Patterns are matched against paths **relative to the volume source root**:
 
-- PodVolume `fs-backup`: the volume mount path inside the node-agent host pod.
+- PodVolume `fs-backup`: the host path containing the volume data, mounted inside the dedicated data mover pod.
 - CSI snapshot + filesystem data mover: the exposed snapshot filesystem root.
 
 A leading `/` in a pattern means that volume root, not the node's POSIX `/`.
+
+Raw-block sources have no filesystem paths to match. When `velero-fs` copies a raw-block source, exclusions are ignored with a backup warning and the full volume is backed up. See [Data-Mover Compatibility](content-exclusion-for-volume-backup.md#data-mover-compatibility).
 
 ---
 
@@ -78,18 +80,19 @@ The following behavior is specific to the current uploader. It is not guaranteed
 
 ### Existing Kopia filters and precedence
 
-The current uploader applies these pattern sources in order, with later applicable matches taking precedence:
+The current uploader assembles Volume Policy patterns and mandatory platform exclusions in this order, with later matches taking precedence:
 
-1. Windows baseline patterns, when running on Windows.
-2. Patterns from the matching global Volume Policy rule.
-3. Patterns from the matching per-backup rule.
-4. Applicable `.kopiaignore` rules, including rules in nested directories that the walker reaches.
+1. Patterns from the matching global Volume Policy rule.
+2. Patterns from the matching per-backup rule.
+3. Mandatory uploader exclusions, including the Windows system-directory exclusions below.
 
-Policy inheritance and first-match selection determine which patterns contribute to steps 2 and 3. A `.kopiaignore` file can add exclusions or re-include paths excluded by policy patterns. Nested rules are scoped to their directory and descendants; deeper rules can override inherited rules there. An excluded parent directory is still pruned, so a nested ignore file cannot re-include content beneath a directory the walker never enters.
+Policy inheritance and first-match selection determine which patterns contribute to steps 1 and 2. Mandatory exclusions are appended by the uploader after the effective Volume Policy list and cannot be overridden by that list, including through `!**` or targeted negation. This precedence guarantee covers Volume Policy patterns; user-managed in-volume ignore files are outside this policy contract.
+
+The current Kopia uploader also reads applicable `.kopiaignore` rules, including rules in nested directories that the walker reaches. A `.kopiaignore` file can add exclusions or re-include paths excluded by policy patterns. Nested rules are scoped to their directory and descendants; deeper rules can override inherited rules there. An excluded parent directory is still pruned, so a nested ignore file cannot re-include content beneath a directory the walker never enters.
 
 Kopia also recognizes valid `CACHEDIR.TAG` markers and treats tagged directories as empty. This check is separate from ordered patterns; negation, including `!**`, does not override it.
 
-`inheritExcludes: false` discards global policy patterns only. Neither that setting nor an empty policy list disables `.kopiaignore`, cache-directory filtering, or Windows defaults. Backup logs record the resolved policy list, not every filter that ultimately affects the payload.
+`inheritExcludes: false` discards global policy patterns only. Neither that setting nor an empty policy list disables `.kopiaignore`, cache-directory filtering, or mandatory Windows exclusions. Backup logs record the resolved policy list, not every filter that ultimately affects the payload.
 
 ### Case sensitivity
 
@@ -103,15 +106,15 @@ Patterns match the symlink’s own name. A directory-only pattern (`cache/`) doe
 
 To exclude the symlink by name, use `cache` without a trailing slash.
 
-### Windows baseline
+### Mandatory Windows exclusions
 
-The current uploader starts with `/System Volume Information/` and `/$Recycle.Bin/` as Windows defaults. User patterns are appended after them. These defaults are overridable: an explicit negation, including `!**`, can re-include these paths. Applicable `.kopiaignore` rules can also override them.
+On Windows, the uploader appends `/System Volume Information/` and `/$Recycle.Bin/` after all effective Volume Policy patterns. These directories must be excluded to avoid backup failures. Volume Policy negations, including `!**`, `!/System Volume Information/`, and `!/$Recycle.Bin/`, cannot re-include them. `inheritExcludes: false` clears only inherited global patterns and does not remove these mandatory uploader exclusions.
 
 ---
 
 ## Portability across filesystem uploaders
 
-Replacement filesystem uploaders must preserve the ordered pattern list and the gitignore-style semantics in [Syntax (gitignore-style)](#syntax-gitignore-style), including root anchoring, `**`, directory-only matching, negation, and last-match-wins evaluation. Platform defaults and additional filters must be documented separately, including whether they can be overridden. The current uploader’s behavior is specified above; it is not a guarantee that every uploader reads `.kopiaignore` or recognizes cache tags.
+Replacement filesystem uploaders must preserve the ordered pattern list and the gitignore-style semantics in [Syntax (gitignore-style)](#syntax-gitignore-style), including root anchoring, `**`, directory-only matching, negation, and last-match-wins evaluation. Uploaders may impose mandatory exclusions required for a successful backup. They must append these after the effective Volume Policy patterns and document the restrictions; last-match-wins still applies within the user-supplied list. Platform defaults and additional filters must be documented separately, including whether they can be overridden. The current uploader’s behavior is specified above; it is not a guarantee that every uploader reads `.kopiaignore` or recognizes cache tags.
 
 ---
 
@@ -172,4 +175,4 @@ exclude:
   - "*.log"   # ...then apply this backup's own exclusions
 ```
 
-A bare `**` matches every path, so `!**` re-includes every entry as it is evaluated: any earlier pattern (including Windows defaults and inherited global patterns) takes no effect, while patterns listed after it (here `*.log`) apply normally. While effective in gitignore trees, `inheritExcludes: false` is preferred for clarity and cross-mover portability.
+A bare `**` matches every path, so `!**` re-includes every entry as it is evaluated: earlier Volume Policy patterns, including inherited global patterns, take no effect, while patterns listed after it (here `*.log`) apply normally. Mandatory uploader exclusions are appended afterward and remain in effect. While effective in gitignore trees, `inheritExcludes: false` is preferred for clarity and cross-mover portability.
