@@ -8,7 +8,9 @@ Velero supports executing commands in containers in pods during a backup.
 ## Backup Hooks
 
 When performing a backup, you can specify one or more commands to execute in a container in a pod
-when that pod is being backed up. The commands can be configured to run *before* any custom action
+when that pod is being backed up.
+Such hooks do _not_ run when the pod is Pending, Failed or Succeeded.
+The commands can be configured to run *before* any custom action
 processing ("pre" hooks), or after all custom actions have been completed and any additional items
 specified by custom action have been backed up ("post" hooks). Note that hooks are _not_ executed within a shell
 on the containers.
