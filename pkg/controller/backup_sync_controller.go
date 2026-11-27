@@ -146,7 +146,7 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// sync each backup
 	for backupName := range backupsToSync {
-		log = log.WithField("backup", backupName)
+		log := log.WithField("backup", backupName)
 		log.Info("Attempting to sync backup into cluster")
 
 		exist, err := backupStore.BackupExists(location.Spec.ObjectStorage.Bucket, backupName)
@@ -353,6 +353,7 @@ func (b *backupSyncReconciler) deleteOrphanedBackups(ctx context.Context, locati
 		LabelSelector: labels.Set(map[string]string{
 			velerov1api.StorageLocationLabel: label.GetValidName(locationName),
 		}).AsSelector(),
+		Namespace: b.namespace,
 	}
 	err := b.client.List(ctx, &backupList, &listOption)
 	if err != nil {
@@ -365,7 +366,7 @@ func (b *backupSyncReconciler) deleteOrphanedBackups(ctx context.Context, locati
 	}
 
 	for i, backup := range backupList.Items {
-		log = log.WithField("backup", backup.Name)
+		log := log.WithField("backup", backup.Name)
 		if !(backup.Status.Phase == velerov1api.BackupPhaseCompleted || backup.Status.Phase == velerov1api.BackupPhasePartiallyFailed) || backupStoreBackups.Has(backup.Name) {
 			continue
 		}
