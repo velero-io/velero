@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	corev1api "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -128,7 +129,9 @@ func (r *backupQueueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 						newBackup.Status.Phase != velerov1api.BackupPhaseInProgress ||
 						oldBackup.Status.Phase != velerov1api.BackupPhaseQueued &&
 							newBackup.Status.Phase == velerov1api.BackupPhaseQueued &&
-							r.backupTracker.RunningCount() < r.concurrentBackups
+							r.backupTracker.RunningCount() < r.concurrentBackups ||
+						oldBackup.Status.Phase == velerov1api.BackupPhaseQueued &&
+							newBackup.Status.Phase == velerov1api.BackupPhaseReadyToStart
 				},
 				CreateFunc: func(event.CreateEvent) bool {
 					return false
@@ -275,6 +278,10 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Infof("%v concurrent backups are already running, leaving %v queued", r.concurrentBackups, backup.Name)
 			return ctrl.Result{}, nil
 		}
+		if r.backupTracker.IsTracked(backup.Namespace, backup.Name) {
+			log.Debugf("Backup %v is already running, skipping", backup.Name)
+			return ctrl.Result{}, nil
+		}
 		earlierBackups := lister.earlierThan(backup.Status.QueuePosition)
 		foundConflict, conflictBackup, clusterNamespaces, err := r.detectNamespaceConflict(ctx, backup, earlierBackups)
 		if err != nil {
@@ -299,8 +306,11 @@ func (r *backupQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// (Add then deferred Delete) before this call, leaking a
 		// tracker entry that nothing would ever clean up.
 		r.backupTracker.AddReadyToStart(backup.Namespace, backup.Name)
-		if err := kube.PatchResource(original, backup, r.Client); err != nil {
+		if err := r.Client.Patch(ctx, backup, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
 			r.backupTracker.Delete(backup.Namespace, backup.Name)
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
 			return ctrl.Result{}, errors.Wrapf(err, "error updating Backup status to %s", backup.Status.Phase)
 		}
 		log.Debug("Updating queuePosition for remaining queued backups")

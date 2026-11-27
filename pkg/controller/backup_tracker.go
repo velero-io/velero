@@ -35,6 +35,8 @@ type BackupTracker interface {
 	Delete(ns, name string)
 	// Contains returns true if backup is InProgress or post-InProgress
 	Contains(ns, name string) bool
+	// IsTracked returns true if backup is ReadyToStart, InProgress or post-InProgress
+	IsTracked(ns, name string) bool
 	// RunningCount returns the number of backups which are ReadyToStart or InProgress
 	RunningCount() int
 }
@@ -100,6 +102,16 @@ func (bt *backupTracker) Contains(ns, name string) bool {
 
 	key := backupTrackerKey(ns, name)
 	return bt.inProgressBackups.Has(key) || bt.postProgressBackups.Has(key)
+}
+
+// IsTracked returns true if backup is ReadyToStart, InProgress or post-InProgress
+// used by queue controller to skip a backup that is already past Queued.
+func (bt *backupTracker) IsTracked(ns, name string) bool {
+	bt.lock.RLock()
+	defer bt.lock.RUnlock()
+
+	key := backupTrackerKey(ns, name)
+	return bt.readyToStartBackups.Has(key) || bt.inProgressBackups.Has(key) || bt.postProgressBackups.Has(key)
 }
 
 // RunningCount returns the number of backups which are ReadyToStart or InProgress
