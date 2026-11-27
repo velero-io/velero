@@ -264,8 +264,10 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// patch to update status and persist to API
-	// This is patching from "" or New, no retry needed
-	err = kubeutil.PatchResource(original, restore, r.kbClient)
+	// This is patching from "" or New. A transient error does not tell us whether
+	// the patch was applied; if it was, the restore is already InProgress and a
+	// requeued reconcile would skip it, so retry such errors.
+	err = patchStartPhase(ctx, original, restore, r.kbClient)
 	if err != nil {
 		// return the error so the restore can be re-processed; it's currently
 		// still in phase = New.
