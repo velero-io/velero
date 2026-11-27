@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -627,4 +628,48 @@ func getMaintenanceHistogramCount(t *testing.T, vec *prometheus.HistogramVec, re
 
 	t.Fatalf("Histogram with repository_name label '%s' not found", repositoryName)
 	return 0
+}
+
+// TestBackupActive verifies the backup_active gauge is registered per phase,
+// exports the expected series, and that InitBackupActive makes all three
+// present at zero before any backup has run.
+func TestBackupActive(t *testing.T) {
+	m := NewServerMetrics()
+
+	gaugeVec, ok := m.Metrics()[backupActive].(*prometheus.GaugeVec)
+	require.True(t, ok, "backup_active should be registered as a GaugeVec")
+
+	phases := []string{
+		BackupActivePhaseReadyToStart,
+		BackupActivePhaseInProgress,
+		BackupActivePhasePostProcessing,
+	}
+
+	// A GaugeVec has no children until one is requested, so an alert on a
+	// Velero that has never run a backup would have nothing to match. Verify
+	// InitBackupActive creates all three at 0.
+	m.InitBackupActive()
+	for _, phase := range phases {
+		assert.Equal(t, float64(0), testutil.ToFloat64(gaugeVec.WithLabelValues(phase)), "phase %s", phase)
+	}
+
+	m.SetBackupActive(BackupActivePhaseInProgress, 2)
+	m.SetBackupActive(BackupActivePhasePostProcessing, 3)
+
+	assert.Equal(t, float64(0), testutil.ToFloat64(gaugeVec.WithLabelValues(BackupActivePhaseReadyToStart)))
+	assert.Equal(t, float64(2), testutil.ToFloat64(gaugeVec.WithLabelValues(BackupActivePhaseInProgress)))
+	assert.Equal(t, float64(3), testutil.ToFloat64(gaugeVec.WithLabelValues(BackupActivePhasePostProcessing)))
+
+	// The exported name carries no _total suffix, which Prometheus reserves
+	// for counters.
+	require.NoError(t, testutil.CollectAndCompare(gaugeVec, strings.NewReader(`
+# HELP velero_backup_active Current number of backups being processed, by phase. ReadyToStart and InProgress are the backups occupying a concurrency slot. PostProcessing groups WaitingForPluginOperations, WaitingForPluginOperationsPartiallyFailed, Finalizing and FinalizingPartiallyFailed, which is where a data mover backup spends its DataUpload time. Backups still Queued are not counted.
+# TYPE velero_backup_active gauge
+velero_backup_active{phase="InProgress"} 2
+velero_backup_active{phase="PostProcessing"} 3
+velero_backup_active{phase="ReadyToStart"} 0
+`)))
+
+	m.SetBackupActive(BackupActivePhaseInProgress, 0)
+	assert.Equal(t, float64(0), testutil.ToFloat64(gaugeVec.WithLabelValues(BackupActivePhaseInProgress)))
 }

@@ -38,6 +38,7 @@ const (
 	//Velero metrics
 	backupTarballSizeBytesGauge   = "backup_tarball_size_bytes"
 	backupTotal                   = "backup_total"
+	backupActive                  = "backup_active"
 	backupAttemptTotal            = "backup_attempt_total"
 	backupSuccessTotal            = "backup_success_total"
 	backupPartialFailureTotal     = "backup_partial_failure_total"
@@ -99,10 +100,18 @@ const (
 	scheduleLabel           = "schedule"
 	backupNameLabel         = "backupName"
 	repositoryNameLabel     = "repository_name"
+	backupActivePhaseLabel  = "phase"
 
 	// metrics values
 	BackupLastStatusSucc    int64 = 1
 	BackupLastStatusFailure int64 = 0
+
+	// Phase values for the backup_active metric's phase label. ReadyToStart and
+	// InProgress are Velero backup phases. PostProcessing is not a phase of its
+	// own: it groups the phases the backup tracker treats as post-InProgress.
+	BackupActivePhaseReadyToStart   = "ReadyToStart"
+	BackupActivePhaseInProgress     = "InProgress"
+	BackupActivePhasePostProcessing = "PostProcessing"
 )
 
 // NewServerMetrics returns new ServerMetrics
@@ -131,6 +140,19 @@ func NewServerMetrics() *ServerMetrics {
 					Name:      backupTotal,
 					Help:      "Current number of existent backups",
 				},
+			),
+			backupActive: prometheus.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Namespace: metricNamespace,
+					Name:      backupActive,
+					Help: "Current number of backups being processed, by phase. " +
+						"ReadyToStart and InProgress are the backups occupying a concurrency slot. " +
+						"PostProcessing groups WaitingForPluginOperations, " +
+						"WaitingForPluginOperationsPartiallyFailed, Finalizing and " +
+						"FinalizingPartiallyFailed, which is where a data mover backup spends " +
+						"its DataUpload time. Backups still Queued are not counted.",
+				},
+				[]string{backupActivePhaseLabel},
 			),
 			backupAttemptTotal: prometheus.NewCounterVec(
 				prometheus.CounterOpts{
@@ -495,6 +517,18 @@ func NewNodeMetrics() *ServerMetrics {
 	}
 }
 
+// InitBackupActive creates the backup_active series at zero, so that a Velero
+// that has not yet run a backup exports 0 rather than nothing at all.
+func (m *ServerMetrics) InitBackupActive() {
+	for _, phase := range []string{
+		BackupActivePhaseReadyToStart,
+		BackupActivePhaseInProgress,
+		BackupActivePhasePostProcessing,
+	} {
+		m.SetBackupActive(phase, 0)
+	}
+}
+
 // RegisterAllMetrics registers all prometheus metrics.
 func (m *ServerMetrics) RegisterAllMetrics() {
 	for _, pm := range m.metrics {
@@ -792,6 +826,14 @@ func (m *ServerMetrics) SetScheduleExpectedIntervalSeconds(scheduleName string, 
 func (m *ServerMetrics) SetBackupTotal(numberOfBackups int64) {
 	if g, ok := m.metrics[backupTotal].(prometheus.Gauge); ok {
 		g.Set(float64(numberOfBackups))
+	}
+}
+
+// SetBackupActive records the current number of backups in the given phase.
+// phase must be one of the BackupActivePhase* values.
+func (m *ServerMetrics) SetBackupActive(phase string, numberOfBackups int64) {
+	if g, ok := m.metrics[backupActive].(*prometheus.GaugeVec); ok {
+		g.WithLabelValues(phase).Set(float64(numberOfBackups))
 	}
 }
 
