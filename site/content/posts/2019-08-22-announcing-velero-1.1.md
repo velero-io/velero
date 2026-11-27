@@ -36,7 +36,7 @@ We’ve also made several other enhancements to Velero that should benefit all u
 
 Users sometimes ask about recommendations for Velero’s resource allocation within their cluster. To help with this concern, we’ve added default resource requirements to the Velero Deployment and restic init containers, along with configurable requests and limits for the restic DaemonSet. All these values can be adjusted if your environment requires it.
 
-We’ve also taken some time to improve Velero for the future by updating the Deployment and DaemonSet to use the apps/v1 API group, which will be the [default in Kubernetes 1.16](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.16.md#action-required-3). This change means that `velero install` and the `velero plugin` commands will require Kubernetes 1.9 or later to work. Existing Velero installs will continue to work without needing changes, however.
+We’ve also taken some time to improve Velero for the future by updating the Deployment and DaemonSet to use the apps/v1 API group, which will be the [default in Kubernetes 1.16](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.16.md#action-required-3). This change means that `velero install` and the `velero plugin` commands will require Kubernetes 1.9 or later to work. Existing Velero installs will continue to work without needing changes, however.
 
 In order to help you better understand what resources have been backed up, we’ve added a list of resources in the `velero backup describe --details` command. This change makes it easier to inspect a backup without having to download and extract it.
 
