@@ -1,0 +1,1 @@
+Fix schedule pause/delete swallowing lookup errors so failed lookups are no longer silently treated as "no schedules found"
