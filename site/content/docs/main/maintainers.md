@@ -22,7 +22,7 @@ Please be sure to also go through the guidance under the entire [Contribute](sta
 Some tips for doing reviews:
 - There are some [code standards and general guidelines](https://velero.io/docs/main/code-standards) we aim for
 - We have [guidelines for writing and reviewing documentation](https://velero.io/docs/main/style-guide/)
-- When reviewing a design document, ensure it follows [our format and guidelines]( https://github.com/velero-io/velero/blob/main/design/_template.md). Also, when reviewing a PR that implements a previously accepted design, ensure the associated design doc is moved to the [design/implemented](https://github.com/velero-io/velero/tree/main/design/implemented) folder.
+- When reviewing a design document, ensure it follows [our format and guidelines]( https://github.com/velero-io/velero/blob/main/design/_template.md). Also, when reviewing a PR that implements a previously accepted design, ensure the associated design doc is moved to the [design/Implemented](https://github.com/velero-io/velero/tree/main/design/Implemented) folder.
 
 
 ## Creating a release
